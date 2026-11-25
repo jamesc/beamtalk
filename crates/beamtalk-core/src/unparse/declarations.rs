@@ -370,15 +370,6 @@ pub(crate) fn unparse_standalone_method_definition(
     smd: &StandaloneMethodDefinition,
 ) -> Document<'static> {
     let class = leaf::ident(&smd.class_name.name);
-    // Cross-package extension methods (ADR 0070): `package@ClassName >> ...`.
-    // `smd.package`, when present, must be consulted here so `beamtalk fmt`
-    // does not drop the package qualifier from a cross-package
-    // standalone method.
-    let class = if let Some(package) = &smd.package {
-        docvec![leaf::ident(&package.name), "@", class]
-    } else {
-        class
-    };
     let separator = if smd.is_class_method {
         Document::Str(" class >> ")
     } else {

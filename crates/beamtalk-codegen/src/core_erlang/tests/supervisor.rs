@@ -294,7 +294,7 @@ fn test_supervisor_instance_methods_are_compiled_with_dispatch() {
     );
     assert!(
         code.contains("call 'bt@stdlib@supervisor':'dispatch'(Selector, Args, Self)")
-            && code.contains("call 'beamtalk_extensions':'lookup'('WebApp', Selector)"),
+            && !code.contains("beamtalk_extensions"),
         "dispatch/3 must delegate other selectors to the Supervisor base. Got:\n{code}"
     );
     let local = code

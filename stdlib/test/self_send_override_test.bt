@@ -127,24 +127,18 @@ TestCase subclass: SelfSendOverrideTest
     self assert: SsoFastSub bar equals: 2
     self assert: SsoFastBase bar equals: 1
 
-  // The fast path must not bypass a class-side extension that shadows the
-  // compiled method (the walk honours it), for the defining class only. Own fixture
-  // classes: the extension registry is global and tests run concurrently.
-  testFastPathHonoursShadowingExtension =>
-    extFun := [:a :s | 99]
-    Erlang beamtalk_extensions
-      register: #'SsoShadowBase class'
+  // The fast path must not bypass an ADR 0084 runtime class-method fun that
+  // shadows the compiled method (the walk honours it), for the defining class
+  // only. Own fixture classes: tests run concurrently.
+  testFastPathHonoursShadowingRuntimeFun =>
+    pid := Erlang beamtalk_class_registry whereis_class: #SsoShadowBase
+    @expect type
+    Erlang beamtalk_object_class
+      put_class_method: pid
       selector: #foo
-      fun: extFun
-      owner: #test
+      fun: [:classSelf | 99]
     [
       self assert: SsoShadowBase bar equals: 99
       self assert: SsoShadowSub bar equals: 2
-    ]
-      ensure: [
-        Erlang beamtalk_extensions
-          unregister: #SsoShadowBase
-          selector: #foo
-          classSide: true
-      ]
+    ] ensure: [SsoShadowBase class removeSelector: #foo]
     self assert: SsoShadowBase bar equals: 1

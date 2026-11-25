@@ -432,8 +432,10 @@ impl Parser {
     /// Syntax:
     /// - `ClassName >> selector => body` (instance method)
     /// - `ClassName class >> selector => body` (class method)
-    /// - `package@ClassName >> selector => body` (cross-package extension, ADR 0070)
-    /// - `package@ClassName class >> selector => body`
+    ///
+    /// A `package@ClassName >> ...` target still parses, so the rest of the
+    /// definition does not cascade into further errors, but it is a parse
+    /// error: package-qualified extension methods were removed (ADR 0152).
     pub(super) fn parse_standalone_method_definition(&mut self) -> StandaloneMethodDefinition {
         let start = self.current_token().span();
 
@@ -459,20 +461,36 @@ impl Parser {
         let class_blank_line_after_comments = initial_comments.blank_line_after_comments;
         let mut class_leading_comments = initial_comments.leading;
 
-        // Parse class name, with optional package qualifier (ADR 0070).
-        // Pattern: `identifier @ Identifier` or just `Identifier`.
-        let (class_name, package) = if matches!(self.current_kind(), TokenKind::Identifier(name) if !name.starts_with(|c: char| c.is_uppercase()))
+        // Parse the class name. A package qualifier (`identifier @ Identifier`,
+        // ADR 0070) is consumed so the definition parses, and reported: a
+        // package-qualified extension names another package's class, and
+        // cross-file extension methods were removed (ADR 0152).
+        let class_name = if matches!(self.current_kind(), TokenKind::Identifier(name) if !name.starts_with(|c: char| c.is_uppercase()))
             && matches!(self.peek_at(1), Some(TokenKind::At))
         {
             // Package-qualified: `json@Parser`
             let pkg_ident = self.parse_identifier("Expected package name");
             self.advance(); // consume `@`
             let cls_ident = self.parse_identifier("Expected class name after '@'");
-            (cls_ident, Some(pkg_ident))
+            self.diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "`{}@{} >> ...` adds a method to a class in another package; \
+                         package-qualified extension methods were removed (ADR 0152)",
+                        pkg_ident.name, cls_ident.name
+                    ),
+                    pkg_ident.span.merge(cls_ident.span),
+                )
+                .with_hint(
+                    "Define the method in the file that defines the class, or write a method \
+                     on a class of your own that takes the value."
+                        .to_string(),
+                ),
+            );
+            cls_ident
         } else {
             // Unqualified: `Counter`
-            let cls_ident = self.parse_identifier("Expected class name");
-            (cls_ident, None)
+            self.parse_identifier("Expected class name")
         };
 
         // Check for optional `class` modifier
@@ -542,7 +560,6 @@ impl Parser {
 
         StandaloneMethodDefinition {
             class_name,
-            package,
             is_class_method,
             method,
             span,

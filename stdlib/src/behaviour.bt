@@ -565,19 +565,19 @@ abstract Object subclass: Behaviour
   // === Method removal (ADR 0112) ===
 
   /// Remove `aSelector` from the receiver, raising if it is not defined
-  /// locally or as an extension.
+  /// locally.
   ///
   /// Follows Pharo's `Behavior>>#removeSelector:`. Side follows the usual
   /// `Counter` vs `Counter class` convention: sent to a class object this
   /// touches the instance-side method table; sent to that class's metaclass
   /// (`Counter class`) it touches the class-side table.
   ///
-  /// Resolution mirrors dispatch order: the extension registry (ADR 0066
-  /// open classes) is checked before the local method table, since an
-  /// extension shadows a same-named local method — removing it re-exposes
-  /// the local method (a second `removeSelector:` call removes that too).
-  /// Removing a locally-defined override re-exposes the inherited
-  /// implementation with no restart needed (ADR 0032's chain-walk dispatch).
+  /// Resolution mirrors dispatch order: on the class side a runtime
+  /// class-method fun (ADR 0084) is removed before the compiled method it
+  /// shadows; otherwise the local method table is edited. Removing a
+  /// locally-defined override re-exposes the inherited implementation with no
+  /// restart needed (ADR 0032's chain-walk dispatch). This also removes a
+  /// method added by a live `Foo >> sel => ...` definition.
   ///
   /// Installs unconditionally, including on stdlib classes — unlike
   /// `removeFromSystem`, there is no receiver-side refusal. What varies is
@@ -595,7 +595,7 @@ abstract Object subclass: Behaviour
 
   /// Remove `aSelector` from the receiver like `removeSelector:`, but
   /// evaluate `absentBlock` instead of raising when the selector is not
-  /// found locally or as an extension.
+  /// found locally.
   ///
   /// Mirrors `Dictionary>>at:ifAbsent:`'s shape: returns the receiver on
   /// success, or `absentBlock`'s value on absence. Like every `Behaviour`
@@ -642,7 +642,7 @@ abstract Object subclass: Behaviour
   /// site and re-registering it under the new name.
   ///
   /// Site discovery is the union of `SystemNavigation referencesTo:
-  /// self` (body/type-annotation/extension references) and
+  /// self` (body/type-annotation references) and
   /// `direct_subclasses:` (superclass-declaration references) — the one
   /// reference kind `referencesTo:` doesn't cover — reusing already-shipped
   /// xref infrastructure rather than a new query (ADR 0087). This primitive
@@ -677,8 +677,7 @@ abstract Object subclass: Behaviour
   /// Side follows `removeSelector:`'s own convention: sent to a class
   /// object this touches the instance-side method table; sent to that
   /// class's metaclass (`Counter class`) it touches the class-side table.
-  /// Local method table only — an extension method (ADR 0066) is not
-  /// resolved or renamed here.
+  /// Local method table only.
   ///
   /// `sendersOf: aSelector` (ADR 0087) reports every textual send of that
   /// selector project-wide, regardless of which class's implementation the

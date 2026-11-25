@@ -339,9 +339,8 @@ send map `#{selector := Bin, line := Line, recv := Recv}` is converted to a
 `Recv` is `self`, `super`, `erlang_ffi`, or `other`. `binary_to_atom/2` (not
 `binary_to_existing_atom`) is used because a send may reference a selector atom
 that does not yet exist anywhere in the loaded image — that is precisely the
-typo case the caller is hunting for. Returning 3-tuples mirrors how
-`beamtalk_extensions list:` / `listAllWithSource` already feed BT data accessed
-via `entry at: N`.
+typo case the caller is hunting for. Returning 3-tuples lets BT code read the
+data with `entry at: N`.
 
 Returns a list of 3-tuples; returns `[]` if the source has no sends, cannot be
 parsed, or the compiler port is unavailable. The degrade-on-error behaviour
@@ -819,11 +818,10 @@ class_object_for_pid(ClassName, Pid) ->
 Resolve a metaclass display tag (`'Foo class'`) to the `Foo class` metaclass
 object, or nil when the tag is not a metaclass tag or names no live class.
 
-The extension registry keys class-side extensions under the metaclass
-display tag (`className ++ " class"`), produced by
+A class's metaclass has the display tag (`className ++ " class"`), produced by
 `beamtalk_class_registry:class_object_tag/1`. `whereis_class/1` has no entry
 for that tag, so `findClass:`/`classNamed:` would otherwise return nil for a
-class-side tag. We decode the tag with the same runtime authority that encodes
+metaclass tag. We decode the tag with the same runtime authority that encodes
 it (`beamtalk_class_registry:is_class_name/1` + `class_display_name/1`),
 resolve the base class, and return its metaclass object — structurally
 identical to `beamtalk_behaviour_intrinsics:classClass/1` (ADR 0036) so that
@@ -1339,7 +1337,7 @@ instance-side selector from `SealedMap`, grouped and ordered exactly as
 first divider), **plus** any live selector `SealedMap' has that the
 on-disk categories never mentioned — a `Value subclass:`'s
 compiler-generated slot accessors, an in-file standalone `ClassName >>
-selector' extension method, or an unflushed `>>' patch's added method —
+selector' method, or an unflushed `>>' patch's added method —
 folded into that leading unnamed bucket (or a synthesized trailing one) so
 a live method is never silently hidden.
 """.
@@ -1382,13 +1380,13 @@ own_method_categories(ClassName, ClassPid, SealedMap) ->
 %%
 %% Any `SealedMap` key that no category ends up covering — a `Value
 %% subclass:`'s compiler-generated slot accessors, an in-file standalone
-%% `ClassName >> selector` extension method (neither has a method
+%% `ClassName >> selector` method (neither has a method
 %% declaration in the AST `categorize_methods_in_source` walks), or an
 %% unflushed `>>` patch that *replaced* a method's source without adding a
 %% new selector — is folded into the leading unnamed bucket when one
 %% exists, else appended as a synthesized trailing unnamed bucket, via
 %% `fold_uncovered/2`. This is what lets a `Value subclass:` or a class with
-%% standalone extensions still group everything the source *does*
+%% standalone methods still group everything the source *does*
 %% categorize instead of falling back to an all-or-nothing rendering.
 %%
 %% Finally, a single, unnamed bucket (no dividers found at all, or every

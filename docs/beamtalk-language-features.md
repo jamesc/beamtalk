@@ -2397,7 +2397,7 @@ Each `Dynamic` type carries a reason explaining why the type could not be determ
 | dynamic receiver | Receiver is Dynamic, so message send result is Dynamic | Fix the receiver's type first |
 | ambiguous control flow | Control flow produces incompatible types | Add type annotations to branches |
 | untyped FFI | Erlang FFI call with no spec or all-Dynamic spec | Add `-spec` to the Erlang module |
-| unresolved selector | The receiver's class is known but no visible method answers the selector, and an unseen dependency extension might still define it (when the checker can prove the method is absent it reports does-not-understand instead, and the result is not warned on again) | Check the selector spelling; use `@expect type` if a dependency's extension defines it |
+| unresolved selector | The receiver's class is known but no visible method answers the selector, and the checker cannot enumerate the class's whole method surface (a `doesNotUnderstand:args:` override, or an ancestor it cannot see). When it can prove the method is absent it reports does-not-understand instead, and the result is not warned on again | Check the selector spelling; use `@expect type` if the class answers it dynamically |
 | *(none)* | Fallback — no specific reason available | Shown as plain `Dynamic` |
 
 #### LSP Hover
@@ -6692,7 +6692,7 @@ continue their current message; the next dispatch uses the new code.
 
 `removeFromSystem` tears a class down entirely: stops its live actors, stops
 the class gen_server, purges the BEAM module, and purges every derived
-registry (xref, extensions, protocol conformance, compiler cache, workspace
+registry (xref, protocol conformance, compiler cache, workspace
 source). Unlike `removeSelector:` (above), it is a hard, unconditional
 refusal for stdlib classes and classes with subclasses — there is no
 in-memory-but-non-flushable escape hatch.
@@ -6788,7 +6788,7 @@ Counter renameSelector: #bogus to: #anything ifAbsent: ["not found"]
 
 **`renameTo:` rewrites every in-project reference it can find, immediately, in
 memory** — constructor/message sends, type annotations (including generic
-parameters like `List(Counter)`), superclass declarations, and extension
+parameters like `List(Counter)`), superclass declarations, and same-file `>>`
 declarations (via the union of `referencesTo:` and the class's direct
 subclasses). A class live-patched via `>>` since its last full compile is a
 real, accepted residual-risk gap here (`referencesTo:`'s reference-indexing
@@ -6986,8 +6986,6 @@ value, so `nav := SystemNavigation` and `nav actorClasses` work too.
 | `allClasses` | `List(Behaviour)` | All registered classes (class objects) |
 | `actorClasses` | `List(Behaviour)` | Classes whose superclass chain includes `Actor`, sorted alphabetically |
 | `dnuHandlers` | `List(Behaviour)` | Classes that locally override `doesNotUnderstand:args:`, sorted alphabetically |
-| `extendersOf: aClass` | `List(Package)` | Packages contributing extension methods to `aClass` |
-| `extensionsBy: aPackage` | `List(Dictionary)` | `#{#class, #selector}` for each extension method `aPackage` contributes |
 | `implementorsOf: #sel` | `List(Behaviour)` | Classes that define the given selector |
 | `sendersOf: #sel` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method body that sends `#sel` |
 | `messagesSentBy: aMethod` | `List(Dictionary)` | `#{#selector, #line}` for every message send in `aMethod`'s body — the outgoing-call dual of `sendersOf:`. `aMethod` must be a `CompiledMethod` (e.g. `Counter >> #increment`). Excludes Erlang FFI sends |
@@ -6999,7 +6997,7 @@ value, so `nav := SystemNavigation` and `nav actorClasses` work too.
 | `fieldWritersOf: #slot in: aClass` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method that writes field/class var `#slot` while scanning `aClass` + subclasses on instance and class sides |
 | `methodsMatching: aRegex` | `List(Dictionary)` | `#{#class, #selector}` for every method whose source matches the regex |
 | `selectorsMatching: pattern` | `List(Symbol)` | Selectors matching a case-insensitive substring (e.g., `"print"`) |
-| `selectorsForClass: aClass` | `List(Symbol)` | All selectors defined on a class (instance + class + extension) |
+| `selectorsForClass: aClass` | `List(Symbol)` | All selectors defined on a class (instance + class) |
 | `classesInPackage: aPackage` | `List(Behaviour)` | Class objects belonging to package `aPackage` (Symbol or String; ADR 0070) |
 | `subclassesOf: aClass in: aPackage` | `List(Behaviour)` | Subclasses of `aClass` that live in package `aPackage` (`allSubclasses` filtered by package) |
 | `unimplementedSelectors` | `List(Dictionary)` | Selectors sent but defined nowhere — a typo-finder lint |
@@ -7007,10 +7005,9 @@ value, so `nav := SystemNavigation` and `nav actorClasses` work too.
 
 Body-based queries (`sendersOf:`, `referencesTo:`, `ffiSitesFor:`,
 `methodsMatching:`, `announcementsSentBy:`, `announcementSitesSentBy:`, and the
-selector-lint queries) scan instance-side, class-side, and extension method
-bodies. `fieldReadersOf:in:` and
-`fieldWritersOf:in:` scan `aClass` + subclasses on instance/class sides (not
-extension methods). Each result's `#class` field is the class object for an
+selector-lint queries) scan instance-side and class-side method bodies.
+`fieldReadersOf:in:` and `fieldWritersOf:in:` scan `aClass` + subclasses on
+instance/class sides. Each result's `#class` field is the class object for an
 instance-side hit and the metaclass object (`Counter class`) for a class-side
 hit.
 
@@ -7061,12 +7058,6 @@ nav actorClasses
 
 nav dnuHandlers
 // => [ErlangModule, ProtoObject, TimeoutProxy, ...]
-
-nav extendersOf: String
-// => [Package(my_lib v1.0.0), ...]
-
-nav extensionsBy: (Package named: "my_lib")
-// => [#{#class => String, #selector => #asJson}, ...]
 
 nav classesInPackage: #stdlib
 // => [Actor, Array, ...]
@@ -9053,7 +9044,7 @@ The full list of structural intrinsics: `blockValue`, `blockValue1`–`blockValu
 
 **`Actor>>new`/`new:` (BT-3074).** Also not `@intrinsic` — `actor.bt` declares real bodies that send `Exception signalKind:class:selector:hint:` (BT-3042), the general-purpose pure-Beamtalk way to raise a named error kind with a hint. `class_send` intercepts `new`/`new:` before class-method dispatch ever reaches these declarations (routing instead to the compiled per-actor-module `new/0`/`new/1` stub the runtime's `{new, Args}` fast path requires), so this is purely the documented, xref-visible source for the selector — never the code path an actual send executes. The type checker correctly proves these bodies diverge via the class-side keyword send to `Exception signalKind:class:selector:hint:` (BT-3075 unified the type-string resolver).
 
-**Relationship to `native:` (ADR 0101).** `@primitive` and `@intrinsic` cover native BEAM *value types* and compiler *substrate*. A third mechanism, the class-level `native:` declaration with `=> self delegate` bodies, covers whole-class **delegation** to a single Erlang module (a stateless `Object` such as `Stream`, or an `Actor` gen_server). Pick by what the method needs: guarded dispatch + the open-world extension registry → `@primitive`; the dispatch act itself (`==`, `class`, `perform:`, actor lifecycle) → `@intrinsic`; pure pass-through to one module → `native:`. See [`native:` for stateless Objects](beamtalk-native-erlang.md#native-stateless-objects--native-for-object).
+**Relationship to `native:` (ADR 0101).** `@primitive` and `@intrinsic` cover native BEAM *value types* and compiler *substrate*. A third mechanism, the class-level `native:` declaration with `=> self delegate` bodies, covers whole-class **delegation** to a single Erlang module (a stateless `Object` such as `Stream`, or an `Actor` gen_server). Pick by what the method needs: guarded dispatch → `@primitive`; the dispatch act itself (`==`, `class`, `perform:`, actor lifecycle) → `@intrinsic`; pure pass-through to one module → `native:`. See [`native:` for stateless Objects](beamtalk-native-erlang.md#native-stateless-objects--native-for-object).
 
 **`whileTrue:`/`whileFalse:`/`repeat`/`on:do:`/`ensure:` via `perform:` (BT-2908).** These five structural intrinsics have real semantics only at the call-site interception the compiler recognizes for a literal message send (e.g. `[cond] whileTrue: [body]` written directly in source). Reaching the compiled method body through any other dispatch path — `perform:`, `perform:withArguments:`, or other generic/dynamic sends — used to resolve to a placeholder and raise a misleading `does_not_understand` naming the wrong (internal) selector. This is now handled the same way BT-2812/BT-2888 handle it for `value*`/`do:`/`collect:`/etc.: a **Tier 1** (pure) condition/receiver/handler/cleanup block gets a real generic implementation — a runtime loop for `whileTrue:`/`whileFalse:`/`repeat`, a runtime `try`/`catch` for `on:do:`/`ensure:` — since neither needs the block's literal AST, only its (opaque, already-evaluated) fun value. A **Tier 2** (stateful, ADR-0041) block reached this way raises a clear `#stateful_block_dispatch` error instead, since a generically-dispatched call site has no live `StateAcc` to thread mutations through. `respondsTo:` returns `true` for these selectors either way, since the method genuinely is defined.
 

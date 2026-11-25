@@ -12,11 +12,7 @@ fn diagnostics_mentioning(source: &str, selector: &str) -> Vec<Diagnostic> {
     // As the compiler does (BT-4721): a same-file extension is folded into its
     // class, so it is an ordinary method of the class.
     let _ = crate::compilation::fold_same_file_extensions(&mut module);
-    let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    // Cross-file extensions are known methods.
-    let mut extensions = crate::compilation::extension_index::ExtensionIndex::new();
-    extensions.add_module(&module, std::path::Path::new("test.bt"));
-    hierarchy.register_extensions(&extensions);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     run_with_expect(&module, &hierarchy)
         .into_iter()
         .filter(|d| d.message.contains(selector))

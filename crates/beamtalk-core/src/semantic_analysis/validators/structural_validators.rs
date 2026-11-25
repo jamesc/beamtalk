@@ -1430,7 +1430,7 @@ mod tests {
     #[test]
     fn test_beamtalk_prefix_accepted() {
         assert!(is_known_erlang_module(
-            "beamtalk_extensions",
+            "beamtalk_dispatch",
             &empty_known_modules()
         ));
         assert!(is_known_erlang_module(

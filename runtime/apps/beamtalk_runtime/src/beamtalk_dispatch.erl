@@ -18,13 +18,12 @@ scattered dispatch logic with a single domain service.
 - Super send dispatch (starts at immediate superclass)
 - Method invocation (handles compiled and dynamic classes)
 - Method combinations (before/after/primary ordering)
-- Extension method checking at each hierarchy level
 - Structured error generation (`#beamtalk_error{}`)
 
 ## Design Principles (ADR 0006)
 
 1. **Runtime lookup is source of truth**: All dispatch paths must use this service
-2. **Hierarchy walking**: Check current class → extensions → superclass → recurse
+2. **Hierarchy walking**: Check current class → superclass → recurse
 3. **Super semantics**: Skip current class, start at immediate superclass
 4. **Method combinations**: Collect before/after from full chain, primary from defining class
 5. **Structured errors**: Always return `#beamtalk_error{}` (a miss) or a wrapped exception map (a raise), never bare tuples
@@ -32,7 +31,6 @@ scattered dispatch logic with a single domain service.
 ## Integration with Other Modules (DDD Separation)
 
 - **beamtalk_object_class**: Class registry, method storage, metadata (data layer)
-- **beamtalk_extensions**: Extension method registry (data layer)
 - **beamtalk_dispatch**: Method lookup, hierarchy walking, invocation (domain service)
 - **beamtalk_actor**: Actor lifecycle, spawn, supervision (actor domain)
 
@@ -90,13 +88,8 @@ never an `{error, _}` result: it propagates unchanged.
     super_reply/5,
     super_value/4,
     inherited_target/2,
-    inherited_value_ext/5,
-    one_hop_children_missing_extension/2,
-    one_hop_parent_extensions_missing/1,
     invoke_resolved/6,
-    responds_to/2,
-    invoke_extension/6,
-    check_extension/2
+    responds_to/2
 ]).
 
 -include("beamtalk.hrl").
@@ -127,10 +120,9 @@ never an `{error, _}` result: it propagates unchanged.
 Core dispatch entry point - walks hierarchy from CurrentClass upward.
 
 This is the primary method lookup function. It:
-1. Checks extension registry for CurrentClass + Selector
-2. Checks CurrentClass's method table for Selector
-3. If not found, recursively checks superclass chain
-4. Returns structured #beamtalk_error{} if not found in entire chain
+1. Checks CurrentClass's method table for Selector
+2. If not found, recursively checks superclass chain
+3. Returns structured #beamtalk_error{} if not found in entire chain
 
 ## Example
 
@@ -150,18 +142,7 @@ lookup(unknownMethod, [], Self, State, 'Counter')
 """.
 -spec lookup(selector(), args(), bt_self(), state(), class_name()) -> dispatch_result().
 lookup(Selector, Args, Self, State, CurrentClass) ->
-    %% Step 1: Check extension registry first (guard against missing ETS table)
-    case check_extension(CurrentClass, Selector) of
-        {ok, Fun} ->
-            %% Found extension method - invoke it
-            ?LOG_DEBUG("Found extension method", #{
-                selector => Selector, class => CurrentClass, domain => [beamtalk, runtime]
-            }),
-            invoke_extension(Fun, Selector, CurrentClass, Args, Self, State);
-        not_found ->
-            %% Step 2: Check class's own method table
-            lookup_in_class_chain(Selector, Args, Self, State, CurrentClass)
-    end.
+    lookup_in_class_chain(Selector, Args, Self, State, CurrentClass).
 
 -doc """
 Super send dispatch - starts at immediate superclass.
@@ -211,19 +192,8 @@ super(Selector, Args, Self, State, CurrentClass) ->
                     ),
                     {error, Error};
                 SuperclassName ->
-                    %% Check extension registry on superclass before hierarchy walk
-                    case check_extension(SuperclassName, Selector) of
-                        {ok, Fun} ->
-                            ?LOG_DEBUG("Found extension method via super", #{
-                                selector => Selector,
-                                class => SuperclassName,
-                                domain => [beamtalk, runtime]
-                            }),
-                            invoke_extension(Fun, Selector, SuperclassName, Args, Self, State);
-                        not_found ->
-                            %% Start lookup at superclass (skip current class)
-                            lookup_in_class_chain(Selector, Args, Self, State, SuperclassName)
-                    end
+                    %% Start lookup at superclass (skip current class)
+                    lookup_in_class_chain(Selector, Args, Self, State, SuperclassName)
             end
     end.
 
@@ -245,37 +215,30 @@ takes only its own:
   through that module's `dispatch/3`. A value-type `dispatch/3` default arm
   (String, Binary, a `Value subclass:`, ...) then calls `Module:dispatch/3`
   directly instead of delegating one superclass `dispatch/3` at a time, each
-  with its own extension lookup. An actor arm treats it as `slow`, except for
+  one superclass at a time. An actor arm treats it as `slow`, except for
   the three `Actor` methods `state_free_actor_intrinsic/3` names (BT-4995),
-  which are answered `compiled` instead, unless `Actor` itself has an extension
-  for the selector (then the verdict is `{ext, 'Actor'}`, below).
-- `{ext, Owner}` (BT-5002): the owner defines `Selector` among its own compiled
-  methods, but has an extension for it too, which replaces the compiled method.
-  An actor arm treats it as `slow` (the walk invokes the extension); a value-type
-  arm calls it through `inherited_value_ext/5`.
+  which are answered `compiled` instead.
 - `slow` for everything else; the arm then takes today's path byte for byte:
-  an extension on `ClassName` or its superclass, an owner that does not define
-  `Selector` among its own compiled methods (an extension on an ancestor
-  between, a runtime-patched standalone method, a catch-all
-  `doesNotUnderstand:args:` class), and does-not-understand.
+  an owner that does not define `Selector` among its own compiled methods (a
+  runtime-patched standalone method, a catch-all `doesNotUnderstand:args:`
+  class), and does-not-understand.
 
 The owner is `resolve_owner/2` from the superclass, which probes each class
-with `has_method_local/1` (own selectors, the reflection arms of its compiled
-dispatch function, and its extensions), so it stops exactly where the
+with `has_method_local/1` (own selectors and the reflection arms of its compiled
+dispatch function), so it stops exactly where the
 superclass-by-superclass walk would stop. A direct call to that owner's
 compiled dispatch function therefore answers what the walk would have.
 
 Memoised in the derived cache under `{inherited_target, Class, Selector}`, so
-it is invalidated by every source that invalidates `resolve_owner/2`: an
-extension install or removal, a method write or removal, a reload and a class
-removal. An out-of-band purge is caught by the export check on a `compiled`
+it is invalidated by every source that invalidates `resolve_owner/2`: a
+method write or removal, a reload and a class removal. An out-of-band purge is caught by the export check on a `compiled`
 hit (`invoke_resolved/6` would otherwise answer a wrapped `undef`). A `value`
 hit needs none: the arm's remote `Module:dispatch/3` call loads a purged
 module exactly as the superclass chain's own static call to it would. An
 unregistered class is answered `slow` and not cached.
 """.
 -spec inherited_target(class_name(), selector()) ->
-    {compiled | value, class_name(), module()} | {ext, class_name()} | slow.
+    {compiled | value, class_name(), module()} | slow.
 inherited_target(ClassName, Selector) ->
     Key = {inherited_target, ClassName, Selector},
     Compute = fun() -> compute_inherited_target(ClassName, Selector) end,
@@ -297,138 +260,19 @@ inherited_target(ClassName, Selector) ->
             Verdict
     end.
 
--doc """
-BT-5002: the route a value type's `dispatch/3` default arm takes on an
-`{ext, Owner}` `inherited_target/2` verdict: the owner of `Selector` has an
-extension, and an extension on a class beats that class's compiled method, so
-a direct call to the owner's `dispatch/3` would skip it.
-
-Value-type extensions are `fun(Args, Self)`; like the generated arm, this does
-not catch a raise from one. If the extension is gone by now (removed after the
-verdict was read), the superclass's compiled `dispatch/3` (`SuperModule`)
-answers, as it did before.
-""".
--spec inherited_value_ext(class_name(), selector(), args(), term(), module()) -> term().
-inherited_value_ext(Owner, Selector, Args, Self, SuperModule) ->
-    case check_extension(Owner, Selector) of
-        {ok, Fun} ->
-            %% By arity, as `invoke_extension/6` does: a value-type extension is
-            %% `fun(Args, Self)`, but a hand-registered `fun(Args, Self, State)`
-            %% on a shared ancestor such as `Object` is accepted too (its state is
-            %% dropped: a value has none).
-            {Result, _State} = apply_extension_by_arity(Fun, Args, Self, #{}),
-            Result;
-        not_found ->
-            SuperModule:dispatch(Selector, Args, Self)
-    end.
-
--doc """
-BT-5060: the direct value subclasses of `Class` that will not see an extension
-registered on `Class` for `Selector`.
-
-A value type's `dispatch/3` takes a one-hop route for a selector its direct
-superclass compiles itself: the class's own extension, then the superclass's
-compiled `dispatch/3`, so an extension on that superclass is never tried. The
-exception is documented in ADR 0066. This names the classes it applies to, for
-the warning `beamtalk_extensions:register/5` logs: `Class` is a value class
-whose module compiles `Selector`, and the subclass neither defines `Selector`
-itself nor has an extension for it. Actor classes, class-side tags and a
-selector `Class` does not compile give `[]` (those cases honour the extension).
-""".
--spec one_hop_children_missing_extension(class_name(), selector()) -> [class_name()].
-one_hop_children_missing_extension(Class, Selector) ->
-    case beamtalk_class_metadata:lookup_module(Class) of
-        {ok, Module} ->
-            case owner_convention(Module, Selector) of
-                value ->
-                    [
-                        Child
-                     || Child <- beamtalk_class_registry:direct_subclasses(Class),
-                        is_value_class(Child),
-                        not defines_locally(Child, Selector),
-                        check_extension(Child, Selector) =:= not_found
-                    ];
-                _ ->
-                    []
-            end;
-        not_found ->
-            []
-    end.
-
--doc """
-BT-5060: the extensions on `Child`'s direct superclass that `Child` will not
-see: `{Selector, Owner}` pairs where the superclass is a value class whose
-module compiles `Selector`, has an extension for it, and `Child` is a value
-class that neither defines `Selector` itself nor has an extension for it. The
-mirror of `one_hop_children_missing_extension/2`, for a child loaded (or
-hot-reloaded) after the extension was registered. Computed from the live
-tables, so it reflects the classes loaded now.
-""".
--spec one_hop_parent_extensions_missing(class_name()) -> [{selector(), class_name()}].
-one_hop_parent_extensions_missing(Child) ->
-    case beamtalk_class_metadata:lookup_superclass(Child) of
-        {ok, Super} when is_atom(Super), Super =/= none, Super =/= nil ->
-            case is_value_class(Child) andalso beamtalk_class_metadata:lookup_module(Super) of
-                {ok, Module} ->
-                    [
-                        {Selector, Super}
-                     || {Selector, _Owner} <- beamtalk_extensions:list(Super),
-                        owner_convention(Module, Selector) =:= value,
-                        not defines_locally(Child, Selector),
-                        check_extension(Child, Selector) =:= not_found
-                    ];
-                _ ->
-                    []
-            end;
-        _ ->
-            []
-    end.
-
-%% A `Value subclass:` class. Built-ins that sit directly under `Object` (the
-%% supervisors, the primitives) have their own dispatch and are not named.
--spec is_value_class(class_name()) -> boolean().
-is_value_class(Class) ->
-    beamtalk_class_registry:inherits_from(Class, 'Value').
-
--spec defines_locally(class_name(), selector()) -> boolean().
-defines_locally(Class, Selector) ->
-    case beamtalk_class_metadata:lookup_instance_methods(Class) of
-        {ok, Selectors} -> lists:member(Selector, Selectors);
-        not_found -> false
-    end.
-
 -spec compute_inherited_target(class_name(), selector()) ->
-    {cache | nocache, {compiled | value, class_name(), module()} | {ext, class_name()} | slow}.
+    {cache | nocache, {compiled | value, class_name(), module()} | slow}.
 compute_inherited_target(ClassName, Selector) ->
     case beamtalk_class_metadata:lookup_superclass(ClassName) of
         not_found ->
             {nocache, slow};
         {ok, Super} when is_atom(Super), Super =/= none, Super =/= nil ->
             Verdict =
-                case
-                    check_extension(ClassName, Selector) =:= not_found andalso
-                        check_extension(Super, Selector) =:= not_found andalso
-                        resolve_owner(Super, Selector)
-                of
+                case resolve_owner(Super, Selector) of
                     {owner, Owner, Module} ->
                         case owner_convention(Module, Selector) of
-                            none ->
-                                slow;
-                            Convention ->
-                                %% BT-5002: an extension on the owner itself replaces the
-                                %% owner's compiled method (the first class with the selector
-                                %% wins, and at each class its extension beats its compiled
-                                %% method), so a direct call to the compiled method would skip
-                                %% it. `{ext, Owner}` takes the walk, which invokes it
-                                %% (`lookup_in_class_chain/5`); a value type's arm calls it
-                                %% through `inherited_value_ext/5`. Computed once per
-                                %% (class, selector) and cached: the hit stays one lookup.
-                                case check_extension(Owner, Selector) of
-                                    {ok, _} ->
-                                        {ext, Owner};
-                                    not_found ->
-                                        verdict_for(Convention, Owner, Module, Selector)
-                                end
+                            none -> slow;
+                            Convention -> verdict_for(Convention, Owner, Module, Selector)
                         end;
                     _ ->
                         slow
@@ -438,7 +282,7 @@ compute_inherited_target(ClassName, Selector) ->
             {cache, slow}
     end.
 
-%% The cached verdict for an owner with no extension of its own for `Selector`.
+%% The cached verdict for an owner of `Selector`.
 %% BT-4995: the three state-free `Actor` intrinsics are answered `compiled`
 %% rather than `value`.
 -spec verdict_for(compiled | value, class_name(), module(), selector()) ->
@@ -465,11 +309,8 @@ verdict_for(compiled, Owner, Module, _Selector) ->
 %%     `stopWith:` is stored, never called.
 %%   - the default `terminate:` is `Actor`'s compiled body `nil`. A stdlib
 %%     class's source is not available to a live patch (`Actor >> terminate:`
-%%     is refused), and an extension or an override on a class below `Actor` is
-%%     seen by `compute_inherited_target/2` before this point. An extension on
-%%     `Actor` itself is checked there too (`check_extension(Owner, ...)`), and
-%%     gives the `{ext, 'Actor'}` verdict, which the actor arm treats as slow;
-%%     its walk invokes the extension (BT-5002).
+%%     is refused), and an override on a class below `Actor` is
+%%     seen by `compute_inherited_target/2` before this point.
 %%
 %% The three are named here, not derived: `actorOnExit` stores a block,
 %% `actorMonitor`, `delegate` and the rest of `Actor`'s intrinsics are left on
@@ -513,7 +354,7 @@ owner_convention(Module, Selector) ->
 Value-context `super` send.
 
 Walks the superclass chain exactly like `super/5`, but for value/primitive
-types whose methods and foreign extensions lower to state-less funs
+types whose methods lower to state-less funs
 (`fun(Args, Self) -> Result`). Such a fun has no `State` binding, so the
 generated code cannot thread one. This wrapper supplies an empty state to the
 shared hierarchy walk (state is meaningless for immutable value types) and
@@ -557,13 +398,7 @@ Used by Object's `respondsTo:` implementation to check the full hierarchy.
 """.
 -spec responds_to(selector(), class_name()) -> boolean().
 responds_to(Selector, ClassName) ->
-    %% Check extension registry first (covers all classes)
-    case check_extension(ClassName, Selector) of
-        {ok, _Fun} ->
-            true;
-        not_found ->
-            beamtalk_behaviour_intrinsics:classCanUnderstandFromName(ClassName, Selector)
-    end.
+    beamtalk_behaviour_intrinsics:classCanUnderstandFromName(ClassName, Selector).
 
 %%% ============================================================================
 %%% Internal Functions
@@ -578,20 +413,8 @@ miss so errors keep their exact shape.
     dispatch_result().
 lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
     case resolve_owner(ClassName, Selector) of
-        {owner, ClassName, Module} ->
-            %% The callers (`lookup/5`, `super/5`) already tried the extension
-            %% on `ClassName` itself.
-            invoke_resolved(ClassName, Module, Selector, Args, Self, State);
         {owner, Owner, Module} ->
-            %% BT-5002: the owner is an ancestor. An extension on it beats its
-            %% compiled method (`has_method_local/2` counts both, so it is the
-            %% first class with the selector by either route).
-            case check_extension(Owner, Selector) of
-                {ok, Fun} ->
-                    invoke_extension(Fun, Selector, Owner, Args, Self, State);
-                not_found ->
-                    invoke_resolved(Owner, Module, Selector, Args, Self, State)
-            end;
+            invoke_resolved(Owner, Module, Selector, Args, Self, State);
         miss ->
             walk_in_class_chain(Selector, Args, Self, State, ClassName)
     end.
@@ -599,8 +422,7 @@ lookup_in_class_chain(Selector, Args, Self, State, ClassName) ->
 -doc """
 Resolve the class that defines `Selector` for a send starting at `ClassName`.
 
-Memoised in the derived cache: class writes and extension installs
-invalidate it; death without restart is flushed by the class monitor and
+Memoised in the derived cache: class writes invalidate it; death without restart is flushed by the class monitor and
 an out-of-band purge is caught by the export guard below. Anything but a
 dispatchable owner is a miss — the walk below then reproduces today's
 errors exactly.
@@ -675,8 +497,7 @@ The one per-class probe of the instance-side chain, shared by the non-invoking
 resolution (`compute_step/2`) and the invoking walk (`class_chain_step/6`) so
 they cannot disagree about where a selector is defined: is `ClassName`
 registered, does this exact class define `Selector` (`has_method_local/2`:
-compiled methods, the reflection arms of its dispatch function and its
-extensions), and if not, who is its superclass. `superclass_safe/1` is only read
+compiled methods and the reflection arms of its dispatch function), and if not, who is its superclass. `superclass_safe/1` is only read
 when the class does not define the selector, as before.
 """.
 -spec probe_class(class_name(), selector()) ->
@@ -789,19 +610,6 @@ classes) to the walker's step protocol.
 -spec invoke_step(class_name(), pid(), selector(), args(), bt_self(), state()) ->
     beamtalk_hierarchy:step_result(dispatch_result()).
 invoke_step(ClassName, ClassPid, Selector, Args, Self, State) ->
-    %% BT-5002: this walk is where `lookup_in_class_chain/5` falls back to, and
-    %% it must pick the same method: an extension on the class beats its
-    %% compiled method.
-    case check_extension(ClassName, Selector) of
-        {ok, Fun} ->
-            {found, invoke_extension(Fun, Selector, ClassName, Args, Self, State)};
-        not_found ->
-            invoke_compiled_step(ClassName, ClassPid, Selector, Args, Self, State)
-    end.
-
--spec invoke_compiled_step(class_name(), pid(), selector(), args(), bt_self(), state()) ->
-    beamtalk_hierarchy:step_result(dispatch_result()).
-invoke_compiled_step(ClassName, ClassPid, Selector, Args, Self, State) ->
     case invoke_method(ClassName, ClassPid, Selector, Args, Self, State) of
         {continue, none} ->
             %% Reached root without finding a dispatchable method.
@@ -872,7 +680,7 @@ invoke_runtime_fun(MethodOwner, ClassPid, Selector, Args, Self, State) ->
             catch
                 %% A `^` NLR throw (ADR 0041) or script exit (ADR 0099 §3) is
                 %% control flow, not an error: a direct send lets both
-                %% propagate, so perform: must too (as invoke_extension/6).
+                %% propagate, so perform: must too.
                 throw:{beamtalk_script_exit, _} = ScriptExit:ScriptStack ->
                     erlang:raise(throw, ScriptExit, ScriptStack);
                 throw:Nlr:NlrStack when ?IS_NLR(Nlr) ->
@@ -949,7 +757,7 @@ invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State) ->
     %% resolves with MethodOwner = 'Object': class_chain_step/6 probes
     %% each level with beamtalk_object_class:has_method_local/2,
     %% which for a compiled actor class answers via
-    %% `has_method_local/1` — a strictly local own-methods-or-extension
+    %% `has_method_local/1` — a strictly local own-methods
     %% check that never delegates to a superclass, unlike `has_method/1`
     %% itself. So the hierarchy walk keeps advancing one class at a time
     %% until it reaches Object itself (see class_chain_step/6's own doc
@@ -962,8 +770,7 @@ invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State) ->
     %% delegating `has_method/1` and the walk stops at the stdlib base;
     %% since BT-4260 every value type exports the strictly-local probe and
     %% the walk reaches `'Object'` (a user supervisor subclass's own
-    %% `has_method_local/1`, ADR 0135, answers only its own selectors and
-    %% extensions, so the walk passes it either way). Without this branch,
+    %% `has_method_local/1`, ADR 0135, answers only its own selectors, so the walk passes it either way). Without this branch,
     %% `aSupervisor printString` would fall through to the compiled Object
     %% method's bare class name instead of matching the REPL's kind-headed
     %% label.
@@ -1069,69 +876,6 @@ dispatch_context(Selector, Self, State, MethodOwner) ->
     #{selector => Selector, class => class_name_from(Self, State, MethodOwner)}.
 
 -doc """
-Invoke an extension method.
-
-Extension methods are stored as closures in the extension registry.
-Supports two signatures based on the target class type:
-
-- Actor extensions: fun(Args, Self, State) -> {Result, NewState}
-  State mutations are threaded back to the gen_server.
-- Value-type extensions: fun(Args, Self) -> Result
-  No state threading (value types have no mutable state).
-
-The arity is checked at call time to support both signatures
-from a single dispatch path.
-
-A crashing extension body is caught and converted to a wrapped exception map
-via `raised/4` + `dispatch_context/4` — the exact same pattern `invoke_method/6` already uses
-for a crash inside a compiled/runtime-installed method reached via this same
-hierarchy walk. Without this catch, a crashing extension would be the one
-dispatch path in this module that instead re-raises the bare Erlang
-exception. For a value-type receiver (evaluated inline in the caller's
-process) that would be mostly harmless, but for an actor instance — whose
-`lookup/5` call runs inside its own gen_server's `handle_call`
-(`beamtalk_actor:dispatch_via_hierarchy/4`, which only catches `exit:`, not
-`error:`) — the re-raise would escape uncaught and crash the actor process,
-unlike an equivalent crash in a regular method body (already crash-safe via
-`dispatch_user_method/4`'s own catch). This mirrors the class-side
-crash-safety guarantee established for class-side extensions (`ClassName` is
-the class the extension was registered under — `CurrentClass` from
-`lookup/5` or `SuperclassName` from `super/5` — used for the error's
-breadcrumb context, same role `MethodOwner` plays for `invoke_method/6`).
-
-A connected `Program exit: N` (ADR 0099 §3) and a `^` non-local return in
-flight (ADR 0041, thrown as `{'$bt_nlr', ...}` — see
-`beamtalk_result:tryDo/1` for the same two tuple shapes) must pass through
-this frame untouched rather than be wrapped (`raised/4` re-raises them): for a
-value-type extension (arity-2), `apply_extension_by_arity/4` runs the fun
-inline in the caller's own process, so the throw is a control-flow signal
-aimed at a catch further up that *same* call stack, not a crash to report —
-catching and wrapping it here would turn a non-local return into a spurious
-error instead of letting it unwind. Mirrors the passthrough
-`beamtalk_class_dispatch:apply_class_extension_fun/5` already has for the
-class-side extension path (that sibling also relays the NLR outward via a
-tagged `{nlr_relay, ...}` return, since a class method crosses its
-gen_server's `handle_call` boundary and the entry point
-needs the tag to keep the class-variable writes made before the unwind; plain instance dispatch has no such boundary to relay across
-here, so re-raising is enough).
-""".
--spec invoke_extension(fun(), selector(), class_name(), args(), bt_self(), state()) ->
-    dispatch_result().
-invoke_extension(Fun, Selector, ClassName, Args, Self, State) ->
-    try
-        {Result, NewState} = apply_extension_by_arity(Fun, Args, Self, State),
-        {reply, Result, NewState}
-    catch
-        Type:Reason:Stack ->
-            ?LOG_DEBUG("Erlang error in extension method", #{
-                selector => Selector,
-                reason => beamtalk_error:format_reason(Type, Reason),
-                domain => [beamtalk, runtime]
-            }),
-            raised(Type, Reason, Stack, dispatch_context(Selector, Self, State, ClassName))
-    end.
-
--doc """
 The `dispatch_result()` for an exception an invoked method raised: always
 the wrapped exception map (never unwrapped back to a `#beamtalk_error{}`),
 so a consumer can tell it from the walk's own miss (BT-4593) — a
@@ -1153,32 +897,6 @@ raised(Type, Reason, Stack, Context) ->
     {error, beamtalk_exception_handler:ensure_wrapped(Type, Reason, Stack, Context)}.
 
 -doc """
-Apply an extension fun given its registered arity, unifying both signatures
-to a plain `{Result, NewState}` pair — the shared "how do I call this fun"
-core behind `invoke_extension/6`.
-
-Internal to this module: only `invoke_extension/6` (instance-side dispatch)
-calls it. Class-side extensions no longer share this arity convention (ADR 0130
-§3: they are `fun(Args, ClassSelf)` and `beamtalk_class_dispatch:
-apply_class_extension_fun/5` calls them directly). Deliberately does NOT decide
-how to handle an error; `invoke_extension/6` classifies via the shared
-`ensure_wrapped/4`.
-""".
--spec apply_extension_by_arity(fun(), args(), bt_self(), state()) -> {term(), state()}.
-apply_extension_by_arity(Fun, Args, Self, State) ->
-    {arity, Arity} = erlang:fun_info(Fun, arity),
-    case Arity of
-        3 ->
-            %% Actor extension: fun(Args, Self, State) -> {Result, NewState}
-            apply(Fun, [Args, Self, State]);
-        2 ->
-            %% Value-type extension: fun(Args, Self) -> Result
-            {apply(Fun, [Args, Self]), State};
-        _ ->
-            error({bad_extension_arity, Arity})
-    end.
-
--doc """
 Extract class name from Self or State, with a default fallback.
 
 Delegates to beamtalk_object_ops:class_name/3 to avoid duplication.
@@ -1186,28 +904,6 @@ Delegates to beamtalk_object_ops:class_name/3 to avoid duplication.
 -spec class_name_from(bt_self(), state(), atom()) -> atom().
 class_name_from(Self, State, Default) ->
     beamtalk_object_ops:class_name(Self, State, Default).
-
--doc """
-Safe extension registry lookup.
-
-Guards against the ETS table not existing (e.g., during early bootstrap).
-Returns {ok, Fun} if found, not_found otherwise.
-
-Exported so `beamtalk_class_dispatch:handle_class_method_call/6` can
-share this exact bootstrap guard when checking the extension registry for a
-class-side extension (keyed under the metaclass tag), instead of duplicating
-the `error:badarg` catch.
-""".
--spec check_extension(class_name(), selector()) -> {ok, fun()} | not_found.
-check_extension(ClassName, Selector) ->
-    try beamtalk_extensions:lookup(ClassName, Selector) of
-        {ok, Fun, _Owner} -> {ok, Fun};
-        not_found -> not_found
-    catch
-        error:badarg ->
-            %% ETS table doesn't exist yet (early bootstrap)
-            not_found
-    end.
 
 -doc """
 Return true if Self is an actor instance (a #beamtalk_object{} with a pid).

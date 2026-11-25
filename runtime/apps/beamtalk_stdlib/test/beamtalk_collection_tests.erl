@@ -234,9 +234,7 @@ to_list_for_threading_test_() ->
         {"do: is never guarded", fun to_list_for_threading_do_test/0},
         {"a stdlib selector folds over do:", fun to_list_for_threading_stdlib_test/0},
         {"a selector the receiver lacks is does_not_understand",
-            fun to_list_for_threading_dnu_test/0},
-        {"a runtime extension on a collection message refuses (BT-3951)",
-            fun to_list_for_threading_extension_test/0}
+            fun to_list_for_threading_dnu_test/0}
     ]}.
 
 to_list_for_threading_list_test() ->
@@ -266,50 +264,6 @@ to_list_for_threading_dnu_test() ->
         'noSuchSelector:',
         beamtalk_collection:to_list_for_threading(make_interval(1, 3), 'noSuchSelector:')
     ).
-
-to_list_for_threading_extension_test() ->
-    Fun = fun(_Args, _Self, State) -> {reply, nil, State} end,
-    %% An extension that is not a collection message changes nothing.
-    ok = beamtalk_extensions:register('Interval', 'bt3951Harmless', Fun, bt3951_test),
-    try
-        ?assertEqual(
-            [1, 2, 3],
-            beamtalk_collection:to_list_for_threading(make_interval(1, 3), 'collect:')
-        )
-    after
-        beamtalk_extensions:unregister('Interval', 'bt3951Harmless')
-    end,
-    %% A class-side `withAll:` (reached through `species`) poisons it too.
-    Tag = beamtalk_class_registry:class_object_tag('Interval'),
-    ok = beamtalk_extensions:register(Tag, 'withAll:', fun(_Args, _Self) -> nil end, bt3951_test),
-    try
-        ?assertBtError(
-            stateful_block_dispatch,
-            beamtalk_collection:to_list_for_threading(make_interval(1, 3), 'collect:')
-        )
-    after
-        beamtalk_extensions:unregister('Interval', 'withAll:', true)
-    end,
-    %% ... but only the selectors that end in `species withAll:`.
-    ok = beamtalk_extensions:register(Tag, 'withAll:', fun(_Args, _Self) -> nil end, bt3951_test),
-    try
-        ?assertEqual(
-            [1, 2, 3],
-            beamtalk_collection:to_list_for_threading(make_interval(1, 3), 'inject:into:')
-        )
-    after
-        beamtalk_extensions:unregister('Interval', 'withAll:', true)
-    end,
-    %% One on a different overridable selector poisons the fold.
-    ok = beamtalk_extensions:register('Interval', 'inject:into:', Fun, bt3951_test),
-    try
-        ?assertBtError(
-            stateful_block_dispatch,
-            beamtalk_collection:to_list_for_threading(make_interval(1, 3), 'collect:')
-        )
-    after
-        beamtalk_extensions:unregister('Interval', 'inject:into:')
-    end.
 
 %%% ============================================================================
 %%% keyed_foldl/5 and from_list_like/2 over a Dictionary (BT-5097)
@@ -379,53 +333,17 @@ keyed_foldl_test_() ->
         end}
     ]}.
 
-%% ADR 0133 receiver guard: a plain `Dictionary` takes the keyed fold, which must
-%% still refuse a writing fold the in-place fold would make skip a method the class
-%% answers outside the stdlib (a runtime extension wins dispatch).
+%% ADR 0133 receiver guard: a plain `Dictionary` (no class overriding a
+%% collection message) takes the keyed fold.
 keyed_foldl_receiver_guard_test_() ->
     Dict = #{a => 1, b => 2},
     Lambda = fun(V, {Acc, N}) -> {[V | Acc], N + 1} end,
-    Fun = fun(_Args, _Self, State) -> {reply, nil, State} end,
-    Run = fun(Selector) ->
-        beamtalk_collection:keyed_foldl(Lambda, {[], 0}, Dict, Selector, [1])
-    end,
     {setup, fun dictionary_setup/0, fun stdlib_teardown/1, [
-        {"no extension: the fold runs", fun() ->
-            ?assertMatch({[_, _], 2}, Run('select:'))
-        end},
-        {"an extension of the selector itself is refused", fun() ->
-            ok = beamtalk_extensions:register('Dictionary', 'select:', Fun, bt5097_test),
-            try
-                ?assertBtError(stateful_block_dispatch, Run('select:')),
-                %% the same refusal as the flattening fold gives
-                ?assertBtError(
-                    stateful_block_dispatch,
-                    beamtalk_collection:to_list_for_threading(Dict, 'select:')
-                )
-            after
-                beamtalk_extensions:unregister('Dictionary', 'select:')
-            end
-        end},
-        {"an extension of a collection message the stdlib's selector runs through is refused",
-            fun() ->
-                ok = beamtalk_extensions:register('Dictionary', 'inject:into:', Fun, bt5097_test),
-                try
-                    ?assertBtError(stateful_block_dispatch, Run('collect:')),
-                    ?assertBtError(
-                        stateful_block_dispatch,
-                        beamtalk_collection:to_list_for_threading(Dict, 'collect:')
-                    )
-                after
-                    beamtalk_extensions:unregister('Dictionary', 'inject:into:')
-                end
-            end},
-        {"an extension that is not a collection message changes nothing", fun() ->
-            ok = beamtalk_extensions:register('Dictionary', 'bt5097Harmless', Fun, bt5097_test),
-            try
-                ?assertMatch({[_, _], 2}, Run('select:'))
-            after
-                beamtalk_extensions:unregister('Dictionary', 'bt5097Harmless')
-            end
+        {"no override: the fold runs", fun() ->
+            ?assertMatch(
+                {[_, _], 2},
+                beamtalk_collection:keyed_foldl(Lambda, {[], 0}, Dict, 'select:', [1])
+            )
         end}
     ]}.
 

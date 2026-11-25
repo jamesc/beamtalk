@@ -379,14 +379,12 @@ pub fn check_collision_at_use_sites(
 
     // Check standalone method definition targets (Tonel-style `Class >> method`)
     for standalone in &module.method_definitions {
-        if standalone.package.is_none() {
-            check_ambiguous_reference(
-                standalone.class_name.name.as_str(),
-                standalone.class_name.span,
-                registry,
-                diagnostics,
-            );
-        }
+        check_ambiguous_reference(
+            standalone.class_name.name.as_str(),
+            standalone.class_name.span,
+            registry,
+            diagnostics,
+        );
     }
 
     // Walk all expressions looking for unqualified ClassReference nodes
@@ -490,15 +488,13 @@ pub fn check_transitive_dep_usage(
 
     // Check standalone method definition targets
     for standalone in &module.method_definitions {
-        if standalone.package.is_none() {
-            check_transitive_reference(
-                standalone.class_name.name.as_str(),
-                standalone.class_name.span,
-                registry,
-                strict_deps,
-                diagnostics,
-            );
-        }
+        check_transitive_reference(
+            standalone.class_name.name.as_str(),
+            standalone.class_name.span,
+            registry,
+            strict_deps,
+            diagnostics,
+        );
     }
 
     // Walk all expressions looking for unqualified ClassReference nodes
@@ -858,24 +854,6 @@ mod tests {
             diagnostics[0]
                 .message
                 .contains("exported by multiple dependencies")
-        );
-    }
-
-    #[test]
-    fn no_collision_in_qualified_standalone_method() {
-        let registry = make_registry(&[
-            ("Parser", "json", "bt@json@parser"),
-            ("Parser", "xml", "bt@xml@parser"),
-        ]);
-
-        // Qualified standalone method — no collision
-        let module = parse_bt("json@Parser >> customParse: input => input");
-        let mut diagnostics = Vec::new();
-        check_collision_at_use_sites(&module, &registry, &mut diagnostics);
-
-        assert!(
-            diagnostics.is_empty(),
-            "No collision for qualified standalone method: {diagnostics:?}"
         );
     }
 

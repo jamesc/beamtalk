@@ -1,57 +1,41 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-5060: one conformance matrix for method lookup order.
+// One conformance matrix for method lookup order (ADR 0152 §2).
 //
 // The lookup order is implemented in several places that can drift apart (the
-// generated actor / value-type / class-side dispatch arms, the one-hop
-// selector shortcut, the memoised `inherited_target/2` verdict, the
-// class-chain walk, `super` sends, `perform:`, `respondsTo:`). This file
-// states the order ONCE (`resolve:from:receiver:exts:` below) and drives
-// every shape through every runtime path, comparing each answer to it. Nothing
-// here is hand-written per cell: the cells are the cross product of
+// generated actor / value-type / class-side dispatch arms, the memoised
+// `inherited_target/2` verdict, the class-chain walk, `super` sends,
+// `perform:`, `respondsTo:`). This file states the order ONCE
+// (`resolve:from:` below) and drives every shape through every runtime path,
+// comparing each answer to it. Nothing here is hand-written per cell: the
+// cells are the cross product of
 //
 //   kind        value | actor
 //   side        instance | class side
 //   receiver    depth 0, 1, 2, 3 of a four-class chain (fixtures/bt5060*_c0..c3.bt)
 //   selector    compiled on {0}, {0,2}, {1}, {2}, {0,3}, {0,1,2,3}, {1,3} or nowhere
-//   extensions  none, one on any class, or two on any pair of classes
-//   phase       cold, extension installed after the class was warm, extension
-//               replaced, extension removed
+//   phase       cold, then warm (the memoised verdicts are populated)
 //   path        a literal send, `perform:`, `respondsTo:`, and a `super` send
 //               made from the receiver's own class
 //
-// The reference order (ADR 0066, BT-5002): walk from the receiver's class up.
-// On the instance side, on the receiver's own class a compiled method beats an
-// extension; on the class side an extension beats the receiver's own compiled
-// class method too (intentional, ADR 0066: class-side live patching). On every
-// ancestor an extension beats that ancestor's compiled method, on both sides. The first class
-// that has the selector by either route wins; none is does-not-understand.
-//
-// A disagreement between a path and the reference is pinned by a `quirk`
-// rule (see `quirkFor:`): the matrix then asserts the path still gives the
-// pinned (wrong) answer, so a fix has to delete the rule, and a rule that no
-// longer applies fails the matrix.
-// Hot reload, a class loaded after the extension, class removal and the other
+// The order: walk from the receiver's class up; the first class that compiles
+// the selector answers; none is does-not-understand. Nothing outside a class's
+// own source (no other file, no package) can change which method answers
+// (ADR 0152); a live `Foo >> sel` at the prompt recompiles the class itself.
+// Hot reload, a live `>>` definition, class removal and the other
 // live-workspace shapes are in tests/repl-protocol/cases/lookup_order_live.btscript.
 //
-// Serial: it installs extensions on shared fixture classes.
+// Serial: the mismatch table is a named Ets table.
 
 TestCase subclass: LookupOrderMatrixTest
   field: found = nil
-  field: pinHits = nil
-  field: ctxKind = nil
-  field: ctxSide = nil
 
   class serial -> Boolean => true
 
-  setUp =>
-    self.found := Ets new: #bt5060Found type: #set
-    self.pinHits := Ets new: #bt5060PinHits type: #set
+  setUp => self.found := Ets new: #bt5060Found type: #set
 
-  tearDown =>
-    self.found delete
-    self.pinHits delete
+  tearDown => self.found delete
 
   // === the one statement of the order ===
 
@@ -70,50 +54,14 @@ TestCase subclass: LookupOrderMatrixTest
     table at: sel
 
   /// What a send of `sel` answers: the symbol of the class that answers it
-  /// (`#c<k>` compiled, `#e<k>` extension; `exts` maps class index to the
-  /// extension's answer), or `#dnu`. `k` is the class being examined,
-  /// `receiver` the receiver's class. `quirk` is `#none` for the reference
-  /// order itself; the pinned disagreements below re-run the same walk with
-  /// the one step they get wrong switched on.
-  resolve: sel from: k receiver: receiver exts: exts quirk: quirk =>
+  /// (`#c<k>`), or `#dnu`. `k` is the class being examined: the receiver's
+  /// class first, then each ancestor in turn.
+  resolve: sel from: k =>
     k < 0 ifTrue: [^#dnu]
-    compiled := (self compiledOn: sel) includes: k
-    compiledSym := #(#c0, #c1, #c2, #c3) at: k + 1
-    // Instance side only: on the class side an extension beats the receiver's
-    // own compiled class method too (ADR 0066, BT-5061).
-    (k =:= receiver and: [
-      compiled and: [self.ctxSide =:= #instance]
-    ]) ifTrue: [^compiledSym]
-    (quirk =:= #directOwnerExtension and: [
-      compiled and: [k =:= (receiver - 1)]
-    ]) ifTrue: [^compiledSym]
-    ext := exts at: k ifAbsent: [nil]
-    ext isNil ifFalse: [^ext]
-    compiled ifTrue: [^compiledSym]
-    self
-      resolve: sel
-      from: k - 1
-      receiver: receiver
-      exts: exts
-      quirk: quirk
-
-  // === known disagreements ===
-  //
-  // Each is a rule, not a list of cells: the answer a path gives today is the
-  // reference walk with one step switched (`quirk`). The matrix asserts the
-  // path still gives that answer; when a fix lands the cells report the
-  // mismatch and the rule is deleted. A rule that applies to no cell fails
-  // `verify:`.
-  //
-  // PIN-BUG BT-5060: a value receiver whose direct superclass compiles the
-  // selector takes the one-hop route to that superclass's compiled `dispatch/3`
-  // and never tries an extension on it.
-  quirkFor: path =>
-    (path =:= #send or: [path =:= #perform]) ifFalse: [^#none]
-    (self.ctxSide =:= #instance and: [
-      self.ctxKind =:= #value
-    ]) ifTrue: [^#directOwnerExtension]
-    #none
+    ((self compiledOn: sel) includes: k) ifTrue: [
+      ^#(#c0, #c1, #c2, #c3) at: k + 1
+    ]
+    self resolve: sel from: k - 1
 
   // === the runtime paths ===
   sends =>
@@ -148,198 +96,52 @@ TestCase subclass: LookupOrderMatrixTest
     ] ifFalse: [paths]
 
   /// Compare one observation against the reference.
-  check: cell observed: observed sel: sel receiver: r exts: exts =>
+  check: cell observed: observed sel: sel receiver: r =>
     observed
       keysAndValuesDo: [:path :actual |
-        self
-          record: cell
-          path: path
+        expected := self
+          expectedFor: path
           sel: sel
           receiver: r
-          exts: exts
-          actual: actual
-      ]
-
-  expectedFor: path sel: sel receiver: r exts: exts quirk: quirk =>
-    path =:= #super
-      ifTrue: [
-        self
-          resolve: sel
-          from: r - 1
-          receiver: r
-          exts: exts
-          quirk: quirk
-      ]
-      ifFalse: [
-        answer := self
-          resolve: sel
-          from: r
-          receiver: r
-          exts: exts
-          quirk: quirk
-        path =:= #responds ifTrue: [(answer =:= #dnu) not] ifFalse: [answer]
-      ]
-
-  record: cell path: path sel: sel receiver: r exts: exts actual: actual =>
-    expected := self
-      expectedFor: path
-      sel: sel
-      receiver: r
-      exts: exts
-      quirk: #none
-    quirk := self quirkFor: path
-    pinned := self
-      expectedFor: path
-      sel: sel
-      receiver: r
-      exts: exts
-      quirk: quirk
-    (quirk =:= #none or: [pinned =:= expected])
-      ifTrue: [
         actual =:= expected
           ifFalse: [
             self.found at: "{cell} path={path}: expected {expected printString}, got {actual printString}" put: true
           ]
       ]
+
+  expectedFor: path sel: sel receiver: r =>
+    path =:= #super
+      ifTrue: [self resolve: sel from: r - 1]
       ifFalse: [
-        self.pinHits at: quirk put: true
-        actual =:= pinned
-          ifFalse: [
-            self.found at: "{cell} path={path}: pinned {pinned printString} ({quirk}), got {actual printString}, reference {expected printString}" put: true
-          ]
+        answer := self resolve: sel from: r
+        path =:= #responds ifTrue: [(answer =:= #dnu) not] ifFalse: [answer]
       ]
 
-  // === the extension sets: none, each single class, each pair ===
-  extSets =>
-    #(#(), #(0), #(1), #(2), #(3), #(0, 1), #(0, 2), #(0, 3), #(1, 2), #(1, 3), #(2, 3))
-
-  tagFor: k kind: kind side: side =>
-    name := kind =:= #value ifTrue: [
-      #(#Bt5060ValueC0, #Bt5060ValueC1, #Bt5060ValueC2, #Bt5060ValueC3)
-    ] ifFalse: [
-      #(#Bt5060ActorC0, #Bt5060ActorC1, #Bt5060ActorC2, #Bt5060ActorC3)
-    ]
-    side =:= #instance
-      ifTrue: [name at: k + 1]
-      ifFalse: [
-        kind =:= #value
-          ifTrue: [
-            #(#'Bt5060ValueC0 class', #'Bt5060ValueC1 class', #'Bt5060ValueC2 class', #'Bt5060ValueC3 class') at: k + 1
-          ]
-          ifFalse: [
-            #(#'Bt5060ActorC0 class', #'Bt5060ActorC1 class', #'Bt5060ActorC2 class', #'Bt5060ActorC3 class') at: k + 1
-          ]
-      ]
-
-  install: set kind: kind side: side sel: sel prefix: prefix =>
-    set
-      do: [:k |
-        answer := #(#e0, #e1, #e2, #e3) at: k + 1
-        answer2 := #(#x0, #x1, #x2, #x3) at: k + 1
-        value := prefix =:= #first ifTrue: [answer] ifFalse: [answer2]
-        Erlang beamtalk_extensions
-          register: (self
-            tagFor: k
-            kind: kind
-            side: side)
-          selector: sel
-          fun: [:args :receiver | value]
-          owner: #bt5060
-      ]
-
-  uninstall: set kind: kind side: side sel: sel =>
-    set
-      do: [:k |
-        Erlang beamtalk_extensions
-          unregister: (self
-            tagFor: k
-            kind: kind
-            side: side)
-          selector: sel
-      ]
-
-  extsMap: set values: names =>
-    set inject: #{} into: [:acc :k | acc at: k put: (names at: k + 1)]
-
-  /// One receiver, one selector, every extension set, every phase.
+  /// One receiver, every selector, cold then warm.
   cells: kind side: side receiver: r object: o =>
-    self.ctxKind := kind
-    self.ctxSide := side
     #(#s0, #s02, #s1, #s2, #s03, #sAll, #s13, #sNone)
       do: [:sel |
         base := "{kind}/{side} r={r} sel={sel}"
-        baseline := self
-          observe: o
+        self
+          check: "{base} phase=cold"
+          observed: (self
+            observe: o
+            sel: sel
+            receiver: r)
           sel: sel
           receiver: r
         self
-          check: "{base} exts=[] phase=cold"
-          observed: baseline
+          check: "{base} phase=warm"
+          observed: (self
+            observe: o
+            sel: sel
+            receiver: r)
           sel: sel
           receiver: r
-          exts: #{}
-        self extSets
-          do: [:set |
-            self
-              install: set
-              kind: kind
-              side: side
-              sel: sel
-              prefix: #first
-            [
-              cell := "{base} exts={set printString}"
-              self
-                check: "{cell} phase=installed"
-                observed: (self
-                  observe: o
-                  sel: sel
-                  receiver: r)
-                sel: sel
-                receiver: r
-                exts: (self extsMap: set values: #(#e0, #e1, #e2, #e3))
-              self
-                install: set
-                kind: kind
-                side: side
-                sel: sel
-                prefix: #second
-              self
-                check: "{cell} phase=replaced"
-                observed: (self
-                  observe: o
-                  sel: sel
-                  receiver: r)
-                sel: sel
-                receiver: r
-                exts: (self extsMap: set values: #(#x0, #x1, #x2, #x3))
-            ]
-              ensure: [
-                self
-                  uninstall: set
-                  kind: kind
-                  side: side
-                  sel: sel
-              ]
-            self
-              check: "{base} exts={set printString} phase=removed"
-              observed: (self
-                observe: o
-                sel: sel
-                receiver: r)
-              sel: sel
-              receiver: r
-              exts: #{}
-          ]
       ]
 
-  /// `rules`: the quirks this matrix must have reached at least once.
-  verify: rules =>
-    rules
-      do: [:q |
-        (self.pinHits includesKey: q) ifFalse: [
-          self.found at: "pinned rule {q} applied to no cell: delete it" put: true
-        ]
-      ]
+  /// Fail with every mismatch the cells recorded.
+  verify =>
     lines := self.found keys
     lines isEmpty ifFalse: [self fail: (lines join: "\n")]
 
@@ -354,7 +156,7 @@ TestCase subclass: LookupOrderMatrixTest
           receiver: r
           object: o new
       ]
-    self verify: #(#directOwnerExtension)
+    self verify
 
   testValueClassSide =>
     #(0, 1, 2, 3)
@@ -366,7 +168,7 @@ TestCase subclass: LookupOrderMatrixTest
           receiver: r
           object: o
       ]
-    self verify: #()
+    self verify
 
   testActorInstanceSide =>
     #(0, 1, 2, 3)
@@ -381,7 +183,7 @@ TestCase subclass: LookupOrderMatrixTest
             object: a
         ] ensure: [a stop]
       ]
-    self verify: #()
+    self verify
 
   testActorClassSide =>
     #(0, 1, 2, 3)
@@ -393,106 +195,4 @@ TestCase subclass: LookupOrderMatrixTest
           receiver: r
           object: o
       ]
-    self verify: #()
-
-  // === the BT-5060 registration warning ===
-  //
-  // `beamtalk_extensions:register/5` logs a warning naming these classes.
-  affected: cls selector: sel =>
-    Erlang beamtalk_dispatch one_hop_children_missing_extension: cls selector: sel
-
-  testWarningNamesTheAffectedChildren =>
-    // C0 compiles s0; C1 does not define it, so it skips an extension on C0.
-    self assert: (self affected: #Bt5060ValueC0 selector: #s0) equals: #(#Bt5060ValueC1)
-    // C1 defines s13 itself; C2 does not.
-    self assert: (self affected: #Bt5060ValueC1 selector: #s13) equals: #(#Bt5060ValueC2)
-    // C2 defines sAll; its child C3 defines it too, so nobody is affected.
-    self assert: (self affected: #Bt5060ValueC2 selector: #sAll) equals: #()
-    // C1 does not compile s0 (BT-5002 covers its descendants).
-    self assert: (self affected: #Bt5060ValueC1 selector: #s0) equals: #()
-    // Actors and class-side tags honour the extension.
-    self assert: (self affected: #Bt5060ActorC0 selector: #s0) equals: #()
-    self assert: (self affected: #'Bt5060ValueC0 class' selector: #s0) equals: #()
-
-  // === the BT-5060 reply warnings ===
-  //
-  // The warnings a registration, a class load and a hot reload queue in the
-  // process serving an operation, for that operation's reply.
-  startCollecting => Erlang beamtalk_refactor_support begin_changelog_warnings
-
-  collected => Erlang beamtalk_refactor_support end_changelog_warnings
-
-  registerOnC0 =>
-    Erlang beamtalk_extensions
-      register: #Bt5060ValueC0
-      selector: #s0
-      fun: [:args :receiver | #ext]
-      owner: #bt5060
-
-  testRegistrationWarningIsQueuedForTheReply =>
-    self startCollecting
-    [
-      self registerOnC0
-      warnings := self collected
-      self assert: warnings size equals: 1
-      self assert: ((warnings at: 1) includesSubstring: "Bt5060ValueC1") equals: true
-      self assert: ((warnings at: 1) includesSubstring: "s0") equals: true
-    ] ensure: [
-      Erlang beamtalk_extensions unregister: #Bt5060ValueC0 selector: #s0
-    ]
-
-  testNothingIsQueuedOutsideAnOperation =>
-    // Not collecting: the registration only logs.
-    self collected
-    [
-      self registerOnC0
-      self assert: self collected equals: #()
-    ] ensure: [
-      Erlang beamtalk_extensions unregister: #Bt5060ValueC0 selector: #s0
-    ]
-
-  testLoadingADirectChildAfterTheExtensionWarns =>
-    [
-      self registerOnC0
-      self startCollecting
-      // What activating the child's module does after its load.
-      Erlang beamtalk_extensions warn_one_hop_for_class: #Bt5060ValueC1
-      warnings := self collected
-      self assert: warnings size equals: 1
-      self assert: ((warnings at: 1) includesSubstring: "Bt5060ValueC1") equals: true
-      self assert: ((warnings at: 1) includesSubstring: "s0") equals: true
-      self assert: ((warnings at: 1) includesSubstring: "Bt5060ValueC0") equals: true
-    ] ensure: [
-      Erlang beamtalk_extensions unregister: #Bt5060ValueC0 selector: #s0
-    ]
-
-  testHotReloadOfTheOwnerRecomputesTheNamedSet =>
-    [
-      self registerOnC0
-      self startCollecting
-      // Reloading the owner recomputes the set from the classes loaded now.
-      Erlang beamtalk_extensions warn_one_hop_for_class: #Bt5060ValueC0
-      reloaded := self collected
-      self assert: reloaded size equals: 1
-      self assert: ((reloaded at: 1) includesSubstring: "Bt5060ValueC1") equals: true
-      // A child that gains its own extension for the selector no longer skips it.
-      Erlang beamtalk_extensions
-        register: #Bt5060ValueC1
-        selector: #s0
-        fun: [:args :receiver | #own]
-        owner: #bt5060
-      self startCollecting
-      Erlang beamtalk_extensions warn_one_hop_for_class: #Bt5060ValueC0
-      self assert: self collected equals: #()
-    ]
-      ensure: [
-        Erlang beamtalk_extensions unregister: #Bt5060ValueC1 selector: #s0
-        Erlang beamtalk_extensions unregister: #Bt5060ValueC0 selector: #s0
-      ]
-
-  testNoWarningWhenNothingIsSkipped =>
-    self startCollecting
-    // No extension on C0 for s0: loading either class warns about nothing.
-    Erlang beamtalk_extensions warn_one_hop_for_class: #Bt5060ValueC0
-    Erlang beamtalk_extensions warn_one_hop_for_class: #Bt5060ValueC1
-    self assert: self collected equals: #()
+    self verify

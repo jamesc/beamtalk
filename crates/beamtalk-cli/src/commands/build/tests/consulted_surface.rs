@@ -21,7 +21,7 @@ fn consulted_by(files: &[(&str, &str)], target: &str) -> ConsultedSurface {
         write_test_file(&src_path.join(name), source);
         source_files.push(src_path.join(name));
     }
-    let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached_asts) =
+    let (class_module_index, class_superclass_index, all_class_infos, _cached_asts) =
         build_class_module_index(&source_files, Some(&src_path), "app").unwrap();
     let stem = target.trim_end_matches(".bt");
     let (_diags, surface) = compile_file_with_surface(

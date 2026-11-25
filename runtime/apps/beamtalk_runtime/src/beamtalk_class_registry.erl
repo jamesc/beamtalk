@@ -29,10 +29,6 @@ Extracted from `beamtalk_object_class` for single-responsibility.
 
 -compile({inline, [has_class_suffix/1]}).
 
-%% The module whose `register_class/0` (an `on_load`) is running this registration,
-%% captured by `begin_registration/0` at `register/5` entry.
--define(REGISTRAR_KEY, '$beamtalk_extension_registrar').
-
 -export([
     whereis_class/1,
     all_classes/0,
@@ -46,11 +42,6 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     ensure_class_warnings_table/0,
     record_class_collision_warning/3,
     drain_class_warnings_by_names/1,
-    record_extension_warning/1,
-    with_extension_warning_scope/2,
-    dedupe_warnings/1,
-    begin_registration/0,
-    end_registration/0,
     record_pending_load_error/2,
     drain_pending_load_errors_by_names/1,
     clear_pending_load_errors_by_names/1,
@@ -407,139 +398,6 @@ drain_class_warnings_by_names(ClassNames) ->
                 ClassNames
             )
     end.
-
--doc """
-BT-5060: run `Fun` (a `code:load_binary/3` of `Module`) in an extension-warning
-scope owned by the calling process, and return its result with the one-hop
-extension warnings the module's `on_load` registered meanwhile.
-
-Registration runs from `register_class/0` in a process the code server spawns,
-so it cannot see the caller. The scope row is keyed by `Module` and names the
-caller; the registering process files its warning under that caller
-(`record_extension_warning/1`, which accepts it only from that module's own
-`register_class/0`), and the caller takes exactly its own rows atomically
-afterwards. Scopes of different modules are independent, so there is no lock and
-a slow `on_load` stalls nobody else. Like `load_binary_scoped/4`, this assumes no
-concurrent load of the same module: two overlapping scopes for one module can
-file a warning under the wrong caller (the text describes shared workspace
-state, never anything private to a session). A row left by a holder that was killed
-mid-load is replaced by the next scope for the same module. Nothing is queued
-without a scope: a registration outside a caller's load keeps only its logger
-line.
-""".
--spec with_extension_warning_scope(module(), fun(() -> Result)) -> {Result, [binary()]} when
-    Result :: term().
-with_extension_warning_scope(Module, Fun) ->
-    ensure_class_warnings_table(),
-    Pid = self(),
-    ScopeKey = {undefined, {'$extension_scope', Module}},
-    RowKey = {undefined, {'$extension_warning', Pid}},
-    %% Drop a stale scope (killed holder) and any rows this process left behind.
-    _ = ets:delete(beamtalk_class_warnings, ScopeKey),
-    _ = ets:delete(beamtalk_class_warnings, RowKey),
-    ets:insert(beamtalk_class_warnings, {ScopeKey, scope, Pid}),
-    try Fun() of
-        Result -> {Result, take_scope_rows(RowKey)}
-    after
-        ets:delete_object(beamtalk_class_warnings, {ScopeKey, scope, Pid}),
-        ets:delete(beamtalk_class_warnings, RowKey)
-    end.
-
--spec take_scope_rows(term()) -> [binary()].
-take_scope_rows(RowKey) ->
-    Rows = ets:take(beamtalk_class_warnings, RowKey),
-    dedupe_warnings([Text || {_Order, Text} <- lists:sort([Cell || {_, one_hop, Cell} <- Rows])]).
-
--doc """
-BT-5060: file a one-hop extension warning for the load scope of the module whose
-`register_class/0` (its `on_load`) is running this registration. Any other
-process, or a module with no open scope, files nothing (the logger line is the
-report).
-""".
--spec record_extension_warning(binary()) -> ok.
-record_extension_warning(Text) when is_binary(Text) ->
-    case ets:info(beamtalk_class_warnings) of
-        undefined ->
-            ok;
-        _ ->
-            case erlang:get(?REGISTRAR_KEY) of
-                Module when is_atom(Module), Module =/= undefined ->
-                    case
-                        ets:lookup(
-                            beamtalk_class_warnings,
-                            {undefined, {'$extension_scope', Module}}
-                        )
-                    of
-                        [{_, scope, Pid}] when is_pid(Pid) ->
-                            case is_process_alive(Pid) of
-                                true ->
-                                    Order = erlang:unique_integer([monotonic]),
-                                    ets:insert(
-                                        beamtalk_class_warnings,
-                                        {
-                                            {undefined, {'$extension_warning', Pid}},
-                                            one_hop,
-                                            {Order, Text}
-                                        }
-                                    ),
-                                    ok;
-                                false ->
-                                    %% A holder killed mid-load: drop its stale scope.
-                                    _ = ets:delete_object(
-                                        beamtalk_class_warnings,
-                                        {{undefined, {'$extension_scope', Module}}, scope, Pid}
-                                    ),
-                                    ok
-                            end;
-                        _ ->
-                            ok
-                    end;
-                _ ->
-                    ok
-            end
-    end.
-
--doc """
-BT-5060: called first thing in `beamtalk_extensions:register/5`, while the stack
-is still shallow (`register/5` called from `register_class/0`): remember which
-module's `register_class/0` is running this registration, or none, for
-`record_extension_warning/1`. Reading the stack here rather than deep inside the
-warning code keeps the answer independent of `backtrace_depth`.
-""".
--spec begin_registration() -> ok.
-begin_registration() ->
-    Registrar =
-        case erlang:process_info(self(), current_stacktrace) of
-            {current_stacktrace, Frames} ->
-                case [M || {M, register_class, 0, _} <- lists:sublist(Frames, 4)] of
-                    [M | _] -> M;
-                    [] -> undefined
-                end;
-            _ ->
-                undefined
-        end,
-    _ = erlang:put(?REGISTRAR_KEY, Registrar),
-    ok.
-
--spec end_registration() -> ok.
-end_registration() ->
-    _ = erlang:erase(?REGISTRAR_KEY),
-    ok.
-
--doc "The one order-preserving de-duplication of reply warning texts.".
--spec dedupe_warnings([binary()]) -> [binary()].
-dedupe_warnings(Texts) ->
-    {Out, _} = lists:foldl(
-        fun(T, {Acc, Seen}) ->
-            case sets:is_element(T, Seen) of
-                true -> {Acc, Seen};
-                false -> {[T | Acc], sets:add_element(T, Seen)}
-            end
-        end,
-        {[], sets:new([{version, 2}])},
-        Texts
-    ),
-    lists:reverse(Out).
 
 -ifdef(TEST).
 -doc """

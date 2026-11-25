@@ -722,10 +722,6 @@ pub struct PackageCheckerScope {
     /// `ProjectComplete` inside a package (every project source file is
     /// walked before per-file analysis), `ModuleOnly` otherwise.
     pub knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope,
-    /// The pre-WS3 guard: dependency extension contributions are not loaded
-    /// yet, so a package that declares dependencies has no provably complete
-    /// receiver surface.
-    pub has_package_dependencies: bool,
     /// The package name, for E0401/E0402 visibility checks; `None` outside a
     /// package or when the manifest does not parse.
     pub package_name: Option<String>,
@@ -742,7 +738,6 @@ impl PackageCheckerScope {
     pub fn module_only() -> Self {
         Self {
             knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope::ModuleOnly,
-            has_package_dependencies: false,
             package_name: None,
             known_packages: None,
         }
@@ -754,7 +749,6 @@ impl PackageCheckerScope {
     pub fn for_manifest(manifest: Option<&ParsedManifest>) -> Self {
         manifest.map_or_else(Self::module_only, |manifest| Self {
             knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
-            has_package_dependencies: !manifest.dependencies.is_empty(),
             package_name: Some(manifest.package.name.clone()),
             known_packages: Some(beamtalk_core::semantic_analysis::known_qualifier_packages(
                 Some(&manifest.package.name),
@@ -785,7 +779,6 @@ impl PackageCheckerScope {
                 Self {
                     knowledge_scope:
                         beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
-                    has_package_dependencies: true,
                     package_name: None,
                     known_packages: None,
                 }

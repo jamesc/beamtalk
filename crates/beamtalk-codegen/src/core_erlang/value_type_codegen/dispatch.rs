@@ -80,9 +80,8 @@ impl CoreErlangGenerator {
     ///
     /// This routes selectors to individual method functions, provides reflection
     /// methods (class, respondsTo:, fieldNames, fieldAt:, fieldAt:put:,
-    /// hasField:, clearField:, perform:, perform:withArguments:), checks the
-    /// extension registry for unknown selectors, and delegates to superclass
-    /// dispatch/3 for inherited methods.
+    /// hasField:, clearField:, perform:, perform:withArguments:), and
+    /// delegates to superclass dispatch/3 for inherited methods.
     /// Only raises `does_not_understand` at the hierarchy root (`ProtoObject`).
     ///
     /// For classes with zero instance methods (e.g., File), generates a
@@ -127,42 +126,36 @@ impl CoreErlangGenerator {
         // Check whether this class has a catch-all DNU handler.
         let has_catch_all_dnu = dispatch_spec::class_has_catch_all_dnu(class);
 
-        // Default case: extension fallback, then superclass delegation (or DNU)
+        // Default case: superclass delegation (or DNU)
         let default_arm: Document<'static> = if has_catch_all_dnu {
             // Class defines DNU — route unknown selectors through it
-            Self::value_extension_default_arm(
-                &class_name,
-                docvec![
-                    "                    call ",
-                    leaf::atom(mod_name.to_string()),
-                    ":'doesNotUnderstand:args:'(Self, Selector, Args)\n",
-                ],
-            )
+            Self::value_root_default_arm(docvec![
+                "            call ",
+                leaf::atom(mod_name.to_string()),
+                ":'doesNotUnderstand:args:'(Self, Selector, Args)\n",
+            ])
         } else if let Some(ref super_mod) = superclass_mod {
             self.value_inherited_default_arm(class, &class_name, super_mod)
         } else {
             // Root of hierarchy — raise does_not_understand
-            Self::value_extension_default_arm(
-                &class_name,
-                docvec![
-                    "                    let <DnuClass> = call 'beamtalk_primitive':'class_of'(Self) in\n",
-                    "                    ",
-                    BeamtalkErrorChain::new("does_not_understand", leaf::var("DnuClass"))
-                        .selector(leaf::var("Selector"))
-                        .hint(leaf::binary_lit(
-                            "Check spelling or use 'respondsTo:' to verify method exists"
-                        ))
-                        .build(
-                            vec![
-                                ErrorBinding::bracketed("DnuErr0"),
-                                ErrorBinding::bracketed("DnuErr1"),
-                                ErrorBinding::bracketed("DnuErr2"),
-                            ],
-                            Document::Str("\n                    "),
-                        ),
-                    "call 'beamtalk_error':'raise'(DnuErr2)\n",
-                ],
-            )
+            Self::value_root_default_arm(docvec![
+                "            let <DnuClass> = call 'beamtalk_primitive':'class_of'(Self) in\n",
+                "            ",
+                BeamtalkErrorChain::new("does_not_understand", leaf::var("DnuClass"))
+                    .selector(leaf::var("Selector"))
+                    .hint(leaf::binary_lit(
+                        "Check spelling or use 'respondsTo:' to verify method exists"
+                    ))
+                    .build(
+                        vec![
+                            ErrorBinding::bracketed("DnuErr0"),
+                            ErrorBinding::bracketed("DnuErr1"),
+                            ErrorBinding::bracketed("DnuErr2"),
+                        ],
+                        Document::Str("\n            "),
+                    ),
+                "call 'beamtalk_error':'raise'(DnuErr2)\n",
+            ])
         };
 
         let (reflection_head, reflection_perform) =
@@ -250,23 +243,10 @@ impl CoreErlangGenerator {
     }
 
     /// The `dispatch/3` default arm of a value type that has no inherited
-    /// route: the extension registry, then `not_found` (a catch-all
-    /// `doesNotUnderstand:args:` handler, or the root's DNU raise).
-    fn value_extension_default_arm(
-        class_name: &str,
-        not_found: Document<'static>,
-    ) -> Document<'static> {
-        docvec![
-            "        <_Other> when 'true' ->\n",
-            "            case call 'beamtalk_extensions':'lookup'(",
-            leaf::atom(class_name.to_string()),
-            ", Selector) of\n",
-            "                <{'ok', ExtFun, _ExtOwner}> when 'true' ->\n",
-            "                    apply ExtFun(Args, Self)\n",
-            "                <'not_found'> when 'true' ->\n",
-            not_found,
-            "            end\n",
-        ]
+    /// route: `not_found` (a catch-all `doesNotUnderstand:args:` handler, or
+    /// the root's DNU raise).
+    fn value_root_default_arm(not_found: Document<'static>) -> Document<'static> {
+        docvec!["        <_Other> when 'true' ->\n", not_found]
     }
 
     /// The `dispatch/3` default arm of a value type with a superclass.
@@ -275,17 +255,17 @@ impl CoreErlangGenerator {
     /// verdict (BT-4280's, one derived-cache key for actors and values). On
     /// `{'value', Owner, Module}` the inherited method is reached by calling
     /// the owner's `dispatch/3` directly, skipping the superclass-by-superclass
-    /// delegation and its extension lookup per level. Anything else (`slow`,
-    /// or an actor-convention verdict a value chain cannot produce) takes the
-    /// unchanged route: this class's extensions, then the superclass's
+    /// delegation per level. Anything else (`slow`, or an actor-convention
+    /// verdict a value chain cannot produce) calls the superclass's
     /// `dispatch/3`.
     ///
     /// Both routes answer the same, so which one a selector takes is only a
     /// cost choice. A selector the superclass defines itself is one hop away:
-    /// the unchanged route (one extension lookup and one call) is cheaper than
-    /// the verdict lookup, so such selectors skip the verdict. The list comes
-    /// from the class hierarchy at compile time; if the superclass later
-    /// changes, a selector only takes the slower of two equivalent routes.
+    /// calling the superclass directly is cheaper than the verdict lookup, so
+    /// such selectors skip the verdict and go straight to the superclass's
+    /// `dispatch/3`. The list comes from the class hierarchy at compile time;
+    /// if the superclass later changes, a selector only takes the slower of
+    /// two equivalent routes.
     fn value_inherited_default_arm(
         &self,
         class: &ClassDefinition,
@@ -979,7 +959,6 @@ impl CoreErlangGenerator {
         class: &ClassDefinition,
         auto_methods: Option<&AutoSlotMethods>,
     ) -> Document<'static> {
-        let class_name = self.class_name().clone();
         let superclass_mod = self.superclass_module_name(class.superclass_name());
 
         // If the class has a catch-all DNU handler, it accepts any
@@ -990,7 +969,6 @@ impl CoreErlangGenerator {
                 &[],
                 &DispatchSpec {
                     reflection: &[],
-                    class_name: &class_name,
                     superclass: None,
                     dnu: true,
                     auto_slots: None,
@@ -1021,7 +999,6 @@ impl CoreErlangGenerator {
             &own_methods,
             &DispatchSpec {
                 reflection: PRIMITIVE_HAS_METHOD_REFLECTION,
-                class_name: &class_name,
                 superclass: superclass_mod.as_deref().map(SuperclassDelegation::Static),
                 dnu: false,
                 auto_slots: auto_methods,
@@ -1034,9 +1011,9 @@ impl CoreErlangGenerator {
     /// Generates a minimal `dispatch/3` for classes with no instance methods.
     ///
     /// Handles `class`, `respondsTo:`, `perform:`, and `perform:withArguments:`
-    /// locally, then checks extensions and delegates everything else to the
-    /// superclass. `perform:` must re-dispatch through this module to preserve
-    /// extension lookup and correct error attribution. Skips fieldNames,
+    /// locally, then delegates everything else to the superclass. `perform:`
+    /// must re-dispatch through this module to preserve correct error
+    /// attribution. Skips fieldNames,
     /// fieldAt:, fieldAt:put: since the superclass already handles them.
     pub(super) fn generate_minimal_dispatch(
         &mut self,
@@ -1058,8 +1035,7 @@ impl CoreErlangGenerator {
                     .map(|(_, arm)| arm)
                     .collect()
             ),
-            // Default: the inherited verdict, then extension check and
-            // superclass delegation
+            // Default: the inherited verdict, then superclass delegation
             self.value_inherited_default_arm(class, &class_name, &super_mod),
             "    end\n",
             "\n",
@@ -1071,12 +1047,11 @@ impl CoreErlangGenerator {
     /// Generates a minimal `has_method/1` for classes with no instance methods.
     ///
     /// Checks `class`, `respondsTo:`, `perform:`, `perform:withArguments:`,
-    /// then extensions, then delegates to superclass.
+    /// then delegates to superclass.
     pub(super) fn generate_minimal_has_method(
         &mut self,
         class: &ClassDefinition,
     ) -> Document<'static> {
-        let class_name = self.class_name().clone();
         let super_mod = self
             .superclass_module_name(class.superclass_name())
             .expect("minimal has_method requires superclass");
@@ -1085,7 +1060,6 @@ impl CoreErlangGenerator {
             &[],
             &DispatchSpec {
                 reflection: &dispatch_spec::value_core_reflection_selectors(),
-                class_name: &class_name,
                 superclass: Some(SuperclassDelegation::Static(&super_mod)),
                 dnu: false,
                 auto_slots: None,

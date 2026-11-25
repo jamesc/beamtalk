@@ -1337,9 +1337,6 @@ has_method_pass_test() ->
 -doc "Setup class system for hierarchy tests".
 setup_class_system() ->
     beamtalk_test_boot:registry(),
-    %% Not beamtalk_extensions:init/0 here: that would make this setup process the
-    %% table owner and the tables would vanish when the fixture ends (BT-4962).
-    ok = beamtalk_test_boot:extensions(),
     case whereis(beamtalk_bootstrap) of
         undefined -> beamtalk_bootstrap:start_link();
         _ -> ok

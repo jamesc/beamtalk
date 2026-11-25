@@ -47,21 +47,11 @@ mutate, best-effort log, return the receiver. Side follows
 `classIncludesSelector/2`'s own convention (a `Self` tagged `class =
 'Metaclass'` is class-side; any other class object is instance-side).
 
-## Local-method-table scope only — extensions deliberately excluded
+## Local-method-table scope only
 
-Unlike `classRemoveSelector/2` (which checks the extension registry, ADR
-0066, FIRST since an extension shadows a same-named local method),
-`OldSelector`/`NewSelector` resolution here goes straight to
-`classIncludesSelector/2` — local method table only. ADR 0114's text never
-mentions extensions for rename, and an extension method has a different
-owner/attribution model entirely that this primitive's
-site-discovery (keyed on `Self`'s own class only) has no way to reason
-about safely. A class whose `OldSelector` is only an extension (no local
-override) is therefore reported `absent` here — exactly like
-`removeSelector:` reports `absent` for a selector that resolves nowhere
-locally OR as an extension would, MINUS the extension half. A caller wanting
-to rename an extension method can still do so manually via `compile:source:`
-+ `removeSelector:`.
+`OldSelector`/`NewSelector` resolution goes straight to
+`classIncludesSelector/2` — the local method table only. A selector that
+resolves nowhere locally is reported `absent`.
 
 ## Ordering
 
@@ -150,8 +140,7 @@ classRenameSelectorIfAbsent(Self, OldSelector, NewSelector, AbsentBlock) when
 
 %% Shared resolution + rename for classRenameSelector/3 and
 %% classRenameSelectorIfAbsent/4. Local-method-table only (see this
-%% section's own moduledoc-style comment above for why extensions are out
-%% of scope). A collision or a shape-mismatch is a hard raise even from
+%% section's own moduledoc-style comment above). A collision or a shape-mismatch is a hard raise even from
 %% this shared helper — only "OldSelector not found" is reported as `absent`
 %% for the two public functions above to handle differently.
 %% `Sent` is the selector that reached here, for a refusal's error.

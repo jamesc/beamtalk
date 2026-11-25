@@ -284,7 +284,7 @@ build_shapes_map(Modules) ->
 `Module`'s class name, via `beamtalk_module_activation:extract_class_names/1`
 (the `beamtalk_class` module attribute the compiler embeds) — not a second,
 independent way to derive a class name from a module. Empty for a
-protocol-only or pure-extension module (no class defined); this module's
+protocol-only module (no class defined); this module's
 callers simply contribute no shapes.json entry for it.
 """.
 -spec class_name_for_module(module()) -> {ok, atom()} | error.

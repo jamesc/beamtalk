@@ -13,7 +13,7 @@ fn test_build_class_module_index_skips_unreadable_file() {
     let nonexistent = Utf8PathBuf::from("/nonexistent/no_such_file.bt");
     let result = build_class_module_index(&[nonexistent], None, "my_app");
     assert!(result.is_ok());
-    let (module_index, superclass_index, _class_infos, _extensions, _cached_asts) = result.unwrap();
+    let (module_index, superclass_index, _class_infos, _cached_asts) = result.unwrap();
     assert!(module_index.is_empty());
     assert!(superclass_index.is_empty());
 }
@@ -51,7 +51,7 @@ fn test_build_class_module_index_subdirectory_actor_class() {
     );
 
     let source_files = vec![observer_path.join("event_bus.bt")];
-    let (index, _superclass, _class_infos, _extensions, _cached_asts) =
+    let (index, _superclass, _class_infos, _cached_asts) =
         build_class_module_index(&source_files, Some(&src_path), "gang_of_four").unwrap();
 
     assert_eq!(
@@ -91,7 +91,7 @@ fn test_cross_file_subdirectory_actor_spawn_uses_correct_module() {
     fs::create_dir_all(&build_dir).unwrap();
 
     let source_files = vec![observer_path.join("event_bus.bt"), src_path.join("main.bt")];
-    let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached_asts) =
+    let (class_module_index, class_superclass_index, all_class_infos, _cached_asts) =
         build_class_module_index(&source_files, Some(&src_path), "gang_of_four").unwrap();
 
     // Build the class index — EventBus should map to observer subdir module
@@ -166,7 +166,7 @@ fn test_cross_file_inheritance_no_false_dnu_warning() {
         src_path.join("counter.bt"),
         src_path.join("inheriting_counter.bt"),
     ];
-    let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached_asts) =
+    let (class_module_index, class_superclass_index, all_class_infos, _cached_asts) =
         build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
 
     // Verify ClassInfo extraction captured Counter's methods
@@ -228,7 +228,7 @@ fn compile_caller_against_shape(shape_src: &str) -> String {
     fs::create_dir_all(&build_dir).unwrap();
 
     let source_files = vec![src_path.join("shape.bt"), src_path.join("caller.bt")];
-    let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached_asts) =
+    let (class_module_index, class_superclass_index, all_class_infos, _cached_asts) =
         build_class_module_index(&source_files, Some(&src_path), "xf").unwrap();
     let core_file = build_dir.join("bt@xf@caller.core");
     compile_file(
@@ -320,7 +320,7 @@ fn test_cross_file_alias_resolution_no_false_type_mismatch() {
     fs::create_dir_all(&build_dir).unwrap();
 
     let source_files = vec![src_path.join("a.bt"), src_path.join("b.bt")];
-    let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached_asts) =
+    let (class_module_index, class_superclass_index, all_class_infos, _cached_asts) =
         build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
     let all_alias_infos = collect_project_alias_infos(&source_files, "test_pkg");
 
@@ -416,7 +416,7 @@ fn test_cross_file_alias_resolution_no_false_duplicate_for_own_alias() {
     fs::create_dir_all(&build_dir).unwrap();
 
     let source_files = vec![src_path.join("a.bt")];
-    let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached_asts) =
+    let (class_module_index, class_superclass_index, all_class_infos, _cached_asts) =
         build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
     // Includes a.bt's own `Direction` alias, exactly as the real Pass 1
     // scan would when compiling a.bt itself.
@@ -582,7 +582,7 @@ fn state_default_with_cross_file_alias_draws_no_type_mismatch() {
     fs::create_dir_all(&build_dir).unwrap();
 
     let source_files = vec![src_path.join("policy.bt"), src_path.join("spec.bt")];
-    let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached) =
+    let (class_module_index, class_superclass_index, all_class_infos, _cached) =
         build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
     let all_alias_infos = collect_project_alias_infos(&source_files, "test_pkg");
 
@@ -677,7 +677,7 @@ fn dependency_protocol_and_alias_infos_merge_and_resolve() {
     fs::create_dir_all(&build_dir).unwrap();
 
     let source_files = vec![src_path.join("consumer.bt")];
-    let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached) =
+    let (class_module_index, class_superclass_index, all_class_infos, _cached) =
         build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
 
     // Same-package cross-file collections are empty here (single file,
@@ -788,7 +788,7 @@ fn test_cross_file_alias_reference_emits_user_type_in_generated_core_erlang() {
     fs::create_dir_all(&build_dir).unwrap();
 
     let source_files = vec![src_path.join("a.bt"), src_path.join("b.bt")];
-    let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached_asts) =
+    let (class_module_index, class_superclass_index, all_class_infos, _cached_asts) =
         build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
     let all_alias_infos = collect_project_alias_infos(&source_files, "test_pkg");
 
@@ -1283,7 +1283,7 @@ fn bt4039_stdlib_alias_union_field_default_draws_no_type_mismatch() {
     fs::create_dir_all(&build_dir).unwrap();
 
     let source_files = vec![src_path.join("spec.bt")];
-    let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached) =
+    let (class_module_index, class_superclass_index, all_class_infos, _cached) =
         build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
 
     let options = default_options();
@@ -1375,7 +1375,7 @@ fn bt4039_cross_file_alias_union_integer_default_draws_no_type_mismatch() {
     fs::create_dir_all(&build_dir).unwrap();
 
     let source_files = vec![src_path.join("timeouts.bt"), src_path.join("spec.bt")];
-    let (class_module_index, class_superclass_index, all_class_infos, _extensions, _cached) =
+    let (class_module_index, class_superclass_index, all_class_infos, _cached) =
         build_class_module_index(&source_files, Some(&src_path), "test_pkg").unwrap();
     let all_alias_infos = collect_project_alias_infos(&source_files, "test_pkg");
     assert!(
@@ -1424,13 +1424,13 @@ fn compile_own_widget_against(module_name: &str, rival_package: Option<&str>) ->
     fs::create_dir_all(&src_path).unwrap();
     write_test_file(&src_path.join("widget.bt"), widget_src);
     let source_files = vec![src_path.join("widget.bt")];
-    let (class_module_index, class_superclass_index, mut all_class_infos, _ext, _asts) =
+    let (class_module_index, class_superclass_index, mut all_class_infos, _asts) =
         build_class_module_index(&source_files, Some(&src_path), "app").unwrap();
     if let Some(rival) = rival_package {
         let dep_src = root.join(rival).join("src");
         fs::create_dir_all(&dep_src).unwrap();
         write_test_file(&dep_src.join("widget.bt"), widget_src);
-        let (_, _, dep_infos, _, _) =
+        let (_, _, dep_infos, _) =
             build_class_module_index(&[dep_src.join("widget.bt")], Some(&dep_src), rival).unwrap();
         all_class_infos.extend(dep_infos);
     }
@@ -1520,7 +1520,7 @@ fn dependency_internal_alias_in_signature_expands_for_consumer() {
         "internal type Secret = Integer\n\
          Object subclass: Vault\n  thing -> Secret => 42\n",
     );
-    let (_, dep_class_infos, _, _, _, _, _) =
+    let (_, dep_class_infos, _, _, _, _) =
         crate::commands::deps::path::build_dep_class_index(&dep_dir, "dep_secret", &[]).unwrap();
 
     let src_path = root.join("src");
@@ -1537,7 +1537,7 @@ fn dependency_internal_alias_in_signature_expands_for_consumer() {
                  run: vault :: Vault =>\n    x :: {annotation} := vault thing\n    x\n"
             ),
         );
-        let (class_module_index, class_superclass_index, mut all_class_infos, _, _) =
+        let (class_module_index, class_superclass_index, mut all_class_infos, _) =
             build_class_module_index(std::slice::from_ref(&file), Some(&src_path), "consumer")
                 .unwrap();
         all_class_infos.extend(dep_class_infos.clone());

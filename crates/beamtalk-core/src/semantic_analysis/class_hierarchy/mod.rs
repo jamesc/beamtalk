@@ -12,7 +12,6 @@
 //!
 //! The hierarchy uses simple depth-first MRO (no multiple inheritance).
 use crate::ast::{ClassDefinition, MethodKind, Module};
-use crate::compilation::extension_index::{ExtensionIndex, MethodSide};
 use crate::semantic_analysis::SemanticError;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
@@ -86,33 +85,11 @@ pub struct ClassHierarchy {
     /// [`KnowledgeScope::ModuleOnly`]; consulted by the receiver-knowledge
     /// classifier (ADR 0100 Rule 2).
     knowledge_scope: crate::semantic_analysis::receiver_knowledge::KnowledgeScope,
-    /// Whether the compiled package has dependencies whose extension
-    /// contributions were not all loaded (pre-WS3 guard).
-    ///
-    /// A dependency can extend *any* class — including `Object`, which every
-    /// receiver inherits from — so while any dependency's extensions are
-    /// unknown no receiver's method surface is provably complete. When true
-    /// (and the scope is `ProjectComplete`), the receiver-knowledge
-    /// classifier keeps every receiver `Open`. Surfaces that load every
-    /// dependency's extensions (ADR 0070 WS3, BT-4608) leave it `false`.
-    dependency_extensions_unknown: bool,
     /// The class names more than one package in this compilation's scope
     /// declares (BT-4151/BT-4283), installed by `analyse_full` and the
     /// codegen driver from [`crate::semantic_analysis::shadowed_class_names_in_scope`].
     /// Read only through [`Self::is_shadowed_class`].
     shadowed_class_names: crate::semantic_analysis::ShadowedClassNames,
-    /// `(class, selector)` of every standalone instance-side extension method
-    /// (`Class >> sel => ...`) whose body does not answer its receiver
-    /// ([`crate::ast::MethodDefinition::answers_receiver`]). Extensions are not
-    /// `ClassInfo` methods, so `discarded-update` consults this set to learn
-    /// that an extension can replace a self-answering method (BT-4788).
-    updating_extensions: HashSet<(EcoString, EcoString)>,
-    /// `(class, selector)` of every class-side extension already registered
-    /// into `class_methods`. `register_extensions` runs once for the current
-    /// module and again for the project-wide index; the first registration
-    /// wins, so a later pass never overwrites an entry an earlier pass put
-    /// there (BT-5111).
-    registered_class_extensions: HashSet<(EcoString, EcoString)>,
 }
 impl ClassHierarchy {
     /// Runtime-only built-in classes (no `.bt` source), e.g. `Future`. The one
@@ -316,10 +293,7 @@ impl ClassHierarchy {
                     protocol_classes: HashSet::new(),
                     knowledge_scope:
                         crate::semantic_analysis::receiver_knowledge::KnowledgeScope::default(),
-                    dependency_extensions_unknown: false,
                     shadowed_class_names: crate::semantic_analysis::ShadowedClassNames::default(),
-                    updating_extensions: HashSet::new(),
-                    registered_class_extensions: HashSet::new(),
                 }
             })
             .clone()
@@ -388,26 +362,6 @@ impl ClassHierarchy {
         scope: crate::semantic_analysis::receiver_knowledge::KnowledgeScope,
     ) {
         self.knowledge_scope = scope;
-    }
-
-    /// Whether dependency extension contributions are unknown.
-    #[must_use]
-    pub fn dependency_extensions_unknown(&self) -> bool {
-        if self.dependency_extensions_unknown {
-            // Some dependency's extensions are not loaded: no receiver's
-            // surface is provably complete, so the reader depends on
-            // everything (BT-4586).
-            crate::semantic_analysis::consulted::record_extensions_unknown();
-        }
-        self.dependency_extensions_unknown
-    }
-
-    /// Declare that the compiled package has dependencies whose extension
-    /// contributions were not all loaded (pre-WS3 guard). Set by
-    /// `analyse_full` from
-    /// `CompilerOptions::dependency_extensions_unknown`.
-    pub fn set_dependency_extensions_unknown(&mut self, unknown: bool) {
-        self.dependency_extensions_unknown = unknown;
     }
 
     /// Installs the class names declared by more than one package in this
@@ -832,94 +786,6 @@ impl ClassHierarchy {
             .cloned()
             .collect()
     }
-    /// Registers extension methods from the [`ExtensionIndex`] into the hierarchy.
-    ///
-    /// Each extension entry is converted to a [`MethodInfo`] and appended to the
-    /// target class's instance or class method list. Unannotated parameters and
-    /// return types remain `None` (Dynamic in the gradual type system), so the
-    /// type checker will skip validation for those positions while still knowing
-    /// the method exists.
-    ///
-    /// Extensions targeting classes not present in the hierarchy are silently
-    /// skipped — they will be caught by the conflict detector or reported as
-    /// errors elsewhere.
-    ///
-    /// For duplicate extensions (same key, multiple locations), only the first
-    /// definition is registered. The conflict detector handles reporting errors
-    /// for duplicates.
-    pub fn register_extensions(&mut self, index: &ExtensionIndex) {
-        let mut changed = false;
-        for (key, locations) in index.entries() {
-            // Only register the first definition; conflicts are handled separately.
-            let Some(first) = locations.first() else {
-                continue;
-            };
-            let method_info = MethodInfo {
-                arity: first.type_info.arity,
-                answers_receiver: first.type_info.answers_receiver,
-                // `ExtensionTypeInfo` stores flattened strings (compilation-layer
-                // metadata, outside `DeclaredType`'s scope) — parse back into
-                // structure rather than carrying the string through as an
-                // opaque `Simple`.
-                ..MethodInfo::synthesized(
-                    key.selector.clone(),
-                    key.class_name.clone(),
-                    first
-                        .type_info
-                        .return_type
-                        .as_deref()
-                        .map(DeclaredType::parse),
-                    first
-                        .type_info
-                        .param_types
-                        .iter()
-                        .map(|p| p.as_deref().map(DeclaredType::parse))
-                        .collect(),
-                    None,
-                )
-            };
-            if key.side == MethodSide::Instance && !first.type_info.answers_receiver {
-                self.updating_extensions
-                    .insert((key.class_name.clone(), key.selector.clone()));
-            }
-            if let Some(class_info) = self.classes.get_mut(key.class_name.as_str()) {
-                let methods = match key.side {
-                    MethodSide::Instance => &mut class_info.methods,
-                    MethodSide::Class => &mut class_info.class_methods,
-                };
-                // Instance side: the class's own definition takes precedence
-                // over an extension on the same class (ADR 0066), so the
-                // extension is not added. Class side: the extension is checked
-                // *before* the class's own class method (BT-5061), so it
-                // replaces the compiled method's static signature — the type
-                // checker must see what a send actually answers (BT-5111).
-                let existing = methods.iter().position(|m| m.selector == key.selector);
-                let class_side = key.side == MethodSide::Class;
-                let pair = (key.class_name.clone(), key.selector.clone());
-                match existing {
-                    None => {
-                        methods.push(method_info);
-                        changed = true;
-                        if class_side {
-                            self.registered_class_extensions.insert(pair);
-                        }
-                    }
-                    // Replace only the *compiled* class method: an entry a
-                    // previous pass registered (the current module's, before
-                    // the project index's) keeps priority.
-                    Some(i) if class_side && !self.registered_class_extensions.contains(&pair) => {
-                        methods[i] = method_info;
-                        changed = true;
-                        self.registered_class_extensions.insert(pair);
-                    }
-                    Some(_) => {}
-                }
-            }
-        }
-        if changed {
-            self.rebuild_all_indexes();
-        }
-    }
     /// Iterate every class. Records a whole-hierarchy scan (BT-4586).
     pub fn iter_classes(&self) -> impl Iterator<Item = (&EcoString, &ClassInfo)> {
         self.classes.iter()
@@ -1062,14 +928,6 @@ impl ClassHierarchy {
     /// Pass 2 runs sealed-override and superclass checks.
     fn add_module_classes(&mut self, module: &Module, stdlib_mode: bool) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-        for standalone in &module.method_definitions {
-            if !standalone.is_class_method && !standalone.method.answers_receiver() {
-                self.updating_extensions.insert((
-                    standalone.class_name.name.clone(),
-                    standalone.method.selector.name(),
-                ));
-            }
-        }
         // Pass 1: Build and register ClassInfo for every class in the module.
         // Duplicate-selector checks only need the class's own methods, so they
         // run here too. Sealed checks are deferred to Pass 2.

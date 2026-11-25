@@ -70,11 +70,6 @@ every_emitter_warns_when_append_fails_test_() ->
         {"remove-method", fun() ->
             E:emit_remove_change_entry(<<"C5084">>, inc, instance, <<"a">>, human)
         end},
-        {"extension remove", fun() ->
-            E:emit_extension_remove_change_entry(
-                <<"C5084">>, inc, instance, undefined, undefined, <<"a">>, human
-            )
-        end},
         {"remove-class", fun() ->
             E:emit_remove_class_change_entry(<<"C5084">>, #{}, <<"a">>, human)
         end}

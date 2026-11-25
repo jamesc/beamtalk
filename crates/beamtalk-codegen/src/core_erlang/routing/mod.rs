@@ -253,7 +253,7 @@ pub(in crate::core_erlang) enum NoBuiltinRoute {
     /// the dynamic path answers without the target module (BT-4390): the
     /// `Pid` row's future protocol (`beamtalk_future`), or the `String`
     /// row's byte-level selectors shared with `Binary`, which go to
-    /// `bt@stdlib@binary` unless a `String` extension overrides them.
+    /// `bt@stdlib@binary`.
     SpecialSelector(&'static str),
 }
 
@@ -268,15 +268,7 @@ pub(in crate::core_erlang) enum NoBuiltinRoute {
 /// clauses, `module_for_value/2`'s `String`/`Binary` shared-selector fast
 /// path) and sends the rest to `target_module:dispatch/3`.
 ///
-/// A `String` extension (ADR 0066) does not move a non-special selector:
-/// the runtime's `beamtalk_extensions:has('String', Sel)` check sits only
-/// inside the shared-selector fast path, so it can only move a *special*
-/// selector between `bt@stdlib@binary` and `bt@stdlib@string`. Every other
-/// `String` selector reaches `bt@stdlib@string:dispatch/3` whatever the
-/// extension registry holds, and that function consults the registry
-/// itself (its `beamtalk_extensions:lookup` fallthrough arm), so an
-/// extension added or replaced at run time is still honoured by the direct
-/// call.
+/// Every non-special `String` selector reaches `bt@stdlib@string:dispatch/3`.
 pub(in crate::core_erlang) fn builtin_send_route(
     class: &str,
     selector: &str,

@@ -48,7 +48,6 @@ register_class_test_() ->
 setup_bootstrap() ->
     beamtalk_test_class_teardown:stop_pg_class_processes(),
     beamtalk_test_boot:registry(),
-    beamtalk_extensions:init(),
     case beamtalk_bootstrap:start_link() of
         {ok, _} -> ok;
         {error, {already_started, _}} -> ok

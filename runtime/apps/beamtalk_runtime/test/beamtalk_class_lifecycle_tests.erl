@@ -6,12 +6,11 @@
 -moduledoc """
 EUnit tests for beamtalk_class_lifecycle:class_removed/2.
 
-Exercises each of the five derived-registry purges directly against
-`class_removed/2` — xref, extensions (both instance- and class-side),
-protocol registry, the compiler server's ambient class cache, and workspace
-metadata's class_sources map. The end-to-end path through
-`beamtalk_behaviour_intrinsics:classRemoveFromSystemByName/1` (extension
-dispatch, redefinition-does-not-resurrect) is covered separately in
+Exercises each of the derived-registry purges directly against
+`class_removed/2` — xref, protocol registry, the compiler server's ambient
+class cache, and workspace metadata's class_sources map. The end-to-end path
+through `beamtalk_behaviour_intrinsics:classRemoveFromSystemByName/1`
+(redefinition-does-not-resurrect) is covered separately in
 `beamtalk_behaviour_intrinsics_tests.erl`.
 """.
 -include_lib("eunit/include/eunit.hrl").
@@ -24,7 +23,7 @@ dispatch, redefinition-does-not-resurrect) is covered separately in
 %% the ones scoped to this module's app so tests don't see each other's rows.
 setup() ->
     beamtalk_test_boot:registry(),
-    beamtalk_extensions:init(),
+    beamtalk_class_shadow_flags:mark_ready(),
     beamtalk_protocol_registry:init(),
     case whereis(beamtalk_xref) of
         undefined -> {ok, _} = beamtalk_xref:start_link();
@@ -102,26 +101,6 @@ class_removed_purges_xref_test_() ->
                 ok = beamtalk_class_lifecycle:class_removed(ClassName, bt3105_lifecycle_mod),
 
                 ?assertEqual([], beamtalk_xref:implementors_of(Selector))
-            end)
-        ]
-    end}.
-
-class_removed_purges_instance_and_class_side_extensions_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassName = 'BT3105LifecycleExt',
-                ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-                Fun = fun(_Args, _Self) -> ok end,
-                ok = beamtalk_extensions:register(ClassName, 'instSel', Fun, mylib),
-                ok = beamtalk_extensions:register(ClassTag, 'classSel', Fun, mylib),
-                ?assert(beamtalk_extensions:has(ClassName, 'instSel')),
-                ?assert(beamtalk_extensions:has(ClassTag, 'classSel')),
-
-                ok = beamtalk_class_lifecycle:class_removed(ClassName, bt3105_lifecycle_mod2),
-
-                ?assertNot(beamtalk_extensions:has(ClassName, 'instSel')),
-                ?assertNot(beamtalk_extensions:has(ClassTag, 'classSel'))
             end)
         ]
     end}.
@@ -213,24 +192,19 @@ class_removed_drops_workspace_class_source_test_() ->
     end}.
 
 %% class_removed/2 purges every registry in one call — a class with rows in
-%% all five, then a single call, then every registry reports it gone.
-class_removed_purges_all_five_registries_together_test_() ->
+%% every one, then a single call, then every registry reports it gone.
+class_removed_purges_all_registries_together_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(
                 with_workspace_meta(fun(WorkspaceOk) ->
                     ClassName = 'BT3105LifecycleAll',
                     Module = bt3105_lifecycle_all_mod,
-                    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
 
                     Entry = beamtalk_xref:build_method_entry(
                         false, 'bar', <<"bar => 2">>, indexed, class_body
                     ),
                     ok = beamtalk_xref:register_class(ClassName, [Entry]),
-
-                    Fun = fun(_Args, _Self) -> ok end,
-                    ok = beamtalk_extensions:register(ClassName, 'ext1', Fun, mylib),
-                    ok = beamtalk_extensions:register(ClassTag, 'ext2', Fun, mylib),
 
                     beamtalk_protocol_registry:register_protocol(#{
                         name => ClassName,
@@ -262,8 +236,6 @@ class_removed_purges_all_five_registries_together_test_() ->
                     ?assertNot(
                         lists:keymember(ClassName, 1, beamtalk_xref:implementors_of('bar'))
                     ),
-                    ?assertNot(beamtalk_extensions:has(ClassName, 'ext1')),
-                    ?assertNot(beamtalk_extensions:has(ClassTag, 'ext2')),
                     ?assertNot(beamtalk_protocol_registry:is_protocol(ClassName)),
                     case CompilerOk of
                         true ->

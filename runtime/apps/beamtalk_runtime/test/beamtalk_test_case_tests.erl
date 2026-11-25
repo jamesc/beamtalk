@@ -160,7 +160,7 @@ execute_tests_run_single_not_found_test() ->
 %% Setup to ensure stdlib is loaded for the tests below that need real modules
 test_case_setup() ->
     beamtalk_test_boot:registry(),
-    beamtalk_extensions:init(),
+    beamtalk_class_shadow_flags:mark_ready(),
     {ok, _} = beamtalk_bootstrap:start_link(),
     beamtalk_test_boot:boot_real_stdlib('Integer'),
     ok.

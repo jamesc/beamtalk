@@ -1163,7 +1163,7 @@ fn behaviour_superclass_returns_union_type() {
 #[test]
 fn union_param_type_integer_compatible() {
     // Integer arg to "Integer | Symbol" param → no warning
-    let hierarchy = hierarchy_with_extension(
+    let hierarchy = hierarchy_with_method(
         "Object",
         "setTimeout:",
         1,
@@ -1194,7 +1194,7 @@ fn union_param_type_integer_compatible() {
 #[test]
 fn union_param_type_symbol_compatible() {
     // Symbol arg to "Integer | Symbol" param → no warning
-    let hierarchy = hierarchy_with_extension(
+    let hierarchy = hierarchy_with_method(
         "Object",
         "setTimeout:",
         1,
@@ -1225,7 +1225,7 @@ fn union_param_type_symbol_compatible() {
 #[test]
 fn union_param_type_incompatible_warns() {
     // String arg to "Integer | Symbol" param → warning
-    let hierarchy = hierarchy_with_extension(
+    let hierarchy = hierarchy_with_method(
         "Object",
         "setTimeout:",
         1,
@@ -1258,7 +1258,7 @@ fn union_param_type_incompatible_warns() {
 #[test]
 fn union_param_type_subclass_compatible() {
     // Integer is a subclass of Number, so Integer arg to "Number | Symbol" should pass
-    let hierarchy = hierarchy_with_extension(
+    let hierarchy = hierarchy_with_method(
         "Object",
         "setTimeout:",
         1,
@@ -1289,7 +1289,7 @@ fn union_param_type_subclass_compatible() {
 #[test]
 fn non_union_param_type_unchanged() {
     // Non-union expected type still works as before: String arg to Integer param → warning
-    let hierarchy = hierarchy_with_extension(
+    let hierarchy = hierarchy_with_method(
         "Object",
         "deposit:",
         1,
@@ -1328,7 +1328,7 @@ fn union_param_type_nil_does_not_disable_validation() {
     // `String | Nil` param with Integer arg should warn.
     // Before fix, `Nil` was not in the hierarchy so the conservative fallback
     // made it compatible with anything, silently disabling validation.
-    let hierarchy = hierarchy_with_extension(
+    let hierarchy = hierarchy_with_method(
         "Object",
         "setName:",
         1,
@@ -1361,7 +1361,7 @@ fn union_param_type_nil_does_not_disable_validation() {
 #[test]
 fn union_param_type_nil_compatible_with_object_union() {
     // `Object | Nil` param with Integer arg should pass (Integer is subclass of Object)
-    let hierarchy = hierarchy_with_extension(
+    let hierarchy = hierarchy_with_method(
         "Object",
         "setValue:",
         1,

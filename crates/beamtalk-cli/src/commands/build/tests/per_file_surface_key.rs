@@ -85,8 +85,6 @@ fn compile_files(
             pre_loaded_protocol_defs: index.all_protocol_defs.clone(),
             pre_loaded_protocol_sources: index.all_protocol_sources.clone(),
             pre_loaded_aliases: index.all_alias_infos.clone(),
-            extension_index: index.extension_index.clone(),
-            dependency_extensions_complete: index.dependency_extensions_complete,
         },
         ..CompileContext::default()
     };

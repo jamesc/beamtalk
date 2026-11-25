@@ -27,12 +27,10 @@
 //!   injection and singleton-union type annotations
 //! - [`adr0103_handle_scope_and_sendability`] — `handleScope:` validity
 //!   and block-capture sendability
-//! - [`extension_method_integration`] — extension methods vs. the type
-//!   checker
 //! - [`workspace_bindings_protocols_and_aliases`] — workspace-binding
 //!   shadowing, protocol name resolution, and ADR 0108 alias seeding
 //! - [`typed_params_knowledge_scope_and_cross_file`] — typed block
-//!   parameters, `KnowledgeScope`, and cross-file extension visibility
+//!   parameters and `KnowledgeScope`
 
 use super::test_helpers::test_span;
 use super::*;
@@ -66,7 +64,6 @@ mod class_hierarchy_and_method_validators;
 mod class_state_abroad;
 mod cross_file_extension_checks;
 mod dead_code_super_and_shadowing;
-mod extension_method_integration;
 mod flattened_provision_diagnostics;
 mod hierarchy_injection_and_singleton_types;
 mod local_threading;

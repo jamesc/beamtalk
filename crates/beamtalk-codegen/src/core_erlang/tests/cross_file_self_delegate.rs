@@ -2,14 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! BT-4930: what `Foo >> sel => self delegate` compiles to on a `native:`
-//! class, for the three ways the method can be written.
-//!
-//! The inline method and the same-file extension are lowered through the
-//! backing module. The cross-file extension is a foreign extension fun in which
-//! `self delegate` is a plain send. That is why semantic analysis rejects the
-//! cross-file form with an error (`check_cross_file_native_delegate`), so this
-//! shape is never built from a program that compiles; the test pins what
-//! codegen does if it is reached, and the validator's reasoning with it.
+//! class: the inline method and the same-file extension are both lowered
+//! through the backing module. (A cross-file `>>` is a compile error, ADR 0152.)
 
 use std::collections::HashMap;
 

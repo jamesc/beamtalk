@@ -102,22 +102,17 @@ let _temp@35 = _coll@33 in let _temp@36 = case call 'erlang':'is_list'(_temp@35)
             let <DispArg0> = call 'erlang':'hd'(Args) in
             call 'foldl_bare_accumulator_value':'withBase:'(Self, DispArg0)
         <_Other> when 'true' ->
+            case Selector of
+                <'printString'> when 'true' ->
+                    call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)
+                <_> when 'true' ->
             %% BT-4260: a memoised verdict picks the direct inherited call.
-            case case Selector of
-                <'printString'> when 'true' -> 'slow'
-                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('BareVal', Selector)
-            end of
+            case call 'beamtalk_dispatch':'inherited_target'('BareVal', Selector) of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
-                <{'ext', InhExtOwner}> when 'true' ->
-                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, 'bt@stdlib@value')
                 <_InhSlow> when 'true' ->
-                    case call 'beamtalk_extensions':'lookup'('BareVal', Selector) of
-                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                            apply ExtFun(Args, Self)
-                        <'not_found'> when 'true' ->
-                            call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)
-                    end
+                    call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)
+            end
             end
     end
 
@@ -140,21 +135,13 @@ let _temp@35 = _coll@33 in let _temp@36 = case call 'erlang':'is_list'(_temp@35)
 'has_method'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'oneLocal:', 'readsField:', 'twoLocals:', 'base', 'withBase:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('BareVal', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'bt@stdlib@value':'has_method'(Selector)
-            end
+        <'false'> when 'true' -> call 'bt@stdlib@value':'has_method'(Selector)
     end
 
 'has_method_local'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'oneLocal:', 'readsField:', 'twoLocals:', 'base', 'withBase:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('BareVal', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> 'false'
-            end
+        <'false'> when 'true' -> 'false'
     end
 
 

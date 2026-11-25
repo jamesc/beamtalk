@@ -174,9 +174,6 @@ a selector the compiler resolved. The other arms each run Erlang code that does 
 through one runtime helper, `beamtalk_actor_state:call_foreign/3`:
 
 - a native method clause (`native:` and `self delegate`, ADR 0056);
-- an ADR 0066 instance-side extension fun, found by the default arm's
-  `beamtalk_extensions:lookup` (also when installed at run time on a
-  selector the compiler saw as compiled);
 - the default arm's hierarchy walk, `beamtalk_dispatch:super/5`, which
   reaches inherited runtime methods on `Object` and `ProtoObject`, the
   reflective `fieldAt:put:` among them;
@@ -185,11 +182,10 @@ through one runtime helper, `beamtalk_actor_state:call_foreign/3`:
 Phase 2a adds a test that drives every arm of a generated `dispatch/4` and
 checks that each one either is a compiled clause or calls `call_foreign/3`.
 
-**The one direct inherited exit (BT-4280).** Before the extension lookup, the
-default arm asks `beamtalk_dispatch:inherited_target/2` for a memoised verdict
+**The one direct inherited exit (BT-4280).** The default arm asks
+`beamtalk_dispatch:inherited_target/2` for a memoised verdict
 (derived-cache key `{inherited_target, Class, Selector}`). It answers
-`{compiled, Owner, Module}` only when there is no extension on the class or its
-superclass for the selector, `resolve_owner/2` finds an owner from the
+`{compiled, Owner, Module}` only when `resolve_owner/2` finds an owner from the
 superclass, and the owner's `__beamtalk_meta/0` has
 `'threads_actor_state' => 'true'` and lists the selector among its own
 methods. The arm then calls `beamtalk_dispatch:invoke_resolved/6` directly,
@@ -202,7 +198,7 @@ predicate, `ClassHierarchy::threads_actor_state`, that decides
 and `{value, Owner, Module}`, the verdict for an owner whose methods take no
 actor `State` (such as `Object`), which a value type's `dispatch/3` default arm
 uses to call that owner's `dispatch/3` directly (BT-4260). Every source
-that changes the answer (extension install or removal, a method write or
+that changes the answer (a method write or
 `removeSelector:`, a reload, a class removal) flushes the derived cache. The
 `dispatch/4` exit test allows `invoke_resolved/6` only under the
 `{'compiled', ...}` arm.
@@ -215,7 +211,7 @@ holds the only writes (a stored block run by an inherited `Object` method such a
 cell's state; if the answer is a different state and the cell changed to
 something else, `call_foreign/3` raises `actor_state_conflict`; an answer equal
 to the cell (a compiled callee that stored and threaded the same version) or an
-unchanged cell passes through. A native method or extension fun that runs a block
+unchanged cell passes through. A native method that runs a block
 should still read the block's writes back from the cell
 (`beamtalk_actor_state:get/2`) before it answers.
 
@@ -223,7 +219,7 @@ Phase 2b audit of what runs blocks behind a foreign exit: the only inherited
 methods that evaluate a caller-supplied block are `Object>>ifNotNil:`,
 `ifNil:ifNotNil:` and `ifNotNil:ifNil:` (compiled Beamtalk in `object.bt`; `ifNil:`
 never runs its block), plus `perform:withArguments:` reaching them. Both shapes
-are covered by `closure_cell_foreign_exit.bt`. No other native or extension fun
+are covered by `closure_cell_foreign_exit.bt`. No other native method
 in the runtime evaluates a block against the actor's state.
 
 The helper does not reconcile the cell with the answer; ADR 0137's
@@ -737,7 +733,7 @@ protected body write through. `OnDoCatch` stores its pre-region version
 under `CatchWithoutStateRestore`. `^` stores before the throw. The
 `no_user_code` mark goes on `PrimitiveBindingTable` entries, set from the
 stdlib pragmas and checked by `build-stdlib`. Audit the native actor methods
-and extension funs that run a user block, and make each read the block's
+that run a user block, and make each read the block's
 writes from the cell before answering. Optionally skip the store when no
 field write happened since the last sync (§7). The exit gate is a generated
 actor-field-closure corpus (block shape × send kind × at home or away ×

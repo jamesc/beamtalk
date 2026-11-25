@@ -305,14 +305,9 @@ pub(crate) fn check_class_method_ffi(
         }
     }
     // Standalone `Foo class >> bar => ...` definitions are class methods of
-    // `Foo` too. Package-qualified extensions are left alone: their class is
-    // resolved by package, which the simple-name hierarchy lookup does not
-    // model (same rule as `class-state-abroad`).
+    // `Foo` too.
     for standalone in &module.method_definitions {
-        if standalone.is_class_method
-            && standalone.package.is_none()
-            && standalone.method.kind == MethodKind::Primary
-        {
+        if standalone.is_class_method && standalone.method.kind == MethodKind::Primary {
             check_method(
                 standalone.class_name.name.as_str(),
                 &standalone.method,

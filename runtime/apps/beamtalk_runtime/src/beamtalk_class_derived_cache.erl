@@ -99,9 +99,7 @@ write has landed. So do the class-side writes the `class_method_owner` memo
 reads: `set_runtime_class_methods/2` (an ADR 0084 fun's selector),
 `put_class_variables/2` and `put_process_bound_selectors/2`, each on a change,
 and the constructor facts `put_direct_constructors/2` and
-`put_defines_user_class_new1/2` (BT-4409) and `put_defines_user_class_new0/2` (BT-4479). Extension install and removal do too: compiled
-`has_method_local/1` consults the extension table, so an extension changes
-resolution for every chain through its class.
+`put_defines_user_class_new1/2` (BT-4409) and `put_defines_user_class_new0/2` (BT-4479).
 Invalidation is global, not per class: a derived fact about
 class C can depend on any of C's ancestors' rows, and class writes are rare
 (load / reload time), so a global flush is both correct and cheap.

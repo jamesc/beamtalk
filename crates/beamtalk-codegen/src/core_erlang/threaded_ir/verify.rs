@@ -655,17 +655,14 @@ pub(in crate::core_erlang) enum VerifyError {
     /// scope whose catch arm answers anything but the bare value
     /// ([`NlrArmShape`](crate::core_erlang::nlr::NlrArmShape)). Invariant, per
     /// scope kind: the function an NLR boundary closes answers what its
-    /// callers take as the send's result. A value-type method (or value-type
-    /// extension fun) and a class method answer the bare value: `dispatch/3`'s
-    /// arm, the own-module typed direct call of the function (BT-4473) and
-    /// the runtime's extension apply
-    /// (`beamtalk_dispatch:apply_extension_by_arity/4`) all take the return
-    /// as is. An actor method answers the `gen_server` reply and a REPL eval its
+    /// callers take as the send's result. A value-type method and a class
+    /// method answer the bare value: `dispatch/3`'s arm and the own-module
+    /// typed direct call of the function (BT-4473) both take the return as
+    /// is. An actor method answers the `gen_server` reply and a REPL eval its
     /// `{Value, Bindings}` pair; those scopes are not constrained here. The
     /// repro: every value-type method with a block `^` answered `{Result,
     /// Self}`, which only its own `dispatch/3` arm and the BT-4473 direct
-    /// call unwrapped, so a value-type
-    /// extension with a block `^` answered the pair to the sender.
+    /// call unwrapped, so any other caller received the pair.
     MethodNlrAnswersPair { boundary: NlrBoundary, at: Span },
 
     /// ADR 0146 (BT-4535): an [`ThreadedStmt::NlrCatch`] whose actor reply

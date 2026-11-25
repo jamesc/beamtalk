@@ -27,8 +27,9 @@ start(_StartType, _StartArgs) ->
     %% `actor_min_heap_size` is set.
     ok = beamtalk_actor:refresh_spawn_options(),
 
-    %% Initialize extension registry ETS tables
-    beamtalk_extensions:init(),
+    %% Class-side shadow flags are authoritative from here on (before this the
+    %% compiled self-send fast path declines to the always-correct walk).
+    beamtalk_class_shadow_flags:mark_ready(),
 
     %% Create the unified class metadata ETS table (hierarchy, module and
     %% method-selector columns share one row) at app startup so it's owned

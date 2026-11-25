@@ -256,7 +256,7 @@ fn lint_erl_files(erl_files: &[Utf8PathBuf], format: OutputFormat) -> Result<usi
 }
 
 /// Resolve the project's dependencies and collect their class, protocol and
-/// alias metadata and extension methods (ADR 0070 WS3, BT-4608) for the
+/// alias metadata for the
 /// shared pipeline, plus each one's own stub directory (ADR 0075 layer 2)
 /// for [`beamtalk_package::ffi_type_registry::lint_type_registry`].
 ///
@@ -277,11 +277,6 @@ pub(crate) fn merge_dependency_infos(
     match super::deps::ensure_deps_resolved(project_root, &options) {
         Ok(resolved_deps) => {
             let mut metadata = DependencyMetadata::default();
-            metadata.extensions_complete =
-                beamtalk_project::dependency_extensions::merge_dependency_extensions(
-                    resolved_deps.iter().map(|dep| &dep.extensions),
-                    &mut metadata.extensions,
-                );
             for dep in &resolved_deps {
                 metadata.class_infos.extend(dep.class_infos.clone());
                 metadata.protocol_infos.extend(dep.protocol_infos.clone());
@@ -937,10 +932,6 @@ mod tests {
                 panic!("unreadable {f}: {e}")
             });
         let (_, dependencies) = merge_dependency_infos(&consumer_root);
-        // ADR 0070 WS3 (BT-4608): every dependency was loaded, so `lint`
-        // lifts the pre-WS3 dependency guard as `build` does.
-        assert!(dependencies.extensions_complete);
-        let extension_index = sources.extension_index;
         let mut all_protocol_infos = sources.protocol_infos;
         all_protocol_infos.extend(dependencies.protocol_infos);
         let mut all_protocol_defs = sources.protocol_defs;
@@ -1050,8 +1041,6 @@ mod tests {
                 pre_loaded_protocol_defs: all_protocol_defs,
                 pre_loaded_aliases: all_alias_infos,
                 knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
-                cross_file_extensions: Some(&extension_index),
-                dependency_extensions_unknown: true,
                 current_package: Some("consumer"),
                 ..FileContext::default()
             },

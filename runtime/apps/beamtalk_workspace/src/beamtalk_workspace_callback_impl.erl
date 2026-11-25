@@ -24,7 +24,6 @@ removal) forward there.
     precheck_method/4,
     remove_method/4,
     emit_remove_change_entry/5,
-    emit_extension_remove_change_entry/7,
     rewrite_sites/2,
     validate_sites/2,
     emit_rewrite_change_entry/2,
@@ -67,22 +66,6 @@ remove_method(ClassNameBin, Selector, Side, StdlibPolicy) ->
 ) -> beamtalk_workspace_callback:emit_result().
 emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
     ?ENTRIES:emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind).
-
--spec emit_extension_remove_change_entry(
-    binary(),
-    atom() | binary(),
-    instance | class,
-    atom() | undefined,
-    binary() | undefined,
-    binary(),
-    human | agent
-) -> beamtalk_workspace_callback:emit_result().
-emit_extension_remove_change_entry(
-    ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
-) ->
-    ?ENTRIES:emit_extension_remove_change_entry(
-        ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
-    ).
 
 -spec rewrite_sites(
     beamtalk_repl_loader_rewrite:rewrite_site() | undefined,

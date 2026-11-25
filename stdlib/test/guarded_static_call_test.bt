@@ -8,54 +8,18 @@
 // `beamtalk_class_shadow_flags:static_call_target/4` only while
 // `direct_call_ok/2` holds. The ADR 0129 static direct calls were unguarded; these
 // are the regression tests for the bugs that caused:
-// - BT-4133: a class-side extension shadowing a direct-called method was
-//   silently bypassed;
 // - BT-4126: hot-patching a direct-called method with a runtime fun left
 //   static callers on the compiled method;
 // - BT-4037: callers passed `nil` as `ClassSelf`.
 // (BT-4134, a re-parent under a class with class variables, is covered by the
 // runtime test `beamtalk_class_in_caller_tests`.)
 //
-// Fixtures: fixtures/gsc_sealed_ext.bt, fixtures/gsc_open_ext.bt,
-// fixtures/gsc_patched.bt, fixtures/gsc_class_self.bt, fixtures/gsc_ping.bt,
-// fixtures/gsc_pong.bt, fixtures/gsc_warm_ext.bt, fixtures/gsc_warm_patched.bt,
+// Fixtures: fixtures/gsc_patched.bt, fixtures/gsc_class_self.bt,
+// fixtures/gsc_ping.bt, fixtures/gsc_pong.bt, fixtures/gsc_warm_patched.bt,
 // fixtures/gsc_warm_parent.bt, fixtures/gsc_warm_child.bt,
 // fixtures/gsc_restart.bt.
 
 TestCase subclass: GuardedStaticCallTest
-
-  // BT-4133: an extension on a sealed class's `class sealed` method is honoured.
-  testExtensionShadowsSealedClassMethod =>
-    self assert: GscSealedExt shadowMe equals: #compiled
-    Erlang beamtalk_extensions
-      register: #'GscSealedExt class'
-      selector: #shadowMe
-      fun: [:args :receiver | #extension]
-      owner: #test
-    shadowed := GscSealedExt shadowMe
-    Erlang beamtalk_extensions
-      unregister: #GscSealedExt
-      selector: #shadowMe
-      classSide: true
-    self assert: shadowed equals: #extension
-    self assert: GscSealedExt shadowMe equals: #compiled
-
-  // BT-4133: the same for an open class, and for a class-side self-send.
-  testExtensionShadowsOpenClassMethodAndSelfSend =>
-    self assert: GscOpenExt viaSelf equals: #compiled
-    Erlang beamtalk_extensions
-      register: #'GscOpenExt class'
-      selector: #shadowMe
-      fun: [:args :receiver | #extension]
-      owner: #test
-    literal := GscOpenExt shadowMe
-    viaSelf := GscOpenExt viaSelf
-    Erlang beamtalk_extensions
-      unregister: #GscOpenExt
-      selector: #shadowMe
-      classSide: true
-    self assert: literal equals: #extension
-    self assert: viaSelf equals: #extension
 
   // BT-4126: a runtime fun replacing a class method is reached by static
   // callers compiled before the patch, and removing it restores them.
@@ -153,25 +117,7 @@ TestCase subclass: GuardedStaticCallTest
   // The class held as a Dynamic value: sends to it compile to `class_send`.
   lookUp: name :: Symbol -> Dynamic => Beamtalk classNamed: name
 
-  // (a) A class-side extension registered after warm-up wins.
-  testExtensionRegisteredAfterWarmUpWins =>
-    self assert: GscWarmExt answer equals: #compiled
-    Erlang beamtalk_extensions
-      register: #'GscWarmExt class'
-      selector: #answer
-      fun: [:args :receiver | #extension]
-      owner: #test
-    literal := GscWarmExt answer
-    dynamic := (self lookUp: #GscWarmExt) answer
-    Erlang beamtalk_extensions
-      unregister: #GscWarmExt
-      selector: #answer
-      classSide: true
-    self assert: literal equals: #extension
-    self assert: dynamic equals: #extension
-    self assert: GscWarmExt answer equals: #compiled
-
-  // (b) A runtime class-method fun installed after warm-up wins, and its
+  // A runtime class-method fun installed after warm-up wins, and its
   // removal (BT-4438) gives the compiled method back.
   testRuntimeClassMethodAfterWarmUpWins =>
     self assert: GscWarmPatched answer equals: #compiled

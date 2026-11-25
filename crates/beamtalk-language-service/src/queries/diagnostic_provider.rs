@@ -71,12 +71,6 @@ pub struct ProjectDiagnosticContext<'a> {
     /// does. Empty for callers that don't (yet) supply project-wide alias
     /// metadata — the pipeline degrades to today's same-file-only resolution.
     pub pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::AliasInfo>,
-    /// Project-wide standalone extension definitions (ADR 0066).
-    /// Registered into the class hierarchy so cross-file
-    /// `ClassName >> selector` extensions resolve instead of producing
-    /// false `Dnu` hints. May include the current file's own entries —
-    /// duplicates are skipped during registration.
-    pub cross_file_extensions: beamtalk_core::compilation::extension_index::ExtensionIndex,
     /// Native type registry for FFI call inference (ADR 0075).
     pub native_type_registry:
         Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>>,
@@ -174,7 +168,6 @@ pub fn compute_project_diagnostics_with_analysis(
         .with_protocol_sources(ctx.pre_loaded_protocol_sources.clone())
         .with_pre_loaded_aliases(ctx.pre_loaded_aliases.clone())
         .with_native_type_registry(ctx.native_type_registry.clone())
-        .with_cross_file_extensions(&ctx.cross_file_extensions)
         .with_is_stub_file(ctx.is_stub_file);
     let mut analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
     // Diagnostics are consumed below (and by every downstream pass

@@ -212,11 +212,6 @@ pub struct SimpleLanguageService {
     /// finishes within its file budget; stays `false` if the budget was
     /// exhausted (coverage would be partial).
     project_complete: bool,
-    /// ADR 0100's pre-WS3 dependency guard input
-    /// (`CompilerOptions::dependency_extensions_unknown`): whether some
-    /// workspace package declares dependencies whose extensions were not all
-    /// loaded. Decided by the LSP server with the CLI's rule (BT-4611).
-    dependency_extensions_unknown: bool,
     /// Per-category diagnostic severity overrides from the workspace's
     /// `beamtalk.toml` `[diagnostics]` section (ADR 0100 Rule 3).
     /// Empty (the default) preserves today's Rule 1 completeness-ladder
@@ -290,7 +285,6 @@ impl SimpleLanguageService {
             known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules::default(),
             root_qualifier_packages: Vec::new(),
             project_complete: false,
-            dependency_extensions_unknown: false,
             diagnostics_overrides:
                 beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
             preload_in_progress: false,
@@ -311,7 +305,6 @@ impl SimpleLanguageService {
             known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules::default(),
             root_qualifier_packages: Vec::new(),
             project_complete: false,
-            dependency_extensions_unknown: false,
             diagnostics_overrides:
                 beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
             preload_in_progress: false,
@@ -339,31 +332,6 @@ impl SimpleLanguageService {
     #[must_use]
     pub fn is_project_complete(&self) -> bool {
         self.project_complete
-    }
-
-    /// Declare whether some dependency's extension methods may be missing
-    /// from the index (ADR 0100's pre-WS3 guard). When true (and the project
-    /// is complete) the receiver-knowledge classifier keeps every receiver
-    /// `Open`. The LSP server decides it with the CLI's rule,
-    /// `beamtalk_project::dependency_extensions::dependency_extensions_unknown`
-    /// (BT-4611).
-    pub fn set_dependency_extensions_unknown(&mut self, unknown: bool) {
-        self.dependency_extensions_unknown = unknown;
-    }
-
-    /// Whether any indexed file under one of `dirs` is incomplete as a
-    /// dependency source: it had a parse error, or its class hierarchy could
-    /// not be built (so its extensions were never indexed). The same per-file
-    /// rule the CLI's dependency scan applies
-    /// (`DependencyExtensions::file_is_complete`, BT-4611).
-    #[must_use]
-    pub fn any_incomplete_file_under(&self, dirs: &[std::path::PathBuf]) -> bool {
-        self.files.iter().any(|(path, data)| {
-            dirs.iter().any(|dir| path.as_std_path().starts_with(dir))
-                && !beamtalk_project::dependency_extensions::DependencyExtensions::file_is_complete(
-                    &data.diagnostics,
-                )
-        })
     }
 
     /// Declare whether the LSP server's startup workspace preload is
@@ -1008,8 +976,6 @@ impl SimpleLanguageService {
                 })
                 .cloned()
                 .collect();
-            let mut extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
-            extensions.add_module(&module, file.as_std_path());
             let is_dependency = crate::project_index::is_dependency_file(&file);
             let old_internal_aliases = self.project_index.internal_aliases_of(&file);
             if is_dependency {
@@ -1025,24 +991,15 @@ impl SimpleLanguageService {
                 for info in &mut protocol_infos {
                     expander.expand_protocol_info(info);
                 }
-                beamtalk_project::dependency_extensions::expand_dependency_protocol_defs(
+                beamtalk_project::dependency_aliases::expand_dependency_protocol_defs(
                     &package_aliases,
                     &mut protocol_defs,
-                );
-                beamtalk_project::dependency_extensions::expand_extension_index_aliases(
-                    &expander,
-                    &mut extensions,
                 );
             }
 
             // Update the project-wide index with this file's class hierarchy
             self.project_index
                 .update_file(file.clone(), &class_hierarchy);
-
-            // Track this file's standalone extension definitions so
-            // other files' diagnostics see them (ADR 0066 / ADR 0100 Rule 2 WS1).
-            self.project_index
-                .set_file_extensions(file.clone(), extensions);
 
             // ADR 0108 Phase 8: track this file's `type`
             // declarations in the project-wide alias registry, so
@@ -1189,11 +1146,6 @@ impl LanguageService for SimpleLanguageService {
                     options.knowledge_scope =
                         beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete;
                 }
-                // Dependency sources are indexed like project files, so their
-                // extensions are in `cross_file_extensions` below; the server
-                // keeps the pre-WS3 guard on unless that loading was complete
-                // (BT-4611, the CLI's rule).
-                options.dependency_extensions_unknown = self.dependency_extensions_unknown;
                 // BT-4022: project-known Erlang modules (hex-dep/native
                 // ebins + own `native/*.erl`, set by the LSP server at
                 // startup) so the `unresolved_ffi` check agrees with
@@ -1216,10 +1168,6 @@ impl LanguageService for SimpleLanguageService {
                 // package set, so an undeclared `pkg@Class` qualifier shows
                 // the squiggle `beamtalk build` would. `None` skips the check.
                 options.known_packages = self.known_qualifier_packages_for(file);
-                // Cross-file extensions from the ProjectIndex are
-                // passed so a same-project `ClassName >> selector` defined in
-                // another file resolves instead of producing a false Dnu hint.
-                let cross_file_extensions = self.project_index.cross_file_extensions_for(file);
                 // Cross-file type aliases from the ProjectIndex, so a
                 // `type Name = ...` declared in another project file resolves
                 // instead of leaving `Dynamic (dynamic receiver)` behind —
@@ -1255,7 +1203,6 @@ impl LanguageService for SimpleLanguageService {
                     pre_loaded_protocols,
                     pre_loaded_protocol_defs,
                     pre_loaded_aliases,
-                    cross_file_extensions,
                     native_type_registry: self
                         .file_native_types
                         .get(file)

@@ -31,7 +31,6 @@ fails. Each entry kind passes its own span resolver as a fun.
     emit_new_class_entry/3,
     emit_change_entry/1,
     emit_remove_change_entry/5,
-    emit_extension_remove_change_entry/7,
     capture_class_removal_snapshot/1,
     emit_remove_class_change_entry/4,
     %% Flushability classification, reused by the loader's own write paths
@@ -1030,8 +1029,8 @@ span_error_entry(Base, _SourceFile, Reason) ->
 %%% ----------------------------------------------------------------------------
 
 -doc """
-Emit a `"remove-method"` ChangeLog entry for a just-completed LOCAL (non-
-extension) method removal.
+Emit a `"remove-method"` ChangeLog entry for a just-completed method
+removal.
 
 Called by `beamtalk_behaviour_intrinsics:remove_selector/2` (backing
 `Behaviour>>removeSelector:` / `removeSelector:ifAbsent:`) *after*
@@ -1123,87 +1122,9 @@ resolve_removal_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, Di
             span_error_entry(Base, SourceFile, Reason)
     end.
 
--doc """
-Emit a `"remove-method"` ChangeLog entry for a just-completed EXTENSION
-method removal (ADR 0066 open classes; ADR 0112 § Extension methods, §
-ChangeLog interaction).
-
-Unlike `emit_remove_change_entry/5` (a local class-body method, whose
-span/prev_source resolve against the target class's own on-disk file), an
-extension method's source lives in a *different* file than the extended
-class's — `beamtalk_extensions` tracks only the owning package/module atom
-(`Owner`, ADR 0070), not which file registered a given `{Class, Selector}`,
-so this attributes the entry the most it can honestly claim:
-
-  - `sourceFile` resolves iff `Owner` also happens to name a currently-loaded
-    class (the common case: a file with no explicit package declaration
-    registers under its own module-derived name) — reuses
-    `class_source_file/1`, the same resolver an ordinary class uses. Any
-    other `Owner` (a genuine multi-class package, or one that never loaded)
-    leaves `sourceFile` unset rather than guessing wrong.
-  - `span` is always `undefined` — locating a standalone `TargetClass >>
-    selector` definition's byte offsets inside an arbitrary owner file has no
-    resolver in this codebase (`beamtalk_compiler:resolve_method_span/4`
-    looks for a method *inside* a named class's own body, not a foreign
-    extension line); building one is out of this issue's scope.
-  - The entry is always `flushable: false, not_flushable_reason:
-    "extension"` — precise disk attribution/excise for extension removals is
-    unbuilt infrastructure (same boundary as every other
-    `remove-method` flush-excise case), not something invented here.
-
-`Owner` and `PrevBody` (the extension's stored source text) must be captured
-by the CALLER before unregistering — `beamtalk_extensions:unregister/3`
-deletes both the moment it returns, so by the time this function runs neither
-is recoverable from the registry itself. `PrevBody` becomes `prev_source` so
-the audit trail at least records what was removed, even though automated
-revert cannot yet act on it (reverting a `sourceFile`-less, `span`-less entry
-has nothing to re-install against).
-""".
--spec emit_extension_remove_change_entry(
-    binary(),
-    atom() | binary(),
-    instance | class,
-    atom() | undefined,
-    binary() | undefined,
-    binary(),
-    human | agent
-) -> emit_result().
-emit_extension_remove_change_entry(
-    ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
-) ->
-    append_entry(
-        "Failed to emit ChangeLog entry for extension removal (removal still installed)",
-        #{class => ClassNameBin, selector => Selector},
-        fun() ->
-            SelectorBin = method_selector_binary(Selector),
-            Base0 = #{
-                class => ClassNameBin,
-                selector => SelectorBin,
-                kind => 'remove-method',
-                side => Side,
-                intent => durable,
-                author => Author,
-                author_kind => AuthorKind,
-                flushable => false,
-                not_flushable_reason => <<"extension">>
-            },
-            Base1 = maybe_put_prev_source(Base0, PrevBody),
-            maybe_put_extension_source_file(Base1, Owner)
-        end
-    ).
-
 -spec maybe_put_prev_source(map(), binary() | undefined) -> map().
 maybe_put_prev_source(Base, undefined) -> Base;
 maybe_put_prev_source(Base, PrevBody) when is_binary(PrevBody) -> Base#{prev_source => PrevBody}.
-
--spec maybe_put_extension_source_file(map(), atom() | undefined) -> map().
-maybe_put_extension_source_file(Base, undefined) ->
-    Base;
-maybe_put_extension_source_file(Base, Owner) when is_atom(Owner) ->
-    case class_source_file(atom_to_binary(Owner, utf8)) of
-        nil -> Base;
-        SourceFile -> Base#{source_file => SourceFile}
-    end.
 
 %%% ----------------------------------------------------------------------------
 %%% Class-removal ChangeLog entry

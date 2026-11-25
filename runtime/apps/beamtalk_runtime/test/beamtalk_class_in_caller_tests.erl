@@ -201,18 +201,6 @@ in_caller_test_() ->
                 )
             end)
         end},
-        {"a class-side extension on the class keeps its process", fun() ->
-            with_class('Bt4300Extended', none, #{}, fun(Pid) ->
-                Tag = tag('Bt4300Extended'),
-                ok = beamtalk_extensions:register(Tag, bt4300Ext, fun(_, _) -> ext end, test),
-                try
-                    ?assertEqual(Pid, send(Pid, testSelf, []))
-                after
-                    beamtalk_extensions:unregister(Tag, bt4300Ext)
-                end,
-                ?assertEqual(self(), send(Pid, testSelf, []))
-            end)
-        end},
         {"a stateless class's state reads as empty in the caller", fun() ->
             with_class('Bt4300NoHome', none, #{}, fun(Pid) ->
                 ?assertEqual(false, send(Pid, testHasCount, [])),
@@ -539,29 +527,6 @@ invalidation_test_() ->
 %% probe fetch (a miss computes nothing) and checks the send's behaviour.
 process_verdict_invalidation_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
-        {"a class-side extension added then removed retires the verdict", fun() ->
-            with_class('Bt4771ExtInval', none, #{count => 0}, fun(Pid) ->
-                Tag = tag('Bt4771ExtInval'),
-                ?assertEqual(Pid, send(Pid, testSelf, [])),
-                ?assertEqual(process, memo(Pid, testSelf)),
-                ok = beamtalk_extensions:register(Tag, testSelf, fun(_, _) -> ext end, test),
-                try
-                    %% The extension answers first, in the class process.
-                    ?assertEqual(ext, send(Pid, testSelf, [])),
-                    ?assertNotEqual(process, memo(Pid, testSelf)),
-                    %% BT-4800: resolved once, as a positive `extension` verdict.
-                    ?assertEqual(extension, memo(Pid, testSelf)),
-                    %% Redefining the extension: the class process looks it up
-                    %% itself, so the new body answers.
-                    ok = beamtalk_extensions:register(Tag, testSelf, fun(_, _) -> ext2 end, test),
-                    ?assertEqual(ext2, send(Pid, testSelf, []))
-                after
-                    beamtalk_extensions:unregister(Tag, testSelf)
-                end,
-                ?assertEqual(Pid, send(Pid, testSelf, [])),
-                ?assertEqual(process, memo(Pid, testSelf))
-            end)
-        end},
         {"dropping and regaining class variables retires the verdict", fun() ->
             with_class('Bt4771VarsInval', none, #{count => 0}, fun(Pid) ->
                 ?assertEqual(Pid, send(Pid, testSelf, [])),

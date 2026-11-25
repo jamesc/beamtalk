@@ -21,11 +21,11 @@ method) before any rename primitive is built on top of it.
   reproduced end-to-end through `SystemNavigation referencesTo:` against a
   real `ClassBuilder`-installed method (`just test-bunit
   test/adr0114class_builder_live_patch_gap_test.bt` → passes).
-- `tests/repl-protocol/cases/adr_0114_live_patch_gap.btscript` — checks the
-  two OTHER live-patch surfaces the ADR names (`>>`/`compile:source:` via a
-  prior revision of this file, and `register/5` extensions in the current
-  one) and finds neither actually reproduces the gap end-to-end (both pass
-  cleanly today, asserting the reference IS found) — see finding #3.
+- the `adr_0114_live_patch_gap` REPL script — *deleted
+  with the extension machinery (ADR 0152).* It checked the `register/5`
+  extension surface and found it did not reproduce the gap end-to-end; that
+  surface no longer exists. The `>>`/`compile:source:` finding below (finding
+  #3) is unchanged.
 
 ## Headline
 
@@ -171,6 +171,8 @@ contradicts the ADR's characterization of `>>`/`compile:source:` as "the
 function every `>>`/`compile:source:` live patch... routes through."
 
 ### 3b. `register/5` sourced extensions — do NOT reproduce the gap (but for a different reason)
+
+> **Historical.** `beamtalk_extensions`, `SystemNavigation`'s extension rescans and the script named below were deleted by ADR 0152. This section records what the spike found at the time.
 
 Checked via `Erlang beamtalk_extensions register: #Counter selector:
 #btAdr0114TimerExt fun: ... source: "spawnTimer -> Timer => Timer after:
