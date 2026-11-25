@@ -782,9 +782,10 @@ impl ClassHierarchy {
     /// eligible). The class must also be concrete, compile as a non-actor,
     /// have a fully known surface and no instance-side method of the same
     /// selector. This only makes the
-    /// class eligible to *try* the in-caller path: a class-side extension or
-    /// ADR 0084 runtime fun of the selector still reaches the class process
-    /// through the run-time guard. As for any in-caller class method
+    /// class eligible to *try* the in-caller path: an ADR 0084 runtime fun of
+    /// the selector turns the direct call off through the run-time guard, and
+    /// the dynamic send that answers instead runs the fun (in the caller, as
+    /// the selector is not process-bound; ADR 0153 §5). As for any in-caller class method
     /// (ADR 0142), a resource the body creates belongs to the caller.
     #[must_use]
     pub fn explicit_class_constructor_builds_in_caller(

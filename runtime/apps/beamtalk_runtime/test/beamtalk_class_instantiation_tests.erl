@@ -1242,22 +1242,20 @@ test_generic_new_inherited_defaults() ->
 
 test_generic_new_ancestor_gone() ->
     %% A module-less child whose builder ancestor process has exited must still
-    %% instantiate — the dead ancestor contributes no defaults rather than
-    %% crashing `new` (ancestor_builder_defaults broadens its exit catch).
+    %% instantiate without crashing `new`. BT-5161: the ancestor's defaults
+    %% are read from its metadata row, not by a call into its process, so a
+    %% dead ancestor contributes whatever its row still holds (none once the
+    %% row is removed).
     ParentPid = register_builder_class('BT2277Parent', 'Object', #{p => 10}, #{}),
     ChildPid = register_builder_class('BT2277Child', 'BT2277Parent', #{c => 20}, #{}),
     try
-        %% Kill the ancestor abnormally so the field_defaults gen_server:call
-        %% inside collect_ancestor_defaults exits with a non-{noproc/timeout}
-        %% reason (a racing call) or, post-deregister, with noproc.
         MRef = erlang:monitor(process, ParentPid),
         exit(ParentPid, kill),
         ?awaitMessage({'DOWN', MRef, process, ParentPid, _}),
         {ok, Instance} = beamtalk_object_class:new(ChildPid, []),
         ?assertEqual('BT2277Child', maps:get('$beamtalk_class', Instance)),
         ?assertEqual(20, maps:get(c, Instance)),
-        %% The dead ancestor's defaults are simply absent — no crash.
-        ?assertNot(maps:is_key(p, Instance))
+        ?assertEqual(maps:get(p, Instance, 10), 10)
     after
         gen_server:stop(ChildPid, normal, 5000),
         case is_process_alive(ParentPid) of

@@ -514,8 +514,11 @@ compiled_meta_fields(Class) ->
 Collect field defaults for a module-less class, including inherited fields.
 
 The current class's own defaults come from the process dictionary cache set in
-`beamtalk_object_class:init/1` (`handle_new` always runs inside the class
-gen_server process, so this read is local and deadlock-free). Inherited fields
+`beamtalk_object_class:init/1` when this runs inside the class's own gen_server
+(the external `X new` handler). Anywhere else (a `self new` in a class method
+running in the caller, ADR 0153 §5, BT-5161) they are read from the class's
+metadata row, which the class process mirrors them into: no process hop, and
+never a silently empty answer from a busy class. Inherited fields
 are gathered by walking the superclass chain via the registry: a compiled
 ancestor with `new/0` contributes its instance map's user fields; a module-less
 ancestor contributes its own cached field defaults. Own fields shadow inherited
@@ -524,9 +527,9 @@ ones, mirroring the compiled value-type `maps:merge(ParentState, Own)` order.
 -spec generic_field_defaults(class_name()) -> map().
 generic_field_defaults(ClassName) ->
     Own =
-        case get(beamtalk_class_field_defaults) of
-            M when is_map(M) -> M;
-            _ -> #{}
+        case {get(beamtalk_class_name), get(beamtalk_class_field_defaults)} of
+            {ClassName, M} when is_map(M) -> M;
+            _ -> beamtalk_class_metadata:lookup_field_defaults(ClassName)
         end,
     Inherited = inherited_field_defaults(ClassName),
     maps:merge(Inherited, Own).
@@ -597,41 +600,16 @@ ancestor_compiled_defaults(Module) ->
     end.
 
 -doc """
-Read a module-less ancestor's cached field defaults via the registry.
-
-`new` must stay robust if the ancestor class process is unavailable while we
-collect defaults: a missing, timing-out, or terminating ancestor is treated as
-contributing no defaults rather than crashing instantiation. Any `gen_server:call`
-exit signals a process-lifecycle problem (the ancestor is gone/going), never a
-programming error in *this* call site — those would surface as `error:`/`throw:`,
-which are deliberately left to propagate. The known-unavailable reasons
-(`noproc`, `timeout`, `shutdown`, `normal`) are handled silently; any other exit
-is logged at warning level so a genuinely crashing ancestor `handle_call` stays
-diagnosable while instantiation degrades gracefully to "no inherited defaults".
+A module-less ancestor's field defaults, read from its metadata row (BT-5161),
+which its class process mirrors them into on `init/1`, reload and rename. No
+`gen_server:call` into the ancestor: a `self new` now runs in the caller (ADR
+0153 §5), so a busy ancestor, or a caller that is the ancestor's own process,
+must neither stall it nor silently lose the defaults. An ancestor with no row
+(gone) contributes none.
 """.
 -spec ancestor_builder_defaults(class_name()) -> map().
 ancestor_builder_defaults(Name) ->
-    case beamtalk_class_registry:whereis_class(Name) of
-        Pid when is_pid(Pid), Pid =/= self() ->
-            try
-                beamtalk_call_failure:tolerate_gone(
-                    fun() -> gen_server:call(Pid, field_defaults, 5000) end,
-                    #{},
-                    #{stopping => true, timeout => true}
-                )
-            catch
-                exit:{Reason, _} ->
-                    ?LOG_WARNING(
-                        "ancestor_builder_defaults: class ~p process exited (~p) "
-                        "while collecting field defaults — treating as no defaults",
-                        [Name, Reason],
-                        #{domain => [beamtalk, runtime]}
-                    ),
-                    #{}
-            end;
-        _ ->
-            #{}
-    end.
+    beamtalk_class_metadata:lookup_field_defaults(Name).
 
 handle_new_compiled(Args, ClassName, Module, IsConstructible0) ->
     IsConstructible =

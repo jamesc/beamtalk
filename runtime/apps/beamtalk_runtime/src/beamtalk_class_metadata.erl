@@ -129,6 +129,7 @@ a table deleted between an existence check and the op (teardown/shutdown).
     put_class_method_fun/3,
     lookup_class_method_fun/2,
     delete_class_method_funs/1,
+    delete_class_method_funs_except/2,
     delete_class_method_fun/2,
     set_class_method_selectors/2,
     has_runtime_class_methods/1,
@@ -145,6 +146,9 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% BT-4363: certified literal class-side bodies (BT-4504: every scalar
     %% literal kind).
     put_constant_class_methods/2,
+    put_field_defaults/2,
+    is_module_less/1,
+    lookup_field_defaults/1,
     lookup_constant_class_methods/1,
     %% BT-4493: certified caller-safe signal primitives (the raise key's row).
     put_caller_safe_primitives/2,
@@ -307,7 +311,14 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% dead (`delete_if_owner/2`) deletes the row only while it still names that
     %% dead pid, so a class rebuilt under the same name in the meantime (its
     %% `insert/5` replaces the row, owner included) is never deleted.
-    owner :: pid() | undefined
+    owner :: pid() | undefined,
+    %% BT-5161: a module-less (`ClassBuilder`) class's own field defaults
+    %% (`field_defaults` from its `ClassInfo`), mirrored from the class process
+    %% so a `self new` in one of its class methods, which runs in the caller
+    %% (ADR 0153 §5), builds with them without a `gen_server:call` into the
+    %% class. Written only by `put_field_defaults/2`; `#{}` for a compiled
+    %% class (its defaults are baked into its module's `new/0`).
+    field_defaults = #{} :: map()
 }).
 
 -type side() :: instance | class.
@@ -1469,6 +1480,36 @@ lookup_constant_class_methods(Name) ->
     end.
 
 -doc """
+Store a class's own field defaults (BT-5161), the module-less instantiation
+path's input (`beamtalk_class_instantiation:generic_field_defaults/1`). Written
+by the class process on `init/1`, reload and rename. A no-op if the row is
+absent.
+""".
+-spec put_field_defaults(class_name(), map()) -> ok.
+put_field_defaults(Name, Defaults) when is_map(Defaults) ->
+    put_if_changed(Name, #class_metadata.field_defaults, Defaults, fun() -> ok end).
+
+-doc """
+Whether `Name` is a module-less class: one built at run time by `ClassBuilder`,
+with no generated module behind it. Such a class registers its own class name
+as its module (`beamtalk_class_builder`'s `moduleName` default, `init/1`'s
+`module` default), and this reads that published row back. The one runtime
+predicate for it (BT-5161); the compiler reads the same registered value
+through `ClassInfo::registered_module_is_module_less`.
+""".
+-spec is_module_less(class_name()) -> boolean().
+is_module_less(Name) ->
+    lookup_module(Name) =:= {ok, Name}.
+
+-doc "Read a class's own field defaults (BT-5161); `#{}` when none are published.".
+-spec lookup_field_defaults(class_name()) -> map().
+lookup_field_defaults(Name) ->
+    case field(Name, #class_metadata.field_defaults) of
+        Defaults when is_map(Defaults) -> Defaults;
+        _ -> #{}
+    end.
+
+-doc """
 Whether `Term` is a `constant_value()` (BT-4504): the shape of a scalar
 literal's compiled term. The registration sync keeps only such entries of a
 module's `constant_class_methods`, so a malformed meta value never certifies
@@ -1728,6 +1769,31 @@ reload, so memory-only runtime methods do not survive a recompile (ADR 0082).
 -spec delete_class_method_funs(class_name()) -> ok.
 delete_class_method_funs(Name) ->
     drop_class_method_funs(Name, '_').
+
+-doc """
+Remove `Name`'s runtime class-method funs except those for `Keep`.
+
+The reload path's purge when the incoming class methods carry funs
+(`beamtalk_class_publish:replace_runtime_class_methods/2`): the incoming funs
+are seeded first, so a selector defined before and after the reload never
+reads as missing (ADR 0153 §5, BT-5161), and only the stale ones go.
+""".
+-spec delete_class_method_funs_except(class_name(), [selector()]) -> ok.
+delete_class_method_funs_except(Name, Keep) ->
+    try
+        lists:foreach(
+            fun([Selector]) ->
+                case lists:member(Selector, Keep) of
+                    true -> ok;
+                    false -> ets:delete(?FUN_TABLE, {Name, Selector})
+                end
+            end,
+            ets:match(?FUN_TABLE, {{Name, '$1'}, '_', '_'})
+        )
+    catch
+        error:badarg -> ok
+    end,
+    beamtalk_class_derived_cache:invalidate().
 
 -spec drop_class_method_funs(class_name(), owner_scope()) -> ok.
 drop_class_method_funs(Name, Owner) ->

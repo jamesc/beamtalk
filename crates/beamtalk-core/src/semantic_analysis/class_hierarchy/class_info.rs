@@ -354,8 +354,9 @@ pub struct ClassInfo {
     pub in_caller_new1: bool,
     /// Whether this class has no compiled BEAM module (BT-4069).
     ///
-    /// True for live `ClassBuilder` classes (whose methods are funs in the
-    /// class process — set by the live-image decode in
+    /// True for live `ClassBuilder` classes (whose methods are ADR 0084
+    /// runtime funs, run in the caller unless the selector is process-bound,
+    /// ADR 0153 §5 — set by the live-image decode in
     /// `beamtalk-compiler-port`, comparing the meta map's `module` to the
     /// class name), for synthetic hierarchy entries, and for runtime-only
     /// `Future` (native-backed, no `.bt` module). A module-less class

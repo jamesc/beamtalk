@@ -242,9 +242,9 @@ class_send_plain(ClassPid, 'spawnWith:', [Map], Timeout) ->
 %% the metaclass equivalent. No working path changes: the alternative was an
 %% exit, not a successful call.
 class_send_plain(ClassPid, Selector, Args, Timeout) ->
-    %% ADR 0142 §2 (BT-4300), ADR 0153 §5: a class method of a class that is
-    %% not shadowed, sent a selector that is not process-bound, runs in the
-    %% caller. Checked before the self-call guard: an in-caller call has no
+    %% ADR 0142 §2 (BT-4300), ADR 0153 §5: a class method sent a selector
+    %% that is not process-bound runs in the caller, an ADR 0084 runtime fun
+    %% included (BT-5161). Checked before the self-call guard: an in-caller call has no
     %% gen_server to deadlock on, so a block re-entering its class answers.
     %% BT-4771: liveness is probed once for the whole send and handed to both
     %% the in-caller check and the via-process path below.
@@ -284,8 +284,8 @@ send_in_caller_or(ClassPid, Selector, Args, Otherwise) ->
 -spec class_send_via_process(pid(), selector(), list(), call_timeout(), boolean()) -> term().
 %% There is no unguarded direct call here (BT-4301): `in_caller_owner/2`
 %% already ran every class method the caller may run, so anything left is a
-%% shadowed method (an ADR 0084 runtime fun the class
-%% process honours) or a process-bound selector. Only a class's send to itself
+%% process-bound selector, a selector no class method answers (the `Class`
+%% protocol), or a send made before the runtime is ready. Only a class's send to itself
 %% takes the first clause below.
 class_send_via_process(ClassPid, Selector, Args, _Timeout, _Alive) when ClassPid =:= self() ->
     class_send_from_own_process(Selector, Args);
@@ -311,10 +311,14 @@ DefiningModule, FunName}` when all of these hold, else `decline` (take
 - `class_method_owner/2` (memoised) resolves the defining class: the
   selector is not process-bound (the generated list, ADR 0153 §5) and the
   class-process lookup would answer it with a class method;
-- `beamtalk_class_shadow_flags:direct_call_ok/2` holds for the receiving
-  class (no ADR 0084 runtime fun, bootstrap finished). One `persistent_term`
-  read of a raw-flag input its writers raise before the change becomes
-  visible.
+- the runtime is ready (`beamtalk_class_shadow_flags:is_ready/0`, one
+  `persistent_term` read).
+
+An ADR 0084 runtime fun does not decline (ADR 0153 §5, BT-5161):
+`run_in_caller/7` applies it from the fun store, for the receiving class's
+own methods as for an ancestor's. "Not shadowed" is a condition of the static
+call keys only, checked by `beamtalk_class_shadow_flags:static_call_target/4`
+on top of this answer.
 
 The memo stays consistent with class-metadata writes through the derived-fact
 cache's generation counter (`beamtalk_class_derived_cache`): an answer derived
@@ -325,7 +329,7 @@ the new metadata.
 
 Exported for `beamtalk_class_shadow_flags:static_call_target/4` (BT-4316),
 which installs a static call key only while this answer names the call
-site's own class, module and function: one rule for both paths.
+site's own class, module and function and nothing shadows that function.
 """.
 -spec in_caller_owner(pid(), selector()) -> owner() | decline.
 in_caller_owner(ClassPid, Selector) ->
@@ -337,14 +341,13 @@ in_caller_owner(ClassPid, Selector) ->
 in_caller_owner(ClassPid, Selector, true) ->
     %% Alive before the memo is consulted: a send to a dead incarnation takes
     %% the crash recovery path and never derives a memo from a class mid-init.
-    case class_method_owner(ClassPid, Selector) of
-        {owner, ClassName, Tag, _Module, _DefiningClass, _DefiningModule, _FunName} = Owner ->
-            case beamtalk_class_shadow_flags:direct_call_ok(Tag, ClassName) of
-                true -> Owner;
-                false -> decline
-            end;
-        decline ->
-            decline
+    %% ADR 0153 §5 (BT-5161): running in the caller needs only a ready
+    %% runtime. An ADR 0084 runtime fun no longer declines: `run_in_caller/7`
+    %% applies it from the fun store. "Not shadowed" stays a condition of the
+    %% static call keys only (`beamtalk_class_shadow_flags:static_call_target/4`).
+    case beamtalk_class_shadow_flags:is_ready() of
+        true -> class_method_owner(ClassPid, Selector);
+        false -> decline
     end;
 in_caller_owner(_ClassPid, _Selector, false) ->
     decline.
@@ -388,7 +391,7 @@ compute_class_method_owner(ClassPid, Selector) ->
 -spec compute_class_method_owner_of(class_name(), selector()) ->
     {cache | nocache, verdict()}.
 compute_class_method_owner_of(ClassName, Selector) ->
-    case beamtalk_class_metadata:lookup_process_bound_selectors(ClassName) of
+    case process_bound_selectors(ClassName) of
         {ok, ProcessBound} ->
             {cache, derive_class_method_owner(ClassName, Selector, ProcessBound)};
         unknown ->
@@ -400,6 +403,60 @@ compute_class_method_owner_of(ClassName, Selector) ->
                 not_found -> {nocache, decline}
             end
     end.
+
+-doc """
+The process-bound selector list (ADR 0142 §1 rule 3) a class's sends are
+routed by. A compiled class publishes its own generated list. A module-less
+class (`beamtalk_class_metadata:is_module_less/1`: built at run time by
+`ClassBuilder`) has no generated module and so no list of its own: it answers with
+the union of the lists its ancestors published, so its ADR 0084 runtime funs
+run in the caller like any other class method (ADR 0153 §5, BT-5161). The
+union, not the nearest ancestor's list: a list may leave out a selector only
+for its own class (BT-4475's own-class `new:` exemption is not inherited), so
+any ancestor naming a selector keeps it process-bound. `unknown` when no
+ancestor published one. A class with a module that published nothing (one
+compiled before the list existed) stays `unknown`. Reads metadata rows only;
+every row write flushes the memo built from it (`beamtalk_class_derived_cache`
+invalidates globally, so an ancestor's write is seen).
+""".
+-spec process_bound_selectors(class_name()) -> {ok, [selector()]} | unknown.
+process_bound_selectors(ClassName) ->
+    case beamtalk_class_metadata:lookup_process_bound_selectors(ClassName) of
+        {ok, _} = Found ->
+            Found;
+        unknown ->
+            case beamtalk_class_metadata:is_module_less(ClassName) of
+                true -> ancestors_process_bound_selectors(ClassName, [ClassName], []);
+                false -> unknown
+            end
+    end.
+
+%% The union of the process-bound lists `ClassName`'s ancestors published
+%% (see `process_bound_selectors/1`), `unknown` when none did. `Seen` guards
+%% the walk against a malformed (cyclic) chain.
+-spec ancestors_process_bound_selectors(class_name(), [class_name()], [[selector()]]) ->
+    {ok, [selector()]} | unknown.
+ancestors_process_bound_selectors(ClassName, Seen, Acc) ->
+    case beamtalk_class_metadata:lookup_superclass(ClassName) of
+        {ok, Superclass} when is_atom(Superclass), Superclass =/= none ->
+            case lists:member(Superclass, Seen) of
+                true ->
+                    union_or_unknown(Acc);
+                false ->
+                    Acc1 =
+                        case beamtalk_class_metadata:lookup_process_bound_selectors(Superclass) of
+                            {ok, Selectors} -> [Selectors | Acc];
+                            unknown -> Acc
+                        end,
+                    ancestors_process_bound_selectors(Superclass, [Superclass | Seen], Acc1)
+            end;
+        _ ->
+            union_or_unknown(Acc)
+    end.
+
+-spec union_or_unknown([[selector()]]) -> {ok, [selector()]} | unknown.
+union_or_unknown([]) -> unknown;
+union_or_unknown(Lists) -> {ok, lists:usort(lists:append(Lists))}.
 
 -spec derive_class_method_owner(class_name(), selector(), [selector()]) ->
     verdict().
@@ -450,19 +507,12 @@ every error is raised with the value it has today.
     #beamtalk_object{}, selector(), list(), class_name(), class_name(), module(), atom()
 ) -> term().
 run_in_caller(ClassSelf, Selector, Args, ClassName, DefiningClass, DefiningModule, FunName) ->
-    Outcome =
-        case DefiningClass =:= ClassName of
-            %% `direct_call_ok/2` held, so the receiving class has no runtime
-            %% class-method fun: its compiled export is the method.
-            true ->
-                apply_compiled_class_method(
-                    ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector, FunName
-                );
-            false ->
-                apply_class_method_body(
-                    ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector, FunName
-                )
-        end,
+    %% ADR 0153 §5 (BT-5161): always through the fun store, the receiving
+    %% class's own methods included: an ADR 0084 runtime fun shadows the
+    %% compiled export wherever the method runs.
+    Outcome = apply_class_method_body(
+        ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector, FunName
+    ),
     case Outcome of
         {ok, Result} ->
             Result;
@@ -1469,9 +1519,20 @@ compiled function only while this answers `compiled`.
 """.
 -spec class_method_body(class_name(), selector()) -> {runtime_fun, fun()} | compiled.
 class_method_body(DefiningClass, Selector) ->
-    case beamtalk_class_metadata:lookup_class_method_fun(DefiningClass, Selector) of
-        {ok, #{block := Fun}} -> {runtime_fun, Fun};
-        error -> compiled
+    %% One `persistent_term` read first (BT-5161): the `runtime_fun` raw flag
+    %% is raised before a class's fun gate opens and cleared only after it
+    %% closes (`beamtalk_class_metadata:set_runtime_class_methods/2`,
+    %% `reset_runtime_class_methods/1`), so while it is clear the gated fun
+    %% lookup would answer `error`. A class with no funs, which is every
+    %% compiled class on the in-caller hot path, pays no ETS read.
+    case beamtalk_class_shadow_flags:is_shadowed(DefiningClass) of
+        false ->
+            compiled;
+        true ->
+            case beamtalk_class_metadata:lookup_class_method_fun(DefiningClass, Selector) of
+                {ok, #{block := Fun}} -> {runtime_fun, Fun};
+                error -> compiled
+            end
     end.
 
 -doc """
@@ -1612,6 +1673,14 @@ is_beamtalk_signal(_ErrClass, _Error) -> false.
     {error, #beamtalk_error{}} | {error, undef_in_body}.
 classify_undef(ClassName, DefiningClass, DefiningModule, Selector, FunName, ST) ->
     case is_dispatch_undef(DefiningModule, FunName, ST) of
+        {true, module_not_loaded} when DefiningModule =:= DefiningClass ->
+            %% A module-less (`ClassBuilder`) class has no module: the method
+            %% was a runtime fun, removed after this send resolved it (the
+            %% lock-free window `do_remove_class_method/2` documents, which an
+            %% in-caller send can now reach for the class's own funs, ADR 0153
+            %% §5). It is not understood any more, not a load failure.
+            Hint = method_not_found_hint(ClassName, DefiningClass, Selector),
+            {error, beamtalk_error:new(does_not_understand, ClassName, Selector, Hint)};
         {true, module_not_loaded} ->
             Hint = module_not_loaded_hint(ClassName, DefiningClass, DefiningModule),
             {error, beamtalk_error:new(class_not_found, ClassName, Selector, Hint)};

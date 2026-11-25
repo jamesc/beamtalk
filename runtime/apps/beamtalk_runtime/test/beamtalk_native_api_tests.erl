@@ -9,8 +9,8 @@
 BT-4556: `beamtalk_native_api`, the supported entry point for package native
 Erlang code to send messages to Beamtalk objects. Sends to a compiled
 class-side method and to instance methods, String and Result round trips,
-where a class-side send runs (in the caller, or in the class process while an
-ADR 0084 runtime-fun shadow is up), and `send/4`'s timeout on the
+where a class-side send runs (in the caller, or in the class process for a
+process-bound selector), and `send/4`'s timeout on the
 class-process path.
 """.
 
@@ -40,27 +40,27 @@ setup() ->
 with_class(Name, Fun) ->
     with_class(Name, false, Fun).
 
-%% `Shadowed`: raise the ADR 0084 runtime-fun shadow flag, which keeps class
-%% methods in the class process (ADR 0153 §5: the class's other input,
-%% besides process-bound selectors).
-with_class(Name, Shadowed, Fun) ->
+%% `ProcessBound`: list every class method as process-bound, the one input
+%% that keeps a class method in the class process (ADR 0153 §5; an ADR 0084
+%% runtime-fun shadow no longer does, BT-5161).
+with_class(Name, ProcessBound, Fun) ->
+    Meta =
+        case ProcessBound of
+            true -> #{process_bound_class_selectors => [new, spawn | maps:keys(?METHODS)]};
+            false -> ?META
+        end,
     ClassInfo = #{
         superclass => none,
         module => ?HELPER,
         class_methods => ?METHODS,
-        meta => ?META
+        meta => Meta
     },
     {ok, Pid} = beamtalk_object_class:start_link(Name, ClassInfo),
     unlink(Pid),
-    case Shadowed of
-        true -> ok = beamtalk_class_shadow_flags:set(runtime_fun, Name);
-        false -> ok
-    end,
     try
         {ok, Class} = ?API:class_named(Name),
         Fun(Class, Pid)
     after
-        beamtalk_class_shadow_flags:clear(runtime_fun, Name),
         try
             gen_server:stop(Pid, normal, 5000)
         catch
@@ -147,8 +147,8 @@ native_api_test_() ->
                 ?assertEqual(Class, ?API:send(Class, testClassSelf, []))
             end)
         end},
-        {"a shadowed class runs its class method in the class process", fun() ->
-            with_class('Bt4556Stateful', true, fun(Class, Pid) ->
+        {"a process-bound class method runs in the class process", fun() ->
+            with_class('Bt4556Bound', true, fun(Class, Pid) ->
                 ?assertEqual(Pid, ?API:send(Class, testSelf, [])),
                 ?assertEqual({with_arg, 7}, ?API:send(Class, 'testWith:', [7]))
             end)
