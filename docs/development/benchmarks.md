@@ -1315,7 +1315,7 @@ write in the body (loop bodies and blocks included) reuses `_CVKeyN`. A method w
 nothing. It is one lowering point shared by compiled class methods, `ClassBuilder` funs and class-side extension
 funs (`class_method_body_doc`), emitted through `class_var_keys::key_binding_doc` (`Document` + `leaf::*`).
 No state-threading scope is involved (class variables are written in place), so there is no `ThreadedIr` node to
-change; `just verify-threaded-ir` and `just test-class-var-corpus` pass.
+change; `just verify-threaded-ir` passes (the class-variable corpus has since been deleted, BT-5151).
 
 Method: `SsbMain run` through `beamtalk run`, two compilers built from the same checkout (before = `origin/main`
 `fbeac1c39`, after = this change), the bench package rebuilt from scratch with each, 7 interleaved rounds

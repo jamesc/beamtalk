@@ -129,7 +129,6 @@ Only affect test, coverage, bless and benchmark runs. None changes shipped behav
 | `ADR0131_MEASURE_VERBOSE` | Verbose output for the statement-measure run. |
 | `ROUTING_TABLE_BLESS` | Rewrites the routing-table fixture. |
 | `PIN_DUMP` | Dumps the class-publish pin data in the EUnit pin test. |
-| `PROPTEST_CASES` | Overrides the proptest case count. |
 | `BT4020_PROGRAMS` | Synced-call corpus: generated programs; default 1024. |
 | `BT4020_ERLC_STRIDE` | Synced-call corpus: compile every Nth construct; default 8. |
 | `BT4020_PARSE_DUMP` | Synced-call corpus: dump parse results. |
