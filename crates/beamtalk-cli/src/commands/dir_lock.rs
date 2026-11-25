@@ -168,7 +168,7 @@ pub(crate) fn project_build_lock_path(project_root: &Utf8Path) -> camino::Utf8Pa
 /// Returns an error if `_build/` cannot be created or the lock cannot be taken.
 pub(crate) fn lock_project_build(project_root: &Utf8Path) -> Result<ProjectBuildLock> {
     if build_lock_disabled() {
-        debug!("{NO_BUILD_LOCK_ENV} set: not taking the project build lock");
+        debug!("not taking the project build lock ({NO_BUILD_LOCK_ENV} is on)");
         return Ok(ProjectBuildLock {
             file: None,
             key: None,
