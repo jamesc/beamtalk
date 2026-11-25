@@ -130,9 +130,11 @@ writeLine_writes_line_and_returns_nil_test() ->
 %%% ============================================================================
 
 %% The exec port queues at most 8 MiB for a child; past that it drops the
-%% write and says so. From then on writeLine: fails instead of silently
-%% losing lines (and the port, unlike before BT-5195, never blocks).
-writeLine_fails_after_the_port_drops_input_test_() ->
+%% write and says so. The writeLine: whose line is dropped raises (BT-5248:
+%% it used to return nil, and only the next one raised), and so does every
+%% later one. The child never reads, so the queue holds exactly eight 1 MiB
+%% lines: the ninth is the one that is dropped.
+writeLine_raises_for_the_line_the_port_drops_test_() ->
     {timeout, 60, fun() ->
         {SleepExe, SleepArgs} = sleep_cmd(),
         {ok, Pid} = beamtalk_subprocess:start(#{
@@ -140,22 +142,26 @@ writeLine_fails_after_the_port_drops_input_test_() ->
             args => SleepArgs
         }),
         Chunk = binary:copy(<<"x">>, 1 bsl 20),
-        Err = write_until_error(Pid, Chunk, 2000),
+        {Accepted, Err} = write_until_error(Pid, Chunk, 0),
+        ?assertEqual(8, Accepted),
         ?assertMatch(#beamtalk_error{kind = runtime_error, selector = 'writeLine:'}, Err),
-        %% Sticky: the next write fails too.
+        ?assertNotEqual(
+            nomatch, binary:match(Err#beamtalk_error.message, <<"the line was not written">>)
+        ),
+        %% Sticky: the next write raises too.
         ?assertMatch({error, #beamtalk_error{}}, gen_server:call(Pid, {'writeLine:', [<<"x">>]})),
         ?assertEqual(nil, gen_server:call(Pid, {close, []})),
         gen_server:stop(Pid)
     end}.
 
-%% Write Chunk until writeLine: answers an error (the port's refusal arrives
-%% asynchronously), at most N times.
-write_until_error(_Pid, _Chunk, 0) ->
+%% Write Chunk until writeLine: answers an error; returns how many writes
+%% were accepted (answered nil) before it.
+write_until_error(_Pid, _Chunk, Accepted) when Accepted > 100 ->
     error(writes_never_refused);
-write_until_error(Pid, Chunk, N) ->
+write_until_error(Pid, Chunk, Accepted) ->
     case gen_server:call(Pid, {'writeLine:', [Chunk]}, 10000) of
-        nil -> write_until_error(Pid, Chunk, N - 1);
-        {error, Err} -> Err
+        nil -> write_until_error(Pid, Chunk, Accepted + 1);
+        {error, Err} -> {Accepted, Err}
     end.
 
 %%% ============================================================================

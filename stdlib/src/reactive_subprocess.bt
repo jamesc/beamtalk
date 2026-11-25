@@ -89,9 +89,10 @@ typed Actor subclass: ReactiveSubprocess native: beamtalk_reactive_subprocess
   /// Write a line to the subprocess's stdin (appends newline).
   ///
   /// The write does not wait for the child to read the line. Up to 8 MiB
-  /// can wait for a child that is not reading its input. A line that cannot
-  /// be delivered (past that limit, or after the child closed its input) is
-  /// lost, and from then on every `writeLine:` raises a `runtime_error`.
+  /// can wait for a child that is not reading its input. The `writeLine:`
+  /// whose line cannot be queued (past that limit) raises a `runtime_error`
+  /// saying the line was not written, and so does every later `writeLine:`:
+  /// no line is dropped silently.
   ///
   /// ## Examples
   /// ```beamtalk

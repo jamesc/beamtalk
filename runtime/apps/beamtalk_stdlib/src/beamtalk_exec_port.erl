@@ -34,6 +34,7 @@ Events (binary → BEAM) — ETF tuples on the port:
   {stdout, ChildId, Data}
   {stderr, ChildId, Data}
   {exit,   ChildId, ExitCode}
+  {stdin_queued, ChildId}
   {error,  ChildId, Command, Reason}
 ```
 
@@ -43,10 +44,14 @@ sent once they have been quiet for 2 s (at most 30 s after the exit), and
 later output is dropped. A failed `spawn` is answered with
 `{exit, ChildId, -1}`.
 
+`stdin_queued` answers a `write_stdin` the binary accepted. Every
+`write_stdin` gets exactly one answer, `stdin_queued` or `error`, in command
+order, so the caller can tell which write was dropped.
+
 `error` reports that `Command` (`spawn`, `write_stdin`, …) for `ChildId`
 failed: malformed `args` or
 `env` (nothing is spawned), an unknown child, or a full stdin queue (8 MiB
-waiting for a child that does not read its input; the write is dropped).
+waiting for a child that does not read its input; that write is dropped).
 `Reason` is a binary.
 
 Children die with the port: on `close/1`, and also when the binary is

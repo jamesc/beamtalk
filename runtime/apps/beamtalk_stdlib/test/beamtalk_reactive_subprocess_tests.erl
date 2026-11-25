@@ -308,6 +308,43 @@ writeLine_after_close_returns_error_test() ->
     gen_server:stop(Pid).
 
 %%% ============================================================================
+%%% writeLine: raises for the line the exec port drops (BT-5248)
+%%% ============================================================================
+
+%% The exec port queues at most 8 MiB for a child that never reads: eight 1 MiB
+%% lines are accepted, the ninth is dropped. That call raises (it used to
+%% return nil, and only the next one raised), and so does every later one.
+writeLine_raises_for_the_line_the_port_drops_test_() ->
+    {timeout, 60, fun() ->
+        {Notify, Collector} = make_collector(),
+        {SleepExe, SleepArgs} = sleep_cmd(),
+        {ok, Pid} = beamtalk_reactive_subprocess:start(#{
+            executable => SleepExe,
+            args => SleepArgs,
+            notify => Notify
+        }),
+        Chunk = binary:copy(<<"x">>, 1 bsl 20),
+        {Accepted, Err} = write_until_error(Pid, Chunk, 0),
+        ?assertEqual(8, Accepted),
+        ?assertMatch(#beamtalk_error{kind = runtime_error, selector = 'writeLine:'}, Err),
+        ?assertNotEqual(
+            nomatch, binary:match(Err#beamtalk_error.message, <<"the line was not written">>)
+        ),
+        ?assertMatch({error, #beamtalk_error{}}, gen_server:call(Pid, {'writeLine:', [<<"x">>]})),
+        ?assertEqual(nil, gen_server:call(Pid, {close, []})),
+        Collector ! stop,
+        gen_server:stop(Pid)
+    end}.
+
+write_until_error(_Pid, _Chunk, Accepted) when Accepted > 100 ->
+    error(writes_never_refused);
+write_until_error(Pid, Chunk, Accepted) ->
+    case gen_server:call(Pid, {'writeLine:', [Chunk]}, 10000) of
+        nil -> write_until_error(Pid, Chunk, Accepted + 1);
+        {error, Err} -> {Accepted, Err}
+    end.
+
+%%% ============================================================================
 %%% close: terminates subprocess interaction
 %%% ============================================================================
 
