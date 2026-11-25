@@ -26,6 +26,12 @@ TestCase subclass: JsonMappingTest
       "output_tokens" => 2
     }
 
+  testTypedCallerGetsDictionaryWithoutOverride =>
+    self assert: (JsonMappedTypedCaller encode: (JsonMappedTokenUsage inputTokens: 1 outputTokens: 2)) equals: #{
+      "input_tokens" => 1,
+      "output_tokens" => 2
+    }
+
   testRunningEntryMatchesHandWrittenJson =>
     hand := JsonHandRunningEntry
       issueId: "a"

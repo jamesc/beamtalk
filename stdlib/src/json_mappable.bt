@@ -36,4 +36,4 @@ Protocol define: JsonMappable
   class jsonMapping -> JsonMapping
 
   /// The mapped Dictionary for the receiver.
-  asJson -> Object => self class jsonMapping encode: self
+  asJson -> Dictionary => self class jsonMapping encode: self
