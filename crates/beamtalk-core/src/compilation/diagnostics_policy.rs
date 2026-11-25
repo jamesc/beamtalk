@@ -916,6 +916,9 @@ fn apply_expect_directives_impl(
 /// `Object`, so any method call on the result produces a DNU hint — but the
 /// suppression applies unconditionally whenever `@expect type` is written.
 fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCategory>) -> bool {
+    if diag_cat.is_some_and(|cat| !cat.is_expect_suppressible()) {
+        return false;
+    }
     expect_cat == ExpectCategory::All
         || matches!(
             (expect_cat, diag_cat),

@@ -9004,6 +9004,8 @@ anything                    // any diagnostic suppressed (discouraged — use a 
 | `lint` | Style/redundancy findings: `beamtalk lint`'s unnecessary-parentheses, redundant trailing `^`, cascade-candidate, … passes, plus the unreachable-code / shadowed-variable / unattached-doc-comment advisories *(lint-only, see below)* |
 | `all` | Any diagnostic on the following expression *(discouraged — use a specific category)* |
 
+**Not suppressible:** no `@expect` category, not even `all`, suppresses the error for a misplaced `Foo >> sel` definition: one whose class is not defined in the same file (ADR 0152), one on a protocol, or an instance-side one on a same-file `native:` actor (BT-5184). The method would never be compiled, so the file cannot be reported clean.
+
 **Lint-only categories (`dead_assignment`, `lint`, `actor_state_abroad`):** the diagnostics these suppress are produced only by `beamtalk lint`'s dedicated passes, which `beamtalk build`/`beamtalk test`, the LSP, and the REPL never run. Those surfaces therefore leave such a directive alone — neither satisfied nor reported stale — and only `beamtalk lint` validates it (BT-3384). `@expect lint` exists for test fixtures that deliberately pin a codegen shape the style lint would otherwise tell you to rewrite (e.g. a trailing `^` whose explicit-return lowering is the thing under test); ordinary code should just take the lint's advice.
 
 **`@expect type` for method-not-found diagnostics:**

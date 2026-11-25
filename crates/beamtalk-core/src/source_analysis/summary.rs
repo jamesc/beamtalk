@@ -209,6 +209,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::UnthreadedLocalWrite => "UnthreadedLocalWrite",
         DiagnosticCategory::InternalVerifier => "InternalVerifier",
         DiagnosticCategory::CodegenReport => "CodegenReport",
+        DiagnosticCategory::MisplacedExtension => "MisplacedExtension",
     }
 }
 
@@ -462,6 +463,7 @@ mod tests {
             ),
             (DiagnosticCategory::InternalVerifier, "InternalVerifier"),
             (DiagnosticCategory::CodegenReport, "CodegenReport"),
+            (DiagnosticCategory::MisplacedExtension, "MisplacedExtension"),
         ];
         for (cat, expected) in all {
             assert_eq!(category_label(cat), expected);

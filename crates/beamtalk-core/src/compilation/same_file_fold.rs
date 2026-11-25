@@ -28,6 +28,7 @@
 //!   turns them into a compile error (ADR 0152).
 
 use crate::ast::{ClassDefinition, Module};
+use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
 /// Whether `class` is a `native:` actor, judged syntactically (direct
@@ -74,7 +75,7 @@ pub fn fold_same_file_extensions(module: &mut Module) -> Vec<Diagnostic> {
                      body would never run. Move the logic into a class method."
                         .to_string(),
                 )
-                .with_category(DiagnosticCategory::Type),
+                .with_category(DiagnosticCategory::MisplacedExtension),
             );
             continue;
         }
@@ -123,7 +124,7 @@ pub fn reject_cross_file_extensions(module: &Module) -> Vec<Diagnostic> {
                     def.method.head_span(),
                 )
                 .with_hint("Put the provided method in the `Protocol define:` body.".to_string())
-                .with_category(DiagnosticCategory::Type);
+                .with_category(DiagnosticCategory::MisplacedExtension);
             }
             Diagnostic::error(
                 format!(
@@ -133,16 +134,35 @@ pub fn reject_cross_file_extensions(module: &Module) -> Vec<Diagnostic> {
                 ),
                 def.method.head_span(),
             )
-            .with_hint(
-                "Define the method in the file that defines the class (in the class body, or \
-                 as a `>>` next to it), or, for a class loaded in a workspace, define it live \
-                 from the REPL or the IDE. For a class you cannot edit, write a method on a \
-                 class of your own that takes the value."
-                    .to_string(),
-            )
-            .with_category(DiagnosticCategory::Type)
+            .with_hint(cross_file_extension_hint(target))
+            .with_category(DiagnosticCategory::MisplacedExtension)
         })
         .collect()
+}
+
+/// The fix-it hint for a cross-file `target >> m`.
+///
+/// A stdlib class is read-only everywhere (a workspace refuses to redefine
+/// it), so it never gets the live-edit route. A class this file cannot see
+/// may be one the workspace loaded from source (editable live) or a
+/// dependency class (read-only), so the live route is offered only on that
+/// condition.
+fn cross_file_extension_hint(target: &str) -> String {
+    let own_class = "write the logic as a method on a class of your own (a subclass, or a \
+                     helper that takes the value as an argument)";
+    if ClassHierarchy::is_builtin_class(target) {
+        format!(
+            "{target} is a stdlib class: it cannot be extended from another file, and a \
+             workspace cannot redefine it. Instead, {own_class}."
+        )
+    } else {
+        format!(
+            "Define the method in the file that defines {target} (in the class body, or as a \
+             `>>` next to it). If {target}'s source is loaded in your workspace, you can also \
+             define it live from the REPL or the IDE. If {target} comes from a dependency, \
+             {own_class}."
+        )
+    }
 }
 
 /// The names of the classes declared in `module`. A standalone method
@@ -238,6 +258,91 @@ mod tests {
         let diags = fold_same_file_extensions(&mut m);
         assert_eq!(diags.len(), 1, "{diags:?}");
         assert!(diags[0].message.contains("native actor"));
+    }
+
+    /// Attaches a declaration-level `@expect <cats>` to every standalone
+    /// definition in `m`, as a class-body method carries one. The `@expect`
+    /// pass collects these from `module.method_definitions`
+    /// (`collect_method_directives`), so this is the directive a rejected
+    /// `>>` would carry.
+    fn attach_expect(m: &mut Module, cats: &[crate::ast::ExpectCategory]) {
+        for def in &mut m.method_definitions {
+            def.method.expect = Some((cats.to_vec(), None, def.method.head_span()));
+        }
+    }
+
+    fn assert_survives_expect(source: &str, needle: &str) {
+        use crate::ast::ExpectCategory;
+        for cats in [
+            vec![ExpectCategory::Type],
+            vec![ExpectCategory::All],
+            vec![ExpectCategory::Type, ExpectCategory::Dnu],
+        ] {
+            let mut m = parse_ok(source);
+            attach_expect(&mut m, &cats);
+            // Directives as written, before the fold drops or folds anything.
+            let unfolded = m.clone();
+            let mut diags = fold_same_file_extensions(&mut m);
+            diags.extend(reject_cross_file_extensions(&m));
+            assert_eq!(diags.len(), 1, "{source}: {diags:?}");
+            for module in [&unfolded, &m] {
+                let mut after = diags.clone();
+                crate::compilation::apply_expect_directives(module, &mut after);
+                assert!(
+                    after
+                        .iter()
+                        .any(|d| d.severity == crate::source_analysis::Severity::Error
+                            && d.message.contains(needle)),
+                    "`@expect {cats:?}` suppressed the error in {source}: {after:?}"
+                );
+            }
+        }
+    }
+
+    /// BT-5184: no `@expect` (any category, including `all`) on a rejected
+    /// `>>` may make `check`/`lint`/the LSP report the file clean.
+    #[test]
+    fn expect_cannot_suppress_cross_file_extension_error() {
+        assert_survives_expect("String >> shout => 1\n", "ADR 0152");
+        assert_survives_expect(
+            "Object subclass: Foo\n  foo => 1\n\nInteger class >> make => 2\n",
+            "ADR 0152",
+        );
+        assert_survives_expect(
+            "Protocol define: P\n  size -> Integer\n\nP >> extra => 1\n",
+            "ADR 0152",
+        );
+    }
+
+    /// BT-5184: the same for the native-actor fold error.
+    #[test]
+    fn expect_cannot_suppress_native_actor_extension_error() {
+        assert_survives_expect(
+            "Actor subclass: Svc native: svc_backing\n  ping => self delegate\n\nSvc >> extra => 1\n",
+            "native actor",
+        );
+    }
+
+    #[test]
+    fn misplaced_extension_category_is_not_expect_suppressible() {
+        assert!(!DiagnosticCategory::MisplacedExtension.is_expect_suppressible());
+        assert!(DiagnosticCategory::Type.is_expect_suppressible());
+    }
+
+    #[test]
+    fn stdlib_target_hint_does_not_offer_live_edit() {
+        let mut m = parse_ok("String >> shout => 1\nWidget >> spin => 2\n");
+        fold_same_file_extensions(&mut m);
+        let diags = reject_cross_file_extensions(&m);
+        let stdlib_hint = diags[0].hint.as_deref().unwrap_or_default();
+        assert!(!stdlib_hint.contains("REPL"), "{stdlib_hint}");
+        assert!(stdlib_hint.contains("stdlib class"), "{stdlib_hint}");
+        assert!(stdlib_hint.contains("subclass"), "{stdlib_hint}");
+        let other_hint = diags[1].hint.as_deref().unwrap_or_default();
+        assert!(
+            other_hint.contains("If Widget's source is loaded in your workspace"),
+            "{other_hint}"
+        );
     }
 
     #[test]

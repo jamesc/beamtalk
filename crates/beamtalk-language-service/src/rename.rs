@@ -138,14 +138,6 @@ fn stmts(body: &[ExpressionStatement]) -> Vec<&Expression> {
     body.iter().map(|s| &s.expression).collect()
 }
 
-const fn side_of(is_class_method: bool) -> MethodSide {
-    if is_class_method {
-        MethodSide::Class
-    } else {
-        MethodSide::Instance
-    }
-}
-
 impl SimpleLanguageService {
     fn body_contexts(&self) -> Vec<BodyCtx<'_>> {
         let mut out = Vec::new();
@@ -171,14 +163,6 @@ impl SimpleLanguageService {
                         });
                     }
                 }
-            }
-            for smd in &data.module.method_definitions {
-                out.push(BodyCtx {
-                    file,
-                    source,
-                    owner: Some((smd.class_name.name.as_str(), side_of(smd.is_class_method))),
-                    roots: stmts(&smd.method.body),
-                });
             }
             // State / class-variable defaults and protocol provided methods
             // (BT-5079): not a method body of any class, so no owner.
@@ -217,15 +201,6 @@ impl SimpleLanguageService {
                             side,
                         });
                     }
-                }
-            }
-            for smd in &data.module.method_definitions {
-                if smd.method.selector.name() == selector {
-                    out.push(DefSite {
-                        file,
-                        class: smd.class_name.name.as_str(),
-                        side: side_of(smd.is_class_method),
-                    });
                 }
             }
         }
@@ -317,13 +292,6 @@ impl SimpleLanguageService {
             for m in &class.class_methods {
                 visit_def(&class.name.name, MethodSide::Class, m);
             }
-        }
-        for smd in &data.module.method_definitions {
-            visit_def(
-                &smd.class_name.name,
-                side_of(smd.is_class_method),
-                &smd.method,
-            );
         }
 
         let mut send_ctx: Option<(Option<(String, MethodSide)>, SendReceiver)> = None;

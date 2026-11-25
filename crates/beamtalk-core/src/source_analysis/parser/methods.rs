@@ -10,7 +10,7 @@ use crate::ast::{
 use crate::source_analysis::TokenKind;
 
 use super::declarations::{SelectorContext, is_state_like_declaration_keyword, is_uses_keyword};
-use super::{Diagnostic, Parser};
+use super::{Diagnostic, DiagnosticCategory, Parser};
 
 impl Parser {
     /// Parses a method definition.
@@ -489,7 +489,8 @@ impl Parser {
                     "Define the method in the file that defines the class, or write a method \
                      on a class of your own that takes the value."
                         .to_string(),
-                ),
+                )
+                .with_category(DiagnosticCategory::MisplacedExtension),
             );
             cls_ident
         } else {
