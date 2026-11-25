@@ -62,7 +62,7 @@ Read by shipped binaries and the runtime. Unset means the default behaviour.
 | `BEAMTALK_EDGE_BASE_URL` | `scripts/refresh-edge.sh`: download base for the tarball checksum (default: the edge release). For tests; ignored with a warning when `CLAUDE_CODE_REMOTE=true`. |
 | `BEAMTALK_PINS_REF` | `scripts/setup-cloud.sh`: git ref of `.tool-versions` fetched when the checkout has none; default `main`. |
 | `RELEASE_NODE` | Release launcher's `-sname` override; the workspace node uses it as its `workspace_id`. |
-| `ERL_EPMD_ADDRESS` | Erlang's epmd address. The REPL sets a loopback value unless an operator exported one. |
+| `ERL_EPMD_ADDRESS` | Erlang's epmd address (a comma-separated list). The REPL sets a loopback value unless an operator exported one. A node's distribution listener stays on loopback unless an entry is a non-loopback IP address; `localhost`, `::1`, any `127.x.x.x` and unparseable values keep it pinned (`tests/conformance/loopback_dist_conformance.json`). |
 | `ERL_EPMD_PORT` | Non-default epmd port (`crates/beamtalk-workspace/src/epmd.rs`). |
 | `RUST_LOG` | Enables tracing in the CLI when set; default is no logs. |
 | `NO_COLOR` | Disables REPL colour output. |

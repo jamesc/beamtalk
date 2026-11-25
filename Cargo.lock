@@ -432,6 +432,7 @@ dependencies = [
  "beamtalk-workspace",
  "camino",
  "clap",
+ "dirs",
  "futures-util",
  "rmcp",
  "serde",

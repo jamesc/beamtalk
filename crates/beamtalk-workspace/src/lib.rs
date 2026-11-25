@@ -326,17 +326,42 @@ pub fn pin_epmd_loopback(cmd: &mut std::process::Command) {
 ///
 /// [`pin_epmd_loopback`] only governs epmd; without this the node's own
 /// distribution port listens on every interface, protected by the cookie
-/// alone. Mirrors the release `vm.args` line. Returns no flags when the
-/// operator has deliberately exported a non-loopback `ERL_EPMD_ADDRESS`
-/// (private-network clustering): pinning the listener to loopback would
-/// silently defeat that choice.
+/// alone. Mirrors the release `vm.args` line. Returns no flags only when the
+/// operator's `ERL_EPMD_ADDRESS` names a non-loopback address
+/// ([`loopback_dist_for`]): pinning the listener to loopback would silently
+/// defeat that private-network choice.
 #[must_use]
 pub fn loopback_dist_args() -> Vec<&'static str> {
-    if resolve_epmd_address() == DEFAULT_EPMD_ADDRESS {
+    if loopback_dist_for(std::env::var(EPMD_ADDRESS_VAR).ok().as_deref()) {
         vec!["-kernel", "inet_dist_use_interface", "{127,0,0,1}"]
     } else {
         Vec::new()
     }
+}
+
+/// Whether the distribution listener stays pinned to loopback, given the
+/// operator's `ERL_EPMD_ADDRESS` (BT-5127, BT-5185).
+///
+/// The value is epmd's comma-separated address list. Each entry is trimmed
+/// and blank entries are skipped. The pin is dropped only when some entry
+/// parses as an IP address that is not loopback (strictly: an IPv6 `%zone`
+/// suffix is ignored and an IPv4-mapped address counts as its IPv4 address);
+/// unset, blank, loopback
+/// (`127.0.0.0/8`, `::1`, `localhost`) and unparseable values all pin, so a
+/// typo fails closed rather than opening every interface. Pinned to
+/// `tests/conformance/loopback_dist_conformance.json`, which the Elixir front's
+/// `BtAttach.Workspace.loopback_dist?/1` reads too.
+#[must_use]
+pub fn loopback_dist_for(epmd_address: Option<&str>) -> bool {
+    !epmd_address.unwrap_or("").split(',').any(|entry| {
+        let entry = entry.trim();
+        let address = entry
+            .split_once('%')
+            .map_or(entry, |(address, _zone)| address);
+        address
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| !ip.to_canonical().is_loopback())
+    })
 }
 
 /// `Command::new("erl")` with [`pin_epmd_loopback`] already applied: the
@@ -563,6 +588,38 @@ mod tests {
         assert_eq!(parse_port_file("  4040  \n  abc \n"), None);
         assert_eq!(parse_port_file("not-a-port\nabc\n"), None);
         assert_eq!(parse_port_file(""), None);
+    }
+
+    /// BT-5185: the loopback decision is the shared fixture's table, read
+    /// through the environment exactly as a spawn reads it. Shared with the
+    /// Elixir front (`BtAttach.Workspace.loopback_dist?/1`).
+    #[test]
+    fn loopback_dist_args_match_the_shared_conformance_fixture() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/conformance/loopback_dist_conformance.json");
+        let raw = fs::read_to_string(path).unwrap();
+        let fixture: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        let _guard = EPMD_ENV_LOCK.lock().unwrap();
+        let mut wrong = Vec::new();
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let pin = case["pin"].as_bool().unwrap();
+            // SAFETY: guarded by EPMD_ENV_LOCK above.
+            unsafe {
+                match case["value"].as_str() {
+                    Some(v) => std::env::set_var(EPMD_ADDRESS_VAR, v),
+                    None => std::env::remove_var(EPMD_ADDRESS_VAR),
+                }
+            }
+            if loopback_dist_args().is_empty() == pin {
+                wrong.push(name.to_string());
+            }
+        }
+        // SAFETY: guarded by EPMD_ENV_LOCK above.
+        unsafe { std::env::remove_var(EPMD_ADDRESS_VAR) };
+        assert!(wrong.is_empty(), "wrong decision for: {wrong:?}");
     }
 
     /// Shared with the VS Code extension (`parsePortFileContent` in

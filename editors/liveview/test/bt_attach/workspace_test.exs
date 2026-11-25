@@ -21,6 +21,14 @@ defmodule BtAttach.WorkspaceTest do
   @external_resource @sname_fixture_path
   @sname_fixture @sname_fixture_path |> File.read!() |> :json.decode()
 
+  # Shared with Rust `beamtalk_workspace::loopback_dist_for` (BT-5185).
+  @loopback_fixture_path Path.expand(
+                           "../../../../tests/conformance/loopback_dist_conformance.json",
+                           __DIR__
+                         )
+  @external_resource @loopback_fixture_path
+  @loopback_fixture @loopback_fixture_path |> File.read!() |> :json.decode()
+
   alias BtAttach.Workspace
 
   describe "format_value/1 — surface-consistent with the Rust formatter (Plain mode)" do
@@ -652,6 +660,17 @@ defmodule BtAttach.WorkspaceTest do
     test "reports :ok with a version report when the workspace is reachable" do
       assert {:ok, report} = Workspace.readiness()
       assert %{runtime_version: _, protocol_version: _, otp_release: _, erts_version: _} = report
+    end
+  end
+
+  describe "loopback_dist?/1 — shared ERL_EPMD_ADDRESS rule (BT-5127, BT-5185)" do
+    # Shared with Rust `beamtalk_workspace::loopback_dist_for`: both read
+    # tests/conformance/loopback_dist_conformance.json.
+    for %{"name" => name, "value" => value, "pin" => pin} <- @loopback_fixture["cases"] do
+      test "conformance: #{name}" do
+        value = unquote(if value == :null, do: nil, else: value)
+        assert Workspace.loopback_dist?(value) == unquote(pin)
+      end
     end
   end
 end

@@ -2426,17 +2426,40 @@ defmodule BtAttach.Workspace do
 
   @doc """
   Whether the distribution listener should be pinned to loopback, given the
-  operator's `ERL_EPMD_ADDRESS` (BT-5127). Unset, blank or `127.0.0.1` means
-  pin; any other value is a deliberate private-network opt-out. Mirrors
-  `beamtalk_workspace::loopback_dist_args/0` (Rust); the Elixir and Rust
-  rules are the same one-liner over `resolve_epmd_address`.
+  operator's `ERL_EPMD_ADDRESS` (BT-5127, BT-5185).
+
+  The value is epmd's comma-separated address list. Each entry is trimmed and
+  blank entries are skipped. The pin is dropped only when some entry parses as
+  an IP address that is not loopback (strictly: an IPv6 `%zone` suffix is
+  ignored and an IPv4-mapped address counts as its IPv4 address); unset,
+  blank, loopback (`127.0.0.0/8`, `::1`, `localhost`) and unparseable values
+  pin, so a typo fails closed. Same rule as Rust
+  `beamtalk_workspace::loopback_dist_for/1`; both are pinned to
+  `tests/conformance/loopback_dist_conformance.json`.
   """
-  def loopback_dist?(epmd_address) do
-    case epmd_address && String.trim(epmd_address) do
-      v when v in [nil, "", "127.0.0.1"] -> true
-      _ -> false
+  def loopback_dist?(nil), do: true
+
+  def loopback_dist?(epmd_address) when is_binary(epmd_address) do
+    epmd_address
+    |> String.split(",")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.all?(&(not non_loopback_ip?(&1)))
+  end
+
+  defp non_loopback_ip?(entry) do
+    [address | _zone] = String.split(entry, "%", parts: 2)
+
+    case :inet.parse_strict_address(String.to_charlist(address)) do
+      {:ok, ip} -> not loopback_ip?(ip)
+      {:error, _} -> false
     end
   end
+
+  defp loopback_ip?({127, _, _, _}), do: true
+  defp loopback_ip?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
+  defp loopback_ip?({0, 0, 0, 0, 0, 0xFFFF, hi, _lo}), do: Bitwise.bsr(hi, 8) == 127
+  defp loopback_ip?(_), do: false
 
   @doc """
   Options this front passes to `:net_kernel.start/2` when it lazily turns

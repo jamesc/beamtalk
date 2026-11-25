@@ -293,7 +293,7 @@ async fn confined_tools_refuse_paths_outside_the_project_root() {
 #[test]
 fn confine_to_root_refuses_home_and_filesystem_root() {
     let home = tempfile::tempdir().unwrap();
-    let err = PathPolicy::confine_to_root(home.path(), Some(home.path().as_os_str())).unwrap_err();
+    let err = PathPolicy::confine_to_root(home.path(), Some(home.path())).unwrap_err();
     assert!(
         err.to_string().contains("no beamtalk project found"),
         "{err}"
@@ -303,6 +303,22 @@ fn confine_to_root_refuses_home_and_filesystem_root() {
     // A project below home, or any directory when HOME is unset, is fine.
     let project = home.path().join("proj");
     std::fs::create_dir_all(&project).unwrap();
-    assert!(PathPolicy::confine_to_root(&project, Some(home.path().as_os_str())).is_ok());
+    assert!(PathPolicy::confine_to_root(&project, Some(home.path())).is_ok());
     assert!(PathPolicy::confine_to_root(home.path(), None).is_ok());
+}
+
+/// BT-5185: a directory *above* home (`/home`, `/Users`, `C:\Users`) holds
+/// every user's home, so it is refused like home itself.
+#[test]
+fn confine_to_root_refuses_a_directory_containing_home() {
+    let base = tempfile::tempdir().unwrap();
+    let home = base.path().join("users").join("alice");
+    std::fs::create_dir_all(&home).unwrap();
+    let err =
+        PathPolicy::confine_to_root(&base.path().join("users"), Some(home.as_ref())).unwrap_err();
+    assert!(
+        err.to_string().contains("no beamtalk project found"),
+        "{err}"
+    );
+    assert!(PathPolicy::confine_to_root(base.path(), Some(home.as_ref())).is_err());
 }
