@@ -164,6 +164,52 @@ retire_entries_honours_the_append_timeout_test_() ->
         end}
     end}.
 
+%% BT-5136: an append that timed out is unconfirmed (the server still writes
+%% it), so the warning says so and does not claim the entry is missing.
+append_timeout_warning_says_unconfirmed_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(#{pid := Pid}) ->
+        {timeout, 30, fun() ->
+            ok = application:set_env(beamtalk_workspace, changelog_append_timeout_ms, 200),
+            ok = sys:suspend(Pid),
+            try
+                {warning, Text} = beamtalk_repl_loader_changelog_entries:emit_new_class_entry(
+                    <<"C5136">>, <<"src">>, <<"/p/c.bt">>
+                ),
+                ?assertNotEqual(nomatch, binary:match(Text, <<"unconfirmed">>)),
+                ?assertEqual(nomatch, binary:match(Text, <<"will not include it">>))
+            after
+                ok = sys:resume(Pid),
+                application:unset_env(beamtalk_workspace, changelog_append_timeout_ms)
+            end
+        end}
+    end}.
+
+%% BT-5136: a retire that times out is still queued, so removing the class must
+%% not also append a `remove-class` entry.
+retire_timeout_does_not_append_remove_class_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(#{pid := Pid}) ->
+        {timeout, 30, fun() ->
+            E = beamtalk_repl_loader_changelog_entries,
+            ok = E:emit_new_class_entry(<<"C5136r">>, <<"src">>, <<"/p/c.bt">>),
+            ok = application:set_env(beamtalk_workspace, changelog_append_timeout_ms, 200),
+            ok = sys:suspend(Pid),
+            try
+                Result = E:emit_remove_class_change_entry(<<"C5136r">>, #{}, <<"a">>, human),
+                ?assertMatch({warning, <<"The class was removed", _/binary>>}, Result)
+            after
+                ok = sys:resume(Pid),
+                application:unset_env(beamtalk_workspace, changelog_append_timeout_ms)
+            end,
+            %% The queued retire has run; nothing was appended after it.
+            _ = beamtalk_workspace_changelog:epoch(),
+            Kinds = [
+                beamtalk_workspace_changelog:entry_kind(En)
+             || En <- beamtalk_workspace_changelog:entries()
+            ],
+            ?assertEqual(['new-class'], Kinds)
+        end}
+    end}.
+
 %% BT-5084 item 9: removing a never-flushed new class retires its entries
 %% without claiming they were flushed.
 cancelled_new_class_is_not_reported_flushed_test_() ->

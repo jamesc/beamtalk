@@ -45,7 +45,8 @@ the workspace's compile-and-install pipeline. This module is that seam:
     validate_sites/2,
     emit_rewrite_change_entry/2,
     capture_class_removal_snapshot/1,
-    emit_remove_class_change_entry/4
+    emit_remove_class_change_entry/4,
+    report_late_hot_reload_failure/3
 ]).
 
 -define(KEY, {beamtalk_runtime, workspace_callback}).
@@ -86,6 +87,7 @@ the workspace's compile-and-install pipeline. This module is that seam:
 -callback capture_class_removal_snapshot(binary()) -> map().
 -callback emit_remove_class_change_entry(binary(), map(), binary(), human | agent) ->
     emit_result().
+-callback report_late_hot_reload_failure(atom(), pid(), {error, term()}) -> ok.
 
 %%% Registration
 
@@ -220,6 +222,10 @@ capture_class_removal_snapshot(ClassNameBin) ->
     emit_result() | no_workspace().
 emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
     invoke(emit_remove_class_change_entry, [ClassNameBin, Snapshot, Author, AuthorKind]).
+
+-spec report_late_hot_reload_failure(atom(), pid(), {error, term()}) -> ok | no_workspace().
+report_late_hot_reload_failure(Module, Pid, Failure) ->
+    invoke(report_late_hot_reload_failure, [Module, Pid, Failure]).
 
 %%% Internal
 

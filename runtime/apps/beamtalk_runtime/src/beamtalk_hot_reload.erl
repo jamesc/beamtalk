@@ -353,8 +353,17 @@ try_change_code(Pid, Module, Extra) ->
     %% A reply alias: once we stop waiting, the worker's late result is dropped
     %% at the source instead of sitting in this (possibly long-lived) mailbox.
     Alias = alias([reply]),
+    %% BT-5136: who owns reporting a failure that lands after the caller stopped
+    %% waiting. 0 = undecided, 1 = the worker delivered its result to the caller,
+    %% 2 = the caller gave up. Whoever moves it off 0 first decides, so a
+    %% failure is reported exactly once: by the caller's reply, or by the worker.
+    Claim = atomics:new(1, []),
     {Worker, Mon} = spawn_monitor(fun() ->
-        Alias ! {Alias, run_change(Pid, Module, Extra, ?CHANGE_RETRIES)}
+        Result = run_change(Pid, Module, Extra, ?CHANGE_RETRIES),
+        case atomics:compare_exchange(Claim, 1, 0, 1) of
+            ok -> Alias ! {Alias, Result};
+            _ -> report_late_failure(Module, Pid, Result)
+        end
     end),
     receive
         {Alias, Result} ->
@@ -368,28 +377,60 @@ try_change_code(Pid, Module, Extra) ->
             ),
             {error, {Other, worker_crashed}}
     after ?CHANGE_WAIT_MS ->
-        unalias(Alias),
         erlang:demonitor(Mon, [flush]),
-        %% A reply that arrived between the timer and `unalias/1` is the real
-        %% outcome: report it rather than a timeout.
-        receive
-            {Alias, LateResult} ->
-                LateResult
-        after 0 ->
-            %% The worker keeps the suspension and resumes the actor once the
-            %% change finishes. Never silent: ERROR now.
-            ?LOG_ERROR(
-                #{
-                    msg =>
-                        <<"code change still running; the actor is resumed if it succeeds and left suspended if it fails">>,
-                    module => Module,
-                    pid => Pid
-                },
-                #{domain => [beamtalk, runtime]}
-            ),
-            {error, timeout}
+        case atomics:compare_exchange(Claim, 1, 0, 2) of
+            ok ->
+                unalias(Alias),
+                %% The worker keeps the suspension and resumes the actor once the
+                %% change finishes. Never silent: ERROR now, and a failure that
+                %% lands later is reported by `report_late_failure/3`.
+                ?LOG_ERROR(
+                    #{
+                        msg =>
+                            <<"code change still running; the actor is resumed if it succeeds and left suspended if it fails">>,
+                        module => Module,
+                        pid => Pid
+                    },
+                    #{domain => [beamtalk, runtime]}
+                ),
+                {error, timeout};
+            _ ->
+                %% The worker finished in the same instant and is sending its
+                %% result: that is the real outcome.
+                %% Bounded: if the worker died between its claim and the send,
+                %% report a timeout rather than block the reloading process.
+                receive
+                    {Alias, LateResult} -> LateResult
+                after ?CHANGE_WAIT_MS ->
+                    unalias(Alias),
+                    {error, timeout}
+                end
         end
     end.
+
+-doc """
+A migration that failed after the reloading process stopped waiting (BT-5136):
+the reload already answered `timeout`, so nothing would otherwise tell the user
+the actor is now left suspended. Reports it through the workspace's reload
+findings (`beamtalk_workspace_callback:report_late_hot_reload_failure/3`) when a
+workspace is running; the worker's ERROR log stays the only record otherwise.
+Never raises.
+""".
+-spec report_late_failure(atom(), pid(), ok | {error, term()}) -> ok.
+report_late_failure(Module, Pid, {error, {left_suspended, _}} = Failure) ->
+    try
+        _ = beamtalk_workspace_callback:report_late_hot_reload_failure(Module, Pid, Failure),
+        ok
+    catch
+        Class:Reason ->
+            ?LOG_WARNING(
+                "Could not report a late hot-reload failure",
+                #{error_class => Class, reason => Reason, domain => [beamtalk, runtime]}
+            ),
+            ok
+    end;
+report_late_failure(_Module, _Pid, _Result) ->
+    ok.
 
 %% The suspend / change_code / resume sequence for one actor. Runs in the
 %% `try_change_code/3` worker.
