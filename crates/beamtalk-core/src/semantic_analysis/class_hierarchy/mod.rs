@@ -408,9 +408,7 @@ impl ClassHierarchy {
     /// part: the selector must not be process-bound
     /// ([`ClassInfo::is_process_bound_class_selector`]). A class method named
     /// `fieldAt:`, `hasField:` etc. is no exception: since BT-5155 the class
-    /// process no longer intercepts those selectors. The runtime's own fail-closed chain check
-    /// (`beamtalk_class_metadata:chain_has_class_variables/1`) outlives this
-    /// one until BT-5158; the guard of every static direct call re-checks it.
+    /// process no longer intercepts those selectors.
     /// A class's own explicit `new:` of the in-caller shape
     /// ([`ClassInfo::in_caller_new1`]) runs in the caller too, when its chain
     /// allows it.
