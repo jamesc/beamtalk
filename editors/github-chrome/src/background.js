@@ -5,6 +5,7 @@
 // tokenize requests from the content script. WASM runs here rather than in
 // the content script so it is governed by the extension's own CSP.
 
+import { MESSAGE_TYPE, requestError } from "./protocol.js";
 import { createTokenizer } from "./tokenize.js";
 
 /** @type {Promise<Awaited<ReturnType<typeof createTokenizer>>> | null} */
@@ -26,14 +27,18 @@ function getTokenizer() {
   return tokenizerPromise;
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== "beamtalk-tokenize") return false;
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type !== MESSAGE_TYPE) return false;
+  // Only this extension's own content scripts; the shape and size are checked
+  // before any tokenizing (BT-5194).
+  if (sender?.id !== chrome.runtime.id) return false;
+  const error = requestError(message);
+  if (error) {
+    sendResponse({ error: `rejected tokenize request: ${error}` });
+    return false;
+  }
   getTokenizer()
-    .then((tokenizer) =>
-      sendResponse({
-        blocks: message.blocks.map((b) => tokenizer.tokenizeLines(b.lines, b.continuous)),
-      })
-    )
+    .then((tokenizer) => sendResponse({ blocks: tokenizer.tokenizeBlocks(message.blocks) }))
     .catch((err) => sendResponse({ error: String(err) }));
   return true;
 });
