@@ -17,9 +17,6 @@
 %% The process-dictionary key naming the live invocation's class key.
 -define(BT_CLASS_VARS_HOME, '$bt_class_vars_home').
 
-%% The read-only marker planted under a class key by `with_snapshot/2`.
--define(BT_CLASS_VARS_RO(ClassTag), {'$bt_class_vars_ro', ClassTag}).
-
 %% The `class_var_abi` value compiled modules declare in `__beamtalk_meta/0`.
 -define(BT_CLASS_VAR_ABI, 3).
 
