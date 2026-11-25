@@ -178,8 +178,20 @@ impl PathPolicy {
         let mut existing = abs.as_path();
         let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
         let mut resolved = loop {
-            if let Ok(real) = beamtalk_core::paths::canonicalize(existing) {
-                break real;
+            match beamtalk_core::paths::canonicalize(existing) {
+                Ok(real) => break real,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                // ELOOP, EACCES, ...: never guess where the path lands.
+                Err(e) => return Err(format!("cannot resolve '{path}': {e}")),
+            }
+            // `canonicalize` also reports NotFound for a dangling symlink,
+            // which a write would follow to its target. Only a component that
+            // is genuinely absent may be treated as a not-yet-existing tail.
+            if std::fs::symlink_metadata(existing).is_ok() {
+                return Err(format!(
+                    "cannot resolve '{path}': '{}' is a symlink that does not resolve",
+                    existing.display()
+                ));
             }
             let name = existing
                 .file_name()

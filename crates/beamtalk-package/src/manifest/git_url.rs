@@ -76,7 +76,14 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
     // helper, not arbitrary installed transport programs. A real scp-style
     // path never starts with `//`.
     let scp_like = url.split_once(':').is_some_and(|(host, path)| {
-        !host.is_empty() && !host.contains('/') && !path.starts_with("//")
+        !host.is_empty()
+            && !host.contains('/')
+            && !path.starts_with("//")
+            // `C:/path` / `C:\path` is a Windows drive path, which git treats
+            // as a local path, not a remote.
+            && !(host.len() == 1
+                && host.as_bytes()[0].is_ascii_alphabetic()
+                && (path.starts_with('/') || path.starts_with('\\')))
     });
 
     if !scp_like {
@@ -95,6 +102,50 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
 #[must_use]
 pub fn is_plaintext_git_url(url: &str) -> bool {
     url.starts_with("http://") || url.starts_with("git://")
+}
+
+/// `url` with any `user:password@` userinfo of a `scheme://` URL replaced by
+/// `***@`, for logs and diagnostics. scp-style URLs and URLs without userinfo
+/// pass through unchanged (BT-5135).
+#[must_use]
+pub fn redact_url_credentials(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    match rest[..authority_end].rfind('@') {
+        Some(at) => format!("{scheme}://***@{}", &rest[at + 1..]),
+        None => url.to_string(),
+    }
+}
+
+/// Environment variable that opts in to plaintext (`http://`, `git://`) git
+/// transports (BT-5107, BT-5135).
+pub const ALLOW_INSECURE_GIT_ENV: &str = "BEAMTALK_ALLOW_INSECURE_GIT";
+
+/// Whether [`ALLOW_INSECURE_GIT_ENV`] is set to `1` in this process.
+#[must_use]
+pub fn insecure_git_allowed() -> bool {
+    std::env::var_os(ALLOW_INSECURE_GIT_ENV).is_some_and(|v| v == "1")
+}
+
+/// The one rule for plaintext git transports, applied identically to a first
+/// resolve, a locked build, a native lock entry and the registry index: refuse
+/// `http://` / `git://` unless `allow` is set (BT-5135).
+///
+/// # Errors
+///
+/// Returns an error if `url` is plaintext and `allow` is false.
+pub fn check_git_transport(what: &str, url: &str, allow: bool) -> Result<()> {
+    if !allow && is_plaintext_git_url(url) {
+        miette::bail!(
+            "{what} uses the plaintext git URL '{url}'.\n\n  \
+             http:// and git:// transports can be tampered with in transit. \
+             Use an https:// or ssh:// URL, or set {ALLOW_INSECURE_GIT_ENV}=1 \
+             to accept the risk."
+        );
+    }
+    Ok(())
 }
 
 /// Screen a git URL taken from a registry index entry.
@@ -180,6 +231,38 @@ mod tests {
         ] {
             assert!(validate_git_url("dep", url).is_err(), "should reject {url}");
         }
+    }
+
+    #[test]
+    fn rejects_windows_drive_paths_as_scp_style() {
+        for url in ["C:/path/repo", "c:\\path\\repo"] {
+            assert!(validate_git_url("dep", url).is_err(), "should reject {url}");
+        }
+        assert!(validate_git_url("dep", "git@host:repo.git").is_ok());
+    }
+
+    #[test]
+    fn plaintext_transport_refused_unless_allowed() {
+        for url in ["http://x.test/r", "git://x.test/r"] {
+            let err = check_git_transport("Dep 'a'", url, false).unwrap_err();
+            assert!(err.to_string().contains(ALLOW_INSECURE_GIT_ENV), "{err}");
+            check_git_transport("Dep 'a'", url, true).unwrap();
+        }
+        check_git_transport("Dep 'a'", "https://x.test/r", false).unwrap();
+        check_git_transport("Dep 'a'", "git@host:r.git", false).unwrap();
+    }
+
+    #[test]
+    fn redacts_url_credentials() {
+        assert_eq!(
+            redact_url_credentials("https://u:tok@host.test/r.git"),
+            "https://***@host.test/r.git"
+        );
+        assert_eq!(
+            redact_url_credentials("https://host.test/a@b"),
+            "https://host.test/a@b"
+        );
+        assert_eq!(redact_url_credentials("git@host:r.git"), "git@host:r.git");
     }
 
     #[test]

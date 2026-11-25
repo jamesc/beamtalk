@@ -13,48 +13,22 @@ use beamtalk_core::compilation::GitReference;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::process::Command;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use super::lockfile::LockEntry;
 
 // The URL screen lives in `beamtalk-package` so the manifest parser applies the
 // same rules (BT-5068); re-exported so existing `git::validate_git_url` call
 // sites are unchanged.
-pub use beamtalk_package::manifest::{is_plaintext_git_url, validate_git_url};
+pub use beamtalk_package::manifest::{
+    check_git_transport, insecure_git_allowed, redact_url_credentials, validate_git_url,
+};
 
-/// Warn when a manifest names a git dependency over an unauthenticated
-/// plaintext transport (`http://`, `git://`).
-pub fn warn_if_plaintext_url(name: &str, url: &str) {
-    if is_plaintext_git_url(url) {
-        warn!(
-            dependency = name,
-            url, "Git dependency uses an insecure plaintext URL; prefer https:// or ssh://"
-        );
-    }
-}
-
-/// Environment variable that opts in to a plaintext (`http://`, `git://`) git
-/// URL pinned in `beamtalk.lock` (BT-5107).
-pub const ALLOW_INSECURE_LOCKED_GIT_ENV: &str = "BEAMTALK_ALLOW_INSECURE_GIT";
-
-/// Refuse a plaintext git URL that `beamtalk.lock` pins, unless `allow` is set.
-///
-/// A manifest naming `http://` only warns (the author chose it), but a
-/// committed lock file is what CI and teammates trust to reproduce a build:
-/// fetching a locked commit over a tamperable transport defeats the pin, so it
-/// needs an explicit opt-in ([`ALLOW_INSECURE_LOCKED_GIT_ENV`]).
-fn check_locked_url_transport(name: &str, url: &str, locked: bool, allow: bool) -> Result<()> {
-    if locked && !allow && is_plaintext_git_url(url) {
-        miette::bail!(
-            "Dependency '{name}' is locked to the plaintext git URL '{url}'.\n\n  \
-             http:// and git:// transports can be tampered with in transit, so a \
-             locked dependency may not use them.\n\n  \
-             Switch the dependency to an https:// or ssh:// URL and run \
-             `beamtalk deps update {name}`, or set {ALLOW_INSECURE_LOCKED_GIT_ENV}=1 \
-             to accept the risk."
-        );
-    }
-    Ok(())
+/// Refuse a plaintext git URL (`http://`, `git://`) unless
+/// `BEAMTALK_ALLOW_INSECURE_GIT=1` is set, on first resolve and locked builds
+/// alike (BT-5107, BT-5135).
+fn check_url_transport(name: &str, url: &str, allow: bool) -> Result<()> {
+    check_git_transport(&format!("Dependency '{name}'"), url, allow)
 }
 
 /// Result of resolving a single git dependency.
@@ -94,7 +68,7 @@ pub struct ResolvedGitDep {
 /// - The requested tag/branch/rev does not exist
 /// - Git commands fail
 /// - A matching lock entry's SHA differs from the freshly resolved SHA
-/// - A matching lock entry pins a plaintext (`http://`, `git://`) URL and
+/// - The URL is plaintext (`http://`, `git://`) and
 ///   `BEAMTALK_ALLOW_INSECURE_GIT=1` is not set
 pub fn resolve_git_dep(
     name: &str,
@@ -106,12 +80,7 @@ pub fn resolve_git_dep(
     let deps_dir = beamtalk_core::build_layout::BuildLayout::new(project_root).deps_dir();
     let checkout_path = deps_dir.join(name);
 
-    check_locked_url_transport(
-        name,
-        url,
-        lock_entry.is_some_and(|e| e.url == url),
-        std::env::var_os(ALLOW_INSECURE_LOCKED_GIT_ENV).is_some_and(|v| v == "1"),
-    )?;
+    check_url_transport(name, url, insecure_git_allowed())?;
 
     // Check if we can skip re-clone based on lockfile.
     //
@@ -150,8 +119,7 @@ pub fn resolve_git_dep(
     }
 
     // Clone the repository
-    warn_if_plaintext_url(name, url);
-    info!(name, url, "Cloning git dependency");
+    info!(name, url = %redact_url_credentials(url), "Cloning git dependency");
     clone_repo(name, url, &checkout_path)?;
 
     // Check out the requested reference
@@ -376,21 +344,21 @@ mod tests {
     use crate::commands::util::to_forward_slash;
     use tempfile::TempDir;
 
-    /// BT-5107: a plaintext URL pinned by the lock fails unless opted in;
-    /// unlocked (manifest-only) plaintext and any secure URL are unaffected.
+    /// BT-5107/BT-5135: plaintext fails on first resolve and locked builds
+    /// unless opted in; secure URLs are unaffected.
     #[test]
-    fn locked_plaintext_url_is_refused_without_opt_in() {
+    fn plaintext_url_is_refused_without_opt_in() {
         for url in ["http://example.test/r.git", "git://example.test/r.git"] {
-            let err = check_locked_url_transport("dep", url, true, false).unwrap_err();
+            let err = check_url_transport("dep", url, false).unwrap_err();
             assert!(
-                err.to_string().contains(ALLOW_INSECURE_LOCKED_GIT_ENV),
+                err.to_string()
+                    .contains(beamtalk_package::manifest::ALLOW_INSECURE_GIT_ENV),
                 "{err}"
             );
-            check_locked_url_transport("dep", url, true, true).unwrap();
-            check_locked_url_transport("dep", url, false, false).unwrap();
+            check_url_transport("dep", url, true).unwrap();
         }
         for url in ["https://example.test/r.git", "ssh://git@example.test/r.git"] {
-            check_locked_url_transport("dep", url, true, false).unwrap();
+            check_url_transport("dep", url, false).unwrap();
         }
     }
 

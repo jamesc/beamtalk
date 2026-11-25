@@ -308,7 +308,7 @@ pub fn session_id(frame: &Value) -> Option<String> {
 }
 
 /// What the caller does after feeding a frame to an [`AuthHandshake`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum AuthStep {
     /// Write this text frame to the server, then read the next frame.
     Send(String),
@@ -316,6 +316,17 @@ pub enum AuthStep {
     Continue,
     /// The handshake is complete. Carries the `session-started` session id.
     Done(Option<String>),
+}
+
+/// `Send` holds the auth JSON (the cookie), so `Debug` never prints it.
+impl std::fmt::Debug for AuthStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Send(_) => f.write_str("Send(<redacted>)"),
+            Self::Continue => f.write_str("Continue"),
+            Self::Done(id) => f.debug_tuple("Done").field(id).finish(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -453,6 +464,15 @@ pub async fn perform_auth_sequence<T>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn auth_step_debug_redacts_the_auth_frame() {
+        let dbg = format!(
+            "{:?}",
+            super::AuthStep::Send("{\"cookie\":\"hunter2\"}".into())
+        );
+        assert!(!dbg.contains("hunter2"), "{dbg}");
+    }
+
     #[test]
     fn auth_handshake_debug_redacts_cookie_and_resume_token() {
         let hs = super::AuthHandshake::new("s3cret-cookie-value", "repl", Some("resume-tok-123"));
