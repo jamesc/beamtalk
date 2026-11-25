@@ -1103,7 +1103,7 @@ static_call_target_test_() ->
         {"restart_class/1 erases a dead class's keys even when no 'DOWN' was seen", fun() ->
             %% A missed 'DOWN' (no monitor watching when the class died) must
             %% not let a restart keep serving the dead pid as ClassSelf: the
-            %% restart re-registers via merge_identity/5, which invalidates.
+            %% restart recreates the row via insert/5, which invalidates.
             Name = 'Bt4316Restart',
             Pid = start_static_class(Name, none, #{}),
             OldRef = warm(Name, Pid),

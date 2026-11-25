@@ -454,6 +454,13 @@ insert(Name, Module, Selectors, Superclass, IsAbstract) ->
     %% BT-3669: a full-row write resets has_runtime_class_methods to false;
     %% clear the shadow flag only AFTER the gate is closed (a stale true is safe).
     beamtalk_class_shadow_flags:clear(runtime_fun, Name),
+    %% BT-4316: a (re)created row is a new incarnation of the class. Its static
+    %% call keys (and its descendants') may still name an earlier incarnation's
+    %% pid as `ClassSelf` when no 'DOWN' erased them (a class restarted while no
+    %% monitor watched it), so erase them now that the row has landed. Until
+    %% ADR 0153 Phase 3a this erase rode on the class-variable fact's
+    %% publication in `init/1`.
+    beamtalk_class_shadow_flags:invalidate(Name),
     %% BT-4064: only after the row has landed (see beamtalk_class_derived_cache).
     beamtalk_class_derived_cache:invalidate().
 
