@@ -1520,12 +1520,18 @@ impl Parser {
             );
         }
         if let Some(token) = self.tokens.get(idx) {
-            gap.own_line.extend(
-                token
-                    .leading_trivia()
-                    .iter()
-                    .filter_map(|t| comment_from_trivia(t, token.span())),
-            );
+            // A blank line before an own-line comment is kept (as
+            // `collect_comment_attachment` keeps it for statements).
+            let mut saw_blank_line = false;
+            for trivia in token.leading_trivia() {
+                if let Trivia::Whitespace(ws) = trivia {
+                    saw_blank_line |= ws.chars().filter(|&c| c == '\n').count() > 1;
+                } else if let Some(mut comment) = comment_from_trivia(trivia, token.span()) {
+                    comment.preceding_blank_line = saw_blank_line;
+                    saw_blank_line = false;
+                    gap.own_line.push(comment);
+                }
+            }
         }
         gap
     }

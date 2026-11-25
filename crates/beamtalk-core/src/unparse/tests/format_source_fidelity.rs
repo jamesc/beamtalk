@@ -330,7 +330,8 @@ fn comment_around_a_cascade_semicolon_is_kept() {
 fn comment_inside_parentheses_is_kept() {
     assert_formats_to("x := (1 // c\n  + 2)\n", "x := (1  // c\n  + 2)\n");
     assert_formats_to("x := ( // open\n  1 + 2)\n", "x := (  // open\n 1 + 2)\n");
-    assert_formats_to("x := (1 + 2 // close\n)\n", "x := (1 + 2  // close\n )\n");
+    // The `)` after a close comment goes back to the enclosing indentation.
+    assert_formats_to("x := (1 + 2 // close\n)\n", "x := (1 + 2  // close\n)\n");
     assert_formats_to(
         "x := 1 + // after op\n  2\n",
         "x := 1  // after op\n  + 2\n",
@@ -379,4 +380,106 @@ fn gap_comments_survive_per_method_source() {
         unparse_method(method),
         "bar =>\n  x\n    foo: 1  // c\n    bar: 2"
     );
+}
+
+#[test]
+fn line_comments_on_both_sides_of_an_operator_stay_on_their_own_lines() {
+    // Two `//` comments must never be joined onto one line.
+    assert_formats_to(
+        "x := 1 // a\n  + // b\n  2\n",
+        "x := 1  // a\n  // b\n  + 2\n",
+    );
+    assert_formats_to(
+        "x foo // a\n  ; // b\n  bar\n",
+        "x foo;  // a\n  // b\n  bar\n",
+    );
+}
+
+#[test]
+fn trailing_doc_comment_in_a_one_statement_block_does_not_swallow_the_bracket() {
+    assert_formats_to("x := [:a | a /// d\n]\n", "x := [:a |\n  a  /// d\n]\n");
+    assert_formats_to(
+        "x foo: [a /// d\n] bar: 1\n",
+        "x\n  foo: [\n    a  /// d\n  ]\n  bar: 1\n",
+    );
+}
+
+#[test]
+fn comment_around_a_concatenation_is_kept() {
+    assert_formats_to(
+        "x := \"a\" ++ // c\n  \"b\" ++ \"c\"\n",
+        "x := \"a\"  // c\n  ++ \"b\"\n  ++ \"c\"\n",
+    );
+    assert_formats_to(
+        "x := \"a\" // c\n  ++ \"b\"\n",
+        "x := \"a\"  // c\n  ++ \"b\"\n",
+    );
+}
+
+#[test]
+fn comment_around_a_binary_cascade_message_is_kept() {
+    assert_formats_to("x foo; + // c\n  2\n", "x foo; +  // c\n  2\n");
+}
+
+#[test]
+fn comment_after_destructure_or_state_default_is_kept() {
+    assert_formats_to("{a, b} := // c\n  foo\n", "{a, b} :=  // c\n  foo\n");
+    assert_formats_to(
+        "Object subclass: Foo\n  state: x = // c\n    1\n",
+        "Object subclass: Foo\n  state: x =  // c\n    1\n",
+    );
+}
+
+#[test]
+fn comment_between_keyword_and_argument_is_kept() {
+    assert_formats_to("x foo: // c\n  1\n", "x\n  foo:  // c\n    1\n");
+    assert_formats_to(
+        "x foo: 1 bar: // c\n  2\n",
+        "x\n  foo: 1\n  bar:  // c\n    2\n",
+    );
+    assert_formats_to(
+        "x foo; at: // c\n  1 put: 2\n",
+        "x foo; at:  // c\n  1 put: 2\n",
+    );
+}
+
+#[test]
+fn comments_around_match_arms_are_kept() {
+    assert_formats_to(
+        "y := x // c\n  match: [1 -> 2]\n",
+        "y := x  // c\n  match: [\n    1 -> 2\n  ]\n",
+    );
+    assert_formats_to(
+        "x match: [1 -> 2 /// d\n ; _ -> 3]\n",
+        "x match: [\n  1 -> 2;  /// d\n  _ -> 3\n]\n",
+    );
+    assert_formats_to(
+        "x match: [\n  1 -> 2  // d\n  _ -> 3  // e\n  // f\n]\n",
+        "x match: [\n  1 -> 2;  // d\n  _ -> 3  // e\n  // f\n]\n",
+    );
+    assert_formats_to(
+        "x match: [1 -> 2 // d\n]\n",
+        "x match: [\n  1 -> 2  // d\n]\n",
+    );
+}
+
+#[test]
+fn value_after_a_gap_comment_indents_its_own_continuation_lines() {
+    assert_formats_to(
+        "^ // c\n  x foo: 1 // d\n    bar: 2\n",
+        "^  // c\n  x\n    foo: 1  // d\n    bar: 2\n",
+    );
+}
+
+#[test]
+fn blank_line_before_a_gap_comment_is_kept() {
+    assert_formats_to(
+        "x := [:a | a\n\n  // c\n]\n",
+        "x := [:a |\n  a\n\n  // c\n]\n",
+    );
+}
+
+#[test]
+fn comment_in_an_empty_block_has_no_stray_spaces() {
+    assert_formats_to("x := [:a | // c\n]\n", "x := [:a |  // c\n]\n");
 }

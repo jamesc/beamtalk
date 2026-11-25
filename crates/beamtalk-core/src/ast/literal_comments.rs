@@ -50,7 +50,7 @@ use std::collections::BTreeMap;
 use super::span_table::{entries_within, span_key as key};
 use ecow::EcoString;
 
-use super::{Comment, CommentAttachment};
+use super::{Comment, CommentAttachment, CommentKind};
 use crate::span::Span;
 
 /// The comments of one collection literal. See the module docs for the slots.
@@ -95,8 +95,17 @@ pub enum GapSlot {
     /// Before a block's `]`, after its last statement: anchored at the
     /// block's end.
     BeforeBlockClose,
-    /// After a `:=` or `^`, before its value: anchored at the value's start.
+    /// After a `:=`, `^` or `state:` default's `=`, before the value:
+    /// anchored at the value's start.
     BeforeValue,
+    /// Between a keyword and its argument: anchored at the argument's start.
+    AfterKeyword,
+    /// Between a `match:`/`matchExhaustive:` receiver and the keyword (the
+    /// AST keeps no span for the keyword): anchored at the receiver's end.
+    BeforeMatch,
+    /// After a match arm's body (and its `;`), and for the last arm before
+    /// the `]`: anchored at the arm body's end.
+    AfterMatchArm,
 }
 
 /// The comments written in one gap between two tokens (BT-5183).
@@ -115,13 +124,20 @@ impl GapComments {
         self.same_line.is_empty() && self.own_line.is_empty()
     }
 
-    /// Appends `other`'s comments after this gap's: its same-line comments
-    /// follow this gap's own-line ones when this gap already broke the line.
+    /// Appends `other`'s comments after this gap's. `other`'s same-line
+    /// comments stay on this gap's line only while nothing has ended that
+    /// line: an own-line comment, or a `//`/`///` comment, which runs to the
+    /// end of its line.
     pub fn extend(&mut self, other: Self) {
-        if self.own_line.is_empty() {
-            self.same_line.extend(other.same_line);
-        } else {
+        let line_ended = !self.own_line.is_empty()
+            || self
+                .same_line
+                .iter()
+                .any(|c| matches!(c.kind, CommentKind::Line | CommentKind::Doc));
+        if line_ended {
             self.own_line.extend(other.same_line);
+        } else {
+            self.same_line.extend(other.same_line);
         }
         self.own_line.extend(other.own_line);
     }

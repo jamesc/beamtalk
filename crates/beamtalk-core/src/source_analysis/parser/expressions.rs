@@ -92,9 +92,17 @@ impl Parser {
         Expression::Return { value, span }
     }
 
+    /// Files the comments between a just-consumed keyword and its argument
+    /// (BT-5183), anchored at the argument's first token.
+    fn record_argument_gap(&mut self) {
+        let gap = self.gap_before_current();
+        let anchor = self.current_token().span().start();
+        self.record_gap(anchor, GapSlot::AfterKeyword, gap);
+    }
+
     /// Files the comments between a just-consumed `:=` or `^` and the value
     /// that follows (BT-5183), anchored at the value's first token.
-    fn record_value_gap(&mut self) {
+    pub(super) fn record_value_gap(&mut self) {
         let gap = self.gap_before_current();
         let anchor = self.current_token().span().start();
         self.record_gap(anchor, GapSlot::BeforeValue, gap);
@@ -158,6 +166,7 @@ impl Parser {
         if let Err(error) = self.enter_nesting(start) {
             return error;
         }
+        self.record_value_gap();
         let value = Box::new(self.parse_assignment());
         self.leave_nesting();
         let span = start.merge(value.span());
@@ -629,10 +638,8 @@ impl Parser {
         );
     }
 
-    /// Parses the `; message` parts of a cascade whose first `;` has been
-    /// consumed, onto `receiver` (the cascade's first send).
-    /// Parses the messages of a cascade onto `receiver`; the current token is
-    /// the first `;`.
+    /// Parses the `; message` parts of a cascade onto `receiver` (the
+    /// cascade's first send); the current token is the first `;`.
     fn parse_cascade_messages(&mut self, receiver: Expression) -> Expression {
         let mut messages = Vec::new();
 
@@ -751,7 +758,9 @@ impl Parser {
                 keywords.push(KeywordPart::new(keyword, span));
                 self.advance();
 
-                // Parse argument (which is a binary message)
+                // Parse argument (which is a binary message), after any
+                // comments between the keyword and it (BT-5183).
+                self.record_argument_gap();
                 arguments.push(self.parse_binary_message());
             }
 
@@ -783,7 +792,10 @@ impl Parser {
         };
         if let Some(op) = binary_op {
             let selector = MessageSelector::Binary(op);
+            let gap = self.gaps_around_current();
             self.advance();
+            let anchor = self.current_token().span().start();
+            self.record_gap(anchor, GapSlot::AroundBinaryOperator, gap);
             let arg = self.parse_unary_message();
             let span = start_span.merge(arg.span());
             return CascadeMessage::new(selector, vec![arg], span);
@@ -933,6 +945,9 @@ impl Parser {
             && self.peek_at(1) == Some(&TokenKind::LeftBracket)
         {
             let exhaustive = matches!(self.current_kind(), TokenKind::Keyword(k) if k.as_str() == "matchExhaustive:");
+            // Comments between the receiver and `match:` (BT-5183).
+            let gap = self.gap_before_current();
+            self.record_gap(receiver.span().end(), GapSlot::BeforeMatch, gap);
             return self.parse_match_expression(receiver, exhaustive);
         }
 
@@ -960,7 +975,9 @@ impl Parser {
             self.record_gap(span.start(), GapSlot::BeforeKeyword, gap);
             self.advance();
 
-            // Parse argument (which is a binary message)
+            // Parse argument (which is a binary message), after any
+            // comments between the keyword and it (BT-5183).
+            self.record_argument_gap();
             arguments.push(self.parse_binary_message());
         }
 
@@ -1664,10 +1681,28 @@ impl Parser {
         let mut arms = Vec::new();
 
         while !self.check(&TokenKind::RightBracket) && !self.is_at_end() {
-            arms.push(self.parse_match_arm());
+            let arm = self.parse_match_arm();
+            // End-of-line comments after the arm's body or its `;`, and for
+            // the last arm the own-line comments before the `]` (BT-5183).
+            // The own-line comments before a later arm are that arm's.
+            let anchor = arm.body.span().end();
+            arms.push(arm);
+            let mut gap = GapComments {
+                same_line: self.gap_before_current().same_line,
+                ..GapComments::default()
+            };
+            let at_semicolon = self.check(&TokenKind::Semicolon);
+            if at_semicolon {
+                self.advance();
+                gap.same_line.extend(self.gap_before_current().same_line);
+            }
+            if self.check(&TokenKind::RightBracket) {
+                gap.own_line = self.gap_before_current().own_line;
+            }
+            self.record_gap(anchor, GapSlot::AfterMatchArm, gap);
 
             // Semicolon or newline separates arms
-            if self.match_token(&TokenKind::Semicolon) {
+            if at_semicolon {
                 // Explicit semicolon — continue
             } else if !self.is_at_end()
                 && !self.check(&TokenKind::RightBracket)

@@ -1442,6 +1442,7 @@ impl Parser {
         let default_value = if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s == "=")
         {
             self.advance(); // consume `=`
+            self.record_value_gap();
             Some(self.parse_expression())
         } else {
             None

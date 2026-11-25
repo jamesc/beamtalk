@@ -91,11 +91,7 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             ..
         } => {
             let target_doc = unparse_expression(target);
-            let value_doc = docvec![
-                " :=",
-                value_separator(value, " "),
-                unparse_expression(value)
-            ];
+            let value_doc = docvec![" :=", value_with_separator(value, " ")];
             if let Some(ann) = type_annotation {
                 docvec![target_doc, " :: ", unparse_type_annotation(ann), value_doc]
             } else {
@@ -103,7 +99,7 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             }
         }
         Expression::Return { value, .. } => {
-            docvec!["^", value_separator(value, ""), unparse_expression(value)]
+            docvec!["^", value_with_separator(value, "")]
         }
         Expression::Cascade {
             receiver, messages, ..
@@ -115,6 +111,8 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             if open.is_none() && close.is_none() {
                 docvec!["(", unparse_expression(expression), ")"]
             } else {
+                // The `)` after a close-gap comment starts its own line at
+                // the enclosing indentation.
                 docvec![
                     "(",
                     nest(
@@ -122,9 +120,9 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
                         docvec![
                             open.as_ref().map_or_else(nil, gap_break),
                             unparse_expression(expression),
-                            close.as_ref().map_or_else(nil, gap_break),
                         ]
                     ),
+                    close.as_ref().map_or_else(nil, gap_break),
                     ")"
                 ]
             }
@@ -139,7 +137,8 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             if let Some(pipeline) = Pipeline::of(expr) {
                 return pipeline.unparse();
             }
-            unparse_match(unparse_expression(value), arms, *exhaustive)
+            let gap = gap_comments(value.span().end(), GapSlot::BeforeMatch);
+            unparse_match(unparse_expression(value), gap.as_ref(), arms, *exhaustive)
         }
         Expression::MapLiteral { pairs, span } => unparse_map_literal(pairs, *span),
         Expression::ListLiteral {
@@ -197,7 +196,11 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             docvec!["/* error: ", leaf::raw_text(&safe_msg), " */"]
         }
         Expression::DestructureAssignment { pattern, value, .. } => {
-            docvec![unparse_pattern(pattern), " := ", unparse_expression(value)]
+            docvec![
+                unparse_pattern(pattern),
+                " :=",
+                value_with_separator(value, " ")
+            ]
         }
         Expression::Spread { name, .. } => {
             docvec!["...", leaf::ident(&name.name)]
@@ -619,6 +622,9 @@ fn unparse_message_laid_out(
                 .collect();
             let always_break = parts.len() >= 3
                 || gaps.iter().any(Option::is_some)
+                || arguments
+                    .iter()
+                    .any(|a| gap_comments(a.span().start(), GapSlot::AfterKeyword).is_some())
                 || arg_docs
                     .iter()
                     .any(|doc| doc.to_pretty_string().contains('\n'));
@@ -626,11 +632,11 @@ fn unparse_message_laid_out(
 
             if always_break {
                 let mut kw_docs: Vec<Document<'static>> = Vec::new();
-                for (part, gap) in parts.iter().zip(&gaps) {
+                for (i, (part, gap)) in parts.iter().zip(&gaps).enumerate() {
                     kw_docs.push(gap.as_ref().map_or_else(line, gap_break));
                     let part_doc = unparse_keyword_part(part);
                     if let Some(arg) = arg_docs.next() {
-                        kw_docs.push(docvec![part_doc, " ", arg]);
+                        kw_docs.push(docvec![part_doc, argument_separator(&arguments[i]), arg]);
                     } else {
                         kw_docs.push(part_doc);
                     }
@@ -652,11 +658,11 @@ fn unparse_message_laid_out(
                 }
             } else {
                 let mut docs: Vec<Document<'static>> = vec![recv_doc];
-                for part in parts {
+                for (i, part) in parts.iter().enumerate() {
                     docs.push(Document::Str(" "));
                     docs.push(unparse_keyword_part(part));
                     if let Some(arg) = arg_docs.next() {
-                        docs.push(Document::Str(" "));
+                        docs.push(argument_separator(&arguments[i]));
                         docs.push(arg);
                     }
                 }
@@ -799,7 +805,7 @@ impl<'e> SpineMessage<'e> {
                 arguments,
                 is_cast,
             } => unparse_message_laid_out(receiver_doc, selector, arguments, is_cast, layout),
-            Self::Match { arms, exhaustive } => unparse_match(receiver_doc, arms, exhaustive),
+            Self::Match { arms, exhaustive } => unparse_match(receiver_doc, None, arms, exhaustive),
         }
     }
 }
@@ -997,17 +1003,22 @@ fn unparse_concat_chain(expr: &Expression) -> Option<Document<'static>> {
             unparse_operand(s, slot)
         })
         .collect();
+    // Comments around a `++` (BT-5183) force one segment per line.
+    let gaps: Vec<Option<GapComments>> = segments[1..]
+        .iter()
+        .map(|seg| gap_comments(seg.span().start(), GapSlot::AroundBinaryOperator))
+        .collect();
     let inline = join_docs(seg_docs.clone(), " ++ ");
     let inline_width = inline.to_pretty_string().len();
 
-    if inline_width <= 80 {
+    if inline_width <= 80 && gaps.iter().all(Option::is_none) {
         Some(inline)
     } else {
         // One segment per line, continuation lines start with "++ "
         let first = seg_docs[0].clone();
         let mut continuation: Vec<Document<'static>> = Vec::new();
-        for seg_doc in &seg_docs[1..] {
-            continuation.push(line());
+        for (seg_doc, gap) in seg_docs[1..].iter().zip(&gaps) {
+            continuation.push(gap.as_ref().map_or_else(line, gap_break));
             continuation.push(docvec!["++ ", seg_doc.clone()]);
         }
         Some(docvec![first, nest(2, concat(continuation))])
@@ -1062,7 +1073,12 @@ fn unparse_block(block: &Block) -> Document<'static> {
     };
 
     if bar_gap.is_some() || close_gap.is_some() {
-        return unparse_block_broken(params_doc, &block.body, close_gap.as_ref());
+        return unparse_block_broken(
+            params_doc,
+            !block.parameters.is_empty(),
+            &block.body,
+            close_gap.as_ref(),
+        );
     }
 
     match block.body.as_slice() {
@@ -1101,7 +1117,7 @@ fn unparse_block(block: &Block) -> Document<'static> {
         [single]
             if matches!(
                 single.comments.trailing.as_ref().map(|c| c.kind),
-                Some(CommentKind::Line)
+                Some(CommentKind::Line | CommentKind::Doc)
             ) =>
         {
             let body = unparse_expression_statement(single);
@@ -1140,6 +1156,7 @@ fn unparse_block(block: &Block) -> Document<'static> {
 /// line.
 fn unparse_block_broken(
     params_doc: Document<'static>,
+    has_params: bool,
     body: &[ExpressionStatement],
     close_gap: Option<&GapComments>,
 ) -> Document<'static> {
@@ -1152,11 +1169,19 @@ fn unparse_block_broken(
         body_docs.push(unparse_expression_statement(stmt));
     }
     if let Some(gap) = close_gap {
-        for comment in &gap.same_line {
-            body_docs.push(Document::Str("  "));
+        for (i, comment) in gap.same_line.iter().enumerate() {
+            // `params_doc` already ends in a space (`[:a | `).
+            body_docs.push(Document::Str(if i == 0 && has_params && body.is_empty() {
+                " "
+            } else {
+                "  "
+            }));
             body_docs.push(unparse_comment(comment));
         }
         for comment in &gap.own_line {
+            if comment.preceding_blank_line {
+                body_docs.push(line());
+            }
             body_docs.push(line());
             body_docs.push(unparse_comment(comment));
         }
@@ -1198,7 +1223,15 @@ fn unparse_cascade_message(msg: &CascadeMessage) -> Document<'static> {
         MessageSelector::Unary(name) => leaf::ident(name),
         MessageSelector::Binary(op) => {
             let arg = arg_doc(&msg.arguments[0]);
-            docvec![leaf::ident(op), " ", arg]
+            // Comments around the operator (BT-5183) put its argument on the
+            // next line.
+            match gap_comments(
+                msg.arguments[0].span().start(),
+                GapSlot::AroundBinaryOperator,
+            ) {
+                Some(gap) => docvec![leaf::ident(op), nest(2, docvec![gap_break(&gap), arg])],
+                None => docvec![leaf::ident(op), " ", arg],
+            }
         }
         MessageSelector::Keyword(parts) => {
             let mut kw_docs: Vec<Document<'static>> = Vec::new();
@@ -1213,7 +1246,7 @@ fn unparse_cascade_message(msg: &CascadeMessage) -> Document<'static> {
                 }
                 kw_docs.push(unparse_keyword_part(part));
                 if i < msg.arguments.len() {
-                    kw_docs.push(Document::Str(" "));
+                    kw_docs.push(argument_separator(&msg.arguments[i]));
                     kw_docs.push(arg_doc(&msg.arguments[i]));
                 }
             }
@@ -1293,23 +1326,32 @@ fn unparse_cascade(receiver: &Expression, messages: &[CascadeMessage]) -> Docume
 
 // --- Match unparsing ---
 
+/// `value_doc match: [arms]`. Comments written between the receiver and
+/// `match:` (`gap`, BT-5183) put the keyword and its arms on the next line,
+/// indented.
 fn unparse_match(
     value_doc: Document<'static>,
+    gap: Option<&GapComments>,
     arms: &[MatchArm],
     exhaustive: bool,
 ) -> Document<'static> {
     // ADR 0106: `matchExhaustive:` round-trips through unparse just
     // like `match:` — only the keyword selector differs.
     let keyword = if exhaustive {
-        " matchExhaustive: ["
+        "matchExhaustive: ["
     } else {
-        " match: ["
+        "match: ["
     };
     let arm_docs: Vec<Document<'static>> = arms.iter().map(unparse_match_arm).collect();
-    if arm_docs.len() <= 1 {
+    // Comments after an arm (BT-5183) force one arm per line.
+    let arm_gaps: Vec<Option<GapComments>> = arms
+        .iter()
+        .map(|arm| gap_comments(arm.body.span().end(), GapSlot::AfterMatchArm))
+        .collect();
+    let rest = if arm_docs.len() <= 1 && gap.is_none() && arm_gaps.iter().all(Option::is_none) {
         // Single arm: try inline, break if too wide
         let joined = join_docs(arm_docs, "; ");
-        group(docvec![value_doc, keyword, joined, "]"])
+        return group(docvec![value_doc, " ", keyword, joined, "]"]);
     } else {
         // Multiple arms: one per line
         let mut body: Vec<Document<'static>> = Vec::new();
@@ -1330,8 +1372,25 @@ fn unparse_match(
             if i < arms.len() - 1 {
                 body.push(Document::Str(";"));
             }
+            if let Some(arm_gap) = &arm_gaps[i] {
+                for comment in &arm_gap.same_line {
+                    body.push(Document::Str("  "));
+                    body.push(unparse_comment(comment));
+                }
+                for comment in &arm_gap.own_line {
+                    if comment.preceding_blank_line {
+                        body.push(line());
+                    }
+                    body.push(line());
+                    body.push(unparse_comment(comment));
+                }
+            }
         }
-        docvec![value_doc, keyword, nest(2, concat(body)), line(), "]"]
+        docvec![keyword, nest(2, concat(body)), line(), "]"]
+    };
+    match gap {
+        Some(gap) => docvec![value_doc, nest(2, docvec![gap_break(gap), rest])],
+        None => docvec![value_doc, " ", rest],
     }
 }
 
@@ -1546,18 +1605,33 @@ fn gap_break(gap: &GapComments) -> Document<'static> {
     }
     docs.push(line());
     for comment in &gap.own_line {
+        if comment.preceding_blank_line {
+            docs.push(line());
+        }
         docs.push(unparse_comment(comment));
         docs.push(line());
     }
     concat(docs)
 }
 
-/// What goes between `:=` or `^` and its `value`: `plain`, or the comments
-/// written there (BT-5183) with the value on the next line.
-fn value_separator(value: &Expression, plain: &'static str) -> Document<'static> {
-    match gap_comments(value.span().start(), GapSlot::BeforeValue) {
+/// The separator between a keyword and its `argument`: a space, or the
+/// comments written there (BT-5183), which put the argument on the next line.
+fn argument_separator(argument: &Expression) -> Document<'static> {
+    match gap_comments(argument.span().start(), GapSlot::AfterKeyword) {
         Some(gap) => nest(2, gap_break(&gap)),
-        None => Document::Str(plain),
+        None => Document::Str(" "),
+    }
+}
+
+/// `value` as written after `:=`, `^` or `=`: `plain` then the
+/// value, or the comments written before it (BT-5183) with the value on the
+/// next line, indented — the whole value, so its own continuation lines
+/// indent under it.
+pub(super) fn value_with_separator(value: &Expression, plain: &'static str) -> Document<'static> {
+    let slot = GapSlot::BeforeValue;
+    match gap_comments(value.span().start(), slot) {
+        Some(gap) => nest(2, docvec![gap_break(&gap), unparse_expression(value)]),
+        None => docvec![plain, unparse_expression(value)],
     }
 }
 
