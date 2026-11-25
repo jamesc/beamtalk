@@ -302,14 +302,13 @@ Beamtalk code raised the error. When the call site is not in `Stack` (a
 callee deeper than the stacktrace depth) every frame is the callee's, as on
 the proxy path when its frame is cut off.
 
-A scalar argument makes the `badarg` charlist retry a no-op (nothing to
-convert), so `ffi_call_raised/8` passes no snapshot. A binary argument
-(BT-4759) does not: a `badarg` retries once with the binary as a charlist,
-here, exactly as on the proxy path (the retry result is coerced the same way),
-and such a call site uses `ffi_call_raised/9` to pass the class-variable
-snapshot it read before the call. So does a map argument (BT-4770): the retry
-deep-unwraps Strings nested in it, and a map may hold a Beamtalk block, so the
-first attempt may have written class variables. A tagged `String` (what a
+A binary argument (BT-4759) makes a `badarg` retry once with the binary as a
+charlist, here, exactly as on the proxy path (the retry result is coerced the
+same way); a map argument (BT-4770) retries with nested Strings deep-unwrapped.
+Compiled call sites pass no class-variable snapshot (ADR 0153 Phase 2): they
+call `/8`, or `/10` with `none` in the snapshot slot; `/9` and the snapshot
+slot stay only for modules built by an older compiler, until Phase 3 removes
+them. A tagged `String` (what a
 Beamtalk `String` is at run time) fails the call site's `is_binary` guard and
 takes `direct_call/4`, which unwraps it.
 """.
@@ -320,7 +319,8 @@ ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site) ->
     ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site, none).
 
 -doc """
-`ffi_call_raised/8` for a call site with a binary argument (BT-4759).
+`ffi_call_raised/8` with a class-variable snapshot (BT-4759). Only modules
+built before ADR 0153 Phase 2 call it; current codegen never does.
 
 `Snap` is `beamtalk_class_vars:snapshot()` read by the call site before the
 call, as `apply_with_coercion/6` reads it. The `badarg` charlist retry restores
@@ -347,8 +347,8 @@ ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site, Snap) -
 
 `Context` is the `{Class, Selector}` that `native_call/5` would have been given,
 so a wrapped error reads `Class>>selector` exactly as on the proxy path. `Snap`
-is `none` when no argument can be a binary (the call never retries); otherwise
-it is the class-variable snapshot, as for `ffi_call_raised/9`.
+is `none` from current codegen (ADR 0153 Phase 2); a module built by an older
+compiler may pass the class-variable snapshot, as for `ffi_call_raised/9`.
 """.
 -spec ffi_call_raised(
     error | exit | throw,

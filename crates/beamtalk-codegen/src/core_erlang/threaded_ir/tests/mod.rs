@@ -15,7 +15,7 @@
 //!   `verify_body_with_opaque_version_gaps`, and `verify_simple_bind`'s
 //!   per-scope invariant
 //! - [`dual_run`] — the dual-run byte-parity harness
-//! - [`catch_boundary`] — ADR 0130 §4 `OnDoCatch` / `CatchWithoutClassVarRestore`
+//! - [`catch_boundary`] — `OnDoCatch` / `CatchNlrNotPassedThrough`
 //! - [`ensure_catch`] — BT-4312 `EnsureCatch` / `EnsureCleanupLostOnNlr`
 //! - [`class_method_scope`] — BT-3725 `ActorStateInClassMethod`
 //! - [`close_and_value`] — `ThreadedValue::close` (ADR 0118 §Decision 5)
