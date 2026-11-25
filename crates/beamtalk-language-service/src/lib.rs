@@ -609,19 +609,6 @@ impl SimpleLanguageService {
                 }
             }
         }
-        for smd in &file_data.module.method_definitions {
-            if Self::offset_in_method_header_selector(&smd.method, &file_data.source, offset_val) {
-                let selection = Self::method_header_selection_span(&smd.method, &file_data.source);
-                return Some(CallHierarchyTarget::new(
-                    smd.method.selector.name(),
-                    Some(smd.class_name.name.clone()),
-                    smd.is_class_method,
-                    file.clone(),
-                    smd.method.span,
-                    selection,
-                ));
-            }
-        }
 
         // 2. Call-site selector hit — no enclosing class on the *send*
         //    (the receiver class is dynamic), but the selector alone is
@@ -901,7 +888,7 @@ impl SimpleLanguageService {
     /// This is the cold-file AST fallback for `textDocument/implementation`.
     /// The LSP wraps it in [`Backend::delegate_nav_query`] so the runtime
     /// path is preferred when attached (and sees live patches, stdlib
-    /// classes, ADR-0066 extension methods the walker can't index).
+    /// classes, methods defined live that the walker can't index).
     ///
     /// Returns method-definition locations whose `span` is the full
     /// `MethodDefinition::span` — LSP callers that want only the header
@@ -1496,7 +1483,8 @@ impl LanguageService for SimpleLanguageService {
                     }
                 }
             }
-            // And standalone method bodies
+            // And standalone method bodies: a rejected cross-file `>>` is
+            // still text the user will move into the class's file.
             for smd in &fd.module.method_definitions {
                 for stmt in &smd.method.body {
                     Self::collect_identifiers(&stmt.expression, &ident.name, &mut spans);
@@ -1582,19 +1570,6 @@ impl LanguageService for SimpleLanguageService {
                 }
             }
         }
-        for standalone in &file_data.module.method_definitions {
-            let method = &standalone.method;
-            if method.return_type.is_none() && overlaps(method.span) {
-                candidates.push((
-                    (
-                        standalone.class_name.name.clone(),
-                        method.selector.name(),
-                        standalone.is_class_method,
-                    ),
-                    method.span,
-                ));
-            }
-        }
         if candidates.is_empty() {
             return actions;
         }
@@ -1653,6 +1628,13 @@ impl Default for SimpleLanguageService {
 
 /// The same-file fold (BT-4721) followed by the ADR 0152 cross-file check: the
 /// file-compile rule the language service shares with the build.
+///
+/// Every standalone definition left after the fold is a rejected cross-file
+/// extension. It stays in the indexed module, so diagnostics match the CLI and
+/// the outline, folding and class references still see its text; but the
+/// method-level queries (implementors, selector declarations and references,
+/// selector rename, call hierarchy) do not treat it as a method of its target
+/// class (BT-5184).
 fn fold_and_check_extensions(
     module: &mut beamtalk_core::ast::Module,
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {

@@ -110,10 +110,13 @@ impl DependencyRegistry {
         })
     }
 
-    /// Returns all class names that are exported by dependencies.
+    /// Returns all class names that are exported by dependencies, sorted so
+    /// diagnostics emitted per class come out in a stable order (BT-5184).
     #[must_use]
     pub fn all_class_names(&self) -> Vec<&str> {
-        self.exports.keys().map(String::as_str).collect()
+        let mut names: Vec<&str> = self.exports.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        names
     }
 }
 
@@ -1038,5 +1041,36 @@ mod tests {
         assert_eq!(utils_exports.len(), 1);
         assert!(!utils_exports[0].is_direct);
         assert_eq!(utils_exports[0].via_chain, vec!["json".to_string()]);
+    }
+
+    /// BT-5184: `all_class_names` walked a `HashMap`, so the reservation
+    /// errors came out in a different order per registry (each has its own
+    /// hash seed).
+    #[test]
+    fn stdlib_reservation_errors_are_sorted_on_every_run() {
+        let entries = [
+            ("String", "pkg", "bt@pkg@string"),
+            ("Integer", "pkg", "bt@pkg@integer"),
+            ("Actor", "pkg", "bt@pkg@actor"),
+            ("Symbol", "pkg", "bt@pkg@symbol"),
+            ("Float", "pkg", "bt@pkg@float"),
+            ("Boolean", "pkg", "bt@pkg@boolean"),
+        ];
+        let run = || {
+            let mut diagnostics = Vec::new();
+            check_stdlib_reservation(&make_registry(&entries), &mut diagnostics);
+            diagnostics
+                .iter()
+                .map(|d| d.message.to_string())
+                .collect::<Vec<_>>()
+        };
+        let first = run();
+        assert_eq!(first.len(), entries.len(), "{first:?}");
+        let mut sorted = first.clone();
+        sorted.sort();
+        assert_eq!(first, sorted);
+        for _ in 0..20 {
+            assert_eq!(run(), first);
+        }
     }
 }

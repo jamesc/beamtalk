@@ -754,6 +754,28 @@ pub enum DiagnosticCategory {
     /// dynamic-site report among them). Drivers surface exactly this
     /// category alongside `InternalVerifier`. Not a `[diagnostics]` key.
     CodegenReport,
+    /// A standalone `X >> m => ...` that cannot compile where it is written
+    /// (ADR 0152, BT-5184): its target is not a class declared in this file
+    /// (cross-file extension methods were removed), it names another
+    /// package's class (`pkg@Foo >> m`), it targets a protocol, or it is an
+    /// instance-side method on a same-file `native:` actor. An error.
+    /// No `@expect` directive suppresses it, not even `@expect all` (see
+    /// [`Self::is_expect_suppressible`]), and it is not a `[diagnostics]` key:
+    /// the method would otherwise silently not exist.
+    MisplacedExtension,
+}
+
+impl DiagnosticCategory {
+    /// Whether an `@expect` directive (including `@expect all`) may suppress
+    /// a diagnostic of this category. The one place that rule lives: every
+    /// `@expect` pass consults it.
+    #[must_use]
+    pub fn is_expect_suppressible(self) -> bool {
+        // `InternalVerifier` is emitted by codegen, after the `@expect` pass,
+        // so it never meets a directive today; listing it keeps its own
+        // "not suppressible by `@expect`" promise true if that ever changes.
+        !matches!(self, Self::MisplacedExtension | Self::InternalVerifier)
+    }
 }
 
 /// A secondary note attached to a diagnostic.

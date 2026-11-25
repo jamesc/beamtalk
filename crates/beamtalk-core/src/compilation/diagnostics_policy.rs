@@ -119,7 +119,8 @@ pub enum DiagnosticsTableError {
 /// `unresolved-class`), except where a word is kept whole
 /// (`HandleInfoNoCatchAll` → `handleinfo-no-catch-all`, after the selector).
 /// Categories that are not user-configurable (`InternalVerifier`,
-/// `CodegenReport`, the ADR 0131 local-threading errors) have no key.
+/// `CodegenReport`, the ADR 0131 local-threading errors, and
+/// `MisplacedExtension`, which must never be turned off) have no key.
 const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
     ("dnu", DiagnosticCategory::Dnu),
     ("type", DiagnosticCategory::Type),
@@ -916,6 +917,9 @@ fn apply_expect_directives_impl(
 /// `Object`, so any method call on the result produces a DNU hint — but the
 /// suppression applies unconditionally whenever `@expect type` is written.
 fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCategory>) -> bool {
+    if diag_cat.is_some_and(|cat| !cat.is_expect_suppressible()) {
+        return false;
+    }
     expect_cat == ExpectCategory::All
         || matches!(
             (expect_cat, diag_cat),
