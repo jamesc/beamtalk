@@ -13,12 +13,14 @@
 // since `Object` (an ancestor of `Class`) still declares them for instances.
 //
 // Fixtures: fixtures/guarded_diff_class_root.bt, fixtures/guarded_diff_class_leaf.bt,
-// fixtures/class_field_reflection_probe.bt.
+// fixtures/class_field_reflection_probe.bt, fixtures/class_field_at_owner.bt.
 
 TestCase subclass: ClassFieldReflectionDnuTest
 
   // Answers the class as Dynamic, so sends to it are plain dynamic class sends.
   dynamicClass -> Dynamic => GuardedDiffClassRoot
+
+  dynamicOwner -> Dynamic => ClassFieldAtOwner
 
   testFieldAtOnAClassIsDoesNotUnderstand =>
     self should: [GuardedDiffClassRoot fieldAt: #x] raise: #does_not_understand
@@ -64,6 +66,21 @@ TestCase subclass: ClassFieldReflectionDnuTest
     self should: [
       cls run: [ClassFieldReflectionProbe fieldAt: #x]
     ] raise: #does_not_understand
+
+  // A class that defines its own class method of one of these names: that
+  // method answers on every route, and `respondsTo:` agrees.
+  testAClassOwnFieldAtMethodAnswersOnEveryRoute =>
+    cls := ClassFieldAtOwner
+    dyn := self dynamicOwner
+    self assert: (ClassFieldAtOwner fieldAt: #k) equals: #(#own, #k)
+    self assert: (dyn fieldAt: #k) equals: #(#own, #k)
+    self assert: (cls perform: #fieldAt: withArguments: #(#k)) equals: #(#own, #k)
+    self assert: cls viaSelf equals: #(#own, #k)
+    self assert: (cls hasField: #anything)
+    self assert: (cls respondsTo: #fieldAt:)
+    self assert: (cls respondsTo: #hasField:)
+    self should: [cls clearField: #k] raise: #does_not_understand
+    self deny: (cls respondsTo: #clearField:)
 
   testFieldReflectionThroughPerformIsDoesNotUnderstand =>
     cls := self dynamicClass

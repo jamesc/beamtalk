@@ -63,7 +63,6 @@ and join the `beamtalk_classes` pg group for enumeration.
     class_var_reflection_op/2,
     is_class_var_reflection_send/2,
     is_class_var_reflection_selector/1,
-    class_field_reflection_dnu/2,
     %% ADR 0114: in-place identity move for a dynamic
     %% (ClassBuilder) class's `renameTo:` — see rename/2's doc.
     rename/2
@@ -1696,57 +1695,24 @@ ownership when there is no session context to fall back to (tier 1).
     atom(), list(), {pid(), term()} | term(), #class_state{}, fun(() -> ok)
 ) -> {reply, term(), #class_state{}} | {noreply, #class_state{}}.
 %% ADR 0153 decision 7 (BT-5155): `Cls hasField:`, `Cls clearField:`,
-%% `Cls fieldAt:` and `Cls fieldAt:put:` used to read and write the class
-%% variables held here (ADR 0124, BT-4148). Class variables are gone, so a
-%% class answers these four the way it answers any selector it does not
-%% understand: the ordinary structured `does_not_understand`, replied as
-%% `{error, Error}` so the caller raises it and this process survives. They
-%% are still answered here, ahead of the class-method lookup, because they
-%% must not fall through to the `Class` protocol, where `Object>>fieldAt:`
-%% would answer for the class object (`class_field_reflection_dnu/2`).
+%% `Cls fieldAt:` and `Cls fieldAt:put:` used to be answered here from the
+%% class variables, ahead of the lookup (ADR 0124, BT-4148). A class has no
+%% fields now, so they take the ordinary lookup: a class method of that name
+%% answers, and otherwise the `Class` protocol fallthrough refuses them
+%% (`beamtalk_class_dispatch:try_class_chain_fallthrough/3`), so the send
+%% raises does_not_understand like any selector the class does not understand.
 dispatch_class_method(Selector, Args, From, State, Restore) ->
-    case class_var_reflection_op(Selector, Args) of
-        none ->
-            dispatch_class_method_lookup(Selector, Args, From, State, Restore);
-        _Op ->
-            Restore(),
-            #class_state{name = ClassName} = State,
-            {reply, {error, class_field_reflection_dnu(ClassName, Selector)}, State}
-    end.
+    dispatch_class_method_lookup(Selector, Args, From, State, Restore).
 
 -doc """
-The structured `does_not_understand` a class object raises for the
-instance-field reflection selectors (`fieldAt:`, `fieldAt:put:`, `hasField:`,
-`clearField:`, the `class_var_reflection_op/2` set) after ADR 0153 removed
-class variables (decision 7, BT-5155). A class has no fields to reflect on.
-Shared by the class gen_server (`dispatch_class_method/5`), the send from the
-class's own process (`beamtalk_class_dispatch:class_send_from_own_process/2`)
-and the `Class` protocol fallthrough
-(`beamtalk_class_dispatch:try_class_chain_fallthrough/3`), so every route
-raises the same error.
-""".
--spec class_field_reflection_dnu(class_name(), atom()) -> #beamtalk_error{}.
-class_field_reflection_dnu(ClassName, Selector) ->
-    beamtalk_error:new(
-        does_not_understand,
-        ClassName,
-        Selector,
-        <<
-            "A class has no fields: class variables were removed (ADR 0153). "
-            "Use a class method, an Actor, an AtomicCounter or PersistentTerm instead."
-        >>
-    ).
-
--doc """
-The instance-field reflection sends to a class (`Cls hasField: #x` /
-`Cls clearField: #x` / `Cls fieldAt: #x` / `Cls fieldAt: #x put: v`), or
-`none` for every other send. Once class-variable reflection (ADR 0124,
-BT-4148); since ADR 0153 decision 7 (BT-5155) every such send raises
-`does_not_understand` (`class_field_reflection_dnu/2`). The single decision
-behind `dispatch_class_method/5`, `is_class_var_reflection_send/2`,
-`is_class_var_reflection_selector/1` and the same send made from inside the
-class's own process (`beamtalk_class_dispatch:class_send_from_own_process/2`).
-The names are kept until ADR 0153 Phase 3 removes this machinery.
+The instance-field reflection sends (`hasField: #x` / `clearField: #x` /
+`fieldAt: #x` / `fieldAt: #x put: v`), or `none` for every other send. Once
+class-variable reflection (ADR 0124, BT-4148). Since ADR 0153 decision 7
+(BT-5155) a class has no fields: these selectors are not part of the class
+object's protocol (`is_class_var_reflection_selector/1`, read by
+`beamtalk_class_dispatch:try_class_chain_fallthrough/3` and
+`beamtalk_primitive:class_responds_to/2`). The names are kept until ADR 0153
+Phase 3 removes this machinery.
 """.
 -spec class_var_reflection_op(atom(), list()) ->
     {has | clear | get, atom()} | {put, atom(), term()} | none.
@@ -1757,20 +1723,18 @@ class_var_reflection_op('fieldAt:put:', [Name, Value]) when is_atom(Name) -> {pu
 class_var_reflection_op(_Selector, _Args) -> none.
 
 -doc """
-Does the class gen_server answer this class-object send itself, ahead of the
-class-method lookup (with `does_not_understand`, ADR 0153 decision 7)?
-`beamtalk_class_dispatch` asks before it skips the class process for a send
-no class method defines (BT-4073).
+Is this an instance-field reflection send (`class_var_reflection_op/2`)?
 """.
 -spec is_class_var_reflection_send(atom(), list()) -> boolean().
 is_class_var_reflection_send(Selector, Args) ->
     class_var_reflection_op(Selector, Args) =/= none.
 
 -doc """
-Can a send of `Selector` be a class-variable reflection send, whatever its
-argument (`is_class_var_reflection_send/2` with a Symbol argument)? The
-in-caller owner memo (`beamtalk_class_dispatch`, ADR 0142) is keyed by
-selector alone, so it declines these selectors outright.
+Is `Selector` an instance-field reflection selector, whatever its argument
+(`is_class_var_reflection_send/2` with a Symbol argument)? A class object
+does not understand these unless it defines a class method of that name
+(ADR 0153 decision 7): the `Class` protocol fallthrough and `respondsTo:`
+refuse them.
 """.
 -spec is_class_var_reflection_selector(atom()) -> boolean().
 is_class_var_reflection_selector(Selector) ->

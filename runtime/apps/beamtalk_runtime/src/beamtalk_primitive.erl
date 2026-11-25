@@ -929,9 +929,8 @@ its class methods) would actually work.
 class_responds_to(ClassName, Selector) ->
     case beamtalk_class_dispatch:class_understands_class_selector(ClassName, Selector) of
         true ->
-            %% Includes a class method named `fieldAt:` etc.: a send with a
-            %% non-Symbol argument reaches it (only a Symbol-named send is
-            %% intercepted, `beamtalk_object_class:class_var_reflection_op/2`).
+            %% Includes a class method named `fieldAt:` etc., which a send
+            %% reaches (ADR 0153 decision 7).
             true;
         false ->
             %% ADR 0153 decision 7 (BT-5155): the instance-field reflection

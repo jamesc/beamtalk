@@ -442,10 +442,7 @@ compute_class_method_owner_of(ClassName, Selector) ->
 -spec derive_class_method_owner(class_name(), selector(), [selector()]) ->
     verdict().
 derive_class_method_owner(ClassName, Selector, ProcessBound) ->
-    case
-        lists:member(Selector, ProcessBound) orelse
-            beamtalk_object_class:is_class_var_reflection_selector(Selector)
-    of
+    case lists:member(Selector, ProcessBound) of
         true ->
             decline;
         false ->
@@ -626,8 +623,8 @@ direct_constructor_owner_of(ClassName, Selector) ->
 A send to a class from inside that class's own process (BT-4262).
 
 When only the `Class` chain can answer `Selector` (no
-local, inherited or runtime-installed class method, and not a
-class-variable reflection send: `class_chain_only_send/3`, the external
+local, inherited or runtime-installed class method:
+`class_chain_only_send/3`, the external
 send's own check), the class process's own lookup would miss and fall
 through to the class-object protocol (`Class -> Behaviour ->
 ...`). That protocol runs as instance methods of the class object, not as a
@@ -638,10 +635,9 @@ that sends to its receiver (`Class>>printString => self name asString`)
 answer when it runs in the class process.
 
 The instance-field reflection sends (`hasField:`, `clearField:`,
-`fieldAt:`, `fieldAt:put:` with a Symbol name: the one decision,
-`beamtalk_object_class:class_var_reflection_op/2`) raise the structured
-`does_not_understand` the class process itself answers with (ADR 0153
-decision 7, BT-5155): a class has no fields.
+`fieldAt:`, `fieldAt:put:`) are not part of that protocol (ADR 0153
+decision 7, BT-5155): unless the class defines one as a class method, the
+fallthrough refuses them and the send raises `does_not_understand`.
 
 A selector the class itself understands would run one of its own class
 methods re-entrantly, which has no safe route, so it still raises the
@@ -652,16 +648,7 @@ effect.
 """.
 -spec class_send_from_own_process(selector(), list()) -> term() | no_return().
 class_send_from_own_process(Selector, Args) ->
-    case beamtalk_object_class:class_var_reflection_op(Selector, Args) of
-        none ->
-            class_send_from_own_process_lookup(Selector, Args);
-        _Op ->
-            %% ADR 0153 decision 7 (BT-5155): the same answer the class
-            %% gen_server gives (`dispatch_class_method/5`).
-            beamtalk_error:raise(
-                beamtalk_object_class:class_field_reflection_dnu(own_class_name(), Selector)
-            )
-    end.
+    class_send_from_own_process_lookup(Selector, Args).
 
 %% Any other send: the same decision
 %% the external send makes before skipping the class process
@@ -989,11 +976,7 @@ Reads the same metadata the class process's own lookup
 `class_understands_class_selector/2`: the local class-method selectors (which `beamtalk_object_class` publishes from its
 `class_methods` map, runtime-installed ADR 0084 funs included, on every init,
 reload and `put_class_method`) and the inherited chain. It is general: no
-selector is special-cased here. The class process also answers the
-instance-field reflection sends (`hasField:`/`clearField:`/`fieldAt:`/
-`fieldAt:put:`, with `does_not_understand` since ADR 0153) ahead of that
-lookup, so `beamtalk_object_class:is_class_var_reflection_send/2` keeps those
-on the gen_server path.
+selector is special-cased here.
 
 A class with no metadata row yet (still registering), a pid with no registered
 class, or a dead class process takes the gen_server path too, so registration
@@ -1008,16 +991,13 @@ class_chain_only_send(ClassPid, Selector, Args) ->
 %% which includes the local-node test) already done by the caller.
 -spec class_chain_only_send(pid(), selector(), list(), boolean()) ->
     {ok, class_name(), module()} | error.
-class_chain_only_send(ClassPid, Selector, Args, Alive) ->
+class_chain_only_send(ClassPid, Selector, _Args, Alive) ->
     case beamtalk_class_registry:class_name_for_pid(ClassPid) of
         {ok, ClassName} ->
             case beamtalk_class_metadata:lookup_methods(ClassName) of
                 {ok, Module, _Selectors} ->
                     case
                         Alive andalso
-                            not beamtalk_object_class:is_class_var_reflection_send(
-                                Selector, Args
-                            ) andalso
                             not class_understands_class_selector(ClassName, Selector)
                     of
                         true -> {ok, ClassName, Module};
