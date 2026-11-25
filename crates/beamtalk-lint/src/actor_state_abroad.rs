@@ -45,14 +45,16 @@
 //! that touch no field and send nothing to `self`.
 //!
 //! Differences from the former `class-state-abroad` lint this was modelled on
-//! (removed with class variables, ADR 0153): there is no stored/returned rule (ADR 0137: the lint sees only blocks passed directly
-//! to `Timer`, another actor or a class method); a send to the actor's *own*
-//! class's class-side method is abroad (the class process is not the actor
-//! process); and there is no transitive write analysis (a `self` send from an
-//! away block messages home, where its writes are kept — only direct field
-//! writes raise). Field reads, writes and `hasField:` probes are read off
-//! [`class_var_accesses`], which is generic over the name set it is given:
-//! here the actor's mutable instance fields, not class variables.
+//! (removed with class variables, ADR 0153): there is no stored/returned rule
+//! (ADR 0137: the lint sees only blocks passed directly to `Timer`, another
+//! actor or a class method); a send to the actor's *own* class's class-side
+//! method that runs in the class process is abroad (the class process is not
+//! the actor process), like any other; and there is
+//! no transitive write analysis (a `self` send from an away block messages
+//! home, where its writes are kept — only direct field writes raise). Field
+//! reads, writes and `hasField:` probes are read off [`class_var_accesses`],
+//! which is generic over the name set it is given: here the actor's mutable
+//! instance fields, not class variables.
 //!
 //! Overlap: a synchronous `self` send in a `Timer` block also fires
 //! `sync_send_in_timer_block` (at the send); this lint fires at the block,

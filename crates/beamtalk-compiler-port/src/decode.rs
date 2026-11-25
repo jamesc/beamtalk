@@ -225,9 +225,10 @@ pub(crate) fn term_to_atom_bool_map(
 /// `meta_field_kinds_map`, beamtalk-codegen).
 ///
 /// An unrecognised value (anything but the atom `'late'`) degrades to
-/// [`SlotKind::Eager`] — the pre-ADR-0124 default every slot had, and the
-/// same "missing metadata means eager" convention `state_field_kind`
-/// (beamtalk-core) falls back to when the map itself is absent (an older BEAM artifact predating this key).
+/// [`SlotKind::Eager`] — the pre-ADR-0124 default every slot had, and the same
+/// "missing metadata means eager" convention `state_field_kind` (beamtalk-core)
+/// falls back to when the map itself is absent (an older BEAM artifact
+/// predating this key).
 pub(crate) fn term_to_slot_kind_map(
     term: &Term,
 ) -> std::collections::HashMap<ecow::EcoString, beamtalk_core::ast::SlotKind> {

@@ -620,7 +620,8 @@ and the LSP never see it. No operation is surface-specific.
   through a variable, a field, a parameter or an instance method, and it
   checks actor classes only (value types and plain objects have no actor
   cell). There is no stored/returned rule, and a send to the actor's own
-  class's class-side method is abroad.
+  class's class-side method is abroad when that method runs in the class
+  process (not for one that runs in the caller).
 - Both lint surfaces run the passes through the shared
   `run_post_analysis_lint_pipeline` hook against `analyse_full`'s cross-file
   hierarchy (BT-4183), so they agree on out-of-file classes: a subclass whose

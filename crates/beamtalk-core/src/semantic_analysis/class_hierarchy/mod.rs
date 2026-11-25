@@ -411,9 +411,10 @@ impl ClassHierarchy {
     /// ([`ClassInfo::is_class_var_reflection_selector`]), which the class
     /// process answers itself. The runtime's own fail-closed chain check
     /// (`beamtalk_class_metadata:chain_has_class_variables/1`) outlives this
-    /// one until BT-5158; the guard of every static direct call re-checks it. A class's own
-    /// explicit `new:` of the in-caller shape ([`ClassInfo::in_caller_new1`])
-    /// runs in the caller too, when its chain allows it.
+    /// one until BT-5158; the guard of every static direct call re-checks it.
+    /// A class's own explicit `new:` of the in-caller shape
+    /// ([`ClassInfo::in_caller_new1`]) runs in the caller too, when its chain
+    /// allows it.
     ///
     /// `sealed` and `class sealed` play no part. The method may be inherited:
     /// a dynamic send runs an inherited stateless method in the caller too

@@ -598,11 +598,12 @@ fn analyze_expression(
             analysis
                 .field_writes
                 .extend(nested_analysis.field_writes.iter().cloned());
-            // Propagate self-sends the same way — a self-send inside a
-            // block passed to select:/collect:/do:/etc. (this is exactly that
-            // shape: a `Block` argument that isn't an inline-conditional
-            // selector, handled above) is itself a potential mutation source,
-            // and callers need to see it at any nesting depth, not just at this block's own top level.
+            // Propagate self-sends the same way — a self-send inside a block
+            // passed to select:/collect:/do:/etc. (this is exactly that shape:
+            // a `Block` argument that isn't an inline-conditional selector,
+            // handled above) is itself a potential mutation source, and callers
+            // need to see it at any nesting depth, not just at this block's own
+            // top level.
             if nested_analysis.has_self_sends {
                 analysis.has_self_sends = true;
             }

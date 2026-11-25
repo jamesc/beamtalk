@@ -757,12 +757,13 @@ impl ClassHierarchy {
     ///   stdlib (`AtomicCounter new:`) creates a named ETS table owned by
     ///   whichever process runs it, which must stay the class process;
     /// - a direct `(Erlang mod) fn` FFI call whose arguments are all literals
-    ///   (or, for `new:`, the method's own parameter) and which is not a row
-    ///   of the curated class-method FFI table read by the
-    ///   `class-method-process-resource` lint (`ets new:`, `erlang self`, `spawn_link`, `gen_udp open:`, ...):
-    ///   those keep the class process, which owns what they create. FFI
-    ///   outside that table is not recognised, exactly as for the lint, and
-    ///   runs in the caller like any other in-caller class method;
+    ///   (or, for `new:`, the method's own parameter) and which is not a row of
+    ///   the curated class-method FFI table read by the
+    ///   `class-method-process-resource` lint (`ets new:`, `erlang self`,
+    ///   `spawn_link`, `gen_udp open:`, ...): those keep the class process,
+    ///   which owns what they create. FFI outside that table is not recognised,
+    ///   exactly as for the lint, and runs in the caller like any other
+    ///   in-caller class method;
     /// - (`new:` only) a send to `self`, with literal or parameter
     ///   arguments, of one of the class's own class methods that already runs
     ///   in the caller ([`Self::is_direct_call_eligible`]: not process-bound)
@@ -798,9 +799,10 @@ impl ClassHierarchy {
     /// The chain-dependent half of
     /// [`Self::explicit_class_constructor_builds_in_caller`], and the one place
     /// the rule lives: not an actor, a fully known surface, and a chain that
-    /// resolves to its root ([`Self::chain_resolves_to_root`]; BT-4644). Evaluated at query time against whatever hierarchy is in
-    /// hand, so a sibling-file ancestor injected later is seen (BT-4640); both
-    /// codegen (through that method) and cross-file callers
+    /// resolves to its root ([`Self::chain_resolves_to_root`]; BT-4644).
+    /// Evaluated at query time against whatever hierarchy is in hand, so a
+    /// sibling-file ancestor injected later is seen (BT-4640); both codegen
+    /// (through that method) and cross-file callers
     /// ([`Self::runs_class_method_in_caller`], from the published
     /// [`ClassInfo::in_caller_new1`] shape) call it. `supervisor_kind` and
     /// `is_abstract` are AST facts already folded into the shape.
