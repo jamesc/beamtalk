@@ -19,6 +19,7 @@ Read by shipped binaries and the runtime. Unset means the default behaviour.
 | `BEAMTALK_WORKSPACE` | Name of an explicit workspace session; highest priority when the CLI picks a workspace (`crates/beamtalk-cli/src/paths.rs`). |
 | `BEAMTALK_WORKSPACE_TIMEOUT` | Overrides the workspace idle timeout, in seconds (`IDLE_TIMEOUT_ENV_VAR`, `crates/beamtalk-workspace/src/lib.rs`). |
 | `BEAMTALK_SESSION_IDLE_SECONDS` | How long a detached REPL session stays resumable, in seconds; default 4 hours. Read by the workspace node after the `session_idle_seconds` application env. |
+| `BEAMTALK_NO_BUILD_LOCK` | Set to a non-empty value other than `0` to skip the project build lock (`_build/.build.lock`), for filesystems without advisory-lock support; concurrent beamtalk processes in one project are then not serialised (`crates/beamtalk-cli/src/commands/dir_lock.rs`). |
 | `BEAMTALK_NODE_NAME` | Node name for the REPL; the `--node` flag takes priority. |
 | `BEAMTALK_REPL_PORT` | Port for the REPL listener (`crates/beamtalk-cli/src/commands/repl/mod.rs`); `0` is OS-assigned. |
 | `BEAMTALK_ERL_COOKIE` | Internal. How the CLI and the release launcher hand a cookie to a child `erl` without putting it in argv, where `ps` shows it; the node adopts it on boot and unsets it (`crates/beamtalk-cli/src/commands/cookie_env.rs`, `beamtalk_ws_cookie:adopt_env_cookie/0`). Not meant to be set by hand. |
