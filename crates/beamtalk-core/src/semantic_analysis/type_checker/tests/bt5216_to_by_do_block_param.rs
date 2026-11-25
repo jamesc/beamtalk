@@ -117,3 +117,26 @@ typed Value subclass: TvIntAnn
         diags.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
+
+/// BT-5246: only a statically-`Integer` step narrows. An untyped (`Dynamic`)
+/// step and a negative Integer literal step behave as the rule says.
+#[test]
+fn bt5246_dynamic_step_keeps_number_and_negative_integer_step_narrows() {
+    let dynamic = r"
+typed Value subclass: TvDyn
+  run: step -> Nil =>
+    1 to: 10 by: step do: [:x | x bitAnd: 1]
+";
+    assert!(
+        dnu_messages(dynamic)
+            .iter()
+            .any(|m| m.contains("Number does not understand 'bitAnd:'")),
+        "an untyped step must keep the Number parameter"
+    );
+    let negative = r"
+typed Value subclass: TvNeg
+  run -> Nil =>
+    10 to: 1 by: -1 do: [:x | x bitAnd: 1]
+";
+    assert_eq!(dnu_messages(negative), Vec::<String>::new());
+}

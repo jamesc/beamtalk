@@ -1042,14 +1042,13 @@ impl TypeChecker {
 
                     if type_params.len() >= 2 {
                         // All but last are block parameter types, last is return type
-                        let block_param_types: Vec<InferredType> = type_params
+                        let mut block_param_types: Vec<InferredType> = type_params
                             [..type_params.len() - 1]
                             .iter()
                             .map(|p| {
                                 Self::resolve_type_param(p, &class_subst, &method_subst, hierarchy)
                             })
                             .collect();
-                        let mut block_param_types = block_param_types;
                         Self::narrow_to_by_do_param(
                             selector_name,
                             class_name,
