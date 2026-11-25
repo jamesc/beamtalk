@@ -1571,6 +1571,7 @@ impl CoreErlangGenerator {
         // actor's `State` variable.
         if receiver.is_self()
             && self.context == super::super::CodeGenContext::Actor
+            && !self.in_class_method()
             && self.lookup_var("self").is_none()
         {
             let name_var = self.fresh_var("Name");
