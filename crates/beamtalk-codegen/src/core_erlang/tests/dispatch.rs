@@ -567,7 +567,6 @@ fn test_bt897_subdirectory_module_name_consistency() {
         }],
         methods: vec![],
         class_methods: vec![],
-        class_variables: vec![],
         type_params: vec![],
         superclass_type_args: vec![],
         uses: vec![],
@@ -2613,24 +2612,6 @@ fn test_field_operation_codegen_table() {
                 Has("'immutable_value'"),
             ],
         },
-        // BT-4148: `Cls fieldAt: #x` / `Cls fieldAt: #x put: v` from outside the
-        // class route through `beamtalk_message_dispatch:send/3`, which reaches
-        // the class gen_server's `dispatch_class_method` `fieldAt:` clauses.
-        FieldCase {
-            label: "fieldAt: and fieldAt:put: on class receiver delegate to message dispatch",
-            src: concat!(
-                "Object subclass: Holder\n",
-                "  classState: count = 0\n\n",
-                "  probe => Holder fieldAt: #count\n",
-                "  poke => Holder fieldAt: #count put: 3\n",
-            ),
-            expect: &[
-                Dispatches("'fieldAt:'"),
-                Dispatches("'fieldAt:put:'"),
-                // Prefix only: covers both `fieldAt:` and `fieldAt:put:`.
-                NoSyncSend("'fieldAt:"),
-            ],
-        },
         // `self fieldNames` inside an actor must NOT route through sync_send.
         // Self is a #beamtalk_object{..., pid: self()} tuple; sync_send(self()) would be
         // gen_server:call(self(), ...) → deadlock. Must use beamtalk_primitive:send(State).
@@ -3790,7 +3771,7 @@ fn test_bt2276_class_methods_accepted_values_compile_table() {
 fn test_class_method_self_send_shape_table() {
     // (label, source, function whose body is inspected (whole module when None),
     //  must contain, must not contain)
-    let cases: [(&str, &str, Option<&str>, &[&str], &[&str]); 3] = [
+    let cases: [(&str, &str, Option<&str>, &[&str], &[&str]); 2] = [
         (
             // A sealed class's self-send passes its own `ClassSelf` to the guarded direct
             // call and to the walk alike.
@@ -3815,14 +3796,6 @@ fn test_class_method_self_send_shape_table() {
                 "'foo', [])",
             ],
             &["ClassVars", "class_var_result"],
-        ),
-        (
-            // A subclass override reached by the walk may write class variables, in place.
-            "open class with class vars has no unwrap",
-            "Object subclass: OpenCls\n  classState: n = 0\n  class foo => 1\n\n  class bar => self foo\n",
-            None,
-            &[],
-            &["class_var_result"],
         ),
     ];
     for (label, src, function, has, lacks) in cases {
@@ -4525,107 +4498,6 @@ fn test_open_class_static_class_self_send_is_a_plain_direct_call() {
     }
 }
 
-/// ADR 0130 §2: `clearField:` and `hasField:` on a class variable are helper
-/// calls at any nesting depth: in a loop, in a conditional, at top level.
-#[test]
-fn test_class_side_clear_and_has_field_lower_to_helper_calls_at_any_depth() {
-    let src = concat!(
-        "Object subclass: CvClearEverywhere\n",
-        "  classState: current = 0\n\n",
-        "  class clearTop =>\n",
-        "    self clearField: #current\n",
-        "    nil\n\n",
-        "  class clearLoop =>\n",
-        "    flag := true\n",
-        "    [flag] whileTrue: [\n",
-        "      self clearField: #current\n",
-        "      flag := false\n",
-        "    ]\n",
-        "    nil\n\n",
-        "  class clearIfPresent =>\n",
-        "    (self hasField: #current)\n",
-        "      ifTrue: [self clearField: #current]\n",
-        "    nil\n",
-    );
-    let code = codegen_source(src);
-    // BT-4070: four, not three — `clearIfPresent`'s `ifTrue:` is pure and
-    // inlines, so its `clearField:` lowers once in the taken arm AND once
-    // in the fallback arm's closure.
-    assert_eq!(
-        code.matches("call 'beamtalk_class_vars':'clear'(ClassSelf, ")
-            .count(),
-        4,
-        "every clearField: is a clear/2 helper call. Got:\n{code}"
-    );
-    assert_has(
-        "hasField: is a has/2 helper call.",
-        &code,
-        &["call 'beamtalk_class_vars':'has'(ClassSelf, "],
-    );
-    assert_lacks(
-        "no threaded map surgery on a ClassVars map",
-        &code,
-        &["'maps':'remove'", "ClassVars"],
-    );
-}
-
-/// BT-4421: class-method `self fieldAt:` / `self fieldAt:put:` read and write
-/// the class variable in place (`field_at` / `field_at_put` helper calls), on
-/// an Actor class too (whose class methods share `CodeGenContext::Actor`), at
-/// body level, in a block (a read takes the block's capture, ADR 0130 §5)
-/// and as an operand — never a `class_send` back into the class's own
-/// `gen_server`, nor the instance-side state-threaded `fieldAt:put:`.
-#[test]
-fn test_class_side_field_at_lowers_to_in_place_helper_calls() {
-    let src = concat!(
-        "Actor subclass: CvFieldAtInPlace\n",
-        "  classState: total = 0\n\n",
-        "  class readTotal => self fieldAt: #total\n\n",
-        "  class writeTotal: v =>\n",
-        "    self fieldAt: #total put: v\n",
-        "    self.total\n\n",
-        "  class sumInto: items =>\n",
-        "    items do: [:each | self fieldAt: #total put: (self fieldAt: #total) + each]\n",
-        "    nil\n\n",
-        "  class orderedSum => (self fieldAt: #total put: 5) + (self fieldAt: #total)\n",
-    );
-    let code = codegen_source(src);
-    assert_has(
-        "a method-level fieldAt: is a field_at/2 helper call.",
-        &code,
-        &["call 'beamtalk_class_vars':'field_at'(ClassSelf, "],
-    );
-    assert_has(
-        "fieldAt:put: is a field_at_put/3 helper call.",
-        &code,
-        &["call 'beamtalk_class_vars':'field_at_put'(ClassSelf, "],
-    );
-    // The `do:` block reads with `fieldAt:`, so it binds a capture and its
-    // read is the 3-arity captured-fallback form.
-    assert_has(
-        "a block that reads with fieldAt: binds a capture.",
-        &code,
-        &["call 'beamtalk_class_vars':'capture'(ClassSelf, "],
-    );
-    let three_arity_read = code
-        .split("call 'beamtalk_class_vars':'field_at'(ClassSelf, ")
-        .skip(1)
-        .any(|rest| {
-            let args = &rest[..rest.find(')').unwrap_or(rest.len())];
-            args.contains(", ")
-        });
-    assert!(
-        three_arity_read,
-        "the block's fieldAt: read passes its capture. Got:\n{code}"
-    );
-    // (The selectors still appear in the class's xref metadata.)
-    assert_lacks(
-        "no fieldAt: message send or state-threaded fieldAt:put:",
-        &code,
-        &["'fieldAt:', [", "'fieldAt:put:', ["],
-    );
-}
-
 // --- direct Value construction (cross-class `new` / keyword ctors) ---
 //
 // An unqualified class reference in a fresh generator is never an
@@ -5074,7 +4946,6 @@ fn test_new1_verdict_agrees_across_files_with_sibling_parent() {
     ]);
     let cases = [
         ("Object subclass: Base\n", true),
-        ("Object subclass: Base\n  classState: n = 0\n", false),
         ("Actor subclass: Base\n", false),
         ("Value subclass: Base\n", true),
     ];

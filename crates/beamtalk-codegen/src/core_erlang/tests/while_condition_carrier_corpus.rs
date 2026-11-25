@@ -467,14 +467,14 @@ const FIELD_CONTEXTS: &[Context] = &[
     Context {
         name: "object_class_side",
         actor_instance: false,
-        header: "Object subclass: WhileCarrierProbe\n  classState: f = 0\n",
+        header: "Object subclass: WhileCarrierProbe\n",
         class_side: true,
         prelude: "",
     },
     Context {
         name: "actor_class_side",
         actor_instance: false,
-        header: "Actor subclass: WhileCarrierProbe\n  classState: f = 0\n",
+        header: "Actor subclass: WhileCarrierProbe\n",
         class_side: true,
         prelude: "",
     },

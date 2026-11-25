@@ -29,7 +29,6 @@ Object subclass: Caller
   yes => Errs yes
   no => Errs no
   inherited => SubErrs protocolError
-  stateful => Stateful answer
 
 Object subclass: Errs
   class protocolError => 1
@@ -48,10 +47,6 @@ Object subclass: Errs
   class withState => 3
 
 Errs subclass: SubErrs
-
-Object subclass: Stateful
-  classState: count :: Integer = 0
-  class answer => 5
 ";
 
 /// The class whose metadata certifies the constants, compiled on its own.
@@ -179,7 +174,7 @@ fn non_literal_bodies_keep_the_guarded_direct_call() {
 }
 
 #[test]
-fn inherited_or_class_process_constants_are_not_folded() {
+fn inherited_constants_are_not_folded() {
     let out = codegen(SRC);
     // An inherited class method takes the dynamic path (ADR 0142 §2): no
     // call site names a superclass module.
@@ -187,12 +182,6 @@ fn inherited_or_class_process_constants_are_not_folded() {
     assert!(
         !inherited.contains("'constant_value'") && !inherited.contains("persistent_term"),
         "an inherited constant takes the dynamic send. Got:\n{inherited}"
-    );
-    // A class with class variables keeps its class methods in its process.
-    let stateful = function_body(&out, "stateful");
-    assert!(
-        !stateful.contains("'constant_value'") && !stateful.contains("persistent_term"),
-        "a class-variable class's constant takes the class process. Got:\n{stateful}"
     );
 }
 

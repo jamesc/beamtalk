@@ -548,3 +548,84 @@ async fn package_classes_error() {
         .unwrap();
     assert_eq!(result.is_error, Some(true));
 }
+
+/// A real workspaces-dir entry for `port` with `nonce`, removed on drop.
+struct PortFile(std::path::PathBuf);
+
+impl PortFile {
+    fn new(tag: &str, port: u16, nonce: &str) -> (Self, String) {
+        let id = format!("test_mcp_bt5188_{tag}_{}", std::process::id());
+        let dir = beamtalk_workspace::workspaces_base_dir()
+            .expect("workspaces dir")
+            .join(&id);
+        std::fs::create_dir_all(&dir).expect("workspace dir");
+        std::fs::write(dir.join("port"), format!("{port}\n{nonce}")).expect("port file");
+        (Self(dir), id)
+    }
+}
+
+impl Drop for PortFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// BT-5188: connecting by workspace id verifies the node's identity before
+/// the cookie is sent, and a node that fails it never sees the cookie.
+#[tokio::test]
+async fn connect_by_workspace_id_refuses_a_node_failing_the_identity_check() {
+    let responder: beamtalk_repl_protocol::test_support::Responder =
+        Box::new(|request| vec![describe_reply(request, &matching_versions())]);
+    let fake = spawn_ws(HandshakeMode::WrongIdentity, "fake-session", responder).await;
+    let (_file, id) = PortFile::new(
+        "wrong",
+        fake.port,
+        beamtalk_repl_protocol::test_support::FAKE_NONCE,
+    );
+    let err = crate::client::ReplClient::connect(fake.port, "test-cookie", Some(id))
+        .await
+        .expect_err("a node that cannot prove the nonce must be refused");
+    assert!(err.contains("cookie was not sent"), "got: {err}");
+    let seen = fake.seen.lock().await.clone();
+    assert!(
+        seen.iter().all(|f| f.get("cookie").is_none()),
+        "no frame carried the cookie: {seen:?}"
+    );
+}
+
+/// BT-5188: the real node (it knows the nonce) passes and is attached to.
+#[tokio::test]
+async fn connect_by_workspace_id_verifies_then_authenticates() {
+    let responder: beamtalk_repl_protocol::test_support::Responder =
+        Box::new(|request| vec![describe_reply(request, &matching_versions())]);
+    let fake = spawn_ws(HandshakeMode::Ok, "fake-session", responder).await;
+    let (_file, id) = PortFile::new(
+        "ok",
+        fake.port,
+        beamtalk_repl_protocol::test_support::FAKE_NONCE,
+    );
+    crate::client::ReplClient::connect(fake.port, "test-cookie", Some(id))
+        .await
+        .expect("the verified node is attached to");
+    let seen = fake.seen.lock().await.clone();
+    assert_eq!(seen[0]["type"], "identify", "{seen:?}");
+    assert_eq!(seen[1]["type"], "auth", "{seen:?}");
+}
+
+/// BT-5188: with a workspace id, a server on a port the port file does not
+/// name (the workspace moved) or a port file without a nonce is never sent
+/// the cookie.
+#[test]
+fn expected_nonce_fails_closed_for_a_known_workspace() {
+    use crate::client::expected_nonce;
+    assert_eq!(expected_nonce(None, 1234), Ok(None), "explicit --port");
+    let (_moved, moved) = PortFile::new("moved", 4321, "n");
+    let err = expected_nonce(Some(&moved), 1234).unwrap_err();
+    assert!(err.contains("no longer on port 1234"), "{err}");
+    assert_eq!(
+        expected_nonce(Some(&moved), 4321),
+        Ok(Some("n".to_string()))
+    );
+    let gone = format!("test_mcp_bt5188_gone_{}", std::process::id());
+    assert!(expected_nonce(Some(&gone), 1234).is_err());
+}

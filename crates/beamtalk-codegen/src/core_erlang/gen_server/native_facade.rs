@@ -16,7 +16,6 @@ use std::collections::HashSet;
 use super::super::errors::{BeamtalkErrorChain, ErrorBinding};
 use super::super::selector_mangler::dispatch_fn_name;
 use super::super::spec_codegen;
-use super::super::util::omit_late_defaultless_slot;
 use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use super::spawn::SpawnVariant;
 use beamtalk_cerl_doc::docvec;
@@ -656,14 +655,10 @@ impl CoreErlangGenerator {
             }
             let class_method_source_doc = Document::Vec(class_method_source_docs);
 
-            // Class variable initial values. ADR 0124 §2/B2: a defaultless
-            // `late classState:` slot is omitted from the map entirely — see
-            // `omit_late_defaultless_slot`.
-            let class_vars: Vec<&beamtalk_core::ast::StateDeclaration> = class
-                .class_variables
-                .iter()
-                .filter(|cv| !omit_late_defaultless_slot(cv))
-                .collect();
+            // Class variable initial values. ADR 0153: `classState:` is rejected
+            // at parse time, so this map is always empty until the key itself is
+            // deleted (BT-5153..5163).
+            let class_vars: Vec<&beamtalk_core::ast::StateDeclaration> = Vec::new();
             let class_vars_doc = self.class_var_map_doc(&class_vars)?;
 
             // Class-level doc comment

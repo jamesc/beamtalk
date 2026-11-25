@@ -235,7 +235,9 @@ const TWO_CLASSES: &str =
 #[test]
 fn range_format_only_changes_overlapping_construct() {
     let start = TWO_CLASSES.find("two").unwrap();
-    let edits = range_format::format_range_edits(TWO_CLASSES, start, start + 3).unwrap();
+    let edits = range_format::format_range_edits(TWO_CLASSES, start, start + 3)
+        .unwrap()
+        .edits;
     assert!(!edits.is_empty(), "selected construct needs formatting");
     let out = apply_byte_edits(TWO_CLASSES, &edits);
     let first = TWO_CLASSES.find("\n\nObject subclass: Beta").unwrap();
@@ -254,7 +256,9 @@ fn range_format_only_changes_overlapping_construct() {
 #[test]
 fn range_format_other_construct_untouched_when_selecting_first() {
     let start = TWO_CLASSES.find("one").unwrap();
-    let edits = range_format::format_range_edits(TWO_CLASSES, start, start).unwrap();
+    let edits = range_format::format_range_edits(TWO_CLASSES, start, start)
+        .unwrap()
+        .edits;
     let out = apply_byte_edits(TWO_CLASSES, &edits);
     assert!(out.ends_with("two =>   2\n"), "Beta unchanged: {out}");
     assert!(!out.contains("=>   1"), "Alpha formatted: {out}");
@@ -262,7 +266,9 @@ fn range_format_other_construct_untouched_when_selecting_first() {
 
 #[test]
 fn range_format_full_range_matches_whole_document() {
-    let edits = range_format::format_range_edits(TWO_CLASSES, 0, TWO_CLASSES.len()).unwrap();
+    let edits = range_format::format_range_edits(TWO_CLASSES, 0, TWO_CLASSES.len())
+        .unwrap()
+        .edits;
     assert_eq!(
         apply_byte_edits(TWO_CLASSES, &edits),
         format_source(TWO_CLASSES).unwrap()
@@ -320,8 +326,83 @@ fn range_format_selection_ending_at_column_zero_does_not_touch_next_construct() 
     // BT-5132: the selection covers Alpha's lines and ends at column 0 of
     // Beta's header line; the end is exclusive, so Beta is not touched.
     let beta = TWO_CLASSES.find("Object subclass: Beta").unwrap();
-    let edits = range_format::format_range_edits(TWO_CLASSES, 0, beta).unwrap();
+    let edits = range_format::format_range_edits(TWO_CLASSES, 0, beta)
+        .unwrap()
+        .edits;
     let out = apply_byte_edits(TWO_CLASSES, &edits);
     assert!(!out.contains("=>   1"), "Alpha formatted: {out}");
     assert!(out.ends_with("two =>   2\n"), "Beta unchanged: {out}");
+}
+
+/// Alpha needs formatting, and so does Beta's header on the next line, so
+/// the formatter's diff merges the two into one hunk (BT-5188).
+const MERGED_HUNK: &str =
+    "Object subclass: Alpha\n  one =>   1\nObject subclass:   Beta\n  two =>   2\n";
+
+#[test]
+fn range_format_counts_a_hunk_it_cannot_apply() {
+    let formatted = range_format::format_range_edits(MERGED_HUNK, 0, 5).unwrap();
+    assert!(formatted.edits.is_empty(), "the merged hunk reaches Beta");
+    assert_eq!(formatted.unapplied, 1, "the dropped hunk is reported");
+}
+
+fn range_params(uri: &Url, end_line: u32) -> tower_lsp::lsp_types::DocumentRangeFormattingParams {
+    tower_lsp::lsp_types::DocumentRangeFormattingParams {
+        text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri: uri.clone() },
+        range: tower_lsp::lsp_types::Range {
+            start: tower_lsp::lsp_types::Position::new(0, 0),
+            end: tower_lsp::lsp_types::Position::new(end_line, 0),
+        },
+        options: tower_lsp::lsp_types::FormattingOptions::default(),
+        work_done_progress_params: tower_lsp::lsp_types::WorkDoneProgressParams::default(),
+    }
+}
+
+/// BT-5188: a selection whose formatting cannot be applied without
+/// rewriting neighbouring code tells the user, instead of silently doing
+/// nothing.
+#[tokio::test]
+async fn range_formatting_reports_a_dropped_hunk() {
+    use futures_util::StreamExt;
+    let dir = unique_temp_dir("bt-5188-range-report");
+    let (mut service, mut socket) = tower_lsp::LspService::new(Backend::new);
+    initialize_service(&mut service, &dir).await;
+    let backend: &Backend = service.inner();
+    let path = Utf8PathBuf::from_path_buf(dir.join("f.bt")).expect("utf8");
+    let uri = open_test_file(backend, &path, MERGED_HUNK);
+    let edits = backend
+        .range_formatting(range_params(&uri, 1))
+        .await
+        .expect("range formatting");
+    assert_eq!(edits, Some(Vec::new()));
+    let message = tokio::time::timeout(std::time::Duration::from_secs(2), socket.next())
+        .await
+        .expect("a message is sent")
+        .expect("socket open");
+    assert_eq!(message.method(), "window/showMessage");
+    let text = message.params().expect("params")["message"]
+        .as_str()
+        .expect("message text")
+        .to_string();
+    assert!(text.contains("whole document"), "{text}");
+}
+
+/// BT-5188: an untitled buffer is range-formatted like a saved file.
+#[tokio::test]
+async fn range_formatting_works_for_untitled_buffers() {
+    let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+    let backend: &Backend = service.inner();
+    let uri = Url::parse("untitled:Untitled-1").expect("uri");
+    let path = backend.resolve_path_for_uri(&uri).expect("untitled path");
+    backend
+        .service
+        .lock_recover()
+        .update_file(path.clone(), TWO_CLASSES.to_string());
+    backend.versions.lock_recover().insert(path, 1);
+    let edits = backend
+        .range_formatting(range_params(&uri, 2))
+        .await
+        .expect("range formatting")
+        .expect("edits for an untitled buffer");
+    assert!(!edits.is_empty(), "Alpha is formatted");
 }

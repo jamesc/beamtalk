@@ -427,7 +427,7 @@ fn class_rename_reaches_a_class_used_only_in_a_state_default() {
         ("/p/models.bt", "Object subclass: St@@ack\n  push => 1\n"),
         (
             "/p/Holder.bt",
-            "Object subclass: Holder\n  state: s = Stack new\n  classState: cv = Stack new\n  get => s\n",
+            "Object subclass: Holder\n  state: s = Stack new\n  state: cv = Stack new\n  get => s\n",
         ),
     ]);
     let plan = svc.plan_rename(&file, pos, "Pile").expect("plan");
@@ -587,4 +587,95 @@ fn selector_rename_refuses_when_a_read_only_descendant_overrides_it() {
     svc.mark_stdlib_file(Utf8PathBuf::from("/std/B.bt"));
     let err = svc.plan_rename(&file, pos, "walk").unwrap_err();
     assert!(err.message.contains("overrides"), "{}", err.message);
+}
+
+/// BT-5188: `overriding: #(#sel)` in a subclass acknowledges that a
+/// protocol's `sel` replaces the inherited one; renaming the inherited
+/// method would silently make the acknowledgement stale. Refused, naming
+/// the class, protocol and selector.
+#[test]
+fn selector_rename_refuses_when_a_uses_clause_names_it() {
+    let (svc, file, pos) = setup(&[
+        ("/p/Prot.bt", "Protocol define: Greets\n  greet => 1\n"),
+        ("/p/Base.bt", "Object subclass: Base\n  gr@@eet => 2\n"),
+        (
+            "/p/Kid.bt",
+            "Base subclass: Kid\n  uses: Greets overriding: #(#greet)\n",
+        ),
+    ]);
+    let err = svc.plan_rename(&file, pos, "hello").unwrap_err();
+    assert!(
+        err.message.contains("Kid")
+            && err.message.contains("Greets")
+            && err.message.contains("#greet")
+            && err.message.contains("overriding:"),
+        "{}",
+        err.message
+    );
+}
+
+/// BT-5188: the same for `excluding:` on the class itself.
+#[test]
+fn selector_rename_refuses_when_an_excluding_clause_names_it() {
+    let (svc, file, pos) = setup(&[
+        ("/p/Prot.bt", "Protocol define: Greets\n  greet => 1\n"),
+        (
+            "/p/Own.bt",
+            "Object subclass: Own\n  uses: Greets excluding: #(#greet)\n  gr@@eet => 2\n",
+        ),
+    ]);
+    let err = svc.plan_rename(&file, pos, "hello").unwrap_err();
+    assert!(
+        err.message.contains("Own") && err.message.contains("excluding:"),
+        "{}",
+        err.message
+    );
+}
+
+/// BT-5188: a `uses:` clause of an unrelated class naming the selector does
+/// not block the rename.
+#[test]
+fn selector_rename_ignores_uses_clauses_of_unrelated_classes() {
+    let (svc, file, pos) = setup(&[
+        ("/p/Prot.bt", "Protocol define: Greets\n  greet => 1\n"),
+        ("/p/Base.bt", "Object subclass: Base\n  gr@@eet => 2\n"),
+        (
+            "/p/Other.bt",
+            "Object subclass: Other\n  uses: Greets excluding: #(#greet)\n",
+        ),
+    ]);
+    assert!(svc.plan_rename(&file, pos, "hello").is_ok());
+}
+
+/// BT-5188: refusals name the selector and the class it was resolved to.
+#[test]
+fn selector_rename_refusal_for_read_only_call_names_class_and_selector() {
+    let (mut svc, file, pos) = setup(&[
+        (
+            "/p/A.bt",
+            "Object subclass: A\n  g@@o => 1\n  run => self go\n",
+        ),
+        ("/std/S.bt", "A subclass: S\n  walk => self go\n"),
+    ]);
+    svc.mark_stdlib_file(Utf8PathBuf::from("/std/S.bt"));
+    let err = svc.plan_rename(&file, pos, "walk2").unwrap_err();
+    assert!(err.message.contains("#go on A"), "{}", err.message);
+}
+
+/// BT-5188: `uses:` composes instance methods, so a class-side rename is not
+/// blocked by a clause naming an instance selector of the same name.
+#[test]
+fn class_side_selector_rename_ignores_uses_clauses() {
+    let (svc, file, pos) = setup(&[
+        ("/p/Prot.bt", "Protocol define: Greets\n  greet => 1\n"),
+        (
+            "/p/Base.bt",
+            "Object subclass: Base\n  class gr@@eet => 2\n",
+        ),
+        (
+            "/p/Kid.bt",
+            "Base subclass: Kid\n  uses: Greets overriding: #(#greet)\n",
+        ),
+    ]);
+    assert!(svc.plan_rename(&file, pos, "hello").is_ok());
 }
