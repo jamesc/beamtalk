@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("vscode", () => ({ commands: { executeCommand: vi.fn() } }));
 
 import { state } from "../extensionState";
-import { captureSessionId, closeReplSession } from "../repl";
+import { captureSessionId, closeReplSession, followsReconnectNotice } from "../repl";
 
 describe("closeReplSession (BT-5199)", () => {
   beforeEach(() => {
@@ -90,5 +90,34 @@ describe("captureSessionId closes the session only when the REPL exited (BT-5199
     );
     expect(client.closeSession).toHaveBeenCalledTimes(1);
     expect(client.closeSession).toHaveBeenCalledWith("sess-live");
+  });
+
+  it("follows the REPL to the new session it got on reconnect", async () => {
+    const { terminal, client } = setup();
+    await captureSessionId(
+      execution(
+        false,
+        "Reconnected (new session). Retrying evaluation...\r\n",
+        "[beamtalk] session: sess-new\r\n"
+      ),
+      terminal
+    );
+    expect(client.closeSession).toHaveBeenCalledTimes(1);
+    expect(client.closeSession).toHaveBeenCalledWith("sess-new");
+  });
+});
+
+describe("followsReconnectNotice (BT-5199)", () => {
+  it("matches only a marker right after the new-session notice", () => {
+    const notice = "Reconnected (new session). Retrying evaluation...\n";
+    expect(followsReconnectNotice(`${notice}[beamtalk] session: s-2\n`, "s-2")).toBe(true);
+    expect(followsReconnectNotice(`${notice}[beamtalk] session: s-2x\n`, "s-2")).toBe(false);
+    expect(followsReconnectNotice("x\n[beamtalk] session: s-2\n", "s-2")).toBe(false);
+    expect(
+      followsReconnectNotice(
+        "Reconnected (session resumed). Retrying evaluation...\n[beamtalk] session: s-2\n",
+        "s-2"
+      )
+    ).toBe(false);
   });
 });

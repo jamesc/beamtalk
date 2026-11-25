@@ -57,6 +57,21 @@ export function closeReplSession(
   });
 }
 
+/** How much recent REPL output `captureSessionId` keeps for the reconnect check. */
+const RECENT_OUTPUT_CHARS = 400;
+
+/**
+ * True when `sessionId`'s marker in `recent` directly follows the CLI's
+ * "Reconnected (new session)" notice — the marker the REPL prints after a
+ * reconnect gave it a new session (BT-1021), as opposed to one in user output.
+ */
+export function followsReconnectNotice(recent: string, sessionId: string): boolean {
+  const escaped = sessionId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `Reconnected \\(new session\\)\\.[^\\n]*\\r?\\n\\[beamtalk\\] session: ${escaped}(?=\\s)`
+  ).test(recent);
+}
+
 /**
  * Read chunks from a shell execution until the session ID is found.
  * Updates `workspaceTreeProvider` with the captured session ID so bindings
@@ -73,13 +88,18 @@ export async function captureSessionId(
   // process exited. A thrown read (shell integration dropped) says nothing
   // about the REPL, which may still be running (BT-5199).
   let executionEnded = false;
-  // Only the first marker of a run is the REPL's own startup line. Later
-  // markers may come from user output (`Transcript show:` of a marker-shaped
-  // string), so they move the sidebar as before but never pick the session
-  // `close` ends (BT-5199).
+  // The session `close` ends when the REPL exits (BT-5199): the first marker
+  // of a run (the REPL's startup line), or a later one the REPL printed right
+  // after its "Reconnected (new session)" notice. Any other later marker may
+  // be user output (`Transcript show:` of a marker-shaped string), so it moves
+  // the sidebar as before but never picks the session `close` ends.
   let closeTargetRecorded = false;
+  // The most recent output, so a later marker can be checked against the
+  // reconnect notice printed just before it (possibly in an earlier chunk).
+  let recent = "";
   try {
     for await (const chunk of execution.read()) {
+      recent = (recent + chunk).slice(-RECENT_OUTPUT_CHARS);
       const scanned = scanSessionChunk(tail, chunk);
       const sessionId = scanned.sessionId;
       tail = scanned.tail;
@@ -90,7 +110,7 @@ export async function captureSessionId(
           break;
         }
         setReplRunning(true);
-        if (!closeTargetRecorded) {
+        if (!closeTargetRecorded || followsReconnectNotice(recent, sessionId)) {
           closeTargetRecorded = true;
           state.replSessionId = sessionId;
         }

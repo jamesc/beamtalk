@@ -345,7 +345,7 @@ List all active REPL sessions in the workspace.
 
 Close the current session. Terminates the shell process, removes the session from the workspace, and closes the WebSocket connection (close code 1000). Detached sessions that are not resumed within the idle timeout (default 4 hours) are automatically cleaned up.
 
-With a `session` field, `close` ends that session instead of the sender's own (BT-5199). VS Code uses this to end the session of a REPL terminal it started once the terminal is gone; the sender's own connection stays open. An unknown `session` closes nothing and still answers `ok` — it never falls back to the sender's session.
+With a `session` field, `close` ends that session instead of the sender's own (BT-5199). VS Code uses this to end the session of a REPL terminal it started once the terminal is gone; the sender's own connection stays open. An unknown `session` closes nothing and still answers `ok` — it never falls back to the sender's session. Like `interrupt` with a `session` field, this gives every client that holds the workspace cookie authority over every session of that workspace (`sessions` lists their ids); the cookie is the workspace's single trust boundary.
 
 Senders: the CLI REPL on `:exit` / Ctrl-D, VS Code when its workspace client is disposed (its own session) and when its REPL terminal ends (that REPL's session), and the LiveView IDE when a tab's session is torn down (dispatched through `beamtalk_repl_ops:dispatch/4` with the session as its SessionPid).
 
