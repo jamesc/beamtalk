@@ -6,7 +6,7 @@
 -module(beamtalk_actor_state).
 -moduledoc """
 Single owner of the actor-state cell and of every access to it (ADR 0137
-§1, §3, §4; the actor-side twin of `beamtalk_class_vars`, ADR 0130).
+§1, §3, §4).
 
 ## The cell
 

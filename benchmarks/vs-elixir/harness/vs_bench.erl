@@ -949,7 +949,6 @@ inv_start(Name, Superclass) ->
         superclass => Superclass,
         module => ?INV_MOD,
         class_methods => maps:from_list([{inv_sel(I), #{arity => 0}} || I <- lists:seq(1, ?INV_MAX_K)]),
-        class_state => #{},
         meta => #{process_bound_class_selectors => [new, spawn]}
     }),
     Pid.

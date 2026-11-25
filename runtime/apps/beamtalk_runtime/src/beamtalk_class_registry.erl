@@ -78,7 +78,6 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     classes_backing_module/1,
     ensure_class_state_table/0,
     record_class_state_snapshot/2,
-    record_class_state_snapshot_if_changed/3,
     class_state_snapshot_lookup/1,
     forget_class_state_snapshot/1,
     ensure_static_call_keys_table/0,
@@ -1002,11 +1001,11 @@ Ensure the classVars live-snapshot table exists (idempotent).
 class method *without* going through the class gen_server — calling
 `gen_server:call` back into it from inside a supervisor's `init/1` (or from
 the supervisor process itself) would deadlock, since that class gen_server
-is the one blocked waiting for `supervisor:start_link` to return. Those
-call sites previously used a hardcoded empty `ClassVars = #{}`, silently
-discarding any `classState:` value set via an ordinary class-method call
-before `supervise` — this table lets them read the current, live snapshot
-instead, without messaging the (possibly blocked) class process.
+is the one blocked waiting for `supervisor:start_link` to return. They run
+under `beamtalk_class_vars:with_snapshot/2`, which reads this table instead of
+messaging the (possibly blocked) class process. Since ADR 0153 (BT-5160) a
+class stores no class variables, so the table only holds one empty row per
+live class; BT-5162 deletes it together with `with_snapshot/2`.
 Read-concurrency + `{heir, ...}` mirrors `ensure_pid_table/0`.
 """.
 -spec ensure_class_state_table() -> ok.
@@ -1016,37 +1015,18 @@ ensure_class_state_table() ->
     ]).
 
 -doc """
-Record the current `classState:` map for a class process.
+Record the classVars snapshot row for a class process.
 
-Called from `beamtalk_object_class:init/1` (the initial, default-seeded
-map) and every `handle_call` clause that rebinds `State#class_state.class_state`
-to a new map, so the snapshot never lags more than one `handle_call` behind
-the class gen_server's own authoritative state.
-
-The class process is the sole writer of its snapshot row (BT-4758): only
-`beamtalk_object_class` calls this or `record_class_state_snapshot_if_changed/3`.
-Because the `_if_changed` variant skips the write when the map is unchanged, a
-call that rebinds nothing does not repair a row that has diverged from the
-class process's state; only the next rebind to a different map rewrites it.
+Since ADR 0153 (BT-5160) a class process stores no class variables:
+`beamtalk_object_class:init/1` records an empty map once, so
+`beamtalk_class_vars:with_snapshot/2` still finds a live class. BT-5162
+removes these rows together with `with_snapshot/2`.
 """.
 -spec record_class_state_snapshot(pid(), map()) -> ok.
 record_class_state_snapshot(Pid, ClassVars) ->
     ensure_class_state_table(),
     ets:insert(beamtalk_class_state_snapshot, {Pid, ClassVars}),
     ok.
-
--doc """
-`record_class_state_snapshot/2`, skipped when `NewClassVars` is the map the
-snapshot already holds (BT-4758). `OldClassVars` is the class process's own
-state before the mutation, which the snapshot mirrors (init and every rebind
-record it), so an unchanged map needs no ETS write. The comparison is
-pointer-equal in the common no-change case.
-""".
--spec record_class_state_snapshot_if_changed(pid(), map(), map()) -> ok.
-record_class_state_snapshot_if_changed(_Pid, ClassVars, ClassVars) ->
-    ok;
-record_class_state_snapshot_if_changed(Pid, _OldClassVars, NewClassVars) ->
-    record_class_state_snapshot(Pid, NewClassVars).
 
 -doc """
 Look up the current `classState:` map for a class process, telling "no row for this pid" (`not_found`:

@@ -179,13 +179,12 @@ shadow_flag_test_() ->
 %% A compiled class's module is loaded before its class process exists (it
 %% registers from `on_load`); load the helper the same way, since
 %% `function_exported/3` is false for a module not loaded yet.
-start_static_class(Name, Superclass, ClassVars) ->
+start_static_class(Name, Superclass) ->
     {module, ?HELPER} = code:ensure_loaded(?HELPER),
     {ok, Pid} = beamtalk_object_class:start(Name, #{
         superclass => Superclass,
         module => ?HELPER,
         class_methods => ?STATIC_METHODS,
-        class_state => ClassVars,
         meta => ?STATIC_META
     }),
     Pid.
@@ -204,7 +203,6 @@ start_class_on(Name, Superclass, Module) ->
         superclass => Superclass,
         module => Module,
         class_methods => #{testSelf => #{arity => 0}},
-        class_state => #{},
         meta => ?STATIC_META
     }),
     Pid.
@@ -227,7 +225,6 @@ start_raise_class(Name, Module, CallerSafe) ->
         superclass => none,
         module => Module,
         class_methods => #{testSelf => #{arity => 0}},
-        class_state => #{},
         meta => maps:put(caller_safe_class_primitives, CallerSafe, ?STATIC_META)
     }),
     Pid.
@@ -253,7 +250,6 @@ start_constant_class(Name, Module, Constants) ->
         superclass => none,
         module => Module,
         class_methods => #{testSelf => #{arity => 0}},
-        class_state => #{},
         meta => constant_meta(Constants)
     }),
     Pid.
@@ -299,7 +295,7 @@ class_ref_test_() ->
             ?assertEqual(undefined, beamtalk_class_shadow_flags:class_ref('Bt4756Absent'))
         end},
         {"a removed class is not served from the map", fun() ->
-            Pid = start_static_class('Bt4756Gone', none, #{}),
+            Pid = start_static_class('Bt4756Gone', none),
             _ = beamtalk_class_shadow_flags:class_ref('Bt4756Gone'),
             ?assertMatch({beamtalk_object, _, _, Pid}, class_ref_installed('Bt4756Gone')),
             stop_static_class(Pid),
@@ -319,8 +315,8 @@ class_ref_test_() ->
             end)
         end},
         {"a descendant's reference does not depend on, or survive, its own erase", fun() ->
-            Root = start_static_class('Bt4756Root', none, #{}),
-            Leaf = start_static_class('Bt4756Leaf', 'Bt4756Root', #{}),
+            Root = start_static_class('Bt4756Root', none),
+            Leaf = start_static_class('Bt4756Leaf', 'Bt4756Root'),
             try
                 _ = beamtalk_class_shadow_flags:class_ref('Bt4756Leaf'),
                 ok = beamtalk_class_shadow_flags:invalidate('Bt4756Root'),
@@ -334,7 +330,7 @@ class_ref_test_() ->
             Name = 'Bt4756Reload',
             ModB = bt4756_reload_mod,
             ok = load_constant_module(ModB, #{}),
-            Pid = start_static_class(Name, none, #{}),
+            Pid = start_static_class(Name, none),
             try
                 Tag = beamtalk_class_registry:class_object_tag(Name),
                 ?assertEqual(
@@ -552,13 +548,12 @@ start_inheriting_class(Name, Superclass) ->
         superclass => Superclass,
         module => ?HELPER,
         class_methods => #{},
-        class_state => #{},
         meta => ?STATIC_META
     }),
     Pid.
 
 with_static_class(Name, Fun) ->
-    Pid = start_static_class(Name, none, #{}),
+    Pid = start_static_class(Name, none),
     try
         Fun(Pid)
     after
@@ -680,7 +675,7 @@ static_call_target_test_() ->
             end)
         end},
         {"declines when the class process is gone", fun() ->
-            Pid = start_static_class('Bt4316Dead', none, #{}),
+            Pid = start_static_class('Bt4316Dead', none),
             stop_static_class(Pid),
             ?assertNot(target('Bt4316Dead', static_key('Bt4316Dead', class_testSelf), testSelf)),
             ?assert(key_gone('Bt4316Dead'))
@@ -699,7 +694,7 @@ static_call_target_test_() ->
                     beamtalk_class_shadow_flags:clear(runtime_fun, 'Bt4316Shadowed')
                 end
             end),
-            Pid = start_static_class('Bt4316Stateful', none, #{count => 0}),
+            Pid = start_static_class('Bt4316Stateful', none),
             try
                 ?assertMatch(
                     #beamtalk_object{pid = Pid},
@@ -811,7 +806,7 @@ static_call_target_test_() ->
             %% BT-4270: a class-literal signal send keys `{DefiningModule,
             %% FunName, ReceiverTag}`; the value is the dynamic path's
             %% ClassSelf for the receiving class.
-            Root = start_static_class('Bt4270Root', none, #{}),
+            Root = start_static_class('Bt4270Root', none),
             Leaf = start_inheriting_class('Bt4270Leaf', 'Bt4270Root'),
             try
                 Key = static_key('Bt4270Leaf', class_testClassSelf),
@@ -833,7 +828,7 @@ static_call_target_test_() ->
             %% BT-4270: the in-caller path applies the defining class's ADR
             %% 0084 runtime fun instead of its compiled function, so no key
             %% may name that function while the fun is installed.
-            Root = start_static_class('Bt4270FunRoot', none, #{}),
+            Root = start_static_class('Bt4270FunRoot', none),
             Leaf = start_inheriting_class('Bt4270FunLeaf', 'Bt4270FunRoot'),
             try
                 Key = static_key('Bt4270FunLeaf', class_testClassSelf),
@@ -888,7 +883,7 @@ static_call_target_test_() ->
             %% BT-4438: the fun was a selector the root's class table gained;
             %% removing it erases the descendant's key with the root's, and
             %% the descendant's send resolves to the compiled method again.
-            Root = start_static_class('Bt4438FunRoot', none, #{}),
+            Root = start_static_class('Bt4438FunRoot', none),
             Leaf = start_inheriting_class('Bt4438FunLeaf', 'Bt4438FunRoot'),
             try
                 Key = static_key('Bt4438FunLeaf', class_testClassSelf),
@@ -937,7 +932,6 @@ static_call_target_test_() ->
                     #{block => fun(_ClassSelf) -> from_builder end, arity => 1},
                     ?STATIC_METHODS
                 ),
-                class_state => #{},
                 meta => ?STATIC_META
             }),
             try
@@ -1072,8 +1066,8 @@ static_call_target_test_() ->
             end
         end},
         {"an ancestor's write erases a descendant's static call keys", fun() ->
-            Root = start_static_class('Bt4316Root', none, #{}),
-            Leaf = start_static_class('Bt4316Leaf', 'Bt4316Root', #{}),
+            Root = start_static_class('Bt4316Root', none),
+            Leaf = start_static_class('Bt4316Leaf', 'Bt4316Root'),
             try
                 _ = warm('Bt4316Leaf', Leaf),
                 ok = beamtalk_class_shadow_flags:invalidate('Bt4316Root'),
@@ -1084,7 +1078,7 @@ static_call_target_test_() ->
             end
         end},
         {"the class monitor's 'DOWN' erases the class's static call keys", fun() ->
-            Pid = start_static_class('Bt4316Down', none, #{}),
+            Pid = start_static_class('Bt4316Down', none),
             _ = warm('Bt4316Down', Pid),
             stop_static_class(Pid),
             beamtalk_test_wait:until(fun() -> key_gone('Bt4316Down') end, 500)
@@ -1105,7 +1099,7 @@ static_call_target_test_() ->
             %% not let a restart keep serving the dead pid as ClassSelf: the
             %% restart recreates the row via insert/5, which invalidates.
             Name = 'Bt4316Restart',
-            Pid = start_static_class(Name, none, #{}),
+            Pid = start_static_class(Name, none),
             OldRef = warm(Name, Pid),
             ok = beamtalk_class_monitor:unwatch(Name),
             MRef = erlang:monitor(process, Pid),
@@ -1138,7 +1132,7 @@ static_call_target_test_() ->
             %% `renameTo:` keeps the module and the process: before the key
             %% carried the tag, the old name's call site hit the new name's
             %% key and ran with its class reference.
-            Pid = start_static_class('Bt4316Before', none, #{}),
+            Pid = start_static_class('Bt4316Before', none),
             OldKey = static_key('Bt4316Before', class_testSelf),
             NewKey = static_key('Bt4316After', class_testSelf),
             try
@@ -1157,7 +1151,7 @@ static_call_target_test_() ->
         end},
         {"a call site naming a removed class never hits a key a reuse of its module installed",
             fun() ->
-                Old = start_static_class('Bt4316Removed', none, #{}),
+                Old = start_static_class('Bt4316Removed', none),
                 OldKey = static_key('Bt4316Removed', class_testSelf),
                 _ = warm('Bt4316Removed', Old),
                 stop_static_class(Old),
@@ -1211,7 +1205,6 @@ static_call_target_test_() ->
                     superclass => none,
                     module => Module,
                     class_methods => #{kept => #{arity => 0}, dropped => #{arity => 0}},
-                    class_state => #{},
                     meta => ?STATIC_META
                 }),
                 try
