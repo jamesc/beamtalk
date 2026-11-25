@@ -115,6 +115,7 @@ Only affect test, coverage, bless and benchmark runs. None changes shipped behav
 | `BEAMTALK_TEST_HEX_REPO_URL` | Debug builds only: unsigned Hex repository used by native-build tests. |
 | `BEAMTALK_TEST_PORT` | MCP client tests: port of a shared REPL. |
 | `BEAMTALK_TEST_COOKIE` | MCP client tests: cookie of the shared REPL. |
+| `BEAMTALK_EXEC_TEST_BIN` | `beamtalk-exec` end-to-end tests (`tests/port_protocol.rs`): binary to test instead of the one Cargo built, e.g. an older build to show what a test catches. |
 | `BEAMTALK_BIN` | `desktop/e2e/attach-cycle.sh`: path of the `beamtalk` CLI; default `target/debug/beamtalk`. |
 | `BT_ATTACH_LAUNCHER` | `desktop/e2e/attach-cycle.sh`: path of the LiveView release launcher; default `dist-liveview/bin/server`. (The desktop shell's own override is `BEAMTALK_ATTACH_LAUNCHER`.) |
 | `BT_E2E_WORKSPACE_ID` | `desktop/e2e/attach-cycle.sh`: workspace id the e2e run creates; default `bt2989_desktop_e2e`. |
