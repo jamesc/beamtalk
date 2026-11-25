@@ -99,7 +99,7 @@ memo reads; it invalidates on its own rather than relying on
 (re)creation of the metadata table itself — calls `invalidate/0` *after* the
 write has landed. So do the class-side writes the `class_method_owner` memo
 reads: `set_runtime_class_methods/2` (an ADR 0084 fun's selector),
-`put_class_variables/2` and `put_process_bound_selectors/2`, each on a change,
+`put_process_bound_selectors/2`, on a change,
 and the constructor facts `put_direct_constructors/2` and
 `put_defines_user_class_new1/2` (BT-4409) and `put_defines_user_class_new0/2` (BT-4479).
 Invalidation is global, not per class: a derived fact about
