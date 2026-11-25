@@ -1,7 +1,7 @@
 # ADR 0116: Double-Dispatch Coercion for Number-on-the-Left Arithmetic
 
 ## Status
-Implemented (2026-08-25) — Phases 1–4 landed (BT-3262–BT-3266, parent BT-2712); 2026-10-18 addendum follow-ups BT-3892, BT-3924, BT-3925 also Done. The 2026-11-25 addendum (comparison operators, BT-5176) is **Accepted (2026-11-25)** and not yet implemented.
+Implemented (2026-08-25) — Phases 1–4 landed (BT-3262–BT-3266, parent BT-2712); 2026-10-18 addendum follow-ups BT-3892, BT-3924, BT-3925 also Done. The 2026-11-25 addendum (comparison operators, BT-5176) is **Accepted (2026-11-25)**; its runtime entry point `send_number_comparison/4` and the reworded arithmetic hint (decision 4) landed in BT-5208, codegen (Phase 2) onward pending.
 
 ## Context
 
@@ -318,9 +318,9 @@ send_number_coercion(Right, Selector, Args, OrigOp) ->
             %% (decision 4); the original "~s has no '~s' — implement it to
             %% support 'number ~s ~s' arithmetic" read as advice to add a
             %% method to `nil`.
-            Hint = iolist_to_binary(io_lib:format(
-                "'~s' cannot combine a number with ~s — the right operand "
-                "must be a number, or a value whose class implements '~s'",
+            Hint = unicode:characters_to_binary(io_lib:format(
+                "'~ts' cannot combine a number with ~ts — the right operand "
+                "must be a number, or a value whose class implements '~ts'",
                 [OrigOp, RightClass, Selector])),
             HintedError = beamtalk_error:with_hint(Error, Hint),
             erlang:raise(error, beamtalk_exception_handler:wrap(HintedError), Stack)

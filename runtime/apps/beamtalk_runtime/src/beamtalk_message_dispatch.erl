@@ -317,8 +317,8 @@ send_reflected(Right, Selector, Args, OrigOp, Wording) ->
         }:Stack ->
             Hint = unicode:characters_to_binary(
                 io_lib:format(
-                    "'~s' cannot ~s a number ~s ~s — the right operand must be a number, "
-                    "or a value whose class implements '~s'",
+                    "'~ts' cannot ~s a number ~s ~ts — the right operand must be a number, "
+                    "or a value whose class implements '~ts'",
                     [OrigOp, hint_verb(Wording), hint_preposition(Wording), RightClass, Selector]
                 )
             ),
