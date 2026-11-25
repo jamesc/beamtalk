@@ -429,7 +429,8 @@ tls_preflight(
     case [Problem || {error, Problem} <- Checks] of
         [] ->
             {ok, H} = Host,
-            {ok, {Ip, Notes}} = Interface,
+            {ok, {Ip, Notes0}} = Interface,
+            Notes = Notes0 ++ [Note || {note, Note} <- [EpmdCheck]],
             {ok, F} = OptFile,
             Proto =
                 case tuple_size(Ip) of
@@ -481,14 +482,26 @@ epmd_port(GetEnv) ->
 %% An epmd already running on loopback but not on the interface keeps its
 %% address (it is shared, and binds whatever the first starter gave it), so
 %% this node would register where no other host can look it up. Nothing to
-%% check for a loopback or every-interface listener.
+%% check for a loopback listener. For every interface (`0.0.0.0`, `::`) a
+%% probe cannot tell the cases apart (it always reaches loopback), so a
+%% running epmd only earns a note.
 tls_epmd(Ip, Port, Epmd) ->
-    Skip =
-        beamtalk_dist_address:is_loopback(Ip) orelse
-            Ip =:= {0, 0, 0, 0} orelse Ip =:= {0, 0, 0, 0, 0, 0, 0, 0},
-    case Skip orelse not Epmd({127, 0, 0, 1}, Port) orelse Epmd(Ip, Port) of
+    Wildcard = Ip =:= {0, 0, 0, 0} orelse Ip =:= {0, 0, 0, 0, 0, 0, 0, 0},
+    case
+        beamtalk_dist_address:is_loopback(Ip) orelse not Epmd({127, 0, 0, 1}, Port) orelse
+            (not Wildcard andalso Epmd(Ip, Port))
+    of
         true ->
             ok;
+        false when Wildcard ->
+            {note,
+                io_lib:format(
+                    "an epmd is already running on this host (port ~b) and keeps the address "
+                    "it was started with; if a loopback release or a beamtalk REPL started it, "
+                    "other hosts cannot find this node (check with `epmd -names` from another "
+                    "host, or run `epmd -kill` and start this node first)",
+                    [Port]
+                )};
         false ->
             {error,
                 io_lib:format(

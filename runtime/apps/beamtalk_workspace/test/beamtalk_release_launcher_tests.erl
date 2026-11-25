@@ -225,7 +225,10 @@ tls_preflight_epmd_test_() ->
                 ),
                 ?_assertMatch({ok, _}, Run("10.0.0.5", [{127, 0, 0, 1}, {10, 0, 0, 5}])),
                 ?_assertMatch({ok, _}, Run("10.0.0.5", [])),
-                ?_assertMatch({ok, _}, Run("0.0.0.0", [{127, 0, 0, 1}])),
+                %% Every interface: a probe always reaches loopback, so a
+                %% running epmd is a note, not a refusal.
+                ?_assertMatch({ok, #{notes := [_]}}, Run("0.0.0.0", [{127, 0, 0, 1}])),
+                ?_assertMatch({ok, #{notes := []}}, Run("0.0.0.0", [])),
                 ?_assertMatch({ok, _}, Run("127.0.0.1", [{127, 0, 0, 1}]))
             ]
         end}.

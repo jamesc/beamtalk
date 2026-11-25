@@ -881,6 +881,19 @@ mod tests {
         assert_eq!(out.status.code(), Some(2));
         assert!(String::from_utf8_lossy(&out.stderr).contains("plain TCP off-host is not offered"));
         assert!(!String::from_utf8_lossy(&out.stdout).contains("ARG["));
+        // `version` starts no distribution, so it does not care.
+        let out = std::process::Command::new("sh")
+            .arg(base.join("bin/orders").as_std_path())
+            .arg("version")
+            .env("PATH", &path)
+            .env("RELEASE_DISTRIBUTION", "tcp")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
 
         // No opt-in: loopback, as before, and the check never runs.
         let out = std::process::Command::new("sh")

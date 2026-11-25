@@ -42,14 +42,14 @@ rem ADR 0126 amendment D2 (BT-5233): RELEASE_DISTRIBUTION=tls is the only way
 rem off loopback (TLS distribution with peer verification); see launcher.sh's
 rem identical check. Plain TCP off-host is not offered. Delayed expansion
 rem only, as for RELEASE_NODE below: the value is never expanded where
-rem cmd.exe tokenizes operators.
+rem cmd.exe tokenizes operators. Any other value is refused by
+rem :select_distribution, so version and eval (no distribution) still run.
 set "DIST_MODE=loopback"
 if defined RELEASE_DISTRIBUTION (
     if "!RELEASE_DISTRIBUTION!"=="tls" (
         set "DIST_MODE=tls"
     ) else (
-        echo error: RELEASE_DISTRIBUTION "!RELEASE_DISTRIBUTION!" is not supported: unset it to stay on this host, or set it to 'tls' to cluster across hosts over TLS with peer verification; plain TCP off-host is not offered 1>&2
-        exit /b 2
+        set "DIST_MODE=unsupported"
     )
 )
 
@@ -291,6 +291,10 @@ rem an IPv6 address can start with ':', which `for /f` would skip as a
 rem delimiter. The values are validated by the check, so they are safe to
 rem expand. epmd then follows the interface.
 :select_distribution
+if "%DIST_MODE%"=="unsupported" (
+    echo error: RELEASE_DISTRIBUTION "!RELEASE_DISTRIBUTION!" is not supported: unset it to stay on this host, or set it to 'tls' to cluster across hosts over TLS with peer verification; plain TCP off-host is not offered 1>&2
+    exit /b 2
+)
 if /I not "%DIST_MODE%"=="tls" exit /b 0
 call :lib_pa_args
 call :minimal_boot_args

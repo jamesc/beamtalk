@@ -1291,11 +1291,15 @@ fn release_launcher_tls_distribution_opt_in_test() {
     let cookie = format!("bt5233_test_cookie_{}", std::process::id());
     let node = format!("bt5233_node_{}", std::process::id());
 
+    // On Unix the node listens on every interface, a different value from
+    // `vm.args`'s loopback pin, so `remote_console` below can show the
+    // launcher's `-kernel inet_dist_use_interface` won (first-wins).
+    let interface = if cfg!(unix) { "0.0.0.0" } else { "127.0.0.1" };
     let tls_env = |optfile: &std::path::Path| -> Vec<(&'static str, std::ffi::OsString)> {
         vec![
             ("RELEASE_DISTRIBUTION", "tls".into()),
             ("RELEASE_HOST", "127.0.0.1".into()),
-            ("RELEASE_DIST_INTERFACE", "127.0.0.1".into()),
+            ("RELEASE_DIST_INTERFACE", interface.into()),
             ("RELEASE_SSL_DIST_OPTFILE", optfile.as_os_str().to_owned()),
         ]
     };
@@ -1457,7 +1461,8 @@ fn release_launcher_tls_distribution_opt_in_test() {
         let mut stdin = rc.stdin.take().unwrap();
         stdin
             .write_all(
-                b"{node(), net_kernel:get_net_ticktime() > 0, init:get_argument(proto_dist)}.\n",
+                b"{node(), init:get_argument(proto_dist), \
+                  application:get_env(kernel, inet_dist_use_interface)}.\n",
             )
             .expect("feed remote_console");
         drop(stdin);
@@ -1473,7 +1478,9 @@ fn release_launcher_tls_distribution_opt_in_test() {
         let out = rc.wait_with_output().expect("remote_console output");
         let text = String::from_utf8_lossy(&out.stdout);
         assert!(
-            text.contains(&format!("{node}@127.0.0.1")) && text.contains("inet_tls"),
+            text.contains(&format!("{node}@127.0.0.1"))
+                && text.contains("inet_tls")
+                && text.contains("{ok,{0,0,0,0}}"),
             "remote_console must reach the TLS node: stdout={text} stderr={}",
             String::from_utf8_lossy(&out.stderr)
         );

@@ -75,13 +75,12 @@ export ERL_EPMD_ADDRESS
 # RELEASE_SSL_DIST_OPTFILE before any distributed node starts, and every verb
 # then uses `-name`, `-proto_dist inet_tls` and that option file. Plain TCP
 # off-host is not offered.
+# Any other value is refused by `select_distribution`, so only the verbs that
+# start distribution fail on it (`version` and `eval` start none).
 case "${RELEASE_DISTRIBUTION:-}" in
     '') DIST_MODE=loopback ;;
     tls) DIST_MODE=tls ;;
-    *)
-        echo "error: RELEASE_DISTRIBUTION '$RELEASE_DISTRIBUTION' is not supported: unset it to stay on this host, or set it to 'tls' to cluster across hosts over TLS with peer verification (plain TCP off-host is not offered)" >&2
-        exit 2
-        ;;
+    *) DIST_MODE=unsupported ;;
 esac
 
 # Reject a malformed RELEASE_NODE before it ever reaches `erl` — an invalid
@@ -305,6 +304,10 @@ TLS_INTERFACE=""
 TLS_HOST=""
 TLS_OPTFILE=""
 select_distribution() {
+    if [ "$DIST_MODE" = "unsupported" ]; then
+        echo "error: RELEASE_DISTRIBUTION '$RELEASE_DISTRIBUTION' is not supported: unset it to stay on this host, or set it to 'tls' to cluster across hosts over TLS with peer verification (plain TCP off-host is not offered)" >&2
+        exit 2
+    fi
     [ "$DIST_MODE" = "tls" ] || return 0
     eval "set -- -noshell $(minimal_boot_args) $(lib_pa_args) \
         -args_file \"\$CONFIG_DIR/vm.args\" \
