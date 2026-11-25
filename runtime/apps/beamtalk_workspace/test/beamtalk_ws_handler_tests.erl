@@ -628,6 +628,48 @@ handshake_auth_error_matches_shared_wire_corpus_test() ->
     {Frames, _State} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
     assert_fixed_fields(AuthError, first_text(Frames)).
 
+%% BT-5188: the identity proof agrees with the vector the Rust side checks.
+identity_proof_matches_shared_wire_corpus_test() ->
+    Cases = load_ws_auth_handshake_wire_corpus(),
+    Reply = wire_corpus_case(<<"identity_reply">>, Cases),
+    #{<<"nonce">> := Nonce, <<"challenge">> := Challenge} = maps:get(<<"vector">>, Reply),
+    #{<<"proof">> := Proof} = maps:get(<<"frame">>, Reply),
+    ?assertEqual(Proof, beamtalk_ws_handler:identity_proof(Nonce, Challenge)).
+
+%% Runs `Fun` with `beamtalk_repl_server:get_nonce/0` answering `Nonce`,
+%% whether or not a real server is registered.
+with_fake_repl_server(Nonce, Fun) ->
+    ok = meck:new(beamtalk_repl_server, [passthrough, no_link]),
+    try
+        meck:expect(beamtalk_repl_server, get_nonce, fun() -> {ok, Nonce} end),
+        Fun()
+    after
+        meck:unload(beamtalk_repl_server)
+    end.
+
+%% BT-5188: `identify` is answered with the proof, and the connection stays
+%% unauthenticated and open for the `auth` that follows.
+identify_replies_with_proof_and_stays_unauthenticated_test() ->
+    Cases = load_ws_auth_handshake_wire_corpus(),
+    Reply = wire_corpus_case(<<"identity_reply">>, Cases),
+    #{<<"nonce">> := Nonce, <<"challenge">> := Challenge} = maps:get(<<"vector">>, Reply),
+    Request = maps:get(<<"frame">>, wire_corpus_case(<<"identify_request">>, Cases)),
+    ?assertEqual(Challenge, maps:get(<<"challenge">>, Request)),
+    Json = iolist_to_binary(json:encode(Request)),
+    {Frames, State} = with_fake_repl_server(Nonce, fun() ->
+        beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state())
+    end),
+    ?assertEqual([{text, iolist_to_binary(json:encode(maps:get(<<"frame">>, Reply)))}], Frames),
+    ?assertNot(State#ws_state.authenticated).
+
+%% BT-5188: a challenge outside 16-256 bytes is not an identify request.
+identify_with_short_challenge_is_rejected_test() ->
+    Json = iolist_to_binary(
+        json:encode(#{<<"type">> => <<"identify">>, <<"challenge">> => <<"short">>})
+    ),
+    {Frames, _} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
+    ?assertMatch([{text, _}, {close, 1008, _}], Frames).
+
 %%% ===========================================================================
 %%% websocket_handle/2 — non-text frames + post-auth dispatch
 %%% ===========================================================================
