@@ -149,8 +149,6 @@ supervisor (OTP `calling_self`, raw or wrapped by dispatch) gets the
 """.
 -spec config_step(atom(), atom(), fun(() -> T)) -> T.
 config_step(ClassName, Selector, Fun) ->
-    %% bt-catcher-audit: not-applicable-reraises - every clause exits init/1, so the
-    %% supervisor process (and any class-variable region in it) ends here
     try
         Fun()
     catch

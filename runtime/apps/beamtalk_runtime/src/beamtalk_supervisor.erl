@@ -384,11 +384,7 @@ start_lock_error(ClassName, lost) ->
 -spec initialize_result(atom(), atom(), tuple(), fun((tuple()) -> ok)) ->
     {ok, tuple()} | {error, #beamtalk_error{}}.
 initialize_result(ClassName, Selector, SupTuple, Step) ->
-    %% bt-catcher-audit: converted - `initialize` runs in this process (it may
-    %% be a class method's `self supervise`, inside the class's invocation), so
-    %% it runs under protect/1 and its class-variable writes are discarded
-    %% before the error is answered as a Result
-    try beamtalk_class_vars:protect(fun() -> Step(SupTuple) end) of
+    try Step(SupTuple) of
         ok -> {ok, SupTuple}
     catch
         throw:Nlr:Stack when ?IS_NLR(Nlr) ->
@@ -2344,8 +2340,6 @@ a Beamtalk `Result` for the stdlib method body.
 -spec with_live_supervisor(tuple(), atom(), fun(() -> term())) ->
     term() | {error, #beamtalk_error{}}.
 with_live_supervisor(Self, Selector, Fun) ->
-    %% bt-catcher-audit: not-applicable-other-process - Fun is a supervisor:* call; child code
-    %% runs in the supervisor
     try
         Fun()
     catch

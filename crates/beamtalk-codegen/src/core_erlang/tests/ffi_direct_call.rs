@@ -4,7 +4,7 @@
 //! BT-4485: an inline FFI call whose spec proves the result needs no
 //! coercion, and whose arguments are proved to reach the callee unchanged,
 //! compiles to a direct remote call wrapped in the proxy's error translation
-//! (`beamtalk_erlang_proxy:ffi_call_raised/8`, `/9` for a binary or map argument). Anything the FFI type table
+//! (`beamtalk_erlang_proxy:ffi_call_raised/8`). Anything the FFI type table
 //! cannot prove keeps `beamtalk_erlang_proxy:direct_call/4`.
 
 use super::{assert_has, assert_lacks, codegen_named};
@@ -469,8 +469,7 @@ fn dynamic_value_result_is_built_inline() {
 
 /// BT-4770: a `Dictionary` argument is proved (the stock-mode unwrap is shallow
 /// and a map is never a tagged String), guarded at run time by `is_map`. The
-/// `badarg` retry deep-unwraps a map, so the call site keeps the class-variable
-/// snapshot for it (`ffi_call_raised/9`), as for a binary.
+/// `badarg` retry deep-unwraps a map, in `ffi_call_raised/8`, as for a binary.
 #[test]
 fn dictionary_arg_is_direct_behind_is_map_guard() {
     let code = compile_run_body("Erlang erlang map_size: d");

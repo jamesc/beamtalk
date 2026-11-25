@@ -131,8 +131,6 @@ warning in this process (`beamtalk_refactor_support:note_changelog_result/1`).
     Result :: tuple().
 with_changelog_warnings(Fun) ->
     ok = beamtalk_refactor_support:begin_changelog_warnings(),
-    %% bt-catcher-audit: not-applicable-reraises - the catch only clears the
-    %% collection marker and re-raises, so the next boundary restores class variables.
     Result =
         try
             Fun()
@@ -569,8 +567,6 @@ do_eval_trace_expression(Expression, State) ->
                 {module, ModuleName} ->
                     CaptureRef = beamtalk_io_capture:start(undefined),
                     EvalResult =
-                        %% bt-catcher-audit: not-applicable-other-process - traced eval runs in
-                        %% the session eval worker, no home entry
                         try
                             {RawSteps, UpdatedBindings} = apply(ModuleName, eval, [
                                 Bindings
@@ -827,21 +823,10 @@ run_self_eval_module(ModuleName, Binary, Bindings) ->
     purge_eval_module(ModuleName),
     case code:load_binary(ModuleName, "", Binary) of
         {module, ModuleName} ->
-            %% bt-catcher-audit: converted - the eval runs under protect/1, which restores on
-            %% error (BT-3728)
             try
-                %% The evaluated source runs in this process, which may be a class
-                %% invocation process (Inspector `evaluate:` called from a class
-                %% method), and a block it runs may write class variables. This
-                %% catch swallows the error, so the writes must be rolled back
-                %% like any other protected region (ADR 0130 §4, BT-3728). A `^`
-                %% (`$bt_nlr`) unwinding out of a block run here is re-raised below
-                %% to its home frame; `protect/1` passes it through without
-                %% restoring, so the writes made before the `^` are kept, as for
-                %% any `^` crossing a protected region (ADR 0130 §4, BT-3735).
-                {RawResult, _UpdatedBindings} = beamtalk_class_vars:protect(fun() ->
-                    apply(ModuleName, eval, [Bindings])
-                end),
+                %% A `^` (`$bt_nlr`) unwinding out of a block run here is
+                %% re-raised below to its home frame (BT-3735).
+                {RawResult, _UpdatedBindings} = apply(ModuleName, eval, [Bindings]),
                 case maybe_await_future(RawResult) of
                     {future_rejected, FutureReason} ->
                         %% An awaited future that rejected/timed out is an error,

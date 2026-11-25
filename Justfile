@@ -999,7 +999,6 @@ lint-repo: \
     lint-banned-patterns \
     lint-beamtalk-stdlib \
     lint-binary-literal-encoding \
-    lint-class-var-catchers \
     lint-compiler-made-names \
     lint-coverage-skips \
     lint-duplicate-erlang-modules \
@@ -1253,23 +1252,6 @@ lint-duplicate-erlang-modules:
 [windows]
 lint-duplicate-erlang-modules:
     @echo "lint-duplicate-erlang-modules: skipped on Windows (covered by Linux CI)"
-
-# Guard (BT-3769, ADR 0130 §4): every runtime/stdlib `try ... catch` (or old-style
-# `catch`) whose body applies a fun or a dynamic module call must run it under
-# `beamtalk_class_vars:protect/1` or carry a `%% bt-catcher-audit: <disposition> -
-# <reason>` marker (vocabulary: docs/development/class-var-catcher-audit.md).
-# Parses with epp_dodger/erl_syntax. The self-test first proves the lint fails on
-# the fixtures in scripts/ci/fixtures/lint-class-var-catchers/ (an unmarked
-# `Block()` under a catch, stale and invalid markers). Unix-only like the other
-# repo-wide lints; Linux CI covers it.
-[unix]
-lint-class-var-catchers:
-    @escript scripts/ci/lint-class-var-catchers.escript --self-test
-    @escript scripts/ci/lint-class-var-catchers.escript
-
-[windows]
-lint-class-var-catchers:
-    @echo "lint-class-var-catchers: skipped on Windows (covered by Linux CI)"
 
 # Guard (BT-4616): no old-style `catch Expr` in runtime/perf/benchmark Erlang
 # (deprecated in OTP 29); use `try ... catch ... end`. Unix-only; Linux CI covers it.

@@ -291,7 +291,7 @@ impl CoreErlangGenerator {
     /// `direct_call/4` when one fails. The call keeps the proxy's error
     /// translation: a raise is handed, with the arguments and the call
     /// site's frame (read only on that path), to
-    /// `beamtalk_erlang_proxy:ffi_call_raised/8` (`/9` with a binary or map argument), which runs the same
+    /// `beamtalk_erlang_proxy:ffi_call_raised/8`, which runs the same
     /// classifier (and `badarg` charlist retry) as `direct_call/4`.
     /// Arguments are bound before the `try`, so a raise while evaluating one
     /// is not translated, as on the proxy path.
@@ -533,9 +533,9 @@ impl CoreErlangGenerator {
             leaf::var(site_var.clone()),
         ];
         // `/8` without a context; `/10` adds the `{Class, Selector}` context of
-        // a delegate (BT-4765) after a `'none'` snapshot slot (ADR 0153: compiled
-        // code reads no class-variable snapshot; the runtime's slot stays until
-        // Phase 3 removes it).
+        // a delegate (BT-4765) after a `'none'` in the former class-variable
+        // snapshot slot, which the runtime ignores (ADR 0153; the arity stays
+        // for modules built by an older compiler).
         if let Some(context) = context {
             raised_args.push(leaf::atom("none"));
             raised_args.push(context.clone());
