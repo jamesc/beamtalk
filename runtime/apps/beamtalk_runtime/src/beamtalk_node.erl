@@ -534,7 +534,9 @@ do_connect(Self, Name) ->
             %% OTP `global` shares names with a new peer in the background;
             %% wait for that so a `scope: #global` name is visible from the
             %% peer as soon as `connect` answers (BT-5156).
-            ok = global:sync(),
+            %% A sync failure (e.g. bad `global_groups` config) does not undo
+            %% the connection, so still answer ok.
+            _ = global:sync(),
             {ok, Self};
         false ->
             {error,
