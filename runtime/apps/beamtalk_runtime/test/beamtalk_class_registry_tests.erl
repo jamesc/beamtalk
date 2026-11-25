@@ -2806,25 +2806,3 @@ bt4758_class_object_tag_memoised_test() ->
         Expected,
         persistent_term:get({beamtalk_class_registry, class_object_tag, Name})
     ).
-
-bt4758_snapshot_if_changed_writes_only_on_change_test() ->
-    ok = beamtalk_class_registry:ensure_class_state_table(),
-    Pid = spawn(fun() ->
-        receive
-            stop -> ok
-        end
-    end),
-    Old = #{a => 1},
-    %% Changed map: written.
-    ok = beamtalk_class_registry:record_class_state_snapshot_if_changed(Pid, #{}, Old),
-    ?assertEqual({ok, Old}, beamtalk_class_registry:class_state_snapshot_lookup(Pid)),
-    %% Unchanged map: no write (a sentinel row proves the skip).
-    ets:insert(beamtalk_class_state_snapshot, {Pid, sentinel}),
-    ok = beamtalk_class_registry:record_class_state_snapshot_if_changed(Pid, Old, Old),
-    ?assertEqual({ok, sentinel}, beamtalk_class_registry:class_state_snapshot_lookup(Pid)),
-    %% A later change overwrites again.
-    New = Old#{b => 2},
-    ok = beamtalk_class_registry:record_class_state_snapshot_if_changed(Pid, Old, New),
-    ?assertEqual({ok, New}, beamtalk_class_registry:class_state_snapshot_lookup(Pid)),
-    ets:delete(beamtalk_class_state_snapshot, Pid),
-    Pid ! stop.

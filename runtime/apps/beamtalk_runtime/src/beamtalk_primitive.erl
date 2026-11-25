@@ -935,7 +935,7 @@ class_responds_to(ClassName, Selector) ->
             %% selectors are not part of a class object's protocol (a send
             %% raises does_not_understand, `try_class_chain_fallthrough/3`),
             %% although `Object` declares them for instances.
-            not beamtalk_object_class:is_class_var_reflection_selector(Selector) andalso
+            not beamtalk_object_class:is_field_reflection_selector(Selector) andalso
                 beamtalk_dispatch:responds_to(Selector, 'Class')
     end.
 
