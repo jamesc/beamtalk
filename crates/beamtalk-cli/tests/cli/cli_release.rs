@@ -943,6 +943,12 @@ fn spawn_foreground_and_wait_for_ping(
             .iter()
             .find_map(|v| v.strip_prefix("BEAMTALK_COOKIE_HOME="))
             .expect("the node booted from a private cookie home");
+        // `ping` answers once distribution is up, which can be before
+        // `beamtalk_runtime` starts and removes the directory.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::path::Path::new(home).exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(100)); // sleep: poll for the node's restore step
+        }
         assert!(
             !std::path::Path::new(home).exists(),
             "the node removes its private cookie home once up"

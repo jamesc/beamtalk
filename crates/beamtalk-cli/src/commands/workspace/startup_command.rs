@@ -194,7 +194,7 @@ pub(super) fn build_detached_node_command(
     }
 
     // Last, so it replaces the HOME forwarded above (BT-5185).
-    cookie_home.apply(&mut cmd);
+    cookie_home.apply_cleared(&mut cmd);
 
     cmd
 }

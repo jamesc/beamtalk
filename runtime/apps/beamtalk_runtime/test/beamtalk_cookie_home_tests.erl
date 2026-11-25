@@ -15,6 +15,7 @@ boot home is undone and removed, the home variables come back as they were.
 %% `with_tmp_home/1` points HOME at a fresh directory, standing in for the
 %% private cookie home the launcher made, and restores the real HOME after.
 restore_puts_home_back_and_removes_the_cookie_home_test() ->
+    OrigDrive = os:getenv("HOMEDRIVE"),
     beamtalk_test_fs:with_tmp_home(fun(Private) ->
         Cookie = filename:join(Private, ".erlang.cookie"),
         ok = file:write_file(Cookie, <<"secret">>),
@@ -31,12 +32,20 @@ restore_puts_home_back_and_removes_the_cookie_home_test() ->
             ?assertEqual(false, os:getenv("BEAMTALK_ORIG_HOMEDRIVE")),
             ?assertNot(filelib:is_file(Cookie)),
             ?assertNot(filelib:is_dir(Private)),
+            ?assert(beamtalk_cookie_home:booted_with_cookie()),
             %% Idempotent: nothing left to do.
             ?assertEqual(none, beamtalk_cookie_home:restore()),
             ?assertEqual("/original/home", os:getenv("HOME"))
         after
-            os:unsetenv("HOMEDRIVE"),
-            os:unsetenv("BEAMTALK_COOKIE_HOME")
+            case OrigDrive of
+                false -> os:unsetenv("HOMEDRIVE");
+                Drive -> os:putenv("HOMEDRIVE", Drive)
+            end,
+            [
+                os:unsetenv(V)
+             || V <- ["BEAMTALK_COOKIE_HOME", "BEAMTALK_ORIG_HOME", "BEAMTALK_ORIG_HOMEDRIVE"]
+            ],
+            _ = persistent_term:erase({beamtalk_cookie_home, booted_with_cookie})
         end
     end).
 
@@ -52,6 +61,7 @@ restore_never_removes_other_files_test() ->
         ?assert(filelib:is_file(Other))
     after
         os:unsetenv("BEAMTALK_COOKIE_HOME"),
+        _ = persistent_term:erase({beamtalk_cookie_home, booted_with_cookie}),
         beamtalk_test_fs:rm_rf(Dir)
     end.
 

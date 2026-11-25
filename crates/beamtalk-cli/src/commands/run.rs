@@ -744,8 +744,8 @@ fn node_name_flag(node_name: &str) -> &'static str {
 /// it.
 ///
 /// A named node starts epmd if none is running, so this goes through
-/// [`beamtalk_workspace::erl_command`], which pins epmd's bind address
-/// (BT-3987).
+/// `cookie_env::erl_command` (the resolved real `erl`, BT-5185), which pins
+/// epmd's bind address (BT-3987).
 fn run_hidden_client(
     args: &[OsString],
     project_root: &std::path::Path,

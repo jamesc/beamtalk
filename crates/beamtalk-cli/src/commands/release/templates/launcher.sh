@@ -199,7 +199,7 @@ export_cookie() {
     fi
     if [ "$USING_HOST_ERTS" = "true" ]; then
         erl_root=$("$ERL" -noshell -noinput -boot no_dot_erlang \
-            -eval 'io:format("~s", [code:root_dir()]), halt().' 2>/dev/null) || erl_root=""
+            -eval 'io:format("~ts", [code:root_dir()]), halt().' 2>/dev/null) || erl_root=""
         if [ -n "$erl_root" ] && [ -x "$erl_root/bin/erl" ]; then
             ERL="$erl_root/bin/erl"
         fi

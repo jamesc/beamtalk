@@ -124,7 +124,10 @@ private directory under `$TMPDIR` (`%TEMP%` on Windows), starts `erl` with that
 directory as its home, and clears `RELEASE_COOKIE` so processes the node starts
 do not inherit it. The node removes the directory as it boots; if it crashes
 before then, a `beamtalk-cookie.*` directory readable only by the service user
-is left in the temp directory.
+is left in the temp directory. So every verb that uses the cookie needs a
+writable temp directory: with a read-only root filesystem (Kubernetes
+`readOnlyRootFilesystem`), mount a small writable volume (an `emptyDir`) and
+point `TMPDIR` at it.
 
 ## Docker
 

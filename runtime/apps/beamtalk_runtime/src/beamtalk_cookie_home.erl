@@ -29,9 +29,14 @@ The launcher records what it changed:
 starts later sees the private home. It is the first `-eval` of every
 CLI-started node and the first step of `beamtalk_runtime_app:start/2` (the
 earliest Beamtalk code in a release); a second call is a no-op.
+
+Two things stay as they were at boot: `init:get_argument(home)` names the
+(removed) private directory, so code should read `HOME` instead; and a
+`~/.erlang` file in the real home is not evaluated at boot. Ports and epmd
+started before `restore/0` inherit the private `HOME`.
 """.
 
--export([restore/0, home_env/0, orig_prefix/0, home_vars/0]).
+-export([restore/0, booted_with_cookie/0, home_env/0, orig_prefix/0, home_vars/0]).
 
 -define(HOME_ENV, "BEAMTALK_COOKIE_HOME").
 -define(ORIG_PREFIX, "BEAMTALK_ORIG_").
@@ -62,10 +67,20 @@ restore() ->
             _ = file:delete(filename:join(Dir, ".erlang.cookie")),
             _ = file:del_dir(Dir),
             true = os:unsetenv(?HOME_ENV),
+            persistent_term:put({?MODULE, booted_with_cookie}, true),
             restored;
         _ ->
             none
     end.
+
+-doc """
+True when this node booted with its cookie from a private cookie home, i.e.
+the operator supplied one (`RELEASE_COOKIE`) rather than OTP falling back to
+`~/.erlang.cookie`. `beamtalk_workspace_app` accepts it like `-setcookie`.
+""".
+-spec booted_with_cookie() -> boolean().
+booted_with_cookie() ->
+    persistent_term:get({?MODULE, booted_with_cookie}, false).
 
 restore_var(Var) ->
     Key = ?ORIG_PREFIX ++ Var,

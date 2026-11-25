@@ -98,16 +98,30 @@ impl CookieHome {
 
     /// Make the private directory `cmd`'s home for `erlexec`, recording the
     /// values replaced so [`RESTORE_HOME_EVAL`] can put them back. Call it
-    /// after anything else that sets a home variable on `cmd`.
+    /// after anything else that sets a home variable on `cmd`. For a `cmd`
+    /// that inherits this process's environment.
     pub(crate) fn apply(&self, cmd: &mut Command) {
+        self.apply_with(cmd, true);
+    }
+
+    /// [`CookieHome::apply`] for a `cmd` whose environment was cleared
+    /// (`env_clear()`): a home variable it does not set itself is recorded as
+    /// unset, never taken from this process.
+    pub(crate) fn apply_cleared(&self, cmd: &mut Command) {
+        self.apply_with(cmd, false);
+    }
+
+    fn apply_with(&self, cmd: &mut Command, inherits: bool) {
         for var in HOME_VARS {
-            let original = cmd
+            let explicit = cmd
                 .get_envs()
                 .find(|(k, _)| *k == OsStr::new(var))
-                .map_or_else(
-                    || std::env::var_os(var),
-                    |(_, v)| v.map(OsStr::to_os_string),
-                );
+                .map(|(_, v)| v.map(OsStr::to_os_string));
+            let original = match explicit {
+                Some(value) => value,
+                None if inherits => std::env::var_os(var),
+                None => None,
+            };
             let mut recorded = OsString::new();
             match original {
                 Some(value) => {
@@ -162,7 +176,8 @@ pub(crate) fn erl_program() -> OsString {
 /// Ask `erl` (through any shim, with this process's environment) where its
 /// installation is, and return that installation's own `bin/erl`.
 fn resolve_erl_program() -> Option<OsString> {
-    let probe = "io:format(\"erl-root:~s~n\", [code:root_dir()]), halt().";
+    // `~ts`: the root may hold characters above U+00FF.
+    let probe = "io:format(\"erl-root:~ts~n\", [code:root_dir()]), halt().";
     let output = beamtalk_workspace::erl_command()
         .args([
             "-noshell",
@@ -229,6 +244,17 @@ mod tests {
             Some("set:/real/home")
         );
         assert!(cmd.get_args().all(|a| a != "-setcookie"));
+
+        // A cleared environment records an unset home as unset, not this
+        // process's value.
+        let mut cleared = Command::new("not-spawned");
+        cleared.env_clear();
+        home.apply_cleared(&mut cleared);
+        let orig = cleared
+            .get_envs()
+            .find(|(n, _)| *n == OsStr::new(&format!("{ORIG_PREFIX}HOME")))
+            .and_then(|(_, v)| v);
+        assert_eq!(orig, Some(OsStr::new("unset")));
         assert!(cmd.get_envs().all(|(_, v)| v.is_none_or(|v| v != "s3cr3t")));
     }
 
