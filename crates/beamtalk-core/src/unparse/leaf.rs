@@ -80,7 +80,7 @@ pub(super) fn float_lit(value: f64) -> Document<'static> {
 
 /// A character literal (`$a`, `$\n`).
 ///
-/// Control characters and the backslash are re-escaped; all other characters
+/// CR, LF, TAB, NUL and the backslash are re-escaped; all other characters
 /// are emitted directly after the `$` sigil.
 #[must_use]
 pub(super) fn char_lit(c: char) -> Document<'static> {
@@ -89,6 +89,8 @@ pub(super) fn char_lit(c: char) -> Document<'static> {
         '\t' => "\\t".to_string(),
         '\r' => "\\r".to_string(),
         '\\' => "\\\\".to_string(),
+        // `$\0` is NUL (BT-5182); a raw NUL byte would not round-trip.
+        '\0' => "\\0".to_string(),
         _ => c.to_string(),
     };
     Document::Owned(format!("${repr}"))
@@ -238,6 +240,7 @@ mod tests {
         assert_eq!(render(&char_lit('\r')), "$\\r");
         assert_eq!(render(&char_lit('\\')), "$\\\\");
         assert_eq!(render(&char_lit('$')), "$$");
+        assert_eq!(render(&char_lit('\0')), "$\\0");
     }
 
     #[test]

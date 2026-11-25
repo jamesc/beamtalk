@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5182: radix and big integer literals evaluated end to end. These live
+// here rather than in stdlib/test because `beamtalk fmt` still rewrites radix
+// literals to decimal (BT-5183), which would erase what they test.
+
+// A negative radix literal is one literal, not `-16` sent `rFF`
+-16rFF
+// => -255
+
+3 + -2r1010
+// => -7
+
+// Integer literals have no size limit (BEAM bignums). printString shows the
+// exact value; the protocol's JSON number would round it.
+100000000000000000000 printString
+// => "100000000000000000000"
+
+16rFFFFFFFFFFFFFFFFFF printString
+// => "4722366482869645213695"
+
+-36rZZZZZZZZZZZZZZZZ printString
+// => "-7958661109946400884391935"
+
+16rFFFFFFFFFFFFFFFFFF =:= ("FFFFFFFFFFFFFFFFFF" asIntegerRadix: 16)
+// => true
+
+// An exponent or radix with no digits is a named compile error
+1e
+// => ERROR: float exponent in `1e` has no digits
+
+16r
+// => ERROR: radix integer `16r` has no digits
+
+// Character escapes mean what string escapes mean
+$\0 =:= (Character value: 0)
+// => true
+
+$\q
+// => ERROR: unknown escape

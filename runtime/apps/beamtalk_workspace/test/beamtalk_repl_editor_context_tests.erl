@@ -57,6 +57,11 @@ assert_literal_span_case(#{
             <<"string">> ->
                 {ok, R} = beamtalk_repl_editor_context:skip_string_literal(Source),
                 R;
+            <<"unterminated_string">> ->
+                %% BT-5182: ends at the end of its opening line, or before a
+                %% definition header.
+                {ok, R} = beamtalk_repl_editor_context:skip_string_literal(Source),
+                R;
             <<"character">> ->
                 beamtalk_repl_editor_context:skip_character_literal(Source)
         end,
@@ -92,6 +97,9 @@ assert_comment_span_case(#{
             <<"line_comment">> ->
                 beamtalk_repl_editor_context:skip_line_comment(Source);
             <<"block_comment">> ->
+                beamtalk_repl_editor_context:skip_block_comment(Source);
+            <<"unterminated_block_comment">> ->
+                %% BT-5182: ends before the next definition header.
                 beamtalk_repl_editor_context:skip_block_comment(Source)
         end,
     Consumed = length(Source) - length(Remaining),
@@ -99,6 +107,26 @@ assert_comment_span_case(#{
         ExpectedEnd,
         Consumed,
         lists:flatten(io_lib:format("span-end mismatch for ~p (~ts)", [Source, Why]))
+    ).
+
+%% BT-5182: `is_definition_header/1` mirrors the Rust lexer's
+%% `is_definition_header`, the line test an unterminated string or block
+%% comment stops at. Both sides run `test/fixtures/definition_header_corpus.json`
+%% — see `source_analysis::parser::tests::lexer_recovery_tests::
+%% definition_header_agrees_with_parser` for the Rust side.
+definition_header_matches_shared_corpus_test() ->
+    Cases = load_fixture("definition_header_corpus.json"),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(#{<<"line">> := LineBin, <<"header">> := Expected, <<"why">> := Why}) ->
+            Line = unicode:characters_to_list(LineBin),
+            ?assertEqual(
+                Expected,
+                beamtalk_repl_editor_context:is_definition_header(Line),
+                lists:flatten(io_lib:format("header mismatch for ~p (~ts)", [Line, Why]))
+            )
+        end,
+        Cases
     ).
 
 %%====================================================================

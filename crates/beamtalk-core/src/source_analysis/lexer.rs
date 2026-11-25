@@ -85,6 +85,15 @@ type SavedPosition<'src> = (usize, Peekable<CharIndices<'src>>);
 /// incomplete and asks for another line; see [`is_unterminated_error`].
 const UNTERMINATED_PREFIX: &str = "unterminated ";
 
+/// `true` if a [`TokenKind::Error`] carries a human-readable message (an
+/// English sentence starting with a lowercase letter, e.g. "single-quoted
+/// strings are no longer supported...") rather than a raw source fragment
+/// (an unknown character, or `$` at end of input).
+#[must_use]
+pub(crate) fn is_message_error(text: &str) -> bool {
+    text.starts_with(|c: char| c.is_ascii_lowercase())
+}
+
 /// `true` if a [`TokenKind::Error`] message reports an unterminated string
 /// literal or block comment, the one family of lexer errors that more input
 /// can fix.
@@ -326,7 +335,13 @@ impl<'src> Lexer<'src> {
         }
         at = target;
         self.line_memo = (at, line, line_start);
-        let column = self.origin[line_start..target].chars().count();
+        // A leading byte-order mark is skipped, so it takes no column.
+        let column_start = if line_start == 0 && self.origin.starts_with(BYTE_ORDER_MARK) {
+            BYTE_ORDER_MARK.len_utf8()
+        } else {
+            line_start
+        };
+        let column = self.origin[column_start..target].chars().count();
         (line + 1, column + 1)
     }
 
@@ -461,7 +476,8 @@ impl<'src> Lexer<'src> {
             // Rewind and stop before the next definition header, leaving the
             // blank lines before it as that header's leading trivia.
             if let Some(header) = self.next_definition_header_after(start as usize) {
-                let end = start as usize + self.source[start as usize..header].trim_end().len();
+                let body = &self.source[start as usize..header];
+                let end = start as usize + body.trim_end_matches([' ', '\t', '\r', '\n']).len();
                 self.restore_position(at_start);
                 while self.position < end {
                     self.advance();
@@ -882,7 +898,9 @@ impl<'src> Lexer<'src> {
                             // span still covers just the offending backslash.
                             self.advance(); // consume the escaped char
                             let escape_end = self.current_position();
-                            self.skip_to_string_end();
+                            if let Some(unterminated) = self.skip_to_string_end() {
+                                return unterminated;
+                            }
                             self.override_span = Some(Span::new(escape_pos, escape_end));
                             return TokenKind::Error(EcoString::from(format!(
                                 "unknown escape '\\{c}' in string literal — \
@@ -932,22 +950,21 @@ impl<'src> Lexer<'src> {
     /// delimiter, `\` escapes the next char (so `\"` doesn't end the skip),
     /// and `{...}` interpolation bodies — which may contain nested strings
     /// with their own quotes — are skipped with the real nesting scan.
-    /// Stops after the closing `"`; a string with none is unterminated, so
-    /// lexing resumes at the end of the line it opened on instead.
-    fn skip_to_string_end(&mut self) {
+    /// Stops after the closing `"` and answers `None`. A string with none is
+    /// unterminated: answers that error instead, with the lexer rewound to
+    /// the end of the line the string opened on, which outranks the unknown
+    /// escape (more input can still close the string).
+    fn skip_to_string_end(&mut self) -> Option<TokenKind> {
         loop {
             match self.peek_char() {
-                None => {
-                    self.unterminated_string();
-                    break;
-                }
+                None => return Some(self.unterminated_string()),
                 Some('"') if self.peek_char_n(1) == Some('"') => {
                     self.advance(); // first "
                     self.advance(); // second "
                 }
                 Some('"') => {
                     self.advance(); // closing quote
-                    break;
+                    return None;
                 }
                 Some('\\') => {
                     self.advance(); // backslash
@@ -958,13 +975,16 @@ impl<'src> Lexer<'src> {
                 Some('{') => {
                     self.advance(); // consume `{`
                     // A `"` inside the interpolation must not end the skip;
-                    // reuse the real nesting scan and discard its result —
-                    // the unknown-escape diagnostic (recorded by the caller)
-                    // stands regardless. Every `Err` path leaves the lexer
-                    // at the end of the string's first line or just past the
-                    // closing quote, so `break` is safe.
-                    if self.lex_interpolation_body().is_err() {
-                        break;
+                    // reuse the real nesting scan. An unterminated string
+                    // comes back rewound and is answered; any other error
+                    // (an unescaped `{`) leaves the lexer just past the
+                    // closing quote, and the unknown escape stands.
+                    match self.lex_interpolation_body() {
+                        Ok(_) => {}
+                        Err(TokenKind::Error(message)) if is_unterminated_error(&message) => {
+                            return Some(TokenKind::Error(message));
+                        }
+                        Err(_) => return None,
                     }
                 }
                 Some(_) => {
@@ -3202,7 +3222,8 @@ mod tests {
                     (kind, tokens[0].kind()),
                     ("string", TokenKind::String(_) | TokenKind::StringStart(_))
                         | ("character", TokenKind::Character(_))
-                ),
+                ) || (kind == "unterminated_string"
+                    && matches!(tokens[0].kind(), TokenKind::Error(m) if is_unterminated_error(m))),
                 "expected a {kind} token for {source:?}, got {:?} ({why})",
                 tokens[0].kind()
             );
@@ -3259,6 +3280,20 @@ mod tests {
                 !tokens.is_empty(),
                 "expected at least an EOF token for {source:?} ({why})"
             );
+            if kind == "unterminated_block_comment" {
+                // The comment is an error token, the first token (BT-5182).
+                assert!(
+                    matches!(tokens[0].kind(), TokenKind::Error(m) if is_unterminated_error(m)),
+                    "expected an unterminated block comment for {source:?}, got {:?} ({why})",
+                    tokens[0].kind()
+                );
+                assert_eq!(
+                    u64::from(tokens[0].span().end()),
+                    expected_end,
+                    "span-end mismatch for {source:?} ({why})"
+                );
+                continue;
+            }
             let leading = tokens[0].leading_trivia();
             assert!(
                 !leading.is_empty(),

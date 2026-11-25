@@ -40,5 +40,17 @@
     "source": "// note\r\nbeta := 2",
     "expected_end": 7,
     "why": "a line comment in a CRLF file ends before the \\r\\n line ending; the \\r is not part of the comment (BT-5182)"
+  },
+  {
+    "kind": "unterminated_block_comment",
+    "source": "/* abc",
+    "expected_end": 6,
+    "why": "an unterminated block comment with no later definition runs to end of input"
+  },
+  {
+    "kind": "unterminated_block_comment",
+    "source": "/* abc\n  x\n\nObject subclass: Foo\n  y => 1",
+    "expected_end": 10,
+    "why": "an unterminated block comment ends before the next definition header, less the blank lines in front of it (BT-5182)"
   }
 ]

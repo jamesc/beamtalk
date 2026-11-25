@@ -58,7 +58,8 @@ Extracted from beamtalk_repl_ops_dev (BT-4706).
     skip_string_literal/1,
     skip_character_literal/1,
     skip_line_comment/1,
-    skip_block_comment/1
+    skip_block_comment/1,
+    is_definition_header/1
 ]).
 
 %% Export internals for white-box testing.
@@ -847,9 +848,11 @@ Skips one string literal starting at the opening `"`, returning
 Mirrors `lex_string/0` (`source_analysis/lexer.rs`): `""` (doubled delimiter)
 is a literal `"` inside the string, and `\` escapes whatever character
 follows it — including another `\`, a `"`, or a `{` — so that pair is always
-consumed together and never independently reopens/closes the string. An
-unterminated plain string (malformed input that would already have failed
-compilation before reaching here) returns `{ok, []}`.
+consumed together and never independently reopens/closes the string. A
+string never runs over a line that starts a definition
+(`is_definition_header/1`), and an unterminated plain string ends at the end
+of the line it opens on, as the lexer recovers (BT-5182), so the text after
+a missing `"` still scans as code.
 
 An unescaped `{` starts a string interpolation, skipped by
 `skip_interpolation_body/1`, a mirror of `lex_interpolation_body` (brace
@@ -866,11 +869,19 @@ and `source_analysis::lexer::tests::string_and_character_literal_span_matches_sh
 """.
 -spec skip_string_literal(string()) -> {ok, string()} | unsupported.
 skip_string_literal([$" | Rest]) ->
-    skip_string_literal_body(Rest).
+    case skip_string_literal_body(Rest) of
+        unterminated -> {ok, drop_to_line_end(Rest)};
+        Result -> Result
+    end.
 
--spec skip_string_literal_body(string()) -> {ok, string()} | unsupported.
+-spec skip_string_literal_body(string()) -> {ok, string()} | unterminated | unsupported.
 skip_string_literal_body([]) ->
-    {ok, []};
+    unterminated;
+skip_string_literal_body([$\n | Next]) ->
+    case is_definition_header(Next) of
+        true -> unterminated;
+        false -> skip_string_literal_body(Next)
+    end;
 skip_string_literal_body([${ | Rest]) ->
     case skip_interpolation_body(Rest) of
         {ok, After} -> skip_string_literal_body(After);
@@ -883,9 +894,92 @@ skip_string_literal_body([$" | Rest]) ->
 skip_string_literal_body([$\\, _Escaped | Rest]) ->
     skip_string_literal_body(Rest);
 skip_string_literal_body([$\\]) ->
-    {ok, []};
+    unterminated;
 skip_string_literal_body([_ | Rest]) ->
     skip_string_literal_body(Rest).
+
+%% The characters from the end of the current line on: its `\n`, or the
+%% `\r\n` of a CRLF line ending, is not consumed (`advance_to_line_end`).
+-spec drop_to_line_end(string()) -> string().
+drop_to_line_end([]) -> [];
+drop_to_line_end([$\n | _] = Chars) -> Chars;
+drop_to_line_end([$\r, $\n | _] = Chars) -> Chars;
+drop_to_line_end([_ | Rest]) -> drop_to_line_end(Rest).
+
+-doc """
+Whether `Line` (text from column 1 of a line) starts a top-level class or
+protocol definition: optional `abstract` / `sealed` / `typed` / `internal`
+modifiers, a superclass name (optionally package-qualified, `json@Parser`,
+and with type arguments, `Collection(E)`), then `subclass:`; or
+`Protocol define:`. An unterminated string or block comment stops before
+such a line (BT-5182).
+
+Mirrors `is_definition_header` (`source_analysis/lexer.rs`); both run the
+shared corpus `test/fixtures/definition_header_corpus.json` — see
+`beamtalk_repl_editor_context_tests:definition_header_matches_shared_corpus_test/0`
+and `source_analysis::parser::tests::lexer_recovery_tests::definition_header_agrees_with_parser`.
+""".
+-spec is_definition_header(string()) -> boolean().
+is_definition_header(Line) ->
+    case header_identifier(Line) of
+        {"Protocol", After} -> lists:prefix("define:", skip_blanks(After));
+        {Name, After} -> header_after_modifiers(Name, After);
+        none -> false
+    end.
+
+-spec header_after_modifiers(string(), string()) -> boolean().
+header_after_modifiers(Name, After) when
+    Name =:= "abstract"; Name =:= "sealed"; Name =:= "typed"; Name =:= "internal"
+->
+    case header_identifier(skip_blanks(After)) of
+        {Next, Rest} -> header_after_modifiers(Next, Rest);
+        none -> false
+    end;
+header_after_modifiers(_Superclass, After) ->
+    case header_qualifier(After) of
+        {ok, Rest} ->
+            case header_type_args(Rest) of
+                {ok, Tail} -> lists:prefix("subclass:", skip_blanks(Tail));
+                error -> false
+            end;
+        error ->
+            false
+    end.
+
+%% Package qualifier: `@Parser` after `json`.
+-spec header_qualifier(string()) -> {ok, string()} | error.
+header_qualifier([$@ | Rest]) ->
+    case header_identifier(Rest) of
+        {_, After} -> {ok, After};
+        none -> error
+    end;
+header_qualifier(Rest) ->
+    {ok, Rest}.
+
+%% Superclass type arguments: `(E)`, `(K, Seq(V))`, closed on the same line.
+-spec header_type_args(string()) -> {ok, string()} | error.
+header_type_args([$( | _] = Chars) -> header_parens(Chars, 0);
+header_type_args(Chars) -> {ok, Chars}.
+
+-spec header_parens(string(), non_neg_integer()) -> {ok, string()} | error.
+header_parens([], _Depth) -> error;
+header_parens([$\n | _], _Depth) -> error;
+header_parens([$( | Rest], Depth) -> header_parens(Rest, Depth + 1);
+header_parens([$) | Rest], 1) -> {ok, Rest};
+header_parens([$) | Rest], Depth) -> header_parens(Rest, Depth - 1);
+header_parens([_ | Rest], Depth) -> header_parens(Rest, Depth).
+
+-spec header_identifier(string()) -> {string(), string()} | none.
+header_identifier([C | _] = Chars) when
+    (C >= $a andalso C =< $z) orelse (C >= $A andalso C =< $Z) orelse C =:= $_
+->
+    lists:splitwith(fun(Ch) -> is_ascii_alphanumeric(Ch) orelse Ch =:= $_ end, Chars);
+header_identifier(_) ->
+    none.
+
+-spec skip_blanks(string()) -> string().
+skip_blanks(Chars) ->
+    lists:dropwhile(fun(C) -> C =:= $\s orelse C =:= $\t end, Chars).
 
 %% Mirror of `lex_interpolation_body` (`source_analysis/lexer.rs`): `Chars`
 %% starts just after the interpolation's opening `{`; returns the characters
@@ -1014,8 +1108,10 @@ skip_line_comment_body([_ | Rest]) ->
 
 -doc """
 Skips one `/* ... */` block comment starting at the opening `/*`, returning
-the characters immediately after its closing `*/`, or `[]` if the comment
-is unterminated (runs to end of input).
+the characters immediately after its closing `*/`. An unterminated comment
+ends before the next line that starts a definition
+(`is_definition_header/1`), less the whitespace in front of that line, or
+runs to end of input when there is none, as the lexer recovers (BT-5182).
 
 Mirrors `lex_block_comment/0` (`source_analysis/lexer.rs`): the whole span,
 delimiters included, is consumed atomically, so a `.`, bracket, or `"`
@@ -1032,12 +1128,35 @@ see `beamtalk_repl_editor_context_tests:comment_span_matches_shared_corpus_test/
 """.
 -spec skip_block_comment(string()) -> string().
 skip_block_comment([$/, $* | Rest]) ->
-    skip_block_comment_body(Rest).
+    case skip_block_comment_body(Rest) of
+        {ok, After} -> After;
+        unterminated -> unterminated_comment_end(Rest, [])
+    end.
 
--spec skip_block_comment_body(string()) -> string().
+-spec skip_block_comment_body(string()) -> {ok, string()} | unterminated.
 skip_block_comment_body([]) ->
-    [];
+    unterminated;
 skip_block_comment_body([$*, $/ | Rest]) ->
-    Rest;
+    {ok, Rest};
 skip_block_comment_body([_ | Rest]) ->
     skip_block_comment_body(Rest).
+
+%% The rest after an unterminated comment's body: from the whitespace in front
+%% of the first definition-header line on, or `[]`. `Seen` is the body so far,
+%% reversed.
+-spec unterminated_comment_end(string(), string()) -> string().
+unterminated_comment_end([], _Seen) ->
+    [];
+unterminated_comment_end([$\n | Next] = Chars, Seen) ->
+    case is_definition_header(Next) of
+        true ->
+            {Blanks, _} = lists:splitwith(fun is_trailing_blank/1, Seen),
+            lists:reverse(Blanks) ++ Chars;
+        false ->
+            unterminated_comment_end(Next, [$\n | Seen])
+    end;
+unterminated_comment_end([C | Rest], Seen) ->
+    unterminated_comment_end(Rest, [C | Seen]).
+
+-spec is_trailing_blank(char()) -> boolean().
+is_trailing_blank(C) -> C =:= $\s orelse C =:= $\t orelse C =:= $\r orelse C =:= $\n.

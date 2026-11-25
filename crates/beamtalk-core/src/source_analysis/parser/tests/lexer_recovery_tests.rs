@@ -142,11 +142,32 @@ fn unterminated_string_with_unknown_escape_does_not_swallow_file() {
     let (module, diagnostics) = parse_file(source);
     assert_eq!(class_names(&module), ["B"]);
     assert!(
-        errors(&diagnostics)
-            .iter()
-            .any(|d| d.message.contains("unknown escape")),
-        "{diagnostics:?}"
+        errors(&diagnostics).iter().any(|d| d
+            .message
+            .starts_with("unterminated string literal starting at line 1")),
+        "the open string outranks its unknown escape: {diagnostics:?}"
     );
+}
+
+#[test]
+fn unknown_escape_in_unterminated_multi_line_string_reports_the_string() {
+    // The string outranks the escape: more input can still close it. Spans
+    // must stay in order (no token re-lexes the escape after a rewind).
+    let source = "x := \"abc\nde\\q f";
+    let tokens = lex(source);
+    for pair in tokens.windows(2) {
+        assert!(
+            pair[0].span().end() <= pair[1].span().start(),
+            "spans out of order: {tokens:?}"
+        );
+    }
+    assert!(
+        tokens.iter().any(
+            |t| matches!(t.kind(), TokenKind::Error(m) if m.starts_with("unterminated string literal"))
+        ),
+        "{tokens:?}"
+    );
+    assert!(!is_input_complete(source));
 }
 
 #[test]
@@ -308,6 +329,19 @@ fn integer_literals_of_any_size_parse() {
 }
 
 #[test]
+fn integer_literal_length_is_capped() {
+    let at_limit = "9".repeat(10_000);
+    assert!(matches!(literal_of(&at_limit), Literal::BigInteger(digits) if digits == at_limit));
+    let (_, diagnostics) = parse_file(&"9".repeat(10_001));
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message == "Integer literal is too long (10001 characters, maximum 10000)"),
+        "{diagnostics:?}"
+    );
+}
+
+#[test]
 fn integer_literals_at_the_i64_boundary_stay_small() {
     assert_eq!(
         literal_of("9223372036854775807"),
@@ -419,6 +453,17 @@ fn byte_order_mark_is_skipped() {
     let tokens = lex(source);
     assert_eq!(tokens[0].span(), Span::new(3, 9));
     assert!(tokens[0].leading_trivia().is_empty());
+}
+
+#[test]
+fn byte_order_mark_takes_no_column() {
+    let (_, diagnostics) = parse_file("\u{FEFF}x := \"abc");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("starting at line 1, column 6")),
+        "{diagnostics:?}"
+    );
 }
 
 #[test]
@@ -565,11 +610,14 @@ fn fuzz_seeds_recover() {
 // Definition-header detection
 // ============================================================================
 
-/// The parser's verdict on `line`: does it start a class or protocol
-/// definition?
+/// The parser's verdict on `line` as a line of a file: does it start a class
+/// or protocol definition at column 1? (The parser itself has no notion of
+/// column; the lexer only stops at headers in column 1, where every
+/// definition in a file starts.)
 fn parser_sees_definition(line: &str) -> bool {
     let parser = Parser::new(lex_with_eof(line));
-    parser.is_at_class_definition() || parser.is_at_protocol_definition()
+    !line.starts_with([' ', '\t'])
+        && (parser.is_at_class_definition() || parser.is_at_protocol_definition())
 }
 
 /// The lexer's textual header check (used where no tokens exist yet) and the
@@ -580,36 +628,31 @@ fn parser_sees_definition(line: &str) -> bool {
 fn definition_header_agrees_with_parser() {
     use crate::source_analysis::lexer::is_definition_header;
 
-    let table = [
-        ("Object subclass: Foo", true),
-        ("Actor subclass: Counter", true),
-        ("sealed Object subclass: Foo", true),
-        ("abstract typed Object subclass: Foo", true),
-        ("internal sealed Value subclass: Point", true),
-        ("json@Parser subclass: MyParser", true),
-        ("Collection(E) subclass: Bag(E)", true),
-        ("Mapping(K, Seq(V)) subclass: Multi(K, V)", true),
-        ("Object  subclass:Foo", true),
-        ("Protocol define: Greeter", true),
-        ("Protocol  define: Greeter", true),
-        ("  Object subclass: Foo", false),
-        ("Object subclass Foo", false),
-        ("Object foo: Bar", false),
-        ("Protocol defines: Greeter", false),
-        ("sealed Protocol define: Greeter", false),
-        ("x := Object subclass: Foo", false),
-        ("// Object subclass: Foo", false),
-        ("\"Object subclass: Foo\"", false),
-        ("Object(E subclass: Foo", false),
-        ("type Pair = Tuple", false),
-        ("", false),
-    ];
-    for (line, expected) in table {
-        assert_eq!(is_definition_header(line), expected, "lexer on {line:?}");
-        assert_eq!(parser_sees_definition(line), expected, "parser on {line:?}");
+    // The shared fixture the Erlang mirror (`beamtalk_repl_editor_context:
+    // is_definition_header/1`) also runs.
+    let root = beamtalk_workspace::cargo_workspace_root!();
+    let path =
+        root.join("runtime/apps/beamtalk_workspace/test/fixtures/definition_header_corpus.json");
+    let raw = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+    let cases: Vec<serde_json::Value> = serde_json::from_str(&raw).expect("corpus is a JSON array");
+    assert!(!cases.is_empty(), "corpus must have cases");
+    for case in &cases {
+        let line = case["line"].as_str().expect("line is a string");
+        let expected = case["header"].as_bool().expect("header is a bool");
+        let why = case["why"].as_str().unwrap_or("");
+        assert_eq!(
+            is_definition_header(line),
+            expected,
+            "lexer on {line:?} ({why})"
+        );
+        assert_eq!(
+            parser_sees_definition(line),
+            expected,
+            "parser on {line:?} ({why})"
+        );
     }
 
-    let root = beamtalk_workspace::cargo_workspace_root!();
     let mut checked = 0;
     for dir in ["stdlib/src", "stdlib/test", "examples"] {
         let mut stack = vec![root.join(dir)];

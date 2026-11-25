@@ -569,7 +569,7 @@ pub fn needs_blank_line_to_complete(source: &str) -> bool {
 /// the raw source text (e.g., `$` at end of input), which starts with a
 /// delimiter character.
 fn is_diagnostic_error(msg: &str) -> bool {
-    msg.starts_with(|c: char| c.is_ascii_lowercase()) && !super::lexer::is_unterminated_error(msg)
+    super::lexer::is_message_error(msg) && !super::lexer::is_unterminated_error(msg)
 }
 
 /// The semantic category of a diagnostic, used by `@expect` for suppression.

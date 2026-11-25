@@ -34,6 +34,10 @@ pub(super) fn parse_integer(s: &str) -> Result<i64, String> {
     }
 }
 
+/// The longest integer literal, in characters, [`parse_integer_literal`]
+/// accepts.
+const MAX_INTEGER_LITERAL_DIGITS: usize = 10_000;
+
 /// Parses an integer literal token's text into a [`Literal::Integer`] when
 /// it fits `i64`, else a [`Literal::BigInteger`] (BT-5182): integer literals
 /// have no size limit, as BEAM integers have none.
@@ -42,6 +46,15 @@ pub(super) fn parse_integer(s: &str) -> Result<i64, String> {
 /// before the digits into the token), decimal digits, or radix notation
 /// `<radix>r<digits>` with a radix from 2 to 36 (`16rFF`, `-2r1010`).
 pub(super) fn parse_integer_literal(s: &str) -> Result<Literal, String> {
+    // Converting digits to decimal is quadratic in their count; no real
+    // literal comes near this, and a pasted megabyte of digits must not
+    // stall the parser (and with it the language server).
+    if s.len() > MAX_INTEGER_LITERAL_DIGITS {
+        return Err(format!(
+            "Integer literal is too long ({} characters, maximum {MAX_INTEGER_LITERAL_DIGITS})",
+            s.len()
+        ));
+    }
     let (negative, unsigned) = match s.strip_prefix('-') {
         Some(rest) => (true, rest),
         None => (false, s),
@@ -1284,7 +1297,7 @@ impl Parser {
             TokenKind::Error(text) => {
                 let text = text.clone();
                 let span = self.advance().span();
-                let message: EcoString = if text.starts_with(|c: char| c.is_ascii_lowercase()) {
+                let message: EcoString = if super::super::lexer::is_message_error(&text) {
                     text
                 } else {
                     // A raw source fragment (an unknown character, or `$`
