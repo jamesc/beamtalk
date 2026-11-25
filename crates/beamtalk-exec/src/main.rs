@@ -457,13 +457,15 @@ fn spawn_child(request: &SpawnRequest, port: &Port) -> Result<(), String> {
         return Err("stdout/stderr not captured".to_string());
     };
     let stdin = child.stdin.take().map(|s| spawn_stdin_writer(child_id, s));
-    #[cfg(unix)]
-    if let Some(watchdog) = watchdog {
-        watchdog.register(pgid);
-    }
 
     let gate = Arc::new(EventGate::default());
     if let Ok(mut map) = port.children.lock() {
+        // Registered under the children lock, like the reaper's unregister,
+        // so a recycled group number's `+` and `-` cannot interleave.
+        #[cfg(unix)]
+        if let Some(watchdog) = watchdog {
+            watchdog.register(pgid);
+        }
         map.insert(
             child_id,
             ChildEntry {
@@ -529,8 +531,13 @@ fn reap(
     // the drain (a `setsid` grandchild can hold the pipes for a while).
     #[cfg(unix)]
     let group_gone = || {
-        if !gate.forgotten.load(Ordering::Acquire) && !watchdog::group_exists(pgid) {
-            port.forget_pgid(pgid, gate);
+        if !gate.forgotten.load(Ordering::Acquire) {
+            // Under the children lock, so a spawn that reuses this group
+            // number cannot register it between the check and the unregister.
+            let _map = port.children.lock();
+            if !watchdog::group_exists(pgid) {
+                port.forget_pgid(pgid, gate);
+            }
         }
         gate.forgotten.load(Ordering::Acquire)
     };
@@ -800,11 +807,12 @@ fn handle_kill_with(
         let Some(pgid) = entry.signallable_pgid() else {
             return Ok(()); // Exited, and nothing it left behind remains.
         };
-        drop(map);
-        // SIGTERM to the whole process group. The group outlives the child
-        // while a grandchild holds the pipes, so this reaches it too.
+        // SIGTERM to the whole process group, still under the lock that
+        // vouched for it. The group outlives the child while a grandchild
+        // holds the pipes, so this reaches it too.
         // SAFETY: kill(2) to a process group this port created.
         let rc = unsafe { libc::kill(-pgid, libc::SIGTERM) };
+        drop(map);
         if rc < 0 {
             let err = io::Error::last_os_error();
             if err.raw_os_error() == Some(libc::ESRCH) {
