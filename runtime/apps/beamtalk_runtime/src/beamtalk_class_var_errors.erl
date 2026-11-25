@@ -160,7 +160,7 @@ raise_read_only(Class, Name) ->
     Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
             "This code runs against a read-only snapshot of ~ts's class variables "
-            "(supervisor definition, a class `initialize:` hook, or `performLocally:`). "
+            "(a supervisor definition or a class `initialize:` hook). "
             "Assign the variable from one of ~ts's own class methods, sent as a normal "
             "class-side message.",
             [Class, Class]

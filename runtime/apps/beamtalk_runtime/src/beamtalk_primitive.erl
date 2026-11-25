@@ -927,17 +927,18 @@ its class methods) would actually work.
 """.
 -spec class_responds_to(atom(), atom()) -> boolean().
 class_responds_to(ClassName, Selector) ->
-    %% ADR 0153 decision 7 (BT-5155): a class answers the instance-field
-    %% reflection selectors with does_not_understand on every route
-    %% (`beamtalk_object_class:dispatch_class_method/5`,
-    %% `beamtalk_class_dispatch:try_class_chain_fallthrough/3`), even when it
-    %% defines a class method of that name (which the compiler already warns
-    %% is shadowed), although `Object` declares them for instances.
-    case beamtalk_object_class:is_class_var_reflection_selector(Selector) of
+    case beamtalk_class_dispatch:class_understands_class_selector(ClassName, Selector) of
         true ->
-            false;
+            %% Includes a class method named `fieldAt:` etc.: a send with a
+            %% non-Symbol argument reaches it (only a Symbol-named send is
+            %% intercepted, `beamtalk_object_class:class_var_reflection_op/2`).
+            true;
         false ->
-            beamtalk_class_dispatch:class_understands_class_selector(ClassName, Selector) orelse
+            %% ADR 0153 decision 7 (BT-5155): the instance-field reflection
+            %% selectors are not part of a class object's protocol (a send
+            %% raises does_not_understand, `try_class_chain_fallthrough/3`),
+            %% although `Object` declares them for instances.
+            not beamtalk_object_class:is_class_var_reflection_selector(Selector) andalso
                 beamtalk_dispatch:responds_to(Selector, 'Class')
     end.
 
