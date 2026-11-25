@@ -10,11 +10,10 @@ use std::collections::HashMap;
 use crate::announce_selectors::is_announce_selector;
 use crate::ast::{Expression, Literal, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
+use crate::semantic_analysis::number_coercion::reflected_operator;
 use crate::semantic_analysis::string_utils::is_symbol_singleton_name;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span, equality_operator_is_negated};
 use ecow::EcoString;
-
-use crate::semantic_analysis::number_coercion::reflected_operator;
 
 use super::super::diagnostic_facts::ClassObjectType;
 use super::super::known_remote;

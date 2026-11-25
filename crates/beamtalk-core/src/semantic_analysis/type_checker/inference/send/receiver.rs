@@ -1153,9 +1153,14 @@ impl TypeChecker {
                 class_name: arg_ty, ..
             }),
         ) = (selector, arg_types.first())
+            && !super::super::super::is_type_var_placeholder(arg_ty, hierarchy)
             && let Some(hook) = Self::reflected_hook(hierarchy, class_name, op, arg_ty)
-            && let Some(ret_ty) = hook.return_type.as_ref()
         {
+            // A hook with no declared return type is not the numeric
+            // operator's result either: answer Dynamic, never `Integer>>+`.
+            let Some(ret_ty) = hook.return_type.as_ref() else {
+                return ControlFlow::Break(InferredType::Dynamic(DynamicReason::DynamicReceiver));
+            };
             let hook_ctx = SendCtx {
                 receiver_ty: &arg_types[0],
                 ..*ctx

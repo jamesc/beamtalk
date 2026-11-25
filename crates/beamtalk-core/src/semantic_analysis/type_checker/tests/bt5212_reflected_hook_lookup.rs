@@ -91,12 +91,65 @@ fn untyped_argument_is_silent() {
 fn hook_parameter_is_checked_against_the_receiver() {
     let src = "typed Value subclass: Vec\n  plusFromNumber: n :: String -> Vec => self\n\n\
                typed Value subclass: Probe\n  run: v :: Vec =>\n    5 + v\n";
-    let diags = diags_parse_ok(src);
+    let msgs: Vec<String> = diags_parse_ok(src)
+        .iter()
+        .map(|d| d.message.to_string())
+        .filter(|m| !m.starts_with("Missing return type"))
+        .collect();
+    assert_eq!(msgs.len(), 1, "{msgs:?}");
     assert!(
-        diags
-            .iter()
-            .any(|d| d.message.contains("plusFromNumber:") || d.message.contains("String")),
-        "{:?}",
-        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        msgs[0].contains("plusFromNumber:") && msgs[0].contains("String"),
+        "{msgs:?}"
     );
+}
+
+fn run_type(src: &str) -> (Option<InferredType>, Vec<Diagnostic>) {
+    let (types, diags) = return_types_and_diags(src);
+    (
+        types.get(&("Probe".into(), "run:".into(), false)).cloned(),
+        // Annotation-completeness lints are not what these tests are about.
+        diags
+            .into_iter()
+            .filter(|d| !d.message.starts_with("Missing return type"))
+            .collect(),
+    )
+}
+
+#[test]
+fn hook_without_return_annotation_is_not_typed_as_the_number_result() {
+    let src = "typed Value subclass: Money\n  plusFromNumber: n :: Number => self\n\n\
+               typed Value subclass: Probe\n  run: m :: Money =>\n    5 + m\n";
+    let (ty, diags) = run_type(src);
+    assert!(diags.is_empty(), "{diags:?}");
+    assert!(
+        !matches!(
+            ty.as_ref()
+                .and_then(InferredType::as_known)
+                .map(|s| s.as_str()),
+            Some("Integer")
+        ),
+        "{ty:?}"
+    );
+}
+
+#[test]
+fn inherited_hook_and_float_receiver_are_found() {
+    let src = "typed Value subclass: Base\n  plusFromNumber: n :: Number -> Base => self\n\n\
+               Base subclass: Money\n\n\
+               typed Value subclass: Probe\n  run: m :: Money =>\n    5.5 + m\n";
+    let (ty, diags) = run_type(src);
+    assert!(diags.is_empty(), "{diags:?}");
+    assert_eq!(
+        ty.as_ref()
+            .and_then(InferredType::as_known)
+            .map(|s| s.as_str()),
+        Some("Base")
+    );
+}
+
+#[test]
+fn numeric_argument_does_not_take_the_hook_path() {
+    let src = "typed Value subclass: Probe\n  run: m :: Float =>\n    5 + m\n";
+    let (_, diags) = run_type(src);
+    assert!(diags.is_empty(), "{diags:?}");
 }
