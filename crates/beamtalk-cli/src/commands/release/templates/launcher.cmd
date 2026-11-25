@@ -214,6 +214,7 @@ for /l %%N in (1,1,50) do if not defined COOKIE_HOME (
     set "COOKIE_TRY=%TEMP%\beamtalk-cookie-!RANDOM!!RANDOM!!RANDOM!!RANDOM!"
     mkdir "!COOKIE_TRY!" >nul 2>&1 && set "COOKIE_HOME=!COOKIE_TRY!"
 )
+set "COOKIE_TRY="
 if not defined COOKIE_HOME (
     echo error: could not create a private directory for the cookie 1>&2
     exit /b 1

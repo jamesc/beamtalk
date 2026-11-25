@@ -193,6 +193,15 @@ export_cookie() {
         echo "error: could not create a private directory for the cookie" >&2
         exit 1
     }
+    COOKIE_HOME_DIR="$cookie_home"
+    # From here on a signal (Ctrl-C, `timeout`, a supervisor) removes the
+    # directory, and stops a client `run_client` started. A `kill` of an
+    # exited client must not abort the trap under `set -e`. `exec` (the
+    # foreground node, `remote_console`) drops these traps.
+    erl_pid=
+    trap '[ -z "$erl_pid" ] || kill "$erl_pid" 2>/dev/null || :; cleanup_cookie_home; exit 130' INT
+    trap '[ -z "$erl_pid" ] || kill "$erl_pid" 2>/dev/null || :; cleanup_cookie_home; exit 143' TERM
+    trap '[ -z "$erl_pid" ] || kill "$erl_pid" 2>/dev/null || :; cleanup_cookie_home; exit 129' HUP
     if ! (umask 277 && printf '%s' "$RELEASE_COOKIE" > "$cookie_home/.erlang.cookie"); then
         rm -rf "$cookie_home"
         echo "error: could not write the cookie file" >&2
@@ -212,7 +221,6 @@ export_cookie() {
         __ORIG_PREFIX__HOME=unset
     fi
     __COOKIE_HOME_ENV__="$cookie_home"
-    COOKIE_HOME_DIR="$cookie_home"
     HOME="$cookie_home"
     export __ORIG_PREFIX__HOME __COOKIE_HOME_ENV__ HOME
     unset RELEASE_COOKIE
@@ -228,11 +236,8 @@ run_client() {
     # Background plus `wait`, so a signal to the launcher (Ctrl-C, `timeout`,
     # a supervisor's TERM/HUP) runs the trap at once: it stops the client and
     # cleans up. These verbs are `-noshell` and read no stdin.
-    # Traps first (a signal right after the fork is covered too), and a `kill`
-    # of an already-exited client must not abort the trap under `set -e`.
-    erl_pid=
-    trap '[ -z "$erl_pid" ] || kill "$erl_pid" 2>/dev/null || :; cleanup_cookie_home; exit 130' INT
-    trap '[ -z "$erl_pid" ] || kill "$erl_pid" 2>/dev/null || :; cleanup_cookie_home; exit 143' TERM HUP
+    # The cleanup traps are already installed (`export_cookie`); they stop the
+    # client once `erl_pid` is set.
     "$ERL" "$@" &
     erl_pid=$!
     wait "$erl_pid" || status=$?
