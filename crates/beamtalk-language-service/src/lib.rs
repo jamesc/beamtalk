@@ -252,6 +252,9 @@ struct FileData {
     module: Module,
     /// Parse diagnostics.
     diagnostics: Vec<Diagnostic>,
+    /// The parser reported an error, so recovery may have dropped part of
+    /// the file's declarations (BT-5188).
+    has_parse_errors: bool,
 }
 
 /// Tags whether an identifier match from [`SimpleLanguageService::find_identifier_at_position`]
@@ -528,6 +531,16 @@ impl SimpleLanguageService {
         }
 
         Some(info)
+    }
+
+    /// Whether the indexed text of `file` has a parse error, so error
+    /// recovery may have dropped some of its declarations (BT-5188).
+    /// `false` for a file that is not indexed.
+    #[must_use]
+    pub fn has_parse_errors(&self, file: &Utf8PathBuf) -> bool {
+        self.files
+            .get(file)
+            .is_some_and(|data| data.has_parse_errors)
     }
 
     /// Returns the cached source text for a file, if available.
@@ -1041,6 +1054,7 @@ impl SimpleLanguageService {
                     source: content,
                     module,
                     diagnostics: all_diagnostics,
+                    has_parse_errors,
                 },
             );
             return false;
@@ -1052,6 +1066,7 @@ impl SimpleLanguageService {
                 source: content,
                 module,
                 diagnostics,
+                has_parse_errors,
             },
         );
 
