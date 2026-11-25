@@ -325,7 +325,7 @@ The disposition is a first reading from the pattern, the file's role and a read 
 | class_var_capture_catch.rs (deleted by BT-5152) | 50 | delete | BT-5153 |
 | `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/tests.rs` | 47 | edit | BT-5154 |
 | class_var_access.rs (deleted by BT-5152) | 47 | delete | BT-5153 |
-| `crates/beamtalk-core/src/semantic_analysis/validators/class_state_abroad.rs` | 45 | delete | BT-5154 |
+| class_state_abroad.rs (deleted by BT-5154) | 45 | delete | BT-5154 |
 | `crates/beamtalk-core/src/semantic_analysis/validators/class_process_ffi_validators.rs` | 43 | edit | BT-5154 |
 | `crates/beamtalk-codegen/src/core_erlang/tests/dispatch.rs` | 40 | edit | BT-5153 |
 | `crates/beamtalk-core/src/semantic_analysis/validators/class_validators.rs` | 37 | edit | BT-5154 |
