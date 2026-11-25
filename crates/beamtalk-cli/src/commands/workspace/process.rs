@@ -32,7 +32,7 @@ use super::startup_command::build_detached_node_command;
 use crate::beam_compiler::escape_erlang_string;
 use crate::commands::protocol::ProtocolClient;
 use beamtalk_repl_protocol::RequestBuilder;
-use miette::{Result, miette};
+use miette::{Context, IntoDiagnostic, Result, miette};
 
 /// Delay between port file read attempts in milliseconds.
 const PORT_DISCOVERY_DELAY_MS: u64 = 500;
@@ -288,10 +288,18 @@ pub fn start_detached_node(
 
     let (eval_cmd, project_path) = prepare_workspace_paths(workspace_id, config)?;
 
+    // BT-5185: the node boots its cookie from this private directory; it
+    // removes the directory itself once up, and this guard removes whatever
+    // is left when start-up returns (the node read it at boot, before writing
+    // the PID file waited for below).
+    let cookie_home = crate::commands::cookie_env::CookieHome::new(&cookie)
+        .into_diagnostic()
+        .wrap_err("Failed to create the private cookie directory")?;
+
     // Start detached BEAM node
     let mut cmd = build_detached_node_command(
         &node_name,
-        &cookie,
+        &cookie_home,
         beam_paths,
         extra_code_paths,
         &eval_cmd,

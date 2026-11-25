@@ -911,12 +911,43 @@ fn spawn_foreground_and_wait_for_ping(
              foreground stderr so far={fg_stderr:?}"
         );
     }
-    // BT-5126: `ping` only succeeded because the node adopted `RELEASE_COOKIE`
-    // from its environment; assert the running BEAM's own argv (`ps` and
+    // BT-5126: `ping` only succeeded because the node booted with
+    // `RELEASE_COOKIE`; assert the running BEAM's own argv (`ps` and
     // `/proc/<pid>/cmdline`) never carried it — not via `-setcookie`,
     // `ERL_AFLAGS` or `-args_file`.
     #[cfg(unix)]
     beamtalk_workspace::test_argv::assert_not_in_argv(foreground.0.id(), cookie);
+    // BT-5185: nor any other cookie (a placeholder the node is reachable
+    // with while it boots), and the cookie is not in the environment the
+    // BEAM was started with, which every process it starts (epmd included)
+    // inherits; the private cookie home is gone once the node is up.
+    #[cfg(target_os = "linux")]
+    {
+        let pid = foreground.0.id();
+        let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).expect("read cmdline");
+        assert!(
+            !cmdline.split(|b| *b == 0).any(|a| a == b"-setcookie"),
+            "no -setcookie may be in the node's argv"
+        );
+        let environ = std::fs::read(format!("/proc/{pid}/environ")).expect("read environ");
+        let vars: Vec<String> = environ
+            .split(|b| *b == 0)
+            .map(|v| String::from_utf8_lossy(v).into_owned())
+            .collect();
+        assert!(
+            vars.iter()
+                .all(|v| !v.starts_with("RELEASE_COOKIE=") && !v.contains(cookie)),
+            "the cookie must not be in the node's environment"
+        );
+        let home = vars
+            .iter()
+            .find_map(|v| v.strip_prefix("BEAMTALK_COOKIE_HOME="))
+            .expect("the node booted from a private cookie home");
+        assert!(
+            !std::path::Path::new(home).exists(),
+            "the node removes its private cookie home once up"
+        );
+    }
     foreground
 }
 
@@ -1078,10 +1109,9 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
         "expected `Smoke run`'s result (42) in rpc output: {rpc_stdout}"
     );
 
-    // BT-5126: `remote_console` connects with `-remsh` while the placeholder
-    // `-setcookie` is in argv; it only reaches the node if the real cookie
-    // is adopted (from the environment) before the shell connects. Feed it
-    // one expression, then EOF, and expect the *remote* node's name back.
+    // BT-5126 / BT-5185: `remote_console` boots with the cookie from its
+    // private cookie home and restores `HOME` before the shell connects. Feed
+    // it one expression, then EOF, and expect the *remote* node's name back.
     #[cfg(unix)]
     {
         use std::io::Write;

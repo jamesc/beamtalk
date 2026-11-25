@@ -151,17 +151,24 @@ client_sname() {
     printf '%s_%s_%s' "$RELEASE_NAME" "$1" "$$"
 }
 
-# BT-5126: hand the cookie to erl through the process *environment*, never
-# argv. `-setcookie`, `ERL_AFLAGS` and `-args_file` all expand into the
-# emulator's command line, which any local user can read from `ps` /
-# `/proc/<pid>/cmdline`; `/proc/<pid>/environ` is readable only by the owner.
-# The release cookie is both the distribution and console cookie, so exposing
-# it is code execution as the service user. erl is started with a random
-# throwaway `-setcookie` (`COOKIE_PLACEHOLDER`, so OTP never touches
-# `~/.erlang.cookie`) and the node adopts the real cookie from
-# `__COOKIE_ENV__` on boot: client verbs via a leading `-eval`, the foreground
-# node in `beamtalk_workspace_app:start/2`.
-# Must run in the main shell (not a `$(...)` subshell) so the export sticks.
+# BT-5126 / BT-5185: the cookie never goes on erl's command line (a cookie
+# flag, `ERL_AFLAGS` and `-args_file` all expand into the emulator's argv,
+# which any local user can read from `ps`), and the node never runs
+# with any other cookie, not even while it boots: a connection made then
+# stays authenticated after the cookie changes. The release cookie is both
+# the distribution and console cookie, so either would be code execution as
+# the service user. Instead the cookie goes in `.erlang.cookie` (0400) in a
+# fresh private (0700) directory that erl is started with as its `HOME`
+# (the only variable erlexec derives `-home` from), so OTP's `auth` reads it
+# as the kernel boots. `__COOKIE_HOME_ENV__` names the directory and
+# `__ORIG_PREFIX__HOME` the `HOME` it replaced; the node puts `HOME` back and
+# removes the directory first thing (`__RESTORE_HOME_EVAL__`: a leading
+# `-eval` for the client verbs, `beamtalk_runtime_app:start/2` for the
+# foreground node). `RELEASE_COOKIE` is unset, so no process erl starts
+# (epmd included) inherits it. A host `erl` found on PATH may be a version
+# manager's shim (mise, asdf) that needs the real `HOME` to find its Erlang,
+# so it is first resolved to the installation's own `bin/erl`, which does not.
+# Must run in the main shell (not a `$(...)` subshell) so the exports stick.
 export_cookie() {
     [ -n "${RELEASE_COOKIE:-}" ] || return 0
     case "$RELEASE_COOKIE" in
@@ -174,10 +181,31 @@ export_cookie() {
             exit 2
             ;;
     esac
-    __COOKIE_ENV__="$RELEASE_COOKIE"
-    export __COOKIE_ENV__
-    COOKIE_PLACEHOLDER=$(od -An -N24 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')
-    [ -n "$COOKIE_PLACEHOLDER" ] || COOKIE_PLACEHOLDER="bt$$x$(date +%s)"
+    cookie_home=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/beamtalk-cookie.XXXXXX") || {
+        echo "error: could not create a private directory for the cookie" >&2
+        exit 1
+    }
+    if ! (umask 277 && printf '%s' "$RELEASE_COOKIE" > "$cookie_home/.erlang.cookie"); then
+        rm -rf "$cookie_home"
+        echo "error: could not write the cookie file" >&2
+        exit 1
+    fi
+    if [ "$USING_HOST_ERTS" = "true" ]; then
+        erl_root=$("$ERL" -noshell -noinput -boot no_dot_erlang \
+            -eval 'io:format("~s", [code:root_dir()]), halt().' 2>/dev/null) || erl_root=""
+        if [ -n "$erl_root" ] && [ -x "$erl_root/bin/erl" ]; then
+            ERL="$erl_root/bin/erl"
+        fi
+    fi
+    if [ -n "${HOME+x}" ]; then
+        __ORIG_PREFIX__HOME="set:$HOME"
+    else
+        __ORIG_PREFIX__HOME=unset
+    fi
+    __COOKIE_HOME_ENV__="$cookie_home"
+    HOME="$cookie_home"
+    export __ORIG_PREFIX__HOME __COOKIE_HOME_ENV__ HOME
+    unset RELEASE_COOKIE
 }
 
 # This node's own `-sname`: `RELEASE_NODE` if set, else the release name
@@ -222,7 +250,7 @@ case "$VERB" in
         # `1> ` prompt reading from stdin.
         export_cookie
         exec "$ERL" -noshell -noinput -boot "$CONFIG_DIR/start" -boot_var RELEASE_DIR "$ROOT" \
-            -sname "$(node_sname)" ${COOKIE_PLACEHOLDER:+-setcookie "$COOKIE_PLACEHOLDER"} \
+            -sname "$(node_sname)" \
             -config "$CONFIG_DIR/sys" -args_file "$CONFIG_DIR/vm.args"
         ;;
     stop)
@@ -233,8 +261,8 @@ case "$VERB" in
         # with the same value).
         NODE=$(node_sname)
         export_cookie
-        eval "set -- -noshell -hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}' ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
-            -eval \"__ADOPT_COOKIE_EVAL__.\" \
+        eval "set -- -noshell -hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}' $(minimal_boot_args) $(lib_pa_args) \
+            -eval \"__RESTORE_HOME_EVAL__.\" \
             -eval \"beamtalk_release_launcher:stop_client_main().\" \
             -extra \"\$NODE\""
         exec "$ERL" "$@"
@@ -247,8 +275,8 @@ case "$VERB" in
         # with the same value).
         NODE=$(node_sname)
         export_cookie
-        eval "set -- -noshell -hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}' ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
-            -eval \"__ADOPT_COOKIE_EVAL__.\" \
+        eval "set -- -noshell -hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}' $(minimal_boot_args) $(lib_pa_args) \
+            -eval \"__RESTORE_HOME_EVAL__.\" \
             -eval \"beamtalk_release_launcher:ping_client_main().\" \
             -extra \"\$NODE\""
         exec "$ERL" "$@"
@@ -263,11 +291,10 @@ case "$VERB" in
         # ADR 0091: same-host attach only — plain loopback distribution, no
         # further authentication beyond the cookie handshake (ADR 0058).
         export_cookie
-        # `-remsh` would connect during boot, before any `-eval` can swap the
-        # placeholder cookie for the real one (BT-5126), so adopt first and
-        # then start the same remote shell `-remsh` does (OTP 26+).
-        eval "set -- -noshell -hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}' ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
-            -eval \"__ADOPT_COOKIE_EVAL__, shell:start_interactive({'\$NODE', {shell, start, []}}).\""
+        # Put `HOME` back first (BT-5185), then start the same remote shell
+        # `-remsh` does (OTP 26+).
+        eval "set -- -noshell -hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}' $(minimal_boot_args) $(lib_pa_args) \
+            -eval \"__RESTORE_HOME_EVAL__, shell:start_interactive({'\$NODE', {shell, start, []}}).\""
         exec "$ERL" "$@"
         ;;
     eval)
@@ -313,8 +340,8 @@ case "$VERB" in
         # with the same value).
         NODE=$(node_sname)
         export_cookie
-        eval "set -- -noshell -hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}' ${COOKIE_PLACEHOLDER:+-setcookie $COOKIE_PLACEHOLDER} $(minimal_boot_args) $(lib_pa_args) \
-            -eval \"__ADOPT_COOKIE_EVAL__.\" \
+        eval "set -- -noshell -hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}' $(minimal_boot_args) $(lib_pa_args) \
+            -eval \"__RESTORE_HOME_EVAL__.\" \
             -eval \"beamtalk_release_launcher:rpc_client_main().\" \
             -extra \"\$NODE\" \"\$CLASS\" \"\$SELECTOR\" \"\$@\""
         exec "$ERL" "$@"

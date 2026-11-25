@@ -18,6 +18,10 @@ Start the Beamtalk runtime application, initializing ETS tables and supervisor t
 """.
 -spec start(application:start_type(), term()) -> {ok, pid()} | {error, term()}.
 start(_StartType, _StartArgs) ->
+    %% BT-5185: first, before any Beamtalk code resolves a path from HOME: a
+    %% release node booted with a private cookie home gets the real one back.
+    _ = beamtalk_cookie_home:restore(),
+
     %% Configure SASL before it starts (started as a beamtalk_workspace dep).
     %% Suppress the legacy SASL error logger — reports flow through the standard
     %% logger framework (OTP 21+) and are captured by the workspace file handler.

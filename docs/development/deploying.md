@@ -107,6 +107,13 @@ RELEASE_COOKIE=$(cat /run/secrets/orders_cookie) bin/orders foreground
 RELEASE_COOKIE=$(cat /run/secrets/orders_cookie) bin/orders stop
 ```
 
+The launcher never puts the cookie on `erl`'s command line. It writes it to a
+private directory under `$TMPDIR` (`%TEMP%` on Windows), starts `erl` with that
+directory as its home, and clears `RELEASE_COOKIE` so processes the node starts
+do not inherit it. The node removes the directory as it boots; if it crashes
+before then, a `beamtalk-cookie.*` directory readable only by the service user
+is left in the temp directory.
+
 ## Docker
 
 ```dockerfile
