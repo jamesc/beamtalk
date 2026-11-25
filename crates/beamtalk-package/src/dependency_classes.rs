@@ -245,9 +245,10 @@ pub fn dependency_layout(project_root: &Utf8Path) -> DependencyLayout {
         .found
         .into_iter()
         .map(|dep| {
-            let stubs_dir = manifest::parse_manifest_full(&dep.root.join("beamtalk.toml"))
-                .ok()
-                .and_then(|dep_manifest| dep_manifest.stubs_dir(&dep.root));
+            let stubs_dir =
+                manifest::parse_dependency_manifest_full(&dep.root.join("beamtalk.toml"))
+                    .ok()
+                    .and_then(|dep_manifest| dep_manifest.stubs_dir(&dep.root));
             DependencyCheckout {
                 src: dependency_source_dir(&dep.root),
                 name: dep.name,

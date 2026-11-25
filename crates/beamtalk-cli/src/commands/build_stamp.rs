@@ -164,6 +164,7 @@ pub(crate) enum StampStatus {
 /// [`beamtalk_package::native_type_specs::discover_otp_version`] reports). When it is `None`
 /// (OTP could not be probed) the OTP axis is skipped and only `beamtalk_version`
 /// is compared — an inability to probe never forces a rebuild on its own.
+#[cfg(test)]
 pub(crate) fn read_stamp_status(stamp_path: &Utf8Path, current_otp: Option<&str>) -> StampStatus {
     read_stamp_status_with_flags(stamp_path, current_otp, "")
 }
@@ -244,6 +245,7 @@ pub(crate) fn read_stamp_status_with_flags(
 /// freshness for incomplete output. Best-effort: an I/O failure is logged but
 /// never fails the build (the next build simply sees a missing stamp and
 /// rebuilds).
+#[cfg(test)]
 pub(crate) fn write_stamp(stamp_path: &Utf8Path, otp_release: Option<&str>) {
     write_stamp_with_flags(stamp_path, otp_release, "");
 }

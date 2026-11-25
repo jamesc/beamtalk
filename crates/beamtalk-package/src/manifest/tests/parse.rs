@@ -649,3 +649,31 @@ fn shape_oauth_and_yaml_exact_manifests_load() {
     assert!(yaml.dependencies.is_empty());
     assert!(yaml.native_dependencies.contains_key("yamerl"));
 }
+
+#[test]
+fn dependency_manifest_tolerates_unknown_keys_but_package_manifest_does_not() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = camino::Utf8PathBuf::from_path_buf(dir.path().join("beamtalk.toml")).unwrap();
+    std::fs::write(
+        &path,
+        "[package]\nname = \"dep\"\nversion = \"0.1.0\"\nfuture_key = \"x\"\n\n[future_section]\na = 1\n",
+    )
+    .unwrap();
+    assert!(parse_manifest_full(&path).is_err());
+    let parsed = parse_dependency_manifest_full(&path).unwrap();
+    assert_eq!(parsed.package.name, "dep");
+}
+
+#[test]
+fn dependency_manifest_still_reports_real_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = camino::Utf8PathBuf::from_path_buf(dir.path().join("beamtalk.toml")).unwrap();
+    std::fs::write(&path, "[package]\nname = \"dep\"\nversion = \n").unwrap();
+    assert!(parse_dependency_manifest_full(&path).is_err());
+    std::fs::write(
+        &path,
+        "[package]\nname = \"Bad Name\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    assert!(parse_dependency_manifest_full(&path).is_err());
+}
