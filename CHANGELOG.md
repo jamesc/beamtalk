@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **New: `PersistentTerm` — a sealed stdlib helper for values that are expensive to build (BT-5146, ADR 0153 Phase 1).** Class-side `at:ifAbsentPut:`, `at:ifAbsent:`, `includesKey:` and `erase:` over `persistent_term`, stored under `{beamtalk_persistent_term, Key}`. There is no `at:put:`. A miss whose value is itself a pid, an actor or a class raises a `type_error`. `erase:` answers a Boolean and forces a global GC.
+
 - **Breaking: cross-file `>>` extension methods are removed (ADR 0152, BT-5141).** A `Class >> selector => ...` or `Class class >> selector => ...` definition in a file that does not define `Class` is now a compile error in `beamtalk build`, `check`, `lint`, `test`, `run`, `Workspace load:`, `:sync`, an inline REPL eval, MCP lint and the LSP, with no deprecation period. `pkg@Class >> selector => ...` goes with it. Nothing in the stdlib, the examples or the downstream packages checked used the feature; only tests did.
   - Unchanged: `Foo >> sel => ...` in the file that defines `Foo` (folded into the class), live method definition at the REPL (`Foo >> sel => ...`, `Foo class >> sel => ...`, `Class compile:source:`, IDE and MCP `save_method`), and the `Foo >> #sel` reflection operator that answers a `CompiledMethod`.
   - Migration: put the method in the file that defines the class; for a class you cannot edit, write the operation on a class of your own that takes the value (`Shout of: aString` in place of `aString shout`); for JSON of a foreign class, give the holder's `JsonMapping` a `using:` converter. The error message carries the same advice.

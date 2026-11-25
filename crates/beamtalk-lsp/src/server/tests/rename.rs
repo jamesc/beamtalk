@@ -234,7 +234,8 @@ fn client_without_change_annotation_support_gets_confirmed_edits_and_a_message()
         change_annotations: false,
         rename_file: true,
     };
-    let outcome = build_rename_edit(&plan, caps, &|f| svc.file_source(f), &HashMap::new());
+    let outcome =
+        build_rename_edit(&plan, caps, &|f| svc.file_source(f), &HashMap::new()).expect("edit");
     assert!(outcome.edit.change_annotations.is_none());
     let Some(DocumentChanges::Operations(ops)) = outcome.edit.document_changes else {
         panic!("expected documentChanges");
@@ -263,7 +264,8 @@ fn client_without_document_changes_gets_a_plain_changes_map() {
         RenameClientCaps::default(),
         &|f| svc.file_source(f),
         &HashMap::new(),
-    );
+    )
+    .expect("edit");
     assert!(outcome.edit.document_changes.is_none());
     let changes = outcome.edit.changes.expect("changes map");
     assert_eq!(changes.len(), 1, "only Counter.bt has confirmed edits");
@@ -286,7 +288,8 @@ fn class_rename_without_resource_operations_asks_for_a_manual_file_rename() {
         change_annotations: true,
         rename_file: false,
     };
-    let outcome = build_rename_edit(&plan, caps, &|f| svc.file_source(f), &HashMap::new());
+    let outcome =
+        build_rename_edit(&plan, caps, &|f| svc.file_source(f), &HashMap::new()).expect("edit");
     let Some(DocumentChanges::Operations(ops)) = outcome.edit.document_changes else {
         panic!("expected documentChanges");
     };
@@ -378,4 +381,52 @@ async fn rename_proceeds_when_closed_files_match_disk() {
         .expect("fresh closed file renames")
         .expect("edit");
     assert!(edit.document_changes.is_some() || edit.changes.is_some());
+}
+
+#[test]
+fn rename_fails_when_a_planned_edit_cannot_be_converted() {
+    let (plan, svc) = selector_plan();
+    // A file the plan edits has vanished from the snapshot.
+    let err = build_rename_edit(&plan, FULL, &|_| None, &HashMap::new()).unwrap_err();
+    assert!(err.contains("no longer indexed"), "{err}");
+    // And the indexed text is shorter than the planned span.
+    let err =
+        build_rename_edit(&plan, FULL, &|_| Some(String::new()), &HashMap::new()).unwrap_err();
+    assert!(err.contains("outside the file"), "{err}");
+    drop(svc);
+}
+
+#[tokio::test]
+async fn rename_edit_version_matches_the_text_after_a_did_change() {
+    let (service, uris) = backend_with(&[("/p/Counter.bt", COUNTER), ("/p/use.bt", USER)]);
+    let backend: &Backend = service.inner();
+    *backend.rename_caps.lock().unwrap() = FULL;
+    let path = absolute_test_path("/p/use.bt");
+    // A change lands: text and version move together under `text_sync`.
+    {
+        let _sync = backend.text_sync.lock().unwrap();
+        backend
+            .service
+            .lock()
+            .unwrap()
+            .update_file(path.clone(), format!("{USER}Counter new\n"));
+        backend.versions.lock().unwrap().insert(path, 7);
+    }
+    let edit = backend
+        .rename(rename_params(&uris[0], 0, 20, "Tally"))
+        .await
+        .expect("ok")
+        .expect("edit");
+    let Some(DocumentChanges::Operations(ops)) = edit.document_changes else {
+        panic!("expected documentChanges");
+    };
+    let use_edit = ops
+        .iter()
+        .find_map(|op| match op {
+            DocumentChangeOperation::Edit(d) if d.text_document.uri == uris[1] => Some(d),
+            _ => None,
+        })
+        .expect("use.bt edit");
+    assert_eq!(use_edit.text_document.version, Some(7));
+    assert_eq!(use_edit.edits.len(), 2, "ranges come from the new text");
 }

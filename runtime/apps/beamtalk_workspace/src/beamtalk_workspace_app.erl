@@ -145,6 +145,9 @@ maybe_start_workspace() ->
             ok;
         {ok, Mode} ->
             Config = env_workspace_config(Mode),
+            %% BT-5126: the launcher hands the cookie over in the environment,
+            %% not argv; adopt it before the console cookie check below.
+            _ = beamtalk_ws_cookie:adopt_env_cookie(),
             case ensure_console_cookie(Config) of
                 ok ->
                     start_workspace(Config);

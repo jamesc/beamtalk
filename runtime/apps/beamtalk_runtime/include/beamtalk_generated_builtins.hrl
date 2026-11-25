@@ -82,6 +82,7 @@
     'ObjectStateChanged',
     'Package',
     'Parallel',
+    'PersistentTerm',
     'Pid',
     'Port',
     'ProcessDictionary',

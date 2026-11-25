@@ -61,8 +61,16 @@ pub(in crate::server) fn format_range_edits(
     let (mut lo, mut hi) = (start, end);
     let mut touched = false;
     for &(s, e) in &spans {
-        // A zero-width range (caret) touches a construct it sits inside or at the edge of.
-        if s <= end && start <= e {
+        // A zero-width range (caret) touches a construct it sits inside or at
+        // the edge of. A selection's end is exclusive (BT-5132): one ending at
+        // column 0 of the next line, or right at a construct's start, does
+        // not touch the construct that begins there.
+        let overlaps_selection = if start == end {
+            s <= start && start <= e
+        } else {
+            s < end && start < e
+        };
+        if overlaps_selection {
             lo = lo.min(s);
             hi = hi.max(e);
             touched = true;
@@ -91,10 +99,14 @@ pub(in crate::server) fn format_range_edits(
         let new = op.new_range();
         // An insertion (empty old range) sits at a line boundary; it belongs to
         // the range when that boundary is inside or at the edges of it.
+        // BT-5132: a replacement must lie wholly inside the touched constructs'
+        // lines; a hunk that also rewrites neighbouring lines (blank-line
+        // separators, an adjacent construct) is skipped rather than applied
+        // beyond the construct.
         let overlaps = if old.is_empty() {
             old.start >= lo_line && old.start <= hi_line + 1
         } else {
-            old.start <= hi_line && old.end > lo_line
+            old.start >= lo_line && old.end <= hi_line + 1
         };
         if !overlaps {
             continue;

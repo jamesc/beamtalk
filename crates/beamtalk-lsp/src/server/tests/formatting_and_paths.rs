@@ -314,3 +314,14 @@ async fn formatting_ignores_formatting_options() {
     .await;
     assert_eq!(spaces, tabs, "options must not change the output");
 }
+
+#[test]
+fn range_format_selection_ending_at_column_zero_does_not_touch_next_construct() {
+    // BT-5132: the selection covers Alpha's lines and ends at column 0 of
+    // Beta's header line; the end is exclusive, so Beta is not touched.
+    let beta = TWO_CLASSES.find("Object subclass: Beta").unwrap();
+    let edits = range_format::format_range_edits(TWO_CLASSES, 0, beta).unwrap();
+    let out = apply_byte_edits(TWO_CLASSES, &edits);
+    assert!(!out.contains("=>   1"), "Alpha formatted: {out}");
+    assert!(out.ends_with("two =>   2\n"), "Beta unchanged: {out}");
+}
