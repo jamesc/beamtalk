@@ -6,6 +6,7 @@
 // the answer type follows the block's type.
 
 Object subclass: PersistentTermTypedCaller
+
   class tables -> Tuple =>
     PersistentTerm at: #ptTestTyped ifAbsentPut: [{1, 2, 3}]
 
