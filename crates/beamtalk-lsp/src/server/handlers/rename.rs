@@ -28,6 +28,12 @@ use tower_lsp::lsp_types::{
 
 /// `RequestFailed` (LSP 3.17): the request was valid but could not be done.
 const REQUEST_FAILED: i64 = -32803;
+/// Refusal for a document whose URI cannot hold a rename (BT-5188: says why).
+const NOT_RENAMEABLE_DOCUMENT: &str = "Rename is only available in Beamtalk files and untitled \
+     Beamtalk buffers, not in this document.";
+/// Refusal for a document the server has not indexed (yet).
+const NOT_INDEXED_DOCUMENT: &str = "This document is not indexed yet. Open it in the editor (or \
+     wait for the project to finish loading) and run the rename again.";
 /// Id of the annotation that marks candidate sites.
 const CANDIDATE_ANNOTATION: &str = "beamtalk.rename.candidates";
 /// How many candidate sites a fallback message lists before summarising.
@@ -324,11 +330,11 @@ impl Backend {
         params: TextDocumentPositionParams,
     ) -> Result<Option<PrepareRenameResponse>> {
         let Some(path) = self.resolve_path_for_uri(&params.text_document.uri) else {
-            return Err(refusal("This document cannot be renamed in."));
+            return Err(refusal(NOT_RENAMEABLE_DOCUMENT));
         };
         let svc = self.service.lock_recover();
         let Some(source) = svc.file_source(&path) else {
-            return Err(refusal("This document is not open."));
+            return Err(refusal(NOT_INDEXED_DOCUMENT));
         };
         let pos = to_bt_position(params.position, &source);
         match svc.prepare_rename(&path, pos) {
@@ -347,7 +353,7 @@ impl Backend {
     ) -> Result<Option<WorkspaceEdit>> {
         let uri = &params.text_document_position.text_document.uri;
         let Some(path) = self.resolve_path_for_uri(uri) else {
-            return Err(refusal("This document cannot be renamed in."));
+            return Err(refusal(NOT_RENAMEABLE_DOCUMENT));
         };
         let caps = *self.rename_caps.lock_recover();
         // Plan under the lock and snapshot, in the same critical section, the
@@ -360,7 +366,7 @@ impl Backend {
             let _sync = self.text_sync.lock_recover();
             let svc = self.service.lock_recover();
             let Some(source) = svc.file_source(&path) else {
-                return Err(refusal("This document is not open."));
+                return Err(refusal(NOT_INDEXED_DOCUMENT));
             };
             let pos = to_bt_position(params.text_document_position.position, &source);
             let plan = svc
@@ -402,16 +408,19 @@ impl Backend {
             }
             let names: Vec<String> = stale.iter().map(|(f, _)| f.to_string()).collect();
             return Err(refusal(format!(
-                "Rename cancelled: {} changed on disk since it was indexed, so the edits could \
-                 land in the wrong place. The index has been refreshed; run the rename again.",
+                "Rename of {} cancelled: {} changed on disk since it was indexed, so the edits \
+                 could land in the wrong place. The index has been refreshed; run the rename \
+                 again.",
+                plan.target,
                 names.join(", ")
             )));
         }
         let outcome = build_rename_edit(&plan, caps, &|f| sources.get(f).cloned(), &versions)
             .map_err(|why| {
                 refusal(format!(
-                    "Rename cancelled: {why}, so the rename would be incomplete. Nothing was \
-                     changed."
+                    "Rename of {} cancelled: {why}, so the rename would be incomplete. Nothing \
+                     was changed; save the affected files and run the rename again.",
+                    plan.target
                 ))
             })?;
         if let Some(message) = outcome.message {
