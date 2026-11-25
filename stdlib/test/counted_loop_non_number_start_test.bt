@@ -1,0 +1,113 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5215: an inlined (writing-block) `to:do:` / `to:by:do:` with a start that
+// is not a number raises what the pure (read-only block) send raises:
+// `does_not_understand` for the selector on the start's class. It used to
+// compare the start against the limit by term order and silently run zero
+// iterations.
+
+TestCase subclass: CountedLoopNonNumberStartTest
+
+  pureToDo: start => start to: 3 do: [:i | i]
+
+  writingToDo: start =>
+    s := 0
+    start to: 3 do: [:i | s := s + i]
+    s
+
+  pureToByDo: start =>
+    start
+      to: 3
+      by: 1
+      do: [:i | i]
+
+  writingToByDo: start =>
+    s := 0
+    start
+      to: 3
+      by: 1
+      do: [:i | s := s + i]
+    s
+
+  errorOf: aBlock => aBlock on: Exception do: [:e | e]
+
+  assertSameError: pureBlock as: writingBlock =>
+    pure := self errorOf: pureBlock
+    writing := self errorOf: writingBlock
+    self assert: pure kind equals: #does_not_understand
+    self assert: writing kind equals: pure kind
+    self assert: writing class equals: pure class
+    self assert: writing selector equals: pure selector
+    self assert: writing message equals: pure message
+
+  // --- to:do: ---
+  testPureToDoNilStartRaises =>
+    self should: [self pureToDo: nil] raise: #does_not_understand
+
+  testWritingToDoNilStartRaises =>
+    self should: [self writingToDo: nil] raise: #does_not_understand
+
+  testWritingToDoSymbolStartRaises =>
+    self should: [self writingToDo: #foo] raise: #does_not_understand
+
+  testWritingToDoStringStartRaises =>
+    self should: [self writingToDo: "abc"] raise: #does_not_understand
+
+  testToDoNilStartPathsAgree =>
+    self assertSameError: [self pureToDo: nil] as: [self writingToDo: nil]
+
+  testToDoSymbolStartPathsAgree =>
+    self assertSameError: [self pureToDo: #foo] as: [self writingToDo: #foo]
+
+  testToDoStringStartPathsAgree =>
+    self assertSameError: [self pureToDo: "abc"] as: [self writingToDo: "abc"]
+
+  testToDoErrorNamesTheSelector =>
+    e := self errorOf: [self writingToDo: nil]
+    self assert: e selector equals: #to:do:
+
+  // The start is checked before the limit, as the pure send fails on its
+  // receiver first.
+  writingToDoNilStartNilLimit =>
+    s := 0
+    nil to: nil do: [:i | s := s + i]
+    s
+
+  testToDoNilStartAndNilLimitRaisesDnu =>
+    e := self errorOf: [self writingToDoNilStartNilLimit]
+    self assert: e kind equals: #does_not_understand
+
+  testWritingToDoIntegerStartStillRuns =>
+    self assert: (self writingToDo: 1) equals: 6
+
+  // --- to:by:do: ---
+  testPureToByDoNilStartRaises =>
+    self should: [self pureToByDo: nil] raise: #does_not_understand
+
+  testWritingToByDoNilStartRaises =>
+    self should: [self writingToByDo: nil] raise: #does_not_understand
+
+  testWritingToByDoSymbolStartRaises =>
+    self should: [self writingToByDo: #foo] raise: #does_not_understand
+
+  testWritingToByDoStringStartRaises =>
+    self should: [self writingToByDo: "abc"] raise: #does_not_understand
+
+  testToByDoNilStartPathsAgree =>
+    self assertSameError: [self pureToByDo: nil] as: [self writingToByDo: nil]
+
+  testToByDoSymbolStartPathsAgree =>
+    self assertSameError: [self pureToByDo: #foo] as: [self writingToByDo: #foo]
+
+  testToByDoStringStartPathsAgree =>
+    self assertSameError: [
+      self pureToByDo: "abc"
+    ] as: [self writingToByDo: "abc"]
+
+  testToByDoErrorNamesTheSelector =>
+    e := self errorOf: [self writingToByDo: nil]
+    self assert: e selector equals: #to:by:do:
+
+  testWritingToByDoIntegerStartStillRuns =>
+    self assert: (self writingToByDo: 1) equals: 6
