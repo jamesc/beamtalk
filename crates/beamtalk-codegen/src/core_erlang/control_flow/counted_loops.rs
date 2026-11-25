@@ -123,9 +123,13 @@ impl CoreErlangGenerator {
         // gensym the loop counter so a user local named `i` (→ Core `I`)
         // cannot collide with the loop fun parameter.
         let counter = self.fresh_temp_var("loopidx");
-        // BT-5167: a nil/non-number count would be term-ordered by `=<`.
-        let number_guard =
-            self.number_guard_doc(&n_var, &[(&n_var, "timesRepeat: count must be a number")]);
+        // BT-5190: the receiver is the count, and only `Integer` defines
+        // `timesRepeat:`. A nil, Float or user-class receiver raises what the
+        // pure send raises (`does_not_understand`, or `stateful_block_dispatch`
+        // for a class with its own `timesRepeat:`) instead of being
+        // term-ordered by `=<` (BT-5167 only raised a `type_error` for nil and
+        // let a Float count run).
+        let receiver_guard = Self::start_guard_doc(receiver, &n_var, "timesRepeat:");
 
         let frame = CountedLoopFrame {
             preamble: docvec![
@@ -134,7 +138,7 @@ impl CoreErlangGenerator {
                 " = ",
                 receiver_code,
                 " in ",
-                number_guard,
+                receiver_guard,
             ],
             fn_name: threaded_ir::REPEAT_LOOP_FN.to_string(),
             condition_prelude: Document::Nil,

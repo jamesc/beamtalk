@@ -404,9 +404,9 @@ The checks of `to_list_for_threading/2` without the conversion (BT-5097): `ok`
 when the in-place fold may stand in for `Selector` on `Recv`, otherwise the
 `stateful_block_dispatch` / `does_not_understand` it raises. `keyed_foldl/5` runs
 it once per call for a `Dictionary`, which is folded over its pairs instead of
-its `to_list/1`. An inlined writing `to:do:` / `to:by:do:` counted loop calls it
-on a start that is not an Integer (BT-5215), so it raises what the pure send of
-that selector to the start raises.
+its `to_list/1`. An inlined writing `to:do:` / `to:by:do:` / `timesRepeat:`
+counted loop calls it on a receiver that is not an Integer (BT-5215, BT-5190),
+so it raises what the pure send of that selector to the receiver raises.
 """.
 -spec guard_writing_fold(term(), atom()) -> ok.
 guard_writing_fold(Recv, Selector) ->
@@ -469,16 +469,46 @@ guard_writing_fold(Recv, Selector) ->
 %% Array and Set (String, Binary and Dictionary never reach here); a Bag would
 %% answer a raw List instead of a Bag, so refuse. A user `Collection` with the
 %% default `species` answers a List on both paths and is allowed.
+%% BT-5190: this is an allowlist, not a denylist: a receiver the fold can stand
+%% in for is a `Collection` or gets `Selector` from a stdlib trait provision (a
+%% fold over `do:`); any other object, a `Stream`, is refused.
 -spec guard_species_rebuild(term(), atom(), atom()) -> ok.
 guard_species_rebuild(#{?BT_CLASS_TAG_KEY := Tag}, _Class, _Selector) when
     Tag =:= 'Array'; Tag =:= 'Set'
 ->
     ok;
 guard_species_rebuild(Recv, Class, Selector) when is_map(Recv) ->
-    case
-        beamtalk_primitive:is_object(Recv) andalso
-            beamtalk_behaviour_intrinsics:speciesDependentThroughCollectionFromName(Class, Selector)
-    of
+    case beamtalk_primitive:is_object(Recv) of
+        false ->
+            ok;
+        true ->
+            case beamtalk_behaviour_intrinsics:foldsOverDoFromName(Class, Selector) of
+                true -> guard_species_dependent(Class, Selector);
+                false -> refuse_not_a_fold_over_do(Class, Selector)
+            end
+    end;
+guard_species_rebuild(_Recv, _Class, _Selector) ->
+    ok.
+
+%% BT-5190: the receiver's stdlib `Selector` is its own native method, not a
+%% fold over `do:`. An in-place fold would force the receiver (never ending on
+%% an infinite `Stream`) and answer a List where the pure path answers a lazy
+%% Stream, or short-circuits for `detect:` / `anySatisfy:`.
+-spec refuse_not_a_fold_over_do(atom(), atom()) -> no_return().
+refuse_not_a_fold_over_do(Class, Selector) ->
+    refuse_writing_fold(
+        Class,
+        Selector,
+        [
+            <<" answers '">>,
+            atom_to_binary(Selector, utf8),
+            <<"' with its own method, not a fold over 'do:', which the in-place fold would force and answer as a List">>
+        ]
+    ).
+
+-spec guard_species_dependent(atom(), atom()) -> ok.
+guard_species_dependent(Class, Selector) ->
+    case beamtalk_behaviour_intrinsics:speciesDependentThroughCollectionFromName(Class, Selector) of
         true ->
             refuse_writing_fold(
                 Class,
@@ -491,9 +521,7 @@ guard_species_rebuild(Recv, Class, Selector) when is_map(Recv) ->
             );
         false ->
             ok
-    end;
-guard_species_rebuild(_Recv, _Class, _Selector) ->
-    ok.
+    end.
 
 -spec refuse_writing_fold(atom(), atom(), iodata()) -> no_return().
 refuse_writing_fold(Class, Selector, Reason) ->

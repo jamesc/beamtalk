@@ -78,6 +78,7 @@ that the Behaviour/Class libraries can rely on.
     overridesCollectionSelectorFromName/1,
     speciesConstructionOverriddenFromName/2,
     speciesDependentThroughCollectionFromName/2,
+    foldsOverDoFromName/2,
     classFieldNames/1,
     classAllFieldNames/1,
     classAllFieldNamesByName/1,
@@ -500,6 +501,50 @@ speciesDependentThroughCollectionFromName(ClassName, Selector) ->
             fun(CN, _CPid, Acc) -> {cont, Acc orelse CN =:= 'Bag'} end,
             false
         ).
+
+-doc """
+Whether the stdlib's `Selector` on this class is a fold over `do:` (BT-5190),
+the only thing an in-place writing fold can stand in for: the class is a
+`Collection` (whose provisions are folds over `do:`), or its first definer of
+`Selector` on the chain is a stdlib trait provision such as `Enumerable`'s (a
+stdlib class that `uses: Enumerable`, `Ets`, included). A stdlib `Enumerable`
+user is trusted to answer a selector it defines natively as the `do:` fold does,
+as every stdlib class was before this check.
+A stdlib class that defines the selector natively and is neither, a `Stream`,
+answers something the fold cannot: a lazy `Stream` from `select:`, a
+short-circuit from `detect:`. Forcing it through `do:` never ends on an
+infinite stream and answers a List.
+""".
+-spec foldsOverDoFromName(atom(), atom()) -> boolean().
+foldsOverDoFromName(ClassName, Selector) ->
+    beamtalk_class_registry:inherits_from(ClassName, 'Collection') orelse
+        walk_hierarchy(
+            ClassName,
+            fun(CN, CPid, _Acc) ->
+                case defines_selector_locally(CN, CPid, Selector) of
+                    true ->
+                        Module = beamtalk_object_class:module_name_safe(CPid),
+                        {halt,
+                            is_stdlib_trait_provision(Module, Selector) orelse
+                                stdlib_uses_enumerable(Module)};
+                    false ->
+                        {cont, false}
+                end
+            end,
+            false
+        ).
+
+%% A stdlib class that `uses: Enumerable` (`Ets`): its `select:` and friends are
+%% the protocol's provisions flattened into its own stdlib module, which records
+%% no `stdlib_trait_methods` (a stdlib module's own methods all count as the
+%% stdlib's), so the `uses` key stands in.
+-spec stdlib_uses_enumerable(atom()) -> boolean().
+stdlib_uses_enumerable(Module) ->
+    is_stdlib_module_name(Module) andalso
+        case meta_for_module(Module) of
+            {ok, Meta} -> lists:member('Enumerable', maps:get(uses, Meta, []));
+            not_available -> false
+        end.
 
 %% Is the first definer of `Selector` on the chain a stdlib class's own method
 %% (`Collection`'s), rather than a stdlib trait's provision flattened into a

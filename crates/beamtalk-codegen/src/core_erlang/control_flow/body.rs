@@ -198,10 +198,15 @@ impl CoreErlangGenerator {
             // BT-5097: the accumulator declares the result list its kind
             // extends, once, here; the keyed fold call reads the same
             // `BodyKind::result_list`.
-            if let Some(ThreadedStmt::FoldAccumulator { result_list, .. }) = stmts.last_mut()
+            // BT-5190: what the accumulator declares is read off its own shape
+            // (`FoldAccValue::inferred_result_list`), not off `kind`, which the
+            // verifier below checks it against.
+            if let Some(ThreadedStmt::FoldAccumulator {
+                result_list, value, ..
+            }) = stmts.last_mut()
                 && !fault!(FoldAccumulatorOmitsResultList)
             {
-                *result_list = kind.result_list();
+                *result_list = value.inferred_result_list();
             }
             // BT-3863: checked before `carry_fold_families` wraps the
             // accumulator in the `Self` family's `Return`.
@@ -210,6 +215,7 @@ impl CoreErlangGenerator {
             locals_errors.extend(threaded_ir::verify_fold_result_list_declared(
                 &stmts,
                 kind.result_list(),
+                kind.result_item(),
                 span,
             ));
             locals_errors.extend(threaded_ir::verify_tuple_acc_no_family(

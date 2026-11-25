@@ -24,8 +24,10 @@ TestCase subclass: CountedLoopNilLimitTest
     msg := [self writingToDo: nil] on: Exception do: [:e | e message]
     self assert: msg equals: "Interval limit must be a number"
 
+  // BT-5190: a nil count is a nil receiver, which does not understand
+  // `timesRepeat:` on the pure path either.
   testWritingTimesRepeatNilRaises =>
-    self should: [self writingTimesRepeat: nil] raise: #type_error
+    self should: [self writingTimesRepeat: nil] raise: #does_not_understand
 
   testWritingToDoStillRuns => self assert: (self writingToDo: 4) equals: 10
 

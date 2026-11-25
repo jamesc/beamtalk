@@ -594,8 +594,11 @@ pub(in crate::core_erlang) enum FoldCarry {
 /// result list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum ConsPerCall {
-    /// A filter (`select:`/`reject:`): the element, or nothing.
-    AtMostOne,
+    /// A filter (`select:`/`reject:`): the element, or nothing — exactly one
+    /// of the two boolean arms conses (BT-5190), the one taken when the
+    /// *block's answer* is `keep_when` (`true` for `select:`, `false` for
+    /// `reject:`, whichever way the epilogue's `case` is written).
+    Filter { keep_when: bool },
     /// A map (`collect:`): the block's answer, always.
     ExactlyOne,
 }

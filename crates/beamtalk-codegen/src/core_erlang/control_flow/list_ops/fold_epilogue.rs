@@ -73,7 +73,7 @@ impl BodyKind {
             })
         };
         match self {
-            Self::FoldlFilter { .. } => list(ConsPerCall::AtMostOne),
+            Self::FoldlFilter { negate, .. } => list(ConsPerCall::Filter { keep_when: !negate }),
             Self::FoldlCollect => list(ConsPerCall::ExactlyOne),
             Self::FoldlDo
             | Self::FoldlInject
@@ -85,6 +85,15 @@ impl BodyKind {
             | Self::FoldlPartition { .. }
             | Self::FoldlGroupBy { .. }
             | Self::FoldlSort { .. } => None,
+        }
+    }
+
+    /// BT-5190: the variable a filter's accumulator must cons: the lambda's
+    /// element. `collect:` conses the block's answer, which has no fixed name.
+    pub(in crate::core_erlang::control_flow) fn result_item(&self) -> Option<&str> {
+        match self {
+            Self::FoldlFilter { item_var, .. } => Some(item_var),
+            _ => None,
         }
     }
 
@@ -183,14 +192,29 @@ impl CoreErlangGenerator {
         let var = self.fresh_temp_var("_PredBad");
         let fallback = Self::case_clause_fallback_clause(var);
         // BT-5117: typed, so the verifier counts the conses into `AccList`.
-        // Test-only fault: the included item is consed twice.
+        // Test-only faults (BT-5117, BT-5190): the included item is consed
+        // twice / not at all / in both arms / in the other arm, or the wrong
+        // variable is consed.
+        let item = if fault!(FilterConsWrongItem) {
+            cx.pv.to_string()
+        } else {
+            item_var.to_string()
+        };
+        let consed = |item: &str| AccSlot::cons(item, ACC_LIST);
         let included = if fault!(FilterConsTwice) {
             AccSlot::Cons {
-                item: item_var.to_string(),
-                list: Box::new(AccSlot::cons(item_var, ACC_LIST)),
+                item: item.clone(),
+                list: Box::new(consed(&item)),
             }
+        } else if fault!(FilterConsNothing) {
+            AccSlot::Name(ACC_LIST)
         } else {
-            AccSlot::cons(item_var, ACC_LIST)
+            consed(&item)
+        };
+        let skipped = if fault!(FilterConsBothArms) {
+            consed(&item)
+        } else {
+            AccSlot::Name(ACC_LIST)
         };
         let arm = |value, head| {
             Box::new(BoolArm {
@@ -201,11 +225,18 @@ impl CoreErlangGenerator {
                 },
             })
         };
+        // The arms swapped: the item is consed when the scrutinee is false.
+        let (included_on, skipped_on) = if fault!(FilterArmsSwapped) {
+            (false, true)
+        } else {
+            (true, false)
+        };
         let value = FoldAccValue {
             prelude: None,
             body: FoldAccBody::BoolCase {
                 scrutinee: condition_doc,
-                arms: [arm(true, included), arm(false, AccSlot::Name(ACC_LIST))],
+                negated: negate,
+                arms: [arm(included_on, included), arm(skipped_on, skipped)],
                 fallback,
             },
         };
