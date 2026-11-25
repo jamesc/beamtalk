@@ -41,7 +41,7 @@ those are EUnit helpers, not runtime modules that should be loaded into the VM.
 When `IncludeTests` is true (the test-load path: `load-tests`/`list-tests`),
 native/test/ helper modules ARE included so a `.bt` test can drive them via
 `(Erlang <helper>) <msg>` — mirroring how the `beamtalk test` CLI compiles
-native/test/ into _build/dev/native/ebin/.
+native/test/ into _build/dev/native_test/ebin/.
 
 Returns an empty list if the directory does not exist.
 """.

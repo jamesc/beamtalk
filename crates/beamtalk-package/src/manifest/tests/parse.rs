@@ -665,3 +665,62 @@ fn dependency_manifest_still_reports_real_errors() {
     .unwrap();
     assert!(parse_dependency_manifest_full(&path).is_err());
 }
+
+/// BT-5186: leniency stops at dependency specs — an unknown key inside one
+/// `[dependencies]` / `[native.dependencies]` / `[native.overrides]` entry
+/// decides what is fetched or how it compiles, so it stays an error.
+#[test]
+fn dependency_manifest_rejects_unknown_keys_inside_dependency_specs() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = camino::Utf8PathBuf::from_path_buf(dir.path().join("beamtalk.toml")).unwrap();
+    for spec in [
+        "[dependencies]\nother = { path = \"../other\", future_spec_key = 1 }\n",
+        "[native.dependencies]\ngun = { git = \"https://example.com/gun.git\", tag = \"v1\", future_spec_key = 1 }\n",
+        "[native.overrides]\ngun = { erl_opts = [\"debug_info\"], future_spec_key = 1 }\n",
+    ] {
+        std::fs::write(
+            &path,
+            format!("[package]\nname = \"dep\"\nversion = \"0.1.0\"\n\n{spec}"),
+        )
+        .unwrap();
+        let err = parse_dependency_manifest_full(&path).expect_err(spec);
+        assert!(
+            format!("{err:?}").contains("future_spec_key"),
+            "error must name the key for {spec}: {err:?}"
+        );
+    }
+}
+
+/// BT-5186: `[native]` itself is a closed table: strict in the project's own
+/// manifest (a typo such as `[native.dependancies]` used to be silently
+/// ignored), dropped with a warning in a dependency's.
+#[test]
+fn unknown_native_subtable_is_strict_for_the_project_and_lenient_for_a_dependency() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = camino::Utf8PathBuf::from_path_buf(dir.path().join("beamtalk.toml")).unwrap();
+    std::fs::write(
+        &path,
+        "[package]\nname = \"dep\"\nversion = \"0.1.0\"\n\n[native.dependancies]\ngun = \"2.0.0\"\n",
+    )
+    .unwrap();
+    let err = parse_manifest_full(&path).unwrap_err();
+    assert!(format!("{err:?}").contains("dependancies"), "{err:?}");
+    let parsed = parse_dependency_manifest_full(&path).unwrap();
+    assert!(parsed.native_dependencies.is_empty());
+}
+
+#[test]
+fn unknown_key_warning_is_first_only_per_file_and_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = camino::Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+    let path = root.join("beamtalk.toml");
+    std::fs::write(&path, "").unwrap();
+    assert!(first_unknown_key_warning(&path, "k"));
+    assert!(!first_unknown_key_warning(&path, "k"));
+    // Another spelling of the same file is the same dependency.
+    assert!(!first_unknown_key_warning(
+        &root.join(".").join("beamtalk.toml"),
+        "k"
+    ));
+    assert!(first_unknown_key_warning(&path, "other"));
+}

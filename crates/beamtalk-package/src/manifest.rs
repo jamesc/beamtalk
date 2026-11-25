@@ -549,9 +549,20 @@ pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
 /// Parse a *dependency's* `beamtalk.toml` leniently (BT-5133).
 ///
 /// A dependency may be published with a newer toolchain that knows keys this
-/// one does not. Unknown keys are dropped with a warning instead of failing
-/// the dependent's build; every other problem (invalid TOML, bad package name,
-/// malformed dependency tables) is still an error, reported with the path.
+/// one does not. Unknown keys are dropped with a warning (once per file and
+/// key per process) instead of failing the dependent's build; every other
+/// problem (invalid TOML, bad package name, malformed dependency tables) is
+/// still an error, reported with the path. Every read of a dependency's
+/// manifest goes through here — never [`parse_manifest`] /
+/// [`parse_manifest_full`], which are for the project's own manifest.
+///
+/// **Leniency stops at dependency specs (BT-5186).** Unknown top-level keys,
+/// tables, and keys in `[package]`, `[application]`, `[stubs]`, `[registry]`
+/// and `[native]` are dropped. An unknown key *inside one entry* of
+/// `[dependencies]`, `[native.dependencies]` or `[native.overrides]` is still
+/// an error: those keys decide what code is fetched and how it is compiled
+/// (a new source kind, a version pin, compiler options), so ignoring one would
+/// silently build something other than what the dependency declared.
 ///
 /// # Errors
 ///
@@ -563,9 +574,31 @@ pub fn parse_dependency_manifest_full(path: &Utf8Path) -> Result<ParsedManifest>
     let (manifest, ignored) = deserialize_ignoring_unknown_keys(&content)
         .wrap_err_with(|| format!("Failed to parse manifest '{path}'"))?;
     for key in ignored {
-        tracing::warn!("Ignoring unknown key `{key}` in dependency manifest '{path}'");
+        if first_unknown_key_warning(path, &key) {
+            tracing::warn!("Ignoring unknown key `{key}` in dependency manifest '{path}'");
+        }
     }
     parsed_from_raw(manifest, path)
+}
+
+/// Whether the unknown-key warning for `key` in the dependency manifest at
+/// `path` has not been emitted yet by this process (BT-5186). A build reads
+/// each dependency's manifest several times (discovery, stubs, `.app`
+/// generation, native-dependency collection), so the warning is deduplicated
+/// per manifest file and key: once per dependency per build. A long-lived
+/// process (REPL, LSP) warns once for its lifetime.
+fn first_unknown_key_warning(path: &Utf8Path, key: &str) -> bool {
+    static WARNED: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashSet<(std::path::PathBuf, String)>>,
+    > = std::sync::OnceLock::new();
+    // Canonical, so `dep/./beamtalk.toml` and `dep/beamtalk.toml` are one file.
+    let file = std::fs::canonicalize(path.as_std_path())
+        .unwrap_or_else(|_| path.as_std_path().to_path_buf());
+    WARNED
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert((file, key.to_string()))
 }
 
 /// Deserialize `content`, removing each unknown key the strict parse rejects

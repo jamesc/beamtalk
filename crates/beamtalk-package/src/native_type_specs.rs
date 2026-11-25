@@ -41,9 +41,26 @@ use camino::Utf8PathBuf;
 /// Non-fatal: if spec extraction fails (e.g., runtime not compiled), returns
 /// `None` rather than erroring — callers fall back to untyped FFI checking.
 pub fn extract_project_type_specs(layout: &BuildLayout) -> Option<NativeTypeRegistry> {
-    let dep_ebin_dirs =
+    extract_specs_with(layout, false)
+}
+
+/// As [`extract_project_type_specs`], plus the package's compiled
+/// `native/test/` helpers (`_build/dev/native_test/ebin`, BT-5186) — the
+/// registry `beamtalk test` types a package's `.bt` tests against, so a test's
+/// FFI call into its own helper module is typed like one into `native/`.
+#[must_use]
+pub fn extract_project_test_type_specs(layout: &BuildLayout) -> Option<NativeTypeRegistry> {
+    extract_specs_with(layout, true)
+}
+
+fn extract_specs_with(layout: &BuildLayout, test_helpers: bool) -> Option<NativeTypeRegistry> {
+    let mut ebin_dirs =
         beamtalk_core::ffi_type_specs::collect_project_dependency_ebin_dirs(layout.project_root());
-    beamtalk_core::ffi_type_specs::extract_type_specs(&layout.type_cache_dir(), &dep_ebin_dirs)
+    let helpers = layout.native_test_ebin_dir();
+    if test_helpers && helpers.is_dir() {
+        ebin_dirs.push(helpers);
+    }
+    beamtalk_core::ffi_type_specs::extract_type_specs(&layout.type_cache_dir(), &ebin_dirs)
 }
 
 /// Extract native type specs from runtime `.beam` files for FFI type inference.

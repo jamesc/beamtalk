@@ -733,7 +733,9 @@ fn generate_dependency_app_file(
     classes: &DepAppClasses<'_>,
     source_files: &[Utf8PathBuf],
 ) -> Result<()> {
-    let dep_manifest = manifest::parse_manifest(&dep_root.join("beamtalk.toml"))?;
+    // A dependency's manifest is read leniently (BT-5133/BT-5186): one written
+    // for a newer toolchain may carry keys this one does not know.
+    let full_manifest = manifest::parse_dependency_manifest_full(&dep_root.join("beamtalk.toml"))?;
     let class_metadata = crate::commands::build::build_class_metadata(
         classes.hierarchy,
         classes.own,
@@ -746,28 +748,14 @@ fn generate_dependency_app_file(
     // seeding-boundary exclusion of a dependency's internal aliases happens
     // downstream, at browse time (`beamtalk_repl_ops_browse.erl`), not here.
     let alias_metadata = crate::commands::build::build_alias_metadata(source_files, Some(dep_root));
-    // Read full manifest to get dependency names for {applications} list
-    let dep_manifest_path = dep_root.join("beamtalk.toml");
-    let full_manifest = if dep_manifest_path.try_exists().into_diagnostic()? {
-        Some(manifest::parse_dependency_manifest_full(
-            &dep_manifest_path,
-        )?)
-    } else {
-        None
-    };
-    let dep_hex_dep_names: Vec<String> = full_manifest
-        .as_ref()
-        .map(|m| m.native_dependencies.keys().cloned().collect())
-        .unwrap_or_default();
+    let dep_hex_dep_names: Vec<String> =
+        full_manifest.native_dependencies.keys().cloned().collect();
     // Use the manifest's declared BT dependencies (not the full prior_deps
     // topo-order prefix) so {applications} lists only direct dependencies.
-    let dep_bt_dep_names: Vec<String> = full_manifest
-        .as_ref()
-        .map(|m| m.dependencies.keys().cloned().collect())
-        .unwrap_or_default();
+    let dep_bt_dep_names: Vec<String> = full_manifest.dependencies.keys().cloned().collect();
     crate::commands::app_file::generate_app_file(
         ebin_path,
-        &dep_manifest,
+        &full_manifest.package,
         module_names,
         &class_metadata,
         None,
@@ -777,8 +765,8 @@ fn generate_dependency_app_file(
         &dep_hex_dep_names,
         &alias_metadata,
         full_manifest
+            .application
             .as_ref()
-            .and_then(|m| m.application.as_ref())
             .map(|a| a.supervisor.as_str()),
     )?;
 
