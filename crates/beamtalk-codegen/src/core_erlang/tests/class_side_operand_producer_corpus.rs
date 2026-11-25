@@ -84,12 +84,6 @@ const POSITIONS: &[(&str, bool)] = &[
     ("    (self take: (PROD)) printString\n", false),
 ];
 
-/// Class-variable writes of the class-side contexts (`classState: f`).
-const CLASS_VAR_POSITIONS: &[&str] = &[
-    "    self.f := self take: (PROD)\n",
-    "    self.f := (self take: (PROD)) + self.f\n",
-];
-
 const HELPERS: &str = "  take: v => v
   take: a with: b => a
   isAlive: k => k > 0
@@ -108,17 +102,17 @@ struct Context {
 const CONTEXTS: &[Context] = &[
     Context {
         name: "object_class_side",
-        header: "Object subclass: OperandProducerProbe\n  classState: f = 0\n",
+        header: "Object subclass: OperandProducerProbe\n",
         class_side: true,
     },
     Context {
         name: "actor_class_side",
-        header: "Actor subclass: OperandProducerProbe\n  state: g = 0\n  classState: f = 0\n",
+        header: "Actor subclass: OperandProducerProbe\n  state: g = 0\n",
         class_side: true,
     },
     Context {
         name: "value_class_side",
-        header: "Value subclass: OperandProducerProbe\n  field: g = 0\n  classState: f = 0\n",
+        header: "Value subclass: OperandProducerProbe\n  field: g = 0\n",
         class_side: true,
     },
     Context {
@@ -149,13 +143,9 @@ const CONTEXTS: &[Context] = &[
     },
 ];
 
-/// Every (name, statement) row of `ctx`: producer x position.
-fn rows(ctx: &Context) -> Vec<(String, String)> {
-    let class_var = ctx.class_side && ctx.header.contains("classState: f");
-    let positions = POSITIONS
-        .iter()
-        .map(|(position, _)| position)
-        .chain(CLASS_VAR_POSITIONS.iter().filter(|_| class_var));
+/// Every (name, statement) row: producer x position.
+fn rows() -> Vec<(String, String)> {
+    let positions = POSITIONS.iter().map(|(position, _)| position);
     let mut out = Vec::new();
     for (p, position) in positions.enumerate() {
         for (k, producer) in PRODUCERS.iter().enumerate() {
@@ -218,7 +208,7 @@ fn stmt_has_fold_producer(stmt: &str) -> bool {
 fn check_context(ctx: &Context) -> Vec<String> {
     let mut failures = Vec::new();
     let mut compiled: Vec<(String, String)> = Vec::new();
-    for (name, stmt) in rows(ctx) {
+    for (name, stmt) in rows() {
         let src = module(ctx, &method(ctx, 0, &stmt));
         match (codegen_outcome(&src), twin_outcome(&stmt)) {
             (Err(e), _) => failures.push(format!("{} / {name}: broken: {e}\n{src}", ctx.name)),
@@ -321,7 +311,7 @@ fn class_side_operand_producers_pre_fix_lowering_is_never_silent() {
     // (row label, source, pre-fix Core Erlang) for rows the verifier misses.
     let mut unreported: Vec<(String, String, String)> = Vec::new();
     for ctx in CONTEXTS.iter().filter(|c| c.class_side) {
-        for (name, stmt) in rows(ctx) {
+        for (name, stmt) in rows() {
             let src = module(ctx, &method(ctx, 0, &stmt));
             if codegen_outcome(&src) != Ok(FieldCodegen::Compiles) {
                 continue;
@@ -369,7 +359,7 @@ fn bt4089_pre_fix_repack_reports_actor_state_in_class_method() {
     let mut missed = Vec::new();
     let mut checked = 0;
     let ctx = context("actor_class_side");
-    for (name, stmt) in rows(ctx) {
+    for (name, stmt) in rows() {
         if !stmt_has_fold_producer(&stmt) {
             continue;
         }
@@ -386,7 +376,7 @@ fn bt4089_pre_fix_repack_reports_actor_state_in_class_method() {
             missed.push(format!("{name} / {stmt}: {report:?}"));
         }
     }
-    assert!(checked >= 50, "only {checked} row(s) checked");
+    assert!(checked >= 40, "only {checked} row(s) checked");
     assert!(
         missed.is_empty(),
         "{} row(s) where the verifier missed the pre-fix repack:\n{}",

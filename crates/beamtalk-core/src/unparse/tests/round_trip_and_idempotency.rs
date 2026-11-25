@@ -168,13 +168,6 @@ fn idempotent_late_state_declaration() {
 }
 
 #[test]
-fn idempotent_late_class_state_declaration() {
-    assert_idempotent(
-        "typed Actor subclass: TranscriptStream\n  late classState: current :: TranscriptStream\n\n  class current => self.current\n",
-    );
-}
-
-#[test]
 fn round_trip_late_state_slot_kind() {
     let source = "typed Actor subclass: CodexClient\n  late state: proc :: Subprocess\n  state: nextId :: Integer\n";
     let module = parse_source(source);

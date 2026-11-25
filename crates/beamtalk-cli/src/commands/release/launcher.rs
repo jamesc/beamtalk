@@ -672,4 +672,46 @@ mod tests {
             "root must resolve through the symlink: {stdout}"
         );
     }
+
+    /// BT-5187: a symlink cycle in `$0` ends with an error instead of
+    /// looping forever. (`sh -c '. script' <name>` sets `$0` to the cycle;
+    /// executing the cycle directly fails in the kernel before the script
+    /// runs.)
+    #[test]
+    #[cfg(unix)]
+    fn launcher_sh_symlink_resolution_is_bounded() {
+        let temp = TempDir::new().unwrap();
+        let base = Utf8PathBuf::from_path_buf(temp.path().join("rel")).unwrap();
+        write_launcher_scripts(&base, "orders", "1.0.0", "14.0", false).unwrap();
+        let a = temp.path().join("a");
+        let b = temp.path().join("b");
+        std::os::unix::fs::symlink(&b, &a).unwrap();
+        std::os::unix::fs::symlink(&a, &b).unwrap();
+        let mut child = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!(". '{}'", base.join("bin/orders")))
+            .arg(&a)
+            .arg("version")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while child.try_wait().unwrap().is_none() {
+            if std::time::Instant::now() > deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("launcher.sh looped on a symlink cycle");
+            }
+            // sleep: polling a child process with a deadline.
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("too many levels"),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
 }

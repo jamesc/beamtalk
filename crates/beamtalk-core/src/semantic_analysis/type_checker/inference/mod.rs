@@ -121,7 +121,6 @@ impl TypeChecker {
 
             if is_typed {
                 self.check_typed_state_annotations(&class.state, &class.name.name);
-                self.check_typed_state_annotations(&class.class_variables, &class.name.name);
                 // Enable Dynamic inference warnings for typed classes
                 self.typed_class_context = Some(class.name.name.clone());
             }

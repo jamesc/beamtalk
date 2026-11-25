@@ -30,9 +30,21 @@ you `COPY` into a container or copy to a server. An existing
 `--output` directory is replaced only if it carries the `.beamtalk-release`
 marker the command writes (or an older release's provenance manifest); the
 previous output is kept until the new release is assembled, and restored if
-the build fails. `--force-output` replaces an unmarked directory; use it
-deliberately. The project root, the current directory and their ancestors
-are always refused.
+the build fails. An empty directory is always accepted. `--force-output`
+replaces an unmarked directory only if it is release-shaped (a `releases/`
+directory and nothing but `bin/`, `lib/`, `releases/`, `erts-*/` at the top
+level); any other directory is refused, forced or not. A filesystem root, the
+home directory, the project root, the current directory and their ancestors,
+and the project's source directories (`src/`, `test/`, `native/`, `priv/`,
+`deps/`, `.git/`) and anything inside them are always refused. An existing tarball
+beside the output is replaced only if `beamtalk release` wrote it, or, with
+`--force-output`, if it is at least a gzip'd tar archive.
+
+A run killed part-way is cleaned up by the next one. While a previous
+release is parked, a `<output>.beamtalk-swap` journal sits beside the output:
+until the new release is complete the previous one is restored; once the
+journal says `committed`, the new release is kept and the leftover old copy
+removed.
 
 `Beamtalk releaseInfo` is the parity-neutral reflective send that names the
 release, its version and the toolchain OTP release. `rpc`/`eval` resolve `Beamtalk`, `Workspace` and `Transcript` as ordinary

@@ -17,6 +17,7 @@
 //! |------------------------------|--------------------|
 //! | `cross_file_class`           | cross-file class extraction |
 //! | `cross_file_extension`       | ADR 0152 cross-file `>>` error |
+//! | `class_state_removed`        | ADR 0153 `classState:` error |
 //! | `sealed_subclass`            | Sealed subclass error |
 //! | `stdlib_mode`                | package-mode cross-file lookup |
 //! | `protocol_cross_file`        | cross-file Protocol use |
@@ -203,6 +204,19 @@ fn corpus_cases() -> Vec<CorpusCase> {
             },
             unreadable_files: &[],
             why: "ADR 0152: a cross-file `>>` is a compile error on every surface",
+        },
+        CorpusCase {
+            name: "class_state_removed",
+            lsp_target: "src/counter.bt",
+            lint_target: "",
+            expected: ExpectedCounts {
+                cli_lint: 1,
+                mcp_lint: 1,
+                mcp_summary: 1,
+                lsp: 1,
+            },
+            unreadable_files: &[],
+            why: "ADR 0153: `classState:` is a compile error on every surface",
         },
         CorpusCase {
             name: "sealed_subclass",

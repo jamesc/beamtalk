@@ -128,51 +128,6 @@ fn reachable_migration_below_current_version_is_silent() {
 }
 
 #[test]
-fn migration_reading_class_variable_is_compile_error() {
-    let src = concat!(
-        "Actor subclass: Cart\n",
-        "  shapeVersion: 2\n",
-        "  state: items = #()\n",
-        "  classState: taxRate = 0.2\n",
-        "\n",
-        "  class migrateFromV1: old -> Dictionary =>\n",
-        "    old at: #tax put: self.taxRate\n",
-    );
-    let diagnostics = diags(src);
-    assert!(
-        diagnostics.iter().any(|d| {
-            d.severity == crate::source_analysis::Severity::Error
-                && d.message.contains("class variable")
-                && d.message.contains("taxRate")
-        }),
-        "reading a class variable in migrateFromV1: must be a compile error, got: {diagnostics:?}"
-    );
-}
-
-#[test]
-fn migration_writing_class_variable_is_compile_error() {
-    let src = concat!(
-        "Actor subclass: Cart\n",
-        "  shapeVersion: 2\n",
-        "  state: items = #()\n",
-        "  classState: taxRate = 0.2\n",
-        "\n",
-        "  class migrateFromV1: old -> Dictionary =>\n",
-        "    self.taxRate := 0.3\n",
-        "    old\n",
-    );
-    let diagnostics = diags(src);
-    assert!(
-        diagnostics.iter().any(|d| {
-            d.severity == crate::source_analysis::Severity::Error
-                && d.message.contains("class variable")
-                && d.message.contains("taxRate")
-        }),
-        "writing a class variable in migrateFromV1: must be a compile error, got: {diagnostics:?}"
-    );
-}
-
-#[test]
 fn migration_return_type_must_be_dictionary() {
     let src = concat!(
         "Actor subclass: Cart\n",

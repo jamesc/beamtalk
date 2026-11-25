@@ -59,22 +59,6 @@ fn bt4043_late_state_slot_accepts_matching_metaclass_value() {
     );
 }
 
-/// Same acceptance for a class-side slot: `classState: kind :: Integer class`.
-#[test]
-fn bt4043_class_state_slot_accepts_matching_metaclass_value() {
-    let diags = diags_parse_ok(
-        "typed Object subclass: Holder\n\
-         \x20 classState: kind :: Integer class\n\
-         \x20 class setKind -> Object =>\n\
-         \x20   self.kind := Integer\n",
-    );
-    let mismatches = type_mismatches(&diags);
-    assert!(
-        mismatches.is_empty(),
-        "matching `X class` value on a `classState:` slot should not warn, got: {mismatches:?} (all: {diags:?})"
-    );
-}
-
 /// Same acceptance for a Value field: `field: kind :: Integer class`.
 /// (Value slot assignment is rejected by the validator pass, not the
 /// type checker, so only `Type mismatch` absence is asserted here.)
