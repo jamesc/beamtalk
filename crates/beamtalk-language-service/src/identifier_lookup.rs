@@ -302,7 +302,7 @@ impl SimpleLanguageService {
         if let Some(ident) = Self::find_identifier_in_type_params(&class.type_params, offset_val) {
             return Some(ident);
         }
-        for state in class.state.iter().chain(class.class_variables.iter()) {
+        for state in &class.state {
             if let Some(type_annotation) = &state.type_annotation
                 && let Some(ident) =
                     Self::find_identifier_in_type_annotation(type_annotation, offset_val)

@@ -545,11 +545,6 @@ const INSTANCE_HELPERS: &str = "  done => false
   + k => k > 0
 ";
 
-const CLASS_HELPERS: &str = "  class done => false
-  class isAlive: k => k > 0
-  class + k => k > 0
-";
-
 const SCOPE_CONTEXTS: &[ScopeContext] = &[
     ScopeContext {
         name: "value_field",
@@ -578,20 +573,6 @@ const SCOPE_CONTEXTS: &[ScopeContext] = &[
         helpers: INSTANCE_HELPERS,
         class_side: false,
         prelude: "    self.f := 1\n",
-    },
-    ScopeContext {
-        name: "object_class_side",
-        header: "Object subclass: FoldScopeProbe\n  classState: f = 0\n",
-        helpers: CLASS_HELPERS,
-        class_side: true,
-        prelude: "",
-    },
-    ScopeContext {
-        name: "actor_class_side",
-        header: "Actor subclass: FoldScopeProbe\n  classState: f = 0\n",
-        helpers: CLASS_HELPERS,
-        class_side: true,
-        prelude: "",
     },
 ];
 
@@ -666,8 +647,7 @@ fn scope_method(ctx: &ScopeContext, i: usize, body: &str) -> String {
 /// BT-4017: in every non-actor scope kind, every fold row passes the debug
 /// verifier, compiles through `erlc` and holds no raw-tuple unpack, except a
 /// row writing the field `f` inside the fold body in a value-type or `TestCase`
-/// method, which a language rule rejects with a structured error (class-side,
-/// `f` is a class variable written in place, and every row compiles).
+/// method, which a language rule rejects with a structured error.
 /// (One `erlc` module per context; bisected to the failing rows on failure.)
 #[test]
 fn fold_body_statements_in_every_scope_compile_without_a_raw_tuple_unpack() {

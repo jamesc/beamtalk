@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0153: a class has no slots, so `self.x` (read or write) in a class
+// method is a compile error. The instance-side `self.count` is untouched.
+
+Actor subclass: ClassSideSelfField
+  state: count = 0
+
+  class readTotal => self.total
+
+  class writeTotal => self.total := 1
+
+  class viaBlock => [self.total] value
+
+  bump => self.count := self.count + 1

@@ -202,7 +202,7 @@ impl CoreErlangGenerator {
             let state_var_xref_doc = self.build_state_var_xref_list(class);
 
             // Class variable initial values
-            let class_vars_doc = self.build_class_var_map(&class.class_variables)?;
+            let class_vars_doc = self.build_class_var_map(&[])?;
 
             // Class-level doc comment
             let class_doc_value: Document<'static> = if let Some(ref doc) = class.doc_comment {

@@ -22,7 +22,7 @@ fn test_nested_letrec_self_send_buried_in_conditional_compiles() {
     // there is nothing for the outer loop to fail to recover — this
     // nested-loop variant of the same shape compiles too. Mirrors
     // `tickInLoopConditional` one loop level deeper.
-    let src = "Object subclass: NestedCondSelfSend\n  classState: runs = 0\n\n  class bump => self.runs := self.runs + 1\n\n  class run: n =>\n    j := 0\n    [j < n] whileTrue: [\n      i := 0\n      [i < n] whileTrue: [\n        (i >= 0) ifTrue: [self bump]\n        i := i + 1\n      ]\n      j := j + 1\n    ]\n    self.runs";
+    let src = "Object subclass: NestedCondSelfSend\n\n  class bump => 1\n\n  class run: n =>\n    j := 0\n    [j < n] whileTrue: [\n      i := 0\n      [i < n] whileTrue: [\n        (i >= 0) ifTrue: [self bump]\n        i := i + 1\n      ]\n      j := j + 1\n    ]\n    0";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let result = generate_module(&module, CodegenOptions::new("bt@nestedcondselfsend"));
@@ -319,7 +319,6 @@ fn test_bt1213_block_value_with_captured_mutation_actor() {
         state: vec![],
         methods: vec![method],
         class_methods: vec![],
-        class_variables: vec![],
         type_params: vec![],
         superclass_type_args: vec![],
         uses: vec![],
