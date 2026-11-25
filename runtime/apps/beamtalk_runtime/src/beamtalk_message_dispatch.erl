@@ -49,6 +49,12 @@ delegates to send/3, and on a `does_not_understand` for the exact
 original operator before it reaches the caller. Any other exception
 propagates unchanged.
 
+### send_number_comparison/4 (sync — returns value) (ADR 0116 addendum)
+
+The same as send_number_coercion/4, for a number on the left of `<`, `<=`,
+`>` or `>=` (`3 < aThing`). The two share one body; only the hint wording
+differs ("order a number against" rather than "combine a number with").
+
 ## Usage (from generated Core Erlang)
 
 ```erlang
@@ -56,11 +62,13 @@ call 'beamtalk_message_dispatch':'send'(Receiver, 'selector', [Args])
 call 'beamtalk_message_dispatch':'cast'(Receiver, 'selector', [Args])
 call 'beamtalk_message_dispatch':'send_number_coercion'(
     Right, 'plusFromNumber:', [Left], '+')
+call 'beamtalk_message_dispatch':'send_number_comparison'(
+    Right, 'lessThanFromNumber:', [Left], '<')
 ```
 
 See: ADR 0006 (Unified Method Dispatch), ADR 0043 (Sync-by-Default Actor Messaging)
 """.
--export([send/3, send/4, cast/3, send_number_coercion/4]).
+-export([send/3, send/4, cast/3, send_number_coercion/4, send_number_comparison/4]).
 
 %% A receiver whose dynamic send is answered by its class's compiled
 %% `dispatch/3` in the caller: a raw-term primitive or a `String`. The fast
@@ -231,8 +239,8 @@ cast(Receiver, Selector, Args) ->
     end.
 
 -doc """
-Send a reflected number-on-the-left coercion message, hinting the DNU if the
-reflected method is genuinely missing (ADR 0116 § Dispatch mechanism).
+Send a reflected number-on-the-left arithmetic hook, hinting the DNU if the
+hook is genuinely missing (ADR 0116 § Dispatch mechanism).
 
 Wraps send/3 for the `<verb>FromNumber:` call sites codegen emits for
 `5 + aVector`-shaped expressions: `Right` is the non-numeric right operand,
@@ -240,13 +248,43 @@ Wraps send/3 for the `<verb>FromNumber:` call sites codegen emits for
 `Args` its argument list (the original left operand), and `OrigOp` the
 original source operator symbol (e.g. `'+'`) used only for the hint text.
 
+On a missing hook the hint reads, for `3 + nil`: "'+' cannot combine a
+number with UndefinedObject — the right operand must be a number, or a value
+whose class implements 'plusFromNumber:'". Everything else is
+send_reflected/5's contract, shared with send_number_comparison/4.
+""".
+-spec send_number_coercion(term(), atom(), list(), atom()) -> term().
+send_number_coercion(Right, Selector, Args, OrigOp) ->
+    send_reflected(Right, Selector, Args, OrigOp, arithmetic).
+
+-doc """
+Send a reflected number-on-the-left comparison hook, hinting the DNU if the
+hook is genuinely missing (ADR 0116 § Addendum (2026-11-25)).
+
+The comparison counterpart of send_number_coercion/4, with the same
+arguments (`Right, Selector, Args, OrigOp`), for `3 < aThing`-shaped
+expressions whose right operand is not a number. Codegen chooses this entry
+point for `<`, `<=`, `>` and `>=`; the runtime keeps no table of which
+operators are comparisons, and the entry point only chooses the hint wording.
+
+On a missing hook the hint reads, for `3 <= nil`: "'<=' cannot order a
+number against UndefinedObject — the right operand must be a number, or a
+value whose class implements 'lessOrEqualFromNumber:'". Everything else is
+send_reflected/5's contract, shared with send_number_coercion/4.
+""".
+-spec send_number_comparison(term(), atom(), list(), atom()) -> term().
+send_number_comparison(Right, Selector, Args, OrigOp) ->
+    send_reflected(Right, Selector, Args, OrigOp, comparison).
+
+-doc """
+The one body behind send_number_coercion/4 and send_number_comparison/4.
+`Wording` (`arithmetic` or `comparison`) only chooses the hint's verb.
+
 On success, returns send/3's result unchanged. On a `does_not_understand`
 whose class and selector match `Right`'s actual class and this exact
-`Selector` — i.e. the reflected method is genuinely absent from `Right`'s
+`Selector` — i.e. the reflected hook is genuinely absent from `Right`'s
 class — re-raises the same error with a hint naming the original operator,
-so `5 + aThing` fails with something closer to "`Thing` has no
-`plusFromNumber:` — implement it to support `number + Thing` arithmetic"
-than an unexplained DNU referencing a selector the caller never typed.
+instead of an unexplained DNU referencing a selector the caller never typed.
 
 Any other exception propagates unchanged via erlang:raise/3: a DNU for a
 *different* selector or class (e.g. a bug inside a *present* reflected
@@ -263,8 +301,8 @@ beamtalk_class_dispatch.erl) — the catch clause below matches that wrapped
 shape, not the bare record, and the re-raise re-wraps the hinted error the
 same way.
 """.
--spec send_number_coercion(term(), atom(), list(), atom()) -> term().
-send_number_coercion(Right, Selector, Args, OrigOp) ->
+-spec send_reflected(term(), atom(), list(), atom(), arithmetic | comparison) -> term().
+send_reflected(Right, Selector, Args, OrigOp, Wording) ->
     RightClass = beamtalk_primitive:class_of(Right),
     try
         send(Right, Selector, Args)
@@ -279,13 +317,22 @@ send_number_coercion(Right, Selector, Args, OrigOp) ->
         }:Stack ->
             Hint = unicode:characters_to_binary(
                 io_lib:format(
-                    "~s has no '~s' — implement it to support 'number ~s ~s' arithmetic",
-                    [RightClass, Selector, OrigOp, RightClass]
+                    "'~ts' cannot ~s a number ~s ~ts — the right operand must be a number, "
+                    "or a value whose class implements '~ts'",
+                    [OrigOp, hint_verb(Wording), hint_preposition(Wording), RightClass, Selector]
                 )
             ),
             HintedError = beamtalk_error:with_hint(Error, Hint),
             erlang:raise(error, beamtalk_exception_handler:wrap(HintedError), Stack)
     end.
+
+-spec hint_verb(arithmetic | comparison) -> string().
+hint_verb(arithmetic) -> "combine";
+hint_verb(comparison) -> "order".
+
+-spec hint_preposition(arithmetic | comparison) -> string().
+hint_preposition(arithmetic) -> "with";
+hint_preposition(comparison) -> "against".
 
 -doc """
 Classify a receiver for dispatch, shared by send/3, send/4, cast/3.
