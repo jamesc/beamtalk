@@ -522,13 +522,23 @@ impl TypeCache {
         // Exclusive create (`create_new`): never write through a pre-created
         // file or symlink at the predictable temp name (BT-5135). A stale
         // leftover from a crashed run with a recycled pid is removed once.
+        // Owner-only (BT-5185): the shared tier lives outside the project. A
+        // failed write removes the half-written temp file rather than leaving
+        // it in the cache directory.
         let write_exclusive = || -> std::io::Result<()> {
             use std::io::Write;
-            let mut f = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(tmp.as_std_path())?;
-            f.write_all(json.as_bytes())
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt as _;
+                options.mode(0o600);
+            }
+            let mut f = options.open(tmp.as_std_path())?;
+            f.write_all(json.as_bytes()).inspect_err(|_| {
+                drop(f);
+                let _ = std::fs::remove_file(tmp.as_std_path());
+            })
         };
         let written = write_exclusive().or_else(|e| {
             if e.kind() == std::io::ErrorKind::AlreadyExists {
@@ -2164,6 +2174,25 @@ mod tests {
     // -----------------------------------------------------------------------
     // TypeCache tests (ADR 0075)
     // -----------------------------------------------------------------------
+
+    /// BT-5185: a cache entry is created owner-only, and no staging file is
+    /// left beside it.
+    #[cfg(unix)]
+    #[test]
+    fn type_cache_entry_is_private_and_leaves_no_temp() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let temp = TempDir::new().unwrap();
+        let cache_dir = Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
+        let cache = TypeCache::new(cache_dir.clone());
+        cache.store("lists", Utf8Path::new("/x/lists.beam"), 1, 0, "line");
+        let entries: Vec<_> = std::fs::read_dir(&cache_dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        let mode = std::fs::metadata(&entries[0]).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0, "mode {mode:o}");
+    }
 
     #[test]
     fn type_cache_store_and_lookup() {

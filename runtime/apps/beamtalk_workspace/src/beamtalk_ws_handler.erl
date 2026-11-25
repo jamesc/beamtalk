@@ -146,14 +146,25 @@ allowed_names() ->
     FromEnv =
         case os:getenv("BEAMTALK_WS_ALLOWED_HOSTS") of
             false -> [];
-            Str -> [list_to_binary(T) || T <- string:tokens(Str, ", ")]
+            Str -> string:tokens(Str, ", ")
         end,
-    FromApp =
-        [
-            iolist_to_binary(N)
-         || N <- application:get_env(beamtalk_workspace, ws_allowed_hosts, [])
-        ],
-    [string:lowercase(N) || N <- FromEnv ++ FromApp].
+    FromApp = application:get_env(beamtalk_workspace, ws_allowed_hosts, []),
+    [Name || Raw <- FromEnv ++ FromApp, {ok, Name} <- [allowed_name(Raw)]].
+
+%% BT-5185: one name as a lowercase UTF-8 binary, or `skip`. An entry that is
+%% not valid Unicode (or not a string at all) is ignored, not a crash on every
+%% upgrade: `list_to_binary/1` raised on any character above 255. A non-ASCII
+%% name can never equal a `Host` header (those are ASCII/IDNA), so skipping it
+%% loses nothing.
+allowed_name(Raw) when is_list(Raw); is_binary(Raw) ->
+    try unicode:characters_to_binary(Raw) of
+        Bin when is_binary(Bin), Bin =/= <<>> -> {ok, string:lowercase(Bin)};
+        _ -> skip
+    catch
+        error:badarg -> skip
+    end;
+allowed_name(_) ->
+    skip.
 
 is_bound_host(H, BindAddr) ->
     case inet:parse_address(binary_to_list(H)) of
@@ -173,13 +184,16 @@ websocket_init(State) ->
     %% must run here, not in `init/2`: `init/2` runs in cowboy's short-lived
     %% request process, while this and `terminate/3` run in the process that
     %% owns the socket. Over the cap: close with 1013 (try again later).
+    %% Monitor the cap table's owner first, so an owner restart between the
+    %% two calls still reaches this handler (BT-5185).
+    OwnerMon = beamtalk_ws_conn_cap:monitor_owner(),
     case beamtalk_ws_conn_cap:acquire() of
         ok ->
-            websocket_init_accepted(State);
+            websocket_init_accepted(State#ws_state{cap_owner_mon = OwnerMon});
         {error, at_capacity} ->
-            ?LOG_WARNING("WebSocket refused: connection cap reached", #{
+            ?LOG_WARNING("WebSocket refused: unauthenticated connection budget full", #{
                 peer => State#ws_state.peer,
-                limit => beamtalk_ws_conn_cap:limit(),
+                limit => beamtalk_ws_conn_cap:preauth_limit(),
                 domain => [beamtalk, runtime]
             }),
             {[{close, 1013, <<"Too many connections">>}], State}
@@ -218,6 +232,16 @@ websocket_handle(_Frame, State) ->
 Handle Erlang messages sent to the handler process.
 Streaming stdout chunk from eval
 """.
+websocket_info({beamtalk_ws_conn_cap, evicted}, State = #ws_state{authenticated = false}) ->
+    %% BT-5185: the pre-auth budget was full and this was the oldest
+    %% unauthenticated socket; a newer one has taken its slot.
+    {[{close, 1013, <<"Too many unauthenticated connections">>}], State};
+websocket_info(
+    {'DOWN', Ref, process, _Owner, _Reason}, State = #ws_state{cap_owner_mon = Ref}
+) when Ref =/= undefined ->
+    %% BT-5185: the REPL server (and its connection-cap table) restarted; this
+    %% connection would live on uncounted, so close it (1012: service restart).
+    {[{close, 1012, <<"Server restarting">>}], State#ws_state{cap_owner_mon = undefined}};
 websocket_info(auth_deadline, State = #ws_state{authenticated = false}) ->
     ?LOG_WARNING("WebSocket closed: auth deadline", #{
         peer => State#ws_state.peer, domain => [beamtalk, runtime]
@@ -669,7 +693,7 @@ handle_auth_message(Decoded, State) ->
                                 peer => format_peer(State#ws_state.peer),
                                 connected_at => erlang:system_time(microsecond)
                             },
-                            start_or_resume_session(
+                            admit_and_start(
                                 ResumeId, Meta, State#ws_state{shutdown_only = ShutdownOnly}
                             );
                         {error, VersionMessage} ->
@@ -710,6 +734,28 @@ handle_auth_message(Decoded, State) ->
                 })
             ),
             {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}
+    end.
+
+-doc """
+Take an authenticated connection slot, then start or resume the session
+(BT-5185). The slot comes first, so a socket refused at the authenticated cap
+(or evicted from the pre-auth budget meanwhile) never starts a session.
+""".
+-spec admit_and_start(binary() | undefined, map(), #ws_state{}) -> {list(), #ws_state{}}.
+admit_and_start(ResumeId, Meta, State) ->
+    case beamtalk_ws_conn_cap:promote() of
+        ok ->
+            start_or_resume_session(ResumeId, Meta, State);
+        {error, at_capacity} ->
+            ?LOG_WARNING("WebSocket refused after auth: authenticated connection cap reached", #{
+                peer => State#ws_state.peer,
+                limit => beamtalk_ws_conn_cap:limit(),
+                domain => [beamtalk, runtime]
+            }),
+            {[{close, 1013, <<"Too many connections">>}], State};
+        {error, evicted} ->
+            %% Evicted from the pre-auth budget while this auth was in flight.
+            {[{close, 1013, <<"Too many unauthenticated connections">>}], State}
     end.
 
 -doc """

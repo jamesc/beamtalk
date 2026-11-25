@@ -8,6 +8,7 @@ instead of a fixture (see `docs/development/architecture-principles.md`).
 | Fixture | Format | Consumers |
 |---|---|---|
 | `attach_sname_conformance.json` | LiveView front's distribution short name, `bt_attach_<suffix>_<os_pid>@localhost` | Rust `beamtalk-desktop-broker` (`sname.rs`), Elixir `BtAttach.Workspace.attach_sname/2` (`workspace_test.exs`) |
+| `loopback_dist_conformance.json` | Whether `ERL_EPMD_ADDRESS` keeps a node's distribution listener on loopback, and which loopback address (`interface_cases`, by `-proto_dist`) | Rust `beamtalk_workspace::loopback_dist_for` / `loopback_interface_for`, Elixir `BtAttach.Workspace.loopback_dist?/1` / `loopback_interface/1` (`workspace_test.exs`) |
 | `port_file_conformance.json` | Workspace `port` file, `PORT` then optional `NONCE`; strict, digits only 1-65535 on the first line | Rust `beamtalk_workspace::parse_port_file`, TypeScript `parsePortFileContent` (`editors/vscode/src/__tests__/portFile.test.ts`) |
 
 Other conformance fixtures live next to the code they pin:

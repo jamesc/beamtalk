@@ -342,7 +342,18 @@ defmodule BtAttachWeb.Auth do
     if id = get_session(conn, @live_socket_id_key) do
       # Revoke first (BT-5108): a cookie copy replayed after logout is refused
       # until its TTL, and the broadcast closes this session's open sockets.
-      BtAttach.RevokedSessions.revoke(id, session_ttl_secs())
+      case BtAttach.RevokedSessions.revoke(id, session_ttl_secs()) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          # BT-5185: the cookie is still cleared and the sockets closed, but a
+          # copy taken earlier stays usable until its TTL; say so.
+          Logger.error("logout could not revoke the session: #{inspect(reason)}",
+            domain: [:beamtalk, :liveview]
+          )
+      end
+
       BtAttachWeb.Endpoint.broadcast(id, "disconnect", %{})
     end
 

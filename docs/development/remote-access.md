@@ -132,8 +132,15 @@ The same list can be set as the `beamtalk_workspace` application env
 which names pass the rebinding check. Alternatively, have the proxy send
 `proxy_set_header Host 127.0.0.1:49152;` and forward no `Origin`.
 
-**Connection cap:** the workspace allows at most 256 live WebSocket connections
-(`beamtalk_workspace` app env `ws_max_connections`); further upgrades get `503`.
+**Connection caps:** unauthenticated and authenticated WebSockets have separate
+budgets. At most 32 sockets may be waiting to authenticate (`beamtalk_workspace`
+app env `ws_max_preauth_connections`); when that budget is full, a new socket
+takes the slot of the oldest unauthenticated one, which is closed with code
+1013, so idle unauthenticated sockets cannot lock a client out. At most 256
+sockets may be authenticated (`ws_max_connections`); one more is closed with
+code 1013 right after it authenticates. If the REPL server restarts, its open
+WebSockets are closed with code 1012 and clients reconnect. A name in
+`BEAMTALK_WS_ALLOWED_HOSTS` that is not valid Unicode is ignored.
 
 **Important nginx notes:**
 - `proxy_http_version 1.1` is required for WebSocket upgrade
