@@ -3593,7 +3593,7 @@ These message sends are Tier 1 optimized — the compiler generates inlined tail
 | `whileTrue` / `whileFalse` (unary: the receiver block is condition and body, so it runs at least once) | `[self.count := self.count + 1. self.count < 10] whileTrue` | ✅ (below) |
 | `timesRepeat:` | `5 timesRepeat: [sum := sum + n]` | ✅ |
 | `to:do:` | `1 to: 10 do: [:n \| total := total + n]` | ✅ |
-| `to:by:do:` (any `Number` step; the block parameter is a `Number`) | `1 to: 2 by: 0.5 do: [:x \| total := total + x]` | ✅ |
+| `to:by:do:` (any `Number` step; the block parameter is a `Number`, or an `Integer` for a statically-`Integer` step) | `1 to: 2 by: 0.5 do: [:x \| total := total + x]` | ✅ |
 | `do:`, `collect:`, `select:`, `reject:` | `items do: [:x \| sum := sum + x]` | ✅ |
 | `inject:into:` | `items inject: 0 into: [:acc :x \| acc + x]` | ✅ |
 
@@ -8527,9 +8527,9 @@ An `Interval` represents an arithmetic sequence of integers without materialisin
 (1 to: 5) collect: [:x | x * x]                 // => #(1, 4, 9, 16, 25)
 ```
 
-A step of `0` raises, and a step or limit that is `nil` or not a number raises `TypeError`. An `Interval` holds integers only, so `to:by:` also raises `TypeError` ("Interval step must be an Integer") for a step that is a number but not an Integer, such as `1 to: 2 by: 0.5` or `1 to: 10 by: 2.0` ([BT-5217](https://linear.app/beamtalk/issue/BT-5217)).
+A step of `0` raises, and a step or limit that is `nil` or not a number raises `TypeError`. An `Interval` holds integers only, so `to:by:` also raises `TypeError` ("Interval step must be an Integer") for a step that is a number but not an Integer, such as `1 to: 2 by: 0.5` or `1 to: 10 by: 2.0` ([BT-5217](https://linear.app/beamtalk/issue/BT-5217)). Likewise `to:` and `to:by:` raise `TypeError` ("Interval limit must be an Integer") for a limit that is not an Integer, such as `1 to: 2.5` ([BT-5245](https://linear.app/beamtalk/issue/BT-5245)); `to:do:` and `to:by:do:` still take any number as the limit. In typed code the `to:by:do:` block parameter is `Integer` when the start and the step are both statically `Integer`, and `Number` otherwise ([BT-5246](https://linear.app/beamtalk/issue/BT-5246)).
 
-The counted loop `to:by:do:` is not an `Interval` and takes any `Number` step: `1 to: 2 by: 0.5 do: [:x | ...]` runs with `x` = 1, 1.5, 2.0. Its block is typed `Block(Number, Object)`, so the type checker treats the loop variable as a `Number`, not an `Integer` ([BT-5216](https://linear.app/beamtalk/issue/BT-5216)). A step of `0` or `0.0` raises, and a step or limit that is `nil` or not a number raises `TypeError`; the compiled counted-loop path raises the same errors. See [Control Flow Constructs](#control-flow-constructs).
+The counted loop `to:by:do:` is not an `Interval` and takes any `Number` step: `1 to: 2 by: 0.5 do: [:x | ...]` runs with `x` = 1, 1.5, 2.0. Its block is declared `Block(Number, Object)`, so the type checker treats the loop variable as a `Number` ([BT-5216](https://linear.app/beamtalk/issue/BT-5216)), except when the start and the step are both statically `Integer`, where it is an `Integer` ([BT-5246](https://linear.app/beamtalk/issue/BT-5246)). A step of `0` or `0.0` raises, and a step or limit that is `nil` or not a number raises `TypeError`; the compiled counted-loop path raises the same errors. See [Control Flow Constructs](#control-flow-constructs).
 
 ### Bag(E) — Multisets
 
