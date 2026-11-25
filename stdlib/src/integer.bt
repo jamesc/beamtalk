@@ -327,6 +327,10 @@ sealed typed Number subclass: Integer
   /// ```beamtalk
   /// 1 to: 3 do: [:i | Transcript show: i]
   /// ```
+  ///
+  /// The start (the receiver) must be an Integer: only `Integer` defines
+  /// `to:do:`, so `1.5 to: 3 do: [...]` raises `does_not_understand` on both
+  /// the pure and the inlined counted-loop path (BT-5235, BT-5215).
   to: end :: Integer do: block :: Block(Integer, Object) -> Nil =>
     (end isKindOf: Number) ifFalse: [
       ^TypeError signal: "Interval limit must be a number"
@@ -357,6 +361,10 @@ sealed typed Number subclass: Integer
   /// The step may be any Number: `1 to: 2 by: 0.5 do:` passes 1, 1.5 and 2.0,
   /// so the block's parameter is a `Number`, not an `Integer` (BT-5216).
   /// `to:by:` (which builds an `Interval`) takes an Integer step only.
+  ///
+  /// The start (the receiver) must be an Integer: only `Integer` defines
+  /// `to:by:do:`, so `1.5 to: 3 by: 0.5 do: [...]` raises `does_not_understand`
+  /// on both the pure and the inlined counted-loop path (BT-5235, BT-5215).
   to: end :: Integer by: step :: Number do: block :: Block(Number, Object) -> Nil =>
     (step isKindOf: Number) ifFalse: [
       ^TypeError signal: "Interval step must be a number"
