@@ -7,7 +7,8 @@
 // declaration made `nil > 10` answer `true`. A wrong-kind receiver now
 // dispatches and raises `does_not_understand`, as for an unknown receiver
 // (BT-3924). A number receiver tests its argument too (ADR 0116 § Addendum,
-// BT-5176, reversing BT-3928); a String receiver does not. Fixture:
+// BT-5176, reversing BT-3928), and a String receiver raises a `type_error`
+// for a non-String argument (BT-5213). Fixture:
 // `fixtures/typed_comparison_probe.bt`.
 
 TestCase subclass: TypedComparisonReceiverTest
@@ -100,10 +101,11 @@ TestCase subclass: TypedComparisonReceiverTest
     bad := TypedComparisonProbe new: #{#mixed => self wrong}
     self should: [bad mixedFieldLt] raise: #does_not_understand
     self assert: (TypedComparisonProbe new: #{#mixed => 5}) mixedFieldLt
-    // A String receiver still orders a wrong-kind argument by term order
-    // (only a number receiver tests its argument, ADR 0116 § Addendum):
-    // numbers sort before binaries.
-    self deny: (TypedComparisonProbe new: #{#mixed => "abc"}) mixedFieldLt
+    // A String receiver raises a `type_error` for a wrong-kind argument
+    // instead of ordering it by term order (BT-5213).
+    self should: [
+      (TypedComparisonProbe new: #{#mixed => "abc"}) mixedFieldLt
+    ] raise: #type_error
 
   testTypedLocalStillRaises =>
     self should: [self.probe localGt: self wrong] raise: #does_not_understand

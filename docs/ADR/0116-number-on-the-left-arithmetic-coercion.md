@@ -1412,7 +1412,16 @@ method with a declared signature, and nothing is looked up through
 
 - **`String` and `Symbol` receivers** with a wrong-kind argument
   (`"a" < 5`, `#a < 5`) still term-order. Separate follow-up, with its own
-  test (`is_binary`) and its own decision about hooks.
+  test (`is_binary`) and its own decision about hooks. *Done by BT-5213:*
+  the owner chose a plain `type_error` with no hooks, `Symbol` against
+  `String` raises too, and the failing arm is a frame-free `erlang:error/1`
+  of a `{beamtalk_ordering_type_error, Left, Op, Right}` term that
+  `beamtalk_exception_handler:wrap_raw/2` turns into the structured error.
+  The right-operand test is the class's routing guard (a `String` is the
+  tagged `{beamtalk_string, Bin}` tuple since BT-4170, so not `is_binary`),
+  on the inlined path for a proven `String` receiver and in the
+  `@primitive` bodies of `String` and `Symbol`. Measured in
+  `docs/development/benchmarks.md` § BT-5213.
 - **Match-arm guards.** A `<` written in a pattern guard lowers to an
   Erlang guard BIF (`patterns/match_lowering.rs`), where nothing can be
   dispatched or raised. Guards keep term order on both operands, as they do
@@ -1786,7 +1795,8 @@ duplicate Epic)
   - BT-5210 — Phase 2b: right-operand test on the inlined path, `comparison_is_bare`
   - BT-5211 — Phase 2c: right-operand test on the primitive path (`perform:`), CHANGELOG and language docs
   - BT-5212 — Phase 3: type-checker hook lookup (open)
-  - BT-5213, BT-5214 — follow-ups: `String`/`Symbol` wrong-kind ordering, Collection `max`/`min` (open)
+  - BT-5213 — follow-up: `String`/`Symbol` wrong-kind ordering raises `type_error`
+  - BT-5214 — follow-up: Collection `max`/`min` (open)
 
 **Status:** Complete for the arithmetic design — all issues Done (BT-3262–BT-3266 closed 2026-08-25, BT-2712 closed 2026-08-25; addendum issues closed 2026-10-18). The 2026-11-25 comparison addendum is implemented at run time (Phases 0–2, BT-5207–BT-5211); the type-checker phase (BT-5212) is open.
 

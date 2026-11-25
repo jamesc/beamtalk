@@ -5,7 +5,8 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
-use super::{binary_bif, generate_numeric_comparison_bif, wrap_string_result};
+use super::{binary_bif, generate_ordering_comparison_bif, wrap_string_result};
+use crate::core_erlang::operators::OrderingKind;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -20,7 +21,7 @@ pub(crate) fn generate_float_bif(selector: &str, params: &[String]) -> Option<Do
         "/" => binary_bif("/", params),
         // Comparison (ADR 0002: Erlang operators)
         "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => {
-            generate_numeric_comparison_bif(selector, params)
+            generate_ordering_comparison_bif(OrderingKind::Number, selector, params)
         }
         // Rounding
         "rounded" => Some(Document::Str("call 'erlang':'round'(Self)")),

@@ -447,6 +447,10 @@ decode_beam_error(#{class := 'Exception', error := #beamtalk_error{message = Msg
     beamtalk_text:to_binary(Msg);
 decode_beam_error(#{?BT_CLASS_TAG_KEY := _, error := #beamtalk_error{message = Msg}}) ->
     beamtalk_text:to_binary(Msg);
+%% BT-5213: the raw term a String or Symbol ordering raises for a wrong-kind
+%% argument reads as the structured `type_error` wrap_raw/2 builds from it.
+decode_beam_error({?BT_ORDERING_TYPE_ERROR_TAG, _, _, _} = Reason) ->
+    decode_beam_error(beamtalk_exception_handler:wrap_raw(Reason));
 decode_beam_error({badkey, Key}) ->
     <<"key ", (beamtalk_primitive:print_string(Key))/binary, " not found in dictionary">>;
 decode_beam_error({badmap, Map}) ->
