@@ -70,6 +70,22 @@
         </div>
       </div>
       <span class="spacer"></span>
+      <%!-- Eval activity + Stop (BT-5189): outside the dock, so it stays in
+           view whichever dock tab is active (or with the dock collapsed). --%>
+      <.eval_activity
+        :if={@connected}
+        id="eval-activity"
+        running={@eval_running}
+        queued={Dock.queued_count(assigns)}
+      />
+      <span
+        :if={@connected and assigns[:eval_notice]}
+        id="eval-notice"
+        class="kbdhint"
+        role="status"
+      >
+        {@eval_notice}
+      </span>
       <%!-- Panel toggle buttons (BT-2559): show/hide side panels and dock. --%>
       <div :if={@connected} class="panel-toggles">
         <button
@@ -780,6 +796,12 @@
                               phx-value-class={c.class}
                               phx-value-kind={c.kind}
                               phx-disable-with="Deleting…"
+                              disabled={
+                                Dock.eval_pending?(
+                                  assigns,
+                                  GitChanges.flush_destructive_key(c.class, c.kind)
+                                )
+                              }
                               data-confirm={
                                 "Permanently delete #{c.class}'s source file from disk? This cannot be undone."
                               }
@@ -806,6 +828,12 @@
                               phx-value-class={c.class}
                               phx-value-kind={c.kind}
                               phx-disable-with="Renaming…"
+                              disabled={
+                                Dock.eval_pending?(
+                                  assigns,
+                                  GitChanges.flush_destructive_key(c.class, c.kind)
+                                )
+                              }
                               data-confirm={rename_flush_confirm_message(c)}
                             >
                               apply rename
@@ -1080,6 +1108,17 @@
                     Refresh
                   </button>
                   <span :if={@tests_running} class="muted-note">Running…</span>
+                  <%!-- BT-5189: a run can take minutes — Stop kills its
+                       workspace-side worker and frees the controls. --%>
+                  <button
+                    :if={@tests_running}
+                    id="tests-stop"
+                    type="button"
+                    class="btn"
+                    phx-click="tests_stop"
+                  >
+                    Stop
+                  </button>
                   <span
                     :if={@test_results}
                     class={["test-summary", @test_results["failed"] > 0 && "fail"]}
@@ -1832,6 +1871,12 @@
                             class="btn btn-sm"
                             type="button"
                             phx-click="remove_method"
+                            disabled={
+                              Dock.eval_pending?(
+                                assigns,
+                                ClassModals.remove_key(MethodEditor.active_tab(assigns))
+                              )
+                            }
                             data-confirm={
                               "Remove #{@edit_selector} from #{@edit_class}#{if MethodEditor.active_tab(assigns).side == "class", do: " class", else: ""}? This cannot be undone from the editor."
                             }
@@ -1878,6 +1923,12 @@
                             class="btn btn-sm"
                             type="button"
                             phx-click="remove_class"
+                            disabled={
+                              Dock.eval_pending?(
+                                assigns,
+                                ClassModals.remove_key(MethodEditor.active_tab(assigns))
+                              )
+                            }
                             data-confirm={
                               "Remove #{@edit_class} from the running system? This deletes it from memory immediately; the source file is not touched until a separate confirmation to flush the removal. This cannot be undone from the editor."
                             }
@@ -1980,16 +2031,29 @@
                             >
                               {@rename_error}
                             </p>
+                            <%!-- BT-5189: while the submitted rename is queued
+                                 or running, submit stays disabled (a second
+                                 submit would queue a second rename) and the
+                                 modal shows the eval activity with its Stop. --%>
                             <div class="modal-actions">
+                              <.eval_activity
+                                id="rename-eval-activity"
+                                running={Dock.eval_pending?(assigns, ClassModals.rename_key())}
+                                queued={Dock.queued_count(assigns)}
+                              />
                               <button type="button" class="btn ghost" phx-click="close_rename">
                                 Cancel
                               </button>
                               <button
+                                id="rename-submit"
                                 class="btn primary"
                                 type="submit"
                                 phx-disable-with="Renaming…"
+                                disabled={Dock.eval_pending?(assigns, ClassModals.rename_key())}
                               >
-                                Rename
+                                {if Dock.eval_pending?(assigns, ClassModals.rename_key()),
+                                  do: "Renaming…",
+                                  else: "Rename"}
                               </button>
                             </div>
                           </form>

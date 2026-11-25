@@ -4280,38 +4280,25 @@ fn test_spawn_with_args_validates_map_argument() {
     );
 }
 
-// --- ADR 0130 §2/§3: class variables are read and written in place; class
-// methods and class-side self-sends neither take nor return them ---
+// --- ADR 0153: a class has no slots; class methods and class-side self-sends
+// neither read nor write class state ---
 
-/// ADR 0130 §2: a class-var write inside a `classMethods:` fun is an in-place
-/// `put` (inlined), with the runtime helper as the miss path.
+/// ADR 0153: a `self.x := v` inside a `classMethods:` fun is rejected (the
+/// builder's `classVars:` names no longer make `self.x` a class variable).
 #[test]
-fn test_builder_class_var_mutation_is_an_in_place_put() {
+fn test_builder_class_method_field_write_is_rejected() {
     let src = "Object classBuilder name: #ShadowB; superclass: Object; \
-               classVars: #{ #runs => 0 }; \
                classMethods: #{ #bump => [:self | self.runs := self.runs + 1] }; register";
-    let code = try_codegen(src).expect("mutating classMethods block must compile");
-    assert_has(
-        "builder class-method write should be an inlined in-place put",
-        &code,
-        &["call 'erlang':'put'(_CVKey", "call 'maps':'put'('runs', "],
-    );
-    assert_has(
-        "builder class-method write should fall back to the runtime helper.",
-        &code,
-        &["call 'beamtalk_class_vars':'put'(ClassSelf, 'runs', "],
-    );
-    assert_lacks(
-        "nothing is threaded or returned beside the result",
-        &code,
-        &["ClassVars", "class_var_result"],
+    assert!(
+        try_codegen(src).is_err(),
+        "a class-side field write must not compile"
     );
 }
 
 /// ADR 0130 §3 / BT-4301: a `ClassBuilder` `super` / self-send passes the LIVE
 /// receiver (`ClassSelf` itself), so a subclass receiver runs the superclass
-/// method under its own class-variable key instead of the static builder
-/// class's, and the runtime rebuilds nothing from a tag.
+/// method as itself instead of as the static builder class, and the runtime
+/// rebuilds nothing from a tag.
 #[test]
 fn test_builder_super_and_self_send_pass_live_receiver() {
     let src = "Object classBuilder name: #BT3709Sup; superclass: Object; \
@@ -4439,10 +4426,9 @@ fn test_class_method_behaviour_protocol_self_send_uses_class_self_send() {
 /// A builder cascade lexically inside a block still lowers the fun as a class
 /// method's own top frame (`block_depth` is reset and restored around it).
 #[test]
-fn test_builder_cascade_at_block_depth_still_lowers_in_place_access() {
+fn test_builder_cascade_at_block_depth_still_lowers_a_class_method_fun() {
     let src = "Object classBuilder name: #ShadowBlk; superclass: Object; \
-               classVars: #{ #runs => 0 }; \
-               classMethods: #{ #bump => [:self | self.runs := self.runs + 1] }; register";
+               classMethods: #{ #twice => [:self | self bump] }; register";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let expr = module
@@ -4455,12 +4441,12 @@ fn test_builder_cascade_at_block_depth_still_lowers_in_place_access() {
     generator.block_depth = 1; // Simulate the cascade sitting inside a block
     let code = generator
         .expression_doc(&expr)
-        .expect("mutating classMethods block must compile")
+        .expect("classMethods block must compile")
         .to_pretty_string();
     assert_has(
-        "builder fun lowered from inside a block should still write in place.",
+        "builder fun lowered from inside a block is a class-method fun.",
         &code,
-        &["call 'erlang':'put'(_CVKey"],
+        &["'twice' => fun (ClassSelf)"],
     );
     assert_eq!(
         generator.block_depth, 1,

@@ -480,15 +480,15 @@ const ON_DO_HYBRID_LOOPS: [&str; 6] = [
 const ON_DO_HYBRID_PROTECTED: [&str; 2] = ["0 error: \"boom\"", "0"];
 const ON_DO_HYBRID_HANDLERS: [&str; 3] = ["[:e | nil]", "[nil]", "[:e | e]"];
 
-/// Every cell-boundary entry in `out`: the text between each class-variable
-/// snapshot and the `try` that follows it.
+/// Every `on:do:` cell-boundary entry in `out`: the `let` that snapshots the
+/// cell or stores the pre-region `State`, rendered immediately before the
+/// boundary's `try` (ADR 0137 §5).
 fn on_do_entries(out: &str) -> Vec<&str> {
-    out.match_indices("'beamtalk_class_vars':'snapshot'()")
-        .map(|(i, _)| {
-            let rest = &out[i..];
-            &rest[..rest.find("try ").expect("on:do: entry precedes its try")]
-        })
-        .collect()
+    let entry = regex::Regex::new(
+        r"let [^ ]+ = call 'beamtalk_actor_state':'(snapshot|store)'\([^)]*\) in try ",
+    )
+    .expect("valid regex");
+    entry.find_iter(out).map(|m| m.as_str()).collect()
 }
 
 #[test]

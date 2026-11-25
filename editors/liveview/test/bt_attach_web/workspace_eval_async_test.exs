@@ -36,6 +36,16 @@ defmodule BtAttachWeb.WorkspaceEvalAsyncTest do
       end
     end
 
+    # BT-5189: a test run that blocks until the test releases it (or the task
+    # running it is killed by Stop).
+    def run_tests(_class) do
+      send(Application.fetch_env!(:bt_attach, :eval_async_test_pid), {:tests_started, self()})
+
+      receive do
+        {:finish, reply} -> reply
+      end
+    end
+
     def list_bindings(_pid) do
       send(Application.fetch_env!(:bt_attach, :eval_async_test_pid), :bindings_read)
       []
@@ -248,5 +258,44 @@ defmodule BtAttachWeb.WorkspaceEvalAsyncTest do
     send(task, {:finish, {:ok, 1, "", []}})
     render_async(view, 1_000)
     assert :sys.get_state(view.pid).socket.assigns.eval_running == false
+  end
+
+  # BT-5189: internal evals (renames, pokes, flushes) queue behind a running
+  # user eval, so Stop and the pending indicator must be in view from every
+  # dock tab, not only inside the Workspace pane.
+  test "Stop and the pending count are visible from another dock tab", %{conn: conn} do
+    view = mount_cockpit(conn)
+
+    view |> form("#eval-form", %{"expr" => "1"}) |> render_submit()
+    assert_receive {:eval_started, first}, 1_000
+    Application.put_env(:bt_attach, :eval_async_eval_pid, first)
+    view |> form("#eval-form", %{"expr" => "2"}) |> render_submit()
+
+    html = render_click(view, "dock_tab", %{"tab" => "transcript"})
+    assert html =~ ~s(id="eval-activity")
+    assert html =~ "1 waiting"
+
+    view |> element("#eval-activity-stop") |> render_click()
+    assert_receive :interrupt_called, 1_000
+    html = render_async(view, 5_000)
+    refute html =~ ~s(id="eval-activity")
+    assert html =~ "1 waiting evaluation was cancelled"
+    refute_receive {:eval_started, _}, 200
+  end
+
+  test "a running test run has a Stop that ends it and frees the controls", %{conn: conn} do
+    view = mount_cockpit(conn)
+
+    render_click(view, "run_tests", %{})
+    assert_receive {:tests_started, task}, 1_000
+    ref = Process.monitor(task)
+    html = render(view)
+    assert html =~ ~s(id="tests-stop")
+
+    html = view |> element("#tests-stop") |> render_click()
+    assert_receive {:DOWN, ^ref, :process, ^task, _}, 1_000
+    refute html =~ ~s(id="tests-stop")
+    assert html =~ "Test run stopped."
+    refute :sys.get_state(view.pid).socket.assigns.tests_running
   end
 end
