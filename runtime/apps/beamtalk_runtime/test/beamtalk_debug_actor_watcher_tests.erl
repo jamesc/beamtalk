@@ -43,19 +43,22 @@ watch_when_not_running_returns_ok_test() ->
 %% Test: line 55 — init/1 fold over pre-existing debug-target rows
 %%====================================================================
 
-%% When the gen_server restarts with existing rows in `beamtalk_debug_targets`,
-%% `init/1` folds over them (line 55) and re-monitors each actor pid.
+%% `init/1` is exported, so it can be called directly to exercise the fold
+%% (line 55) without starting a new registered gen_server process.  This avoids
+%% `{already_started, _}` errors when the full test suite has already started
+%% `beamtalk_debug_actor_watcher` via the runtime supervisor.
 init_with_preexisting_target_monitors_it_test() ->
     beamtalk_logging_config:ensure_table(),
     IdlePid = beamtalk_test_proc:spawn_idle(),
     ets:insert(?TABLE, {IdlePid, actor_instance, 'SomeClass'}),
     try
-        {ok, WatcherPid} = beamtalk_debug_actor_watcher:start_link(),
-        ?assert(is_process_alive(WatcherPid)),
-        beamtalk_test_proc:stop(WatcherPid)
+        {ok, Monitors} = beamtalk_debug_actor_watcher:init([]),
+        ?assertMatch(#{IdlePid := _}, Monitors),
+        #{IdlePid := MRef} = Monitors,
+        demonitor(MRef, [flush])
     after
         beamtalk_test_proc:kill_and_wait(IdlePid),
-        ets:delete_all_objects(?TABLE)
+        ets:delete(?TABLE, IdlePid)
     end.
 
 %%====================================================================
@@ -66,14 +69,18 @@ debug_actor_watcher_running_test_() ->
     {setup,
         fun() ->
             beamtalk_logging_config:ensure_table(),
-            {ok, Pid} = beamtalk_debug_actor_watcher:start_link(),
-            Pid
+            case whereis(beamtalk_debug_actor_watcher) of
+                undefined ->
+                    {ok, Pid} = beamtalk_debug_actor_watcher:start_link(),
+                    {started, Pid};
+                Pid ->
+                    {already_running, Pid}
+            end
         end,
-        fun(Pid) ->
-            beamtalk_test_proc:stop(Pid),
-            ets:delete_all_objects(?TABLE)
+        fun({started, Pid}) -> beamtalk_test_proc:stop(Pid);
+           ({already_running, _}) -> ok
         end,
-        fun(_Pid) ->
+        fun(_) ->
             [
                 fun watch_pid_not_in_table_returns_ok/0,
                 fun watch_pid_already_monitored_returns_ok/0,
