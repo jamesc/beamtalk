@@ -87,62 +87,6 @@ fn eager_instance_field_read_stays_bare_maps_get_alongside_late_sibling() {
     );
 }
 
-/// Class-method branch (ADR 0130 §2): `self.current` on a `late classState:`
-/// var reads in place; only an absent key is a miss, which the runtime's
-/// `get_late/2` turns into the structured `uninitialized_state_error` — a
-/// stored `nil` answers on the hit path (BT-4061).
-#[test]
-fn late_class_var_read_inlines_the_hit_and_falls_back_to_get_late() {
-    let src = concat!(
-        "typed Actor subclass: CodexClient\n",
-        "  late classState: current :: CodexClient\n",
-        "  classState: total :: Integer = 0\n\n",
-        "  class fetch => self.current\n",
-    );
-    let code = codegen_named(src, "codex_client");
-
-    assert!(
-        code.contains("call 'maps':'find'('current', "),
-        "a `late` class variable read must guard with maps:find. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("when call 'erlang':'=/='("),
-        "a `late` class variable read must NOT treat a stored nil as a miss — presence is assignment. Got:\n{code}"
-    );
-    assert!(
-        code.contains("call 'beamtalk_class_vars':'get_late'(ClassSelf, 'current')"),
-        "the miss path is the runtime's get_late/2. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("ClassVars"),
-        "no ClassVars map is read (ADR 0130 §3). Got:\n{code}"
-    );
-
-    assert_compiles_through_erlc("codex_client", &code);
-}
-
-/// An eager class variable alongside a `late` one reads through `get/2`, not
-/// `get_late/2`, and has no nil-is-a-miss guard.
-#[test]
-fn eager_class_var_read_uses_get_alongside_late_sibling() {
-    let src = concat!(
-        "typed Actor subclass: CodexClient\n",
-        "  late classState: current :: CodexClient\n",
-        "  classState: total :: Integer = 0\n\n",
-        "  class fetchTotal => self.total\n",
-    );
-    let code = codegen_named(src, "codex_client");
-
-    assert!(
-        code.contains("call 'beamtalk_class_vars':'get'(ClassSelf, 'total')"),
-        "an eager class variable's miss path is get/2. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'get_late'(ClassSelf, 'total')") && !code.contains("'=/='"),
-        "an eager class variable has no late guard. Got:\n{code}"
-    );
-}
-
 /// Cross-file inheritance: a `late` instance field declared on a
 /// compiled-elsewhere ancestor (`ClassInfo` metadata only, no AST) must
 /// still be guarded when read in the subclass's own method — the flattened

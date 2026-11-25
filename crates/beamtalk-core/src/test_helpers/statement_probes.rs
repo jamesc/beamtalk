@@ -341,7 +341,7 @@ pub fn probe_method(
 #[must_use]
 pub fn class_source(context: &str, name: &str, methods: &[String]) -> String {
     let header = match context {
-        "class" => format!("Object subclass: {name}\n  classState: n = 0\n  class plain => 0\n"),
+        "class" => format!("Object subclass: {name}\n  class plain => 0\n"),
         "value" => format!("Value subclass: {name}\n  plain => 0\n"),
         "actor" => format!("Actor subclass: {name}\n  state: n = 0\n  plain => 0\n"),
         other => panic!("unknown context {other}"),

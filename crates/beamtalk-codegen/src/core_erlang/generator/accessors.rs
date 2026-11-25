@@ -486,7 +486,7 @@ impl CoreErlangGenerator {
             }
         }
         self.current_class_field_types = fields;
-        self.current_class_var_types = classify_fields(&class.class_variables);
+        self.current_class_var_types = classify_fields(&[]);
     }
 
     /// The comparison kinds of a `self.<name>` read when its field is declared

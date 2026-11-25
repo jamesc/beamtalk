@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0153: `classState:` and `late classState:` are compile errors. The
+// parser recovers past the declaration, so the rest of the class still
+// compiles.
+
+Actor subclass: ClassStateRemoved
+  state: count = 0
+  classState: total = 0
+  late classState: current :: Integer
+
+  class limit => 100
+
+  bump => self.count := self.count + 1

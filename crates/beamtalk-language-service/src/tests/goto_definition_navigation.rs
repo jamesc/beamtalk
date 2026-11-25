@@ -642,7 +642,7 @@ fn goto_definition_from_method_header_navigates_cross_file() {
 // BT-5079: state and class-variable defaults are expressions the IDE layer
 // must traverse like any method body.
 #[test]
-fn navigation_works_inside_state_and_class_variable_defaults() {
+fn navigation_works_inside_state_defaults() {
     let mut service = SimpleLanguageService::new();
     let stack = Utf8PathBuf::from("Stack.bt");
     let holder = Utf8PathBuf::from("Holder.bt");
@@ -652,10 +652,10 @@ fn navigation_works_inside_state_and_class_variable_defaults() {
     );
     service.update_file(
         holder.clone(),
-        "Object subclass: Holder\n  state: s = Stack new\n  classState: c = Stack new\n  get => s\n"
+        "Object subclass: Holder\n  state: s = Stack new\n  state: c = Stack new\n  get => s\n"
             .to_string(),
     );
-    for (line, col) in [(1, 14), (2, 20)] {
+    for (line, col) in [(1, 14), (2, 15)] {
         let pos = Position::new(line, col);
         let def = service.goto_definition(&holder, pos).expect("definition");
         assert_eq!(def.file, stack, "line {line}");

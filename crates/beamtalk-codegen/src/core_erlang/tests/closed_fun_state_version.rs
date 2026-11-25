@@ -152,13 +152,11 @@ fn inject_fold_with_conditional_local_write_inside_stateacc_loop() {
     // plan); the fold fun's `ifTrue:ifFalse:` writes the block-local `v`.
     check(
         "Object subclass: FoldProbe
-  classState: n = 0
-
   class h0: x -> Integer => 3
 
   class probe -> Integer =>
     i := 0. [i < 2] whileTrue: [#(1, 4) inject: 0 into: [:a :e | 4 < 5 ifTrue: [self h0: a. 2] ifFalse: [v := 1]. i]. i := i + 1]
-    self.n
+    i
 ",
     );
 }
@@ -179,13 +177,11 @@ const ENCLOSING: &[Enclosing] = &[
     Enclosing {
         name: "class_stateacc_loop",
         header: "Object subclass: ClosedFunProbe
-  classState: n = 0
-
   class h0: x -> Integer => 3
 ",
         method: "  class probe{i} -> Integer =>
     i := 0. [i < 2] whileTrue: [self h0: i. EXPR. i := i + 1]
-    self.n
+    i
 ",
     },
     // An actor method whose `State{N}` chain runs through `EXPR`.
