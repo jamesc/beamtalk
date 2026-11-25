@@ -394,7 +394,10 @@ handle_writeLine(Data, From, State) ->
                                 ),
                                 #{reason => WriteReason}
                             ),
-                            {reply, {error, Err}, State#{port_closed => true}}
+                            %% Parked callers would never be answered once port_closed is set.
+                            {reply, {error, Err}, (fail_pending_writes(State))#{
+                                port_closed => true
+                            }}
                     end
             catch
                 error:badarg ->

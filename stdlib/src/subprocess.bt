@@ -82,8 +82,9 @@ typed Actor subclass: Subprocess native: beamtalk_subprocess
   /// can wait for a child that is not reading its input. The `writeLine:`
   /// whose line cannot be queued (past that limit) raises a `runtime_error`
   /// saying the line was not written (the reason is in its hint), and so does
-  /// every later `writeLine:`. Lines already queued when the child exits or
-  /// closes its input are lost without an error.
+  /// every later `writeLine:`. A line already accepted and still queued when
+  /// the child exits or closes its input is lost; only the next `writeLine:`
+  /// raises.
   ///
   /// ## Examples
   /// ```beamtalk
