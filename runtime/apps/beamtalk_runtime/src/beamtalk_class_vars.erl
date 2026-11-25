@@ -48,7 +48,7 @@ tag fully (once per block-literal creation, not a hot path).
 
 ## Semantics
 
-- **Key presence is the "at home" test.** A read with no key and no marker
+- **Key presence is the "at home" test.** A read with no key
   raises `class_state_unreachable`; the 3-arity forms fall back to the
   creation-time capture (`capture/2`), raising only when the capture is `none`.
   (ADR 0153 Phase 3a removed the per-chain class-variable fact that let a
