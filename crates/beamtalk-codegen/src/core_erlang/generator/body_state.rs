@@ -54,7 +54,6 @@ pub(in crate::core_erlang) struct BodyState {
     rebind_frames: HashMap<FrameId, RebindFrame>,
     in_private_scratch: bool,
     block_depth: usize,
-    class_var_capture: Option<String>,
     actor_closure: Option<crate::core_erlang::actor_state_access::ActorClosure>,
     /// The enclosing body's non-local-return token variable
     /// (`value_type_context.current_nlr_token`): a nested body mints and
@@ -85,7 +84,6 @@ impl CoreErlangGenerator {
             rebind_frames: std::mem::take(&mut self.rebind_frames),
             in_private_scratch: std::mem::take(&mut self.in_private_scratch),
             block_depth: std::mem::take(&mut self.block_depth),
-            class_var_capture: self.class_var_capture.take(),
             actor_closure: self.actor_closure.take(),
             nlr_token: {
                 let token = self.current_nlr_token().cloned();
@@ -112,7 +110,6 @@ impl CoreErlangGenerator {
             rebind_frames,
             in_private_scratch,
             block_depth,
-            class_var_capture,
             actor_closure,
             nlr_token,
         } = state;
@@ -129,7 +126,6 @@ impl CoreErlangGenerator {
         self.rebind_frames = rebind_frames;
         self.in_private_scratch = in_private_scratch;
         self.block_depth = block_depth;
-        self.class_var_capture = class_var_capture;
         self.actor_closure = actor_closure;
         self.set_current_nlr_token(nlr_token);
     }
@@ -204,7 +200,6 @@ mod tests {
             .rebind_frames
             .insert(FrameId::new(7), RebindFrame::implicit_root());
         generator.block_depth = 2;
-        generator.class_var_capture = Some("CVCap".to_string());
         generator.set_current_nlr_token(Some("NlrTok".to_string()));
     }
 
@@ -224,7 +219,6 @@ mod tests {
             assert!(!scope.in_fold_frame);
             assert!(scope.rebind_frames.is_empty());
             assert_eq!(scope.block_depth, 0);
-            assert!(scope.class_var_capture.is_none());
             assert!(scope.current_nlr_token().is_none());
         }
         assert_eq!(generator.state_version(), 4);
@@ -237,7 +231,6 @@ mod tests {
         assert!(generator.in_fold_frame);
         assert!(generator.rebind_frames.contains_key(&FrameId::new(7)));
         assert_eq!(generator.block_depth, 2);
-        assert_eq!(generator.class_var_capture.as_deref(), Some("CVCap"));
         assert_eq!(
             generator.current_nlr_token().map(String::as_str),
             Some("NlrTok")
@@ -257,7 +250,6 @@ mod tests {
         assert!(generator.local_producer_sites.is_empty());
         assert!(generator.rebind_frames.is_empty());
         assert_eq!(generator.block_depth, 0);
-        assert!(generator.class_var_capture.is_none());
         assert!(generator.current_nlr_token().is_none());
     }
 
