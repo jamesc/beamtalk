@@ -80,7 +80,10 @@ resolved again", not a re-derivation of `NodeShapeSkew`'s own criteria.
 The tally only holds entries for connected peers: `nodeup` (and `init/1`,
 for peers already connected) opens an empty entry, `nodedown` removes it,
 and a `skew_detected` cast for a node with no entry is dropped — so a check
-that finishes after its peer has gone cannot bring the entry back (BT-5232).
+that finishes after its peer has gone does not bring the entry back
+(BT-5232). This is best-effort, not a per-connection guarantee: if the peer
+reconnects before an old check's cast arrives, that cast lands in the new
+entry, and the new connection's own checks then overwrite it per class.
 
 A reload-time check updates **both** sides: after comparing its own entry
 with a peer's, the reloading node casts the pair to the peer's monitor
@@ -445,9 +448,10 @@ Connect-time version comparison (ADR 0126 Amendment (BT-5193) D3): read
 `NodeVersionSkew` when it differs from this node's. An `erpc` failure is
 logged and, while the peer is still connected, announced with `nil` remote
 fields: that covers `undef` from a peer too old to export the function, and
-also a peer too slow to answer within the timeout. A peer that has already
-disconnected is only logged — its `NodeDown` has been (or is being)
-announced, and a version event after it would describe a node that is gone.
+also a peer too slow to answer within the timeout. Nothing is announced for
+a peer that has disconnected by the time the read finishes (whether or not
+the read succeeded): its `NodeDown` has been (or is being) announced, and a
+version event after it would describe a node that is gone.
 Fault-isolated like the shape check.
 """.
 -spec check_version_skew_on_connect(node()) -> ok.
@@ -470,7 +474,7 @@ check_version_skew_on_connect(PeerNode) ->
                     unknown
             end,
         Fields = version_skew_fields(PeerNode, beamtalk_version:dist_versions(), Remote),
-        case Fields =/= none andalso (Remote =/= unknown orelse lists:member(PeerNode, nodes())) of
+        case Fields =/= none andalso lists:member(PeerNode, nodes()) of
             true -> announce('NodeVersionSkew', Fields);
             false -> ok
         end
