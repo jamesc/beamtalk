@@ -332,3 +332,134 @@ fn moderately_long_chains_still_parse() {
 fn nested_n(open: &str, middle: &str, close: &str, n: usize) -> String {
     open.repeat(n) + middle + &close.repeat(n)
 }
+
+// ── Review follow-ups ───────────────────────────────────────────────────────
+
+/// Parses `source` on a small stack; answers the diagnostics and the module.
+fn parse_module_on_small_stack(source: String) -> (Vec<Diagnostic>, Module) {
+    std::thread::Builder::new()
+        .stack_size(SMALL_STACK)
+        .spawn(move || {
+            let (module, diagnostics) = parse(lex_with_eof(&source));
+            (diagnostics, module)
+        })
+        .expect("spawn parse thread")
+        .join()
+        .expect("parse thread panicked")
+}
+
+/// `(` nested `levels` deep, each level a `chain`-link chain whose first
+/// operand is the next level: deep through both mechanisms at once while
+/// each chain and each level is within its own limit.
+fn nested_chains(levels: usize, operator: &str, operand: &str) -> String {
+    let link = format!(" {operator} {operand}");
+    "(".repeat(levels) + operand + &(link.repeat(MAX_EXPRESSION_DEPTH - 1) + ")").repeat(levels)
+}
+
+#[test]
+fn grouped_type_chains_are_bounded_by_total_depth() {
+    // Grouping parens make each chain the first operand of the next, so the
+    // intersection tree is far deeper than any one chain.
+    let (diagnostics, module) =
+        parse_module_on_small_stack(format!("x :: {} := 1", nested_chains(40, "&", "A")));
+    assert!(
+        diagnostics.iter().any(|d| d
+            .message
+            .contains("Type annotation is too long or nested too deep")),
+        "{:?}",
+        diagnostics.iter().take(5).collect::<Vec<_>>()
+    );
+    drop(module); // must not overflow either
+}
+
+#[test]
+fn deep_operand_past_the_chain_limit_is_dropped_without_overflow() {
+    // The right operand after the chain limit is discarded; it is itself as
+    // deep as nested chains get.
+    let source = "a".to_string()
+        + &" + a".repeat(MAX_EXPRESSION_DEPTH)
+        + " + "
+        + &nested_chains(40, "+", "a");
+    let (diagnostics, depth) = parse_on_small_stack(source);
+    assert!(depth <= MAX_EXPRESSION_DEPTH, "depth {depth}");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("Expression chain is too long")),
+        "{:?}",
+        diagnostics.iter().take(5).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn intermediate_nesting_levels_are_bounded() {
+    // A deep tree inside a parenthesised operand is bounded where it is
+    // built, not only at the statement, so the parser never holds it.
+    let (diagnostics, depth) =
+        parse_on_small_stack(format!("x foo: [{}]", nested_chains(40, "+", "a")));
+    assert!(depth <= MAX_EXPRESSION_DEPTH, "depth {depth}");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("too long or nested too deep")),
+        "{:?}",
+        diagnostics.iter().take(5).collect::<Vec<_>>()
+    );
+}
+
+/// Asserts the only diagnostic is the one nesting diagnostic: recovery
+/// skipped exactly the over-deep construct.
+fn assert_single_nesting_diagnostic(source: String) {
+    let (diagnostics, _) = parse_on_small_stack(source);
+    assert_eq!(
+        diagnostics.len(),
+        1,
+        "expected only the nesting diagnostic: {:?}",
+        diagnostics.iter().take(5).collect::<Vec<_>>()
+    );
+    assert!(diagnostics[0].message.contains("nesting is too deep"));
+}
+
+#[test]
+fn too_deep_literal_recovery_skips_method_lookup() {
+    // `>>` here is method lookup, not the end of a binary construction.
+    assert_single_nesting_diagnostic(nested("#(", "Counter >> #inc", ")") + ".\ny := 2");
+}
+
+#[test]
+fn too_deep_literal_recovery_skips_infix_shift() {
+    // An infix `<<` (itself an error) does not open a construction, so
+    // recovery stops at the literal's own `)` and the next statement parses.
+    let (diagnostics, module) =
+        parse_module_on_small_stack(nested("#(", "a << b", ")") + ".\ny := 2");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("nesting is too deep"))
+    );
+    assert_eq!(module.expressions.len(), 2, "{diagnostics:?}");
+}
+
+#[test]
+fn too_deep_power_chain_across_lines_reports_once() {
+    assert_single_nesting_diagnostic("2 **\n".repeat(DEEP) + "2");
+}
+
+#[test]
+fn too_deep_type_recovery_skips_the_whole_union() {
+    assert_single_nesting_diagnostic(format!("x :: {} := 1", nested("Foo(", "A | B & C", ")")));
+}
+
+#[test]
+fn replaced_chain_leaves_no_pipeline_sends() {
+    // The chain past the limit becomes one error node; the pipeline sends
+    // recorded inside it are gone with it.
+    let source = "(x |> f)".to_string() + &" + (x |> f)".repeat(MAX_EXPRESSION_DEPTH + 5);
+    let (diagnostics, module) = parse_module_on_small_stack(source);
+    assert_reported_too_long_once(&diagnostics);
+    assert!(
+        module.pipeline_sends.is_empty(),
+        "{} stale pipeline sends",
+        module.pipeline_sends.len()
+    );
+}

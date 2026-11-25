@@ -119,15 +119,8 @@ impl Parser {
         let mut depth = 0usize;
         loop {
             match self.peek_at(o)? {
-                TokenKind::LeftParen
-                | TokenKind::LeftBracket
-                | TokenKind::LeftBrace
-                | TokenKind::ListOpen
-                | TokenKind::ArrayOpen
-                | TokenKind::MapOpen => depth += 1,
-                TokenKind::RightParen | TokenKind::RightBracket | TokenKind::RightBrace => {
-                    depth = depth.checked_sub(1)?;
-                }
+                kind if kind.is_opening_bracket() => depth += 1,
+                kind if kind.is_closing_bracket() => depth = depth.checked_sub(1)?,
                 TokenKind::Eof => return None,
                 _ if depth == 0 => return None,
                 _ => {}
@@ -443,11 +436,26 @@ impl Parser {
         self.with_nesting(
             start,
             |p| {
-                let end = p.skip_type_operand_for_recovery();
+                let end = p.skip_type_for_recovery();
                 TypeAnnotation::Simple(Identifier::new("Error", start.merge(end)))
             },
-            Self::parse_type_annotation_unguarded,
+            |p| {
+                let ty = p.parse_type_annotation_unguarded();
+                p.bound_type_depth(ty)
+            },
         )
+    }
+
+    /// Consumes a type — operands joined by `|`, `&` or `\` — without
+    /// recursion, for recovery once a type annotation is nested too deep.
+    /// Answers the span of the last token consumed.
+    fn skip_type_for_recovery(&mut self) -> Span {
+        let mut end = self.skip_type_operand_for_recovery();
+        while self.is_type_chain_operator(0) {
+            self.advance();
+            end = self.skip_type_operand_for_recovery();
+        }
+        end
     }
 
     /// Consumes one type operand — a name with its generic arguments, a
@@ -462,10 +470,7 @@ impl Parser {
                 return end;
             }
         }
-        if matches!(
-            self.current_kind(),
-            TokenKind::LeftParen | TokenKind::MapOpen
-        ) {
+        if self.current_kind().is_opening_bracket() {
             end = self.skip_bracketed_group();
         }
         end
@@ -546,7 +551,8 @@ impl Parser {
             if is_chain_operator && !self.chain_may_grow(&mut links, self.current_token().span()) {
                 // Past the chain limit: consume the rest without building it.
                 self.advance();
-                let _ = self.parse_single_type_annotation();
+                let rest = self.parse_single_type_annotation();
+                crate::ast_walker::dismantle_type_annotation(rest);
                 continue;
             }
             match op.as_str() {
@@ -599,6 +605,7 @@ impl Parser {
             // A too-long chain becomes one error type, like a too-long chain
             // of sends (see `finish_chain`).
             let span = ty.span().merge(self.previous_token_span());
+            crate::ast_walker::dismantle_type_annotation(ty);
             return TypeAnnotation::Simple(Identifier::new("Error", span));
         }
         ty

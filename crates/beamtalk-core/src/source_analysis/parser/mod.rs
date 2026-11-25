@@ -52,7 +52,9 @@
 
 use std::collections::HashSet;
 
-use crate::ast::{Comment, CommentAttachment, Expression, ExpressionStatement, Module};
+use crate::ast::{
+    Comment, CommentAttachment, Expression, ExpressionStatement, Module, TypeAnnotation,
+};
 #[cfg(test)]
 use crate::ast::{CommentKind, Literal};
 use crate::source_analysis::{Span, Token, TokenKind, Trivia, lex_with_eof};
@@ -1062,6 +1064,40 @@ pub(crate) const MAX_EXPRESSION_DEPTH: usize = 512;
 const STACK_RED_ZONE: usize = 128 * 1024;
 const STACK_SEGMENT: usize = 1024 * 1024;
 
+/// Whether `closer` closes a group opened by `opener`.
+fn closes(opener: &TokenKind, closer: &TokenKind) -> bool {
+    matches!(
+        (opener, closer),
+        (
+            TokenKind::LeftParen | TokenKind::ListOpen,
+            TokenKind::RightParen
+        ) | (
+            TokenKind::LeftBracket | TokenKind::ArrayOpen,
+            TokenKind::RightBracket
+        ) | (
+            TokenKind::LeftBrace | TokenKind::MapOpen,
+            TokenKind::RightBrace
+        ) | (TokenKind::LtLt, TokenKind::GtGt)
+    )
+}
+
+/// Whether a token of `kind` can end an operand, so a `<<` after it
+/// is infix rather than opening a construction.
+fn ends_operand(kind: &TokenKind) -> bool {
+    kind.is_closing_bracket()
+        || matches!(
+            kind,
+            TokenKind::Identifier(_)
+                | TokenKind::Integer(_)
+                | TokenKind::Float(_)
+                | TokenKind::String(_)
+                | TokenKind::Symbol(_)
+                | TokenKind::Character(_)
+                | TokenKind::StringEnd(_)
+                | TokenKind::GtGt
+        )
+}
+
 /// The parser state.
 pub(super) struct Parser {
     /// The tokens being parsed.
@@ -1652,13 +1688,21 @@ impl Parser {
     }
 
     /// [`Self::with_nesting`] for a parse path that answers an
-    /// [`Expression`]: past the limit it answers an error node.
+    /// [`Expression`]: past the limit it answers an error node, and the
+    /// answer is held to [`MAX_EXPRESSION_DEPTH`] ([`Self::bound_expression_depth`]).
     pub(super) fn with_expression_nesting(
         &mut self,
         span: Span,
         body: impl FnOnce(&mut Self) -> Expression,
     ) -> Expression {
-        self.with_nesting(span, |_| Self::nesting_error(span), body)
+        self.with_nesting(
+            span,
+            |_| Self::nesting_error(span),
+            |p| {
+                let expr = body(p);
+                p.bound_expression_depth(expr)
+            },
+        )
     }
 
     /// [`Self::with_expression_nesting`] for a bracketed construct starting at
@@ -1676,7 +1720,10 @@ impl Parser {
                 let end = p.skip_bracketed_group();
                 Self::nesting_error(start.merge(end))
             },
-            body,
+            |p| {
+                let expr = body(p);
+                p.bound_expression_depth(expr)
+            },
         )
     }
 
@@ -1687,43 +1734,46 @@ impl Parser {
         }
     }
 
-    /// Consumes the bracketed group opening at the current token (any of
-    /// `(`, `[`, `{`, `#(`, `#[`, `#{`, `<<`), up to its matching closer or
-    /// the end of input, without recursion. Answers the span of the last
-    /// token consumed. Consumes just the current token when it opens no
-    /// group.
+    /// Consumes the bracketed group opening at the current token (a
+    /// [`TokenKind::is_opening_bracket`] token, or the `<<` of a binary
+    /// construction), up to its matching closer, without recursion. Answers
+    /// the span of the last token consumed. Consumes just the current token
+    /// when it opens no group.
+    ///
+    /// Closers are matched against a stack of the openers seen: a closer
+    /// that matches no open group is skipped over, and one that matches an
+    /// outer group closes the inner ones left open. Inside the group `<<`
+    /// opens a construction only in operand position and `>>` closes one
+    /// only when a construction is open, so infix `<<` and `Foo >> #bar`
+    /// do not unbalance the count. The scan stops early, leaving the token,
+    /// at a line that starts a method definition, which no group spans.
     pub(super) fn skip_bracketed_group(&mut self) -> Span {
-        let mut depth = 0usize;
+        let mut open: Vec<TokenKind> = Vec::new();
+        let mut last = self.current_token().span();
+        let mut previous_is_operand = false;
         loop {
             if self.is_at_end() {
-                return self.current_token().span();
+                return last;
             }
-            let opens = matches!(
-                self.current_kind(),
-                TokenKind::LeftParen
-                    | TokenKind::LeftBracket
-                    | TokenKind::LeftBrace
-                    | TokenKind::ListOpen
-                    | TokenKind::ArrayOpen
-                    | TokenKind::MapOpen
-                    | TokenKind::LtLt
-            );
-            let closes = matches!(
-                self.current_kind(),
-                TokenKind::RightParen
-                    | TokenKind::RightBracket
-                    | TokenKind::RightBrace
-                    | TokenKind::GtGt
-            );
-            let span = self.advance().span();
-            if opens {
-                depth += 1;
-            } else if closes {
-                depth = depth.saturating_sub(1);
+            let kind = self.current_kind().clone();
+            if !open.is_empty()
+                && self.current_token().has_leading_newline()
+                && self.is_at_method_definition()
+            {
+                return last;
             }
-            if depth == 0 {
-                return span;
+            if kind.is_opening_bracket() || (kind == TokenKind::LtLt && !previous_is_operand) {
+                open.push(kind.clone());
+            } else if (kind.is_closing_bracket() || kind == TokenKind::GtGt)
+                && let Some(at) = open.iter().rposition(|opener| closes(opener, &kind))
+            {
+                open.truncate(at);
             }
+            last = self.advance().span();
+            if open.is_empty() {
+                return last;
+            }
+            previous_is_operand = ends_operand(&kind);
         }
     }
 
@@ -1759,11 +1809,21 @@ impl Parser {
             return built;
         }
         let span = built.span().merge(self.previous_token_span());
-        crate::ast_walker::dismantle_expression(built);
+        self.discard_expression(built, span);
         Expression::Error {
             message: "Expression chain too long".into(),
             span,
         }
+    }
+
+    /// Drops a parsed expression the parser is not keeping, without
+    /// recursion ([`crate::ast_walker::dismantle_expression`]), and forgets
+    /// the pipeline sends recorded inside `span` (which covers it), since
+    /// they are no longer in the tree.
+    pub(super) fn discard_expression(&mut self, expr: Expression, span: Span) {
+        crate::ast_walker::dismantle_expression(expr);
+        self.pipeline_sends
+            .retain(|(send, _)| send.start() < span.start() || send.end() > span.end());
     }
 
     /// The span of the token most recently consumed (the current token's
@@ -1776,12 +1836,12 @@ impl Parser {
     }
 
     /// Replaces `expr` with an error node, reporting a diagnostic, when its
-    /// syntax tree is deeper than [`MAX_EXPRESSION_DEPTH`]. Checked on each
-    /// outermost expression (and on the literals a declaration parses
-    /// directly), so the passes after the parser never see a tree
-    /// deep enough to overflow their stacks: long chains nested inside
-    /// each other can be deep together while each chain and each nesting
-    /// level is within its own limit (BT-5181).
+    /// syntax tree is deeper than [`MAX_EXPRESSION_DEPTH`]. Checked on the
+    /// result of every nesting level ([`Self::with_expression_nesting`]):
+    /// long chains nested inside each other can be deep together while each
+    /// chain and each nesting level is within its own limit, so bounding
+    /// each level keeps every tree the parser holds — and every tree a later
+    /// pass walks — shallow enough to recurse over and drop (BT-5181).
     pub(super) fn bound_expression_depth(&mut self, expr: Expression) -> Expression {
         if crate::ast_walker::expression_depth(&expr) <= MAX_EXPRESSION_DEPTH {
             return expr;
@@ -1796,17 +1856,29 @@ impl Parser {
             )
             .with_hint("split it across statements with intermediate variables"),
         );
-        crate::ast_walker::dismantle_expression(expr);
+        self.discard_expression(expr, span);
         Expression::Error {
             message: "Expression too deep".into(),
             span,
         }
     }
 
-    /// Whether the parser is inside no nesting level: the expression being
-    /// parsed is an outermost one.
-    pub(super) fn at_outermost_level(&self) -> bool {
-        self.nesting_depth == 0
+    /// The type-annotation counterpart of [`Self::bound_expression_depth`]:
+    /// grouping parentheses let `&`/`\` chains nest inside each other, so a
+    /// type tree can be deep while each chain and level is within its limit.
+    pub(super) fn bound_type_depth(&mut self, ty: TypeAnnotation) -> TypeAnnotation {
+        if crate::ast_walker::type_annotation_depth(&ty) <= MAX_EXPRESSION_DEPTH {
+            return ty;
+        }
+        let span = ty.span();
+        self.diagnostics.push(Diagnostic::error(
+            format!(
+                "Type annotation is too long or nested too deep (maximum depth {MAX_EXPRESSION_DEPTH})"
+            ),
+            span,
+        ));
+        crate::ast_walker::dismantle_type_annotation(ty);
+        TypeAnnotation::Simple(crate::ast::Identifier::new("Error", span))
     }
 
     /// Synchronizes parser to a safe recovery point.

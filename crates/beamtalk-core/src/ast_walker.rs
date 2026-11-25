@@ -20,8 +20,10 @@
 //!   names the span-end rule for cursor queries that descend through them;
 //!   [`for_each_child_mut`] is the mutable twin.
 //!
-//! - [`expression_depth`] / [`dismantle_expression`] — measure and drop a tree
-//!   without recursion, for trees too deep to walk (BT-5181).
+//! - [`expression_depth`] / [`dismantle_expression`] (and the type-annotation
+//!   twins [`type_annotation_depth`] / [`dismantle_type_annotation`]) —
+//!   measure and drop a tree without recursion, for trees too deep to walk
+//!   (BT-5181).
 //!
 //! - [`walk_expression_and_patterns`] — [`walk_expression`] that also reports
 //!   match-arm patterns, for passes that look for names a pattern carries.
@@ -58,7 +60,7 @@
 
 use crate::ast::{
     BinarySegment, CascadeMessage, Expression, ExpressionStatement, MessageSelector, Module,
-    Pattern, StringSegment,
+    Pattern, StringSegment, TypeAnnotation,
 };
 use crate::source_analysis::Span;
 
@@ -446,6 +448,82 @@ pub fn dismantle_expression(expr: Expression) {
                 },
             ));
         });
+    }
+}
+
+/// Calls `f` on each type annotation nested directly in `ty`: union
+/// members, generic arguments, the operands of `&`/`\`, a nilable's inner
+/// type and shape field types.
+pub fn for_each_type_child<'a>(ty: &'a TypeAnnotation, f: &mut dyn FnMut(&'a TypeAnnotation)) {
+    match ty {
+        TypeAnnotation::Union { types, .. }
+        | TypeAnnotation::Generic {
+            parameters: types, ..
+        } => types.iter().for_each(f),
+        TypeAnnotation::FalseOr { inner, .. } => f(inner),
+        TypeAnnotation::Difference { base, excluded, .. } => {
+            f(base);
+            f(excluded);
+        }
+        TypeAnnotation::Intersection { left, right, .. } => {
+            f(left);
+            f(right);
+        }
+        TypeAnnotation::Shape { fields, .. } => {
+            for field in fields {
+                f(&field.value);
+            }
+        }
+        TypeAnnotation::Simple(..)
+        | TypeAnnotation::Singleton { .. }
+        | TypeAnnotation::SelfType { .. }
+        | TypeAnnotation::SelfClass { .. }
+        | TypeAnnotation::ClassOf { .. } => {}
+    }
+}
+
+/// The depth of `ty`'s tree (1 for a leaf), measured with an explicit
+/// stack — the [`expression_depth`] of type annotations (BT-5181).
+#[must_use]
+pub fn type_annotation_depth(ty: &TypeAnnotation) -> usize {
+    let mut max = 0;
+    let mut stack = vec![(ty, 1usize)];
+    while let Some((node, depth)) = stack.pop() {
+        max = max.max(depth);
+        for_each_type_child(node, &mut |child| stack.push((child, depth + 1)));
+    }
+    max
+}
+
+/// Drops `ty` without recursion — the [`dismantle_expression`] of type
+/// annotations (BT-5181). Takes each node apart by value, so the match must
+/// stay exhaustive, in step with [`for_each_type_child`].
+pub fn dismantle_type_annotation(ty: TypeAnnotation) {
+    let mut stack = vec![ty];
+    while let Some(node) = stack.pop() {
+        match node {
+            TypeAnnotation::Union { types, .. }
+            | TypeAnnotation::Generic {
+                parameters: types, ..
+            } => stack.extend(types),
+            TypeAnnotation::FalseOr { inner, .. } => stack.push(*inner),
+            TypeAnnotation::Difference { base, excluded, .. } => {
+                stack.push(*base);
+                stack.push(*excluded);
+            }
+            TypeAnnotation::Intersection { left, right, .. } => {
+                stack.push(*left);
+                stack.push(*right);
+            }
+            TypeAnnotation::Shape { fields, .. } => {
+                stack.extend(fields.into_iter().map(|field| field.value));
+            }
+            TypeAnnotation::Simple(..)
+            | TypeAnnotation::Singleton { .. }
+            | TypeAnnotation::SelfType { .. }
+            | TypeAnnotation::SelfClass { .. }
+            | TypeAnnotation::ClassOf { .. } => {}
+        }
     }
 }
 

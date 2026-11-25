@@ -53,24 +53,17 @@ impl Parser {
     /// Parses any expression.
     ///
     /// Entry point for expression parsing. Handles all precedence levels.
-    /// Runs one nesting level deeper ([`Self::with_nesting`]), and an
-    /// outermost expression is checked against [`MAX_EXPRESSION_DEPTH`](super::MAX_EXPRESSION_DEPTH)
-    /// once complete, so no later pass receives a tree deep enough to
-    /// overflow its stack (BT-5181).
+    /// Runs one nesting level deeper ([`Self::with_expression_nesting`]),
+    /// which also holds the result to the tree-depth limit, so no later pass
+    /// receives a tree deep enough to overflow its stack (BT-5181).
     pub(super) fn parse_expression(&mut self) -> Expression {
-        let outermost = self.at_outermost_level();
-        let expr = self.with_expression_nesting(self.current_token().span(), |p| {
+        self.with_expression_nesting(self.current_token().span(), |p| {
             if p.match_token(&TokenKind::Caret) {
                 p.parse_return()
             } else {
                 p.parse_assignment()
             }
-        });
-        if outermost {
-            self.bound_expression_depth(expr)
-        } else {
-            expr
-        }
+        })
     }
 
     /// Parses a return statement.
@@ -114,7 +107,8 @@ impl Parser {
             self.advance(); // consume `::`
             let _ = self.parse_type_annotation();
             if self.match_token(&TokenKind::Assign) {
-                let _ = self.parse_cascade();
+                let value = self.parse_cascade();
+                self.discard_expression(value, span);
             }
             return Expression::Error {
                 message: "Type annotations on non-identifier assignments are not supported".into(),
@@ -471,7 +465,9 @@ impl Parser {
                     message: "Expression chain too long".into(),
                     span: self.current_token().span(),
                 };
-                let _ = self.parse_pipeline_stage(receiver, CommentAttachment::default());
+                let stage = self.parse_pipeline_stage(receiver, CommentAttachment::default());
+                let stage_span = stage.span();
+                self.discard_expression(stage, stage_span);
                 self.pipeline_sends.truncate(mark);
                 continue;
             }
@@ -1042,6 +1038,8 @@ impl Parser {
 
             if !self.chain_may_grow(&mut links, op_span) {
                 // Past the chain limit: consume the rest without building it.
+                let right_span = right.span();
+                self.discard_expression(right, right_span);
                 continue;
             }
 
@@ -1078,16 +1076,22 @@ impl Parser {
 
     /// Consumes the operands and binary operators that follow, for recovery
     /// once a right-associative chain is too deep, without recursing into
-    /// the chain. Answers the span of the last token consumed.
+    /// the chain. Stops where the binary loop would: at a token that is not
+    /// a binary operator, or a line that starts a method definition.
+    /// Answers the span of the last token consumed.
     fn skip_binary_operands(&mut self) -> Span {
         loop {
-            let end = self.parse_unary_message().span();
+            let operand = self.parse_unary_message();
+            let end = operand.span();
+            self.discard_expression(operand, end);
             let continues = match self.current_kind() {
                 TokenKind::BinarySelector(op) => binary_binding_power(op).is_some(),
                 TokenKind::Arrow | TokenKind::GtGt => true,
                 _ => false,
             };
-            if !continues || self.current_token().has_leading_newline() {
+            if !continues
+                || (self.current_token().has_leading_newline() && self.is_at_method_definition())
+            {
                 return end;
             }
             self.advance();
@@ -1309,7 +1313,10 @@ impl Parser {
                 let end = p.skip_string_interpolation();
                 Self::nesting_error(start.merge(end))
             },
-            Self::parse_string_interpolation_body,
+            |p| {
+                let expr = p.parse_string_interpolation_body();
+                p.bound_expression_depth(expr)
+            },
         )
     }
 

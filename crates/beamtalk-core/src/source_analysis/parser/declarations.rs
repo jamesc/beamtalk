@@ -945,7 +945,9 @@ impl Parser {
                     self.advance(); // consume `aliasing:`
                     end = if matches!(self.current_kind(), TokenKind::MapOpen) {
                         let map = self.with_bracketed_nesting(Self::parse_map_literal);
-                        self.bound_expression_depth(map).span()
+                        let span = map.span();
+                        self.discard_expression(map, span);
+                        span
                     } else {
                         kw_span
                     };
@@ -1002,8 +1004,7 @@ impl Parser {
     /// selector text and the source symbol's span) plus the whole list's
     /// span, for the caller's own span bookkeeping.
     fn parse_selector_symbol_list(&mut self) -> (Vec<Identifier>, Span) {
-        let list = self.with_bracketed_nesting(Self::parse_list_literal);
-        let expr = self.bound_expression_depth(list);
+        let expr = self.with_bracketed_nesting(Self::parse_list_literal);
         let span = expr.span();
         let mut selectors = Vec::new();
         if let Expression::ListLiteral { elements, tail, .. } = expr {
