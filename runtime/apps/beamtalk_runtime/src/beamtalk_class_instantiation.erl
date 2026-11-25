@@ -600,41 +600,16 @@ ancestor_compiled_defaults(Module) ->
     end.
 
 -doc """
-Read a module-less ancestor's cached field defaults via the registry.
-
-`new` must stay robust if the ancestor class process is unavailable while we
-collect defaults: a missing, timing-out, or terminating ancestor is treated as
-contributing no defaults rather than crashing instantiation. Any `gen_server:call`
-exit signals a process-lifecycle problem (the ancestor is gone/going), never a
-programming error in *this* call site — those would surface as `error:`/`throw:`,
-which are deliberately left to propagate. The known-unavailable reasons
-(`noproc`, `timeout`, `shutdown`, `normal`) are handled silently; any other exit
-is logged at warning level so a genuinely crashing ancestor `handle_call` stays
-diagnosable while instantiation degrades gracefully to "no inherited defaults".
+A module-less ancestor's field defaults, read from its metadata row (BT-5161),
+which its class process mirrors them into on `init/1`, reload and rename. No
+`gen_server:call` into the ancestor: a `self new` now runs in the caller (ADR
+0153 §5), so a busy ancestor, or a caller that is the ancestor's own process,
+must neither stall it nor silently lose the defaults. An ancestor with no row
+(gone) contributes none.
 """.
 -spec ancestor_builder_defaults(class_name()) -> map().
 ancestor_builder_defaults(Name) ->
-    case beamtalk_class_registry:whereis_class(Name) of
-        Pid when is_pid(Pid), Pid =/= self() ->
-            try
-                beamtalk_call_failure:tolerate_gone(
-                    fun() -> gen_server:call(Pid, field_defaults, 5000) end,
-                    #{},
-                    #{stopping => true, timeout => true}
-                )
-            catch
-                exit:{Reason, _} ->
-                    ?LOG_WARNING(
-                        "ancestor_builder_defaults: class ~p process exited (~p) "
-                        "while collecting field defaults — treating as no defaults",
-                        [Name, Reason],
-                        #{domain => [beamtalk, runtime]}
-                    ),
-                    #{}
-            end;
-        _ ->
-            #{}
-    end.
+    beamtalk_class_metadata:lookup_field_defaults(Name).
 
 handle_new_compiled(Args, ClassName, Module, IsConstructible0) ->
     IsConstructible =

@@ -147,6 +147,7 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% literal kind).
     put_constant_class_methods/2,
     put_field_defaults/2,
+    is_module_less/1,
     lookup_field_defaults/1,
     lookup_constant_class_methods/1,
     %% BT-4493: certified caller-safe signal primitives (the raise key's row).
@@ -1487,6 +1488,18 @@ absent.
 -spec put_field_defaults(class_name(), map()) -> ok.
 put_field_defaults(Name, Defaults) when is_map(Defaults) ->
     put_if_changed(Name, #class_metadata.field_defaults, Defaults, fun() -> ok end).
+
+-doc """
+Whether `Name` is a module-less class: one built at run time by `ClassBuilder`,
+with no generated module behind it. Such a class registers its own class name
+as its module (`beamtalk_class_builder`'s `moduleName` default, `init/1`'s
+`module` default), and this reads that published row back. The one runtime
+predicate for it (BT-5161); the compiler reads the same registered value
+through `ClassInfo::registered_module_is_module_less`.
+""".
+-spec is_module_less(class_name()) -> boolean().
+is_module_less(Name) ->
+    lookup_module(Name) =:= {ok, Name}.
 
 -doc "Read a class's own field defaults (BT-5161); `#{}` when none are published.".
 -spec lookup_field_defaults(class_name()) -> map().

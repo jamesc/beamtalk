@@ -273,6 +273,59 @@ runtime_fun_test_() ->
                 beamtalk_test_class:stop(Pid)
             end
         end},
+        {"self new inherits a busy ClassBuilder ancestor's field defaults", fun() ->
+            %% Inherited module-less defaults come from the ancestor's row
+            %% too: suspending the ancestor neither stalls the send nor drops
+            %% its defaults.
+            Make = fun(#beamtalk_object{class = Tag}) ->
+                ClassName = beamtalk_primitive:class_name_from_tag(Tag),
+                Module = beamtalk_class_instantiation:resolve_module_or_raise(ClassName, 'new'),
+                beamtalk_class_instantiation:class_self_new(ClassName, Module, [])
+            end,
+            {ok, Parent} = beamtalk_class_builder:register(#{
+                className => 'Bt5161DefaultsParent',
+                superclassRef => 'Object',
+                fieldSpecs => #{p => 10, shared => 1},
+                methodSpecs => #{}
+            }),
+            try
+                with_builder_class_fields(
+                    'Bt5161DefaultsChild',
+                    'Bt5161DefaultsParent',
+                    #{c => 20, shared => 2},
+                    #{make => Make},
+                    fun(Child) ->
+                        ok = sys:suspend(Parent),
+                        ok = sys:suspend(Child),
+                        try
+                            Instance = send(Child, make, []),
+                            ?assertEqual(
+                                {10, 20, 2},
+                                {
+                                    maps:get(p, Instance),
+                                    maps:get(c, Instance),
+                                    maps:get(shared, Instance)
+                                }
+                            )
+                        after
+                            sys:resume(Child),
+                            sys:resume(Parent)
+                        end
+                    end
+                )
+            after
+                beamtalk_test_class:stop(Parent)
+            end
+        end},
+        {"is_module_less/1 names ClassBuilder classes only", fun() ->
+            with_builder_class('Bt5161ModuleLess', 'Object', #{}, fun(_Pid) ->
+                ?assert(beamtalk_class_metadata:is_module_less('Bt5161ModuleLess'))
+            end),
+            with_class('Bt5161Compiled', none, fun(_Pid) ->
+                ?assertNot(beamtalk_class_metadata:is_module_less('Bt5161Compiled'))
+            end),
+            ?assertNot(beamtalk_class_metadata:is_module_less('Bt5161NoSuchClass'))
+        end},
         {"a module-less subclass runs its ancestor's fun in the caller", fun() ->
             with_builder_class(
                 'Bt5161BuilderRoot',
@@ -436,10 +489,14 @@ loop_in_caller(Pid, Parent, N) ->
 %% (`beamtalk_class_builder:register/1`) with `ClassMethods` as its runtime
 %% class-method funs, run `Fun(Pid)`, and remove it.
 with_builder_class(Name, Superclass, ClassMethods, Fun) ->
+    with_builder_class_fields(Name, Superclass, #{}, ClassMethods, Fun).
+
+%% `with_builder_class/4` with `Fields` as the class's field defaults.
+with_builder_class_fields(Name, Superclass, Fields, ClassMethods, Fun) ->
     {ok, Pid} = beamtalk_class_builder:register(#{
         className => Name,
         superclassRef => Superclass,
-        fieldSpecs => #{},
+        fieldSpecs => Fields,
         methodSpecs => #{},
         classMethods => ClassMethods
     }),

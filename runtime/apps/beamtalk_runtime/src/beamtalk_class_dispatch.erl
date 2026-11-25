@@ -407,9 +407,8 @@ compute_class_method_owner_of(ClassName, Selector) ->
 -doc """
 The process-bound selector list (ADR 0142 §1 rule 3) a class's sends are
 routed by. A compiled class publishes its own generated list. A module-less
-class (built at run time by `ClassBuilder`; its row names its own class name
-as its module, as `ClassInfo::registered_module_is_module_less` decides on the
-Rust side) has no generated module and so no list of its own: it answers with
+class (`beamtalk_class_metadata:is_module_less/1`: built at run time by
+`ClassBuilder`) has no generated module and so no list of its own: it answers with
 the union of the lists its ancestors published, so its ADR 0084 runtime funs
 run in the caller like any other class method (ADR 0153 §5, BT-5161). The
 union, not the nearest ancestor's list: a list may leave out a selector only
@@ -426,9 +425,9 @@ process_bound_selectors(ClassName) ->
         {ok, _} = Found ->
             Found;
         unknown ->
-            case beamtalk_class_metadata:lookup_module(ClassName) of
-                {ok, ClassName} -> ancestors_process_bound_selectors(ClassName, [ClassName], []);
-                _ -> unknown
+            case beamtalk_class_metadata:is_module_less(ClassName) of
+                true -> ancestors_process_bound_selectors(ClassName, [ClassName], []);
+                false -> unknown
             end
     end.
 
