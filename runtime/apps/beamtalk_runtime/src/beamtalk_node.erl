@@ -71,9 +71,11 @@ selectors (ADR 0126 Phase 2) apply the same rule rather than re-deriving it.
     name/1,
     connect_policy/2,
     tls_distribution/0,
-    remote_shape_manifest/1,
-    bounded_sync/2
+    remote_shape_manifest/1
 ]).
+
+%% Exported for EUnit only (BT-5173); not part of the runtime surface.
+-export([bounded_sync/2]).
 
 -type t() :: #{?BT_CLASS_TAG_KEY := 'Node', name := node()}.
 -export_type([t/0]).
@@ -137,8 +139,10 @@ A new connection answers only after OTP `global` has synced names with the
 peer (so a `scope: #global` name registered next is visible from it at
 once, BT-5156), but waits at most 5 seconds for that: on timeout a warning
 is logged and `connect` still answers ok (BT-5173). A node that is already
-connected skips the sync. `ping` never syncs: it is a liveness probe, so use
-`connect` when `global` names must be visible immediately.
+connected skips the sync, so a node first connected by `ping`, Erlang's
+auto-connect or raw `net_kernel` is not synced by a later `connect`. `ping`
+never syncs: it is a liveness probe, so call `connect` (on a node not yet
+connected) when `global` names must be visible immediately.
 """.
 -spec connect(t()) -> beamtalk_result:t().
 connect(#{?BT_CLASS_TAG_KEY := 'Node', name := Name} = Self) ->
@@ -544,7 +548,8 @@ do_connect(Self, Name) ->
             %% OTP `global` shares names with a new peer in the background;
             %% wait for that (bounded) so a `scope: #global` name is visible
             %% from the peer as soon as `connect` answers (BT-5156, BT-5173).
-            %% Skipped when already connected: the names were synced then.
+            %% Skipped when already connected (BT-5173): an earlier `connect` synced,
+            %% but a connection made by `ping`/auto-connect/FFI did not (known gap).
             %% A sync failure or timeout does not undo the connection, so
             %% still answer ok.
             case AlreadyConnected of
