@@ -16,8 +16,74 @@ use super::match_lowering::MatchThreading;
 use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Identifier, MatchArm};
+
+/// The head of the `String` representation, the `{'beamtalk_string', Bytes}`
+/// tuple ([`Guard::StringTag`], BT-4173): shared by the `case` renderer
+/// ([`CoreErlangGenerator::wrap_string_test`]) and the expression renderer
+/// ([`guard_boolean_test`]). Its size is the shared fixture's
+/// ([`string_tag_size`]).
+const STRING_TAG: &str = "beamtalk_string";
+
+/// The size of the [`STRING_TAG`] tuple, read from the shared routing
+/// fixture's reserved tuple tags, which must list it.
+fn string_tag_size() -> i64 {
+    routing::reserved_tuple_tags()
+        .iter()
+        .find(|reserved| reserved.tag == STRING_TAG)
+        .map_or_else(
+            || unreachable!("the routing fixture reserves the {STRING_TAG} tag"),
+            |reserved| i64::from(reserved.size),
+        )
+}
+
+/// The atoms that are not `Symbol`s ([`Guard::Symbol`]): `nil`, `true` and
+/// `false` belong to `UndefinedObject` and `Boolean`. Shared by the `case`
+/// renderer ([`CoreErlangGenerator::wrap_symbol_test`]) and the expression
+/// renderer ([`guard_boolean_test`]).
+const NON_SYMBOL_ATOMS: [&str; 3] = ["nil", "true", "false"];
+
+/// The expression form of a routing [`Guard`]: one guard-safe boolean built
+/// only from `erlang` type-test and comparison BIFs, for a site that needs
+/// the test as a value rather than a `case` around its two outcomes (the
+/// right-operand test of a `String` or `Symbol` ordering comparison, BT-5213,
+/// which the `@primitive` bodies build without a generator). `None` for the
+/// guard kinds with no such form here. The `case` renderers
+/// ([`CoreErlangGenerator::render_type_test`]) stay the renderers of record;
+/// `patterns::tests::boolean_guard_tests_agree_with_the_case_renderers` runs
+/// both over the same terms.
+pub(in crate::core_erlang) fn guard_boolean_test(
+    guard: Guard,
+    var: &str,
+) -> Option<Document<'static>> {
+    let subject = || leaf::var(var.to_string());
+    match guard {
+        Guard::Bif(bif) => Some(form::call("erlang", bif, [subject()])),
+        Guard::StringTag => Some(form::call(
+            "erlang",
+            "is_record",
+            [
+                subject(),
+                leaf::atom(STRING_TAG),
+                leaf::int_lit(string_tag_size()),
+            ],
+        )),
+        Guard::Symbol => Some(NON_SYMBOL_ATOMS.iter().fold(
+            form::call("erlang", "is_atom", [subject()]),
+            |acc, excluded| {
+                let differs = form::call("erlang", "=/=", [subject(), leaf::atom(*excluded)]);
+                form::call("erlang", "and", [acc, differs])
+            },
+        )),
+        Guard::ExactAtom(atom) => Some(form::call("erlang", "=:=", [subject(), leaf::atom(atom)])),
+        Guard::BinaryOrStringTag
+        | Guard::UnalignedBitstring
+        | Guard::UnreservedTuple
+        | Guard::UntaggedMap => None,
+    }
+}
 
 fn true_doc() -> Document<'static> {
     Document::Str("'true'")
@@ -422,12 +488,16 @@ impl CoreErlangGenerator {
             "<'true'> when 'true' -> ",
             "case call 'erlang':'=='(call 'erlang':'tuple_size'(",
             v.clone(),
-            "), 2) of ",
+            "), ",
+            leaf::int_lit(string_tag_size()),
+            ") of ",
             "<'true'> when 'true' -> ",
             "case call 'erlang':'element'(1, ",
             v,
             ") of ",
-            "<'beamtalk_string'> when 'true' -> ",
+            "<",
+            leaf::atom(STRING_TAG),
+            "> when 'true' -> ",
             success,
             " <",
             leaf::var(no_match_tag),
@@ -507,24 +577,27 @@ impl CoreErlangGenerator {
         rest: &Document<'static>,
     ) -> Document<'static> {
         let v = leaf::var(match_var.to_string());
-        let tests: [Document<'static>; 4] = [
-            docvec!["call 'erlang':'is_atom'(", v.clone(), ")"],
-            docvec!["call 'erlang':'=/='(", v.clone(), ", 'nil')"],
-            docvec!["call 'erlang':'=/='(", v.clone(), ", 'true')"],
-            docvec!["call 'erlang':'=/='(", v, ", 'false')"],
-        ];
-        tests.into_iter().rev().fold(success, |acc, test| {
-            docvec![
-                "case ",
-                test,
-                " of ",
-                "<'true'> when 'true' -> ",
-                acc,
-                " <'false'> when 'true' -> ",
-                rest.clone(),
-                " end"
-            ]
-        })
+        let tests = std::iter::once(form::call("erlang", "is_atom", [v.clone()])).chain(
+            NON_SYMBOL_ATOMS
+                .iter()
+                .map(|excluded| form::call("erlang", "=/=", [v.clone(), leaf::atom(*excluded)])),
+        );
+        tests
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .fold(success, |acc, test| {
+                docvec![
+                    "case ",
+                    test,
+                    " of ",
+                    "<'true'> when 'true' -> ",
+                    acc,
+                    " <'false'> when 'true' -> ",
+                    rest.clone(),
+                    " end"
+                ]
+            })
     }
 
     /// `case is_map(_Match) of <'true'> -> case maps:get('$beamtalk_class',

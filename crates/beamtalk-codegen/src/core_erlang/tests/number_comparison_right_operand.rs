@@ -173,8 +173,12 @@ fn every_operator_sends_its_own_hook() {
     assert_compiles_through_erlc("test", &code);
 }
 
+/// A `String` receiver never takes the number arm's test or hook: a literal
+/// tests its right operand for a `String` instead (BT-5213,
+/// `string_symbol_comparison_right_operand.rs`), and a declared `String`
+/// dispatches a tagged String to its primitive body.
 #[test]
-fn a_string_receiver_and_a_declared_string_are_unchanged() {
+fn a_string_receiver_and_a_declared_string_get_no_number_test() {
     let code = codegen(
         "Object subclass: P\n\
          \x20 lit: x => \"m\" < x\n\

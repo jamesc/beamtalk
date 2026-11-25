@@ -265,6 +265,17 @@ decode_error_badkey_test() ->
     {fail, _, Msg, _} = Result,
     ?assertNotEqual(nomatch, binary:match(Msg, <<"not found in dictionary">>)).
 
+%% BT-5213: the raw String/Symbol ordering term reads as its type_error.
+decode_error_ordering_type_error_test() ->
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testOrderingTypeError, #{}, nil
+    ),
+    ?assertMatch({fail, testOrderingTypeError, Msg, _} when is_binary(Msg), Result),
+    {fail, _, Msg, _} = Result,
+    ?assertNotEqual(
+        nomatch, binary:match(Msg, <<"String>><: cannot order a String against Integer">>)
+    ).
+
 decode_error_badmap_test() ->
     Result = beamtalk_test_case:run_test_method(
         'FakeTest', tc_run_helper, testBadMap, #{}, nil
