@@ -12,12 +12,9 @@
 
 use super::{RootMethodKind, captured_local_mutations_from_analysis, literal_block_value_arm};
 use crate::ast::well_known::WellKnownSelector;
-use crate::ast::{
-    Block, ClassDefinition, Expression, ExpressionStatement, MessageSelector, MethodKind,
-    ParameterDefinition,
-};
+use crate::ast::{Block, Expression, ExpressionStatement, MessageSelector};
 use crate::ast_walker::{
-    SendSite, WalkEvent, cascade_sends, for_each_child, walk_expression_and_sends, walk_sends,
+    SendSite, WalkEvent, cascade_sends, for_each_child, walk_expression_and_sends,
 };
 use crate::source_analysis::Span;
 use std::collections::HashSet;
@@ -170,106 +167,6 @@ pub fn analyze_block(block: &Block) -> BlockMutationAnalysis {
     analyze_statements(&block.body, &mut ctx)
 }
 
-/// Analyzes a method body (top-level statements, not wrapped in a
-/// `Block`) the same way [`analyze_block`] analyzes a block body — used by
-/// the class-var-mutating-selector purity check (`compute_class_var_mutating_selectors`)
-/// to inspect each class method's own body directly, since `MethodDefinition`
-/// isn't a `Block`.
-pub fn analyze_method_body(
-    parameters: &[ParameterDefinition],
-    body: &[ExpressionStatement],
-) -> BlockMutationAnalysis {
-    let mut ctx = AnalysisContext::new();
-    for param in parameters {
-        ctx.local_bindings.insert(param.name.name.to_string());
-    }
-    analyze_statements(body, &mut ctx)
-}
-
-/// Computes the set of this class's own class-method selectors that
-/// are *known or suspected* to mutate a class variable — directly (`self.cv
-/// := ...` for `cv` in `class_var_names`) or transitively (a same-class send
-/// — `self foo` OR `ClassName foo`, anywhere in the method body including
-/// inside nested blocks — to another selector already in this set).
-///
-/// The transitive closure walks [`BlockMutationAnalysis::self_send_selectors`]
-/// (a `self foo` send) unioned with [`same_class_reference_send_selectors`]
-/// (a `ClassName foo` send to the class's own name, which binds the same
-/// method), so a mutation reached only through the `ClassName`-spelled call is
-/// not mistaken for pure.
-///
-/// A same-class send to a selector NOT defined in this class's own
-/// `class_methods` (inherited, or otherwise unresolvable at this class's
-/// compile time) is conservatively treated as mutating: a selector is only
-/// excluded from the mutating set when its target is a *locally defined*
-/// method that this same pass has proven pure.
-///
-/// Consumed by the `class-state-abroad` lint (`validators/class_state_abroad.rs`,
-/// `may_write_class_var`) to judge whether a `self`/own-class send inside a
-/// block may write a class variable. The analysis is syntactic and whole-class
-/// (it needs the class's own call graph for the fixed point) and lives in
-/// `beamtalk-core`, which cannot depend on `beamtalk-codegen`.
-#[allow(clippy::implicit_hasher)] // concrete HashSet (matches ClassContext::class_var_names) is simpler for callers
-pub fn compute_class_var_mutating_selectors(
-    class: &ClassDefinition,
-    class_var_names: &HashSet<String>,
-) -> HashSet<String> {
-    let class_name = class.name.name.as_str();
-    let methods: Vec<(String, BlockMutationAnalysis, HashSet<String>)> = class
-        .class_methods
-        .iter()
-        .filter(|m| m.kind == MethodKind::Primary)
-        .map(|m| {
-            let analysis = analyze_method_body(&m.parameters, &m.body);
-            let mut same_class_call_targets = analysis.self_send_selectors.clone();
-            same_class_call_targets
-                .extend(same_class_reference_send_selectors(&m.body, class_name));
-            (
-                m.selector.name().to_string(),
-                analysis,
-                same_class_call_targets,
-            )
-        })
-        .collect();
-    let local_selectors: HashSet<&str> = methods.iter().map(|(sel, _, _)| sel.as_str()).collect();
-
-    let mut mutating: HashSet<String> = methods
-        .iter()
-        .filter(|(_, analysis, _)| {
-            analysis
-                .field_writes
-                .iter()
-                .any(|f| class_var_names.contains(f))
-        })
-        .map(|(sel, _, _)| sel.clone())
-        .collect();
-
-    // Fixed-point closure over same-class sends: a method becomes "mutating"
-    // if it same-class-sends (`self foo` or `ClassName foo`) a selector
-    // already known to mutate, or one this class doesn't itself define
-    // (unresolvable — assume the worst).
-    loop {
-        let mut changed = false;
-        for (sel, _, same_class_call_targets) in &methods {
-            if mutating.contains(sel) {
-                continue;
-            }
-            let calls_unsafe = same_class_call_targets.iter().any(|called| {
-                mutating.contains(called) || !local_selectors.contains(called.as_str())
-            });
-            if calls_unsafe {
-                mutating.insert(sel.clone());
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-
-    mutating
-}
-
 /// Whether `receiver` is the unqualified class reference `class_name`: the
 /// one own-class-receiver shape the class-side rules share (here, and
 /// codegen's `expr_shape::is_own_class_reference`, BT-4005).
@@ -282,31 +179,10 @@ pub fn is_own_class_reference(receiver: &Expression, class_name: &str) -> bool {
     )
 }
 
-/// Selectors sent via a same-class `ClassName selector` receiver (as opposed
-/// to `self selector`) anywhere in `body`, including nested blocks — the
-/// [`Expression::ClassReference`] counterpart to [`is_self_reference`]-based
-/// `self_send_selectors` tracking, unioned in by
-/// [`compute_class_var_mutating_selectors`].
-fn same_class_reference_send_selectors(
-    body: &[ExpressionStatement],
-    class_name: &str,
-) -> HashSet<String> {
-    let mut selectors = HashSet::new();
-    for stmt in body {
-        // Cascades expanded: `Counter log; bump` sends both (BT-3716).
-        walk_sends(&stmt.expression, &mut |send| {
-            if is_own_class_reference(send.receiver, class_name) {
-                selectors.insert(send.selector.name().to_string());
-            }
-        });
-    }
-    selectors
-}
-
 /// How a block literal written in a class method touches its home class's
 /// variables (ADR 0130 §5), nested blocks included: the one answer behind
-/// codegen's block-creation capture (`block_reads_class_var`), the
-/// `class-state-abroad` lint and the Phase 0 census (BT-3761).
+/// codegen's block-creation capture (`block_reads_class_var`) and the Phase 0
+/// census (BT-3761).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ClassVarAccesses {
     /// Class variables read as `self.name`, sorted. The target of a
@@ -369,7 +245,7 @@ pub struct ReflectiveWrite {
 impl ReflectiveWrite {
     /// The write as a verb phrase: ``writes {noun} 'n' of {class} with
     /// `fieldAt:put:` ``, ``clears a {noun} of {class} with `clearField:` ``.
-    /// How the `class-state-abroad` and `actor-state-abroad` lints name it.
+    /// How the `actor-state-abroad` lint names it.
     #[must_use]
     pub fn describe(&self, noun: &str, class: &str) -> String {
         let (verb, selector) = match self.kind {
@@ -393,8 +269,8 @@ pub enum HasFieldProbe {
 }
 
 /// `` `hasField: #n` ``, `` `hasField:` (#a, #b) `` or, when no probe names a
-/// symbol, `` `hasField:` ``: how the `class-state-abroad` and
-/// `actor-state-abroad` lints name a block's probes.
+/// symbol, `` `hasField:` ``: how the `actor-state-abroad` lint names a
+/// block's probes.
 #[must_use]
 pub fn probe_clause(probes: &std::collections::BTreeSet<HasFieldProbe>) -> String {
     let symbols: Vec<String> = probes
@@ -450,8 +326,7 @@ impl ClassVarAccesses {
     /// The block's reads as a verb phrase, `self.name` and reflective
     /// `fieldAt:` reads joined: ``reads {noun} n of {class}``, ``reads
     /// {noun} n of {class} and {noun} m with `fieldAt:` ``; `None` when the
-    /// block makes neither. How the `class-state-abroad` and
-    /// `actor-state-abroad` lints name them.
+    /// block makes neither. How the `actor-state-abroad` lint names them.
     #[must_use]
     pub fn reads_phrase(&self, noun: &str, class: &str) -> Option<String> {
         let direct = (!self.reads.is_empty()).then(|| {
@@ -564,7 +439,7 @@ pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAcce
     accesses
 }
 
-/// Shared statement-list walker behind [`analyze_block`] and [`analyze_method_body`].
+/// Statement-list walker behind [`analyze_block`].
 fn analyze_statements(
     body: &[ExpressionStatement],
     ctx: &mut AnalysisContext,
@@ -727,8 +602,7 @@ fn analyze_expression(
             // block passed to select:/collect:/do:/etc. (this is exactly that
             // shape: a `Block` argument that isn't an inline-conditional
             // selector, handled above) is itself a potential mutation source,
-            // and callers like `analyze_method_body`'s purity check need to see
-            // it at any nesting depth, not just at this block's own top level.
+            // and callers need to see it at any nesting depth, not just at this block's own top level.
             if nested_analysis.has_self_sends {
                 analysis.has_self_sends = true;
             }
@@ -748,7 +622,7 @@ fn analyze_expression(
             // one's send target here, paired with that receiver by the shared
             // cascade expansion (BT-3716, BT-3761): a mutating self-send hidden
             // behind an earlier pure cascade message (`self pureLog: x; check:
-            // x`) must reach `compute_class_var_mutating_selectors`.
+            // x`) must be recorded.
             analyze_expression(receiver, analysis, ctx);
             for send in cascade_sends(expr).filter(|s| s.site == SendSite::CascadeLater) {
                 record_send_target(

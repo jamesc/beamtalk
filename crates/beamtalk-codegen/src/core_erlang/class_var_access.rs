@@ -263,7 +263,7 @@ impl CoreErlangGenerator {
     /// variable of the class being compiled, so its creation binds a capture.
     /// The walk is `beamtalk-core`'s
     /// [`class_var_accesses`](beamtalk_core::semantic_analysis::block_facts::class_var_accesses),
-    /// the one the `class-state-abroad` lint uses too (BT-3761): a `self.<class
+    /// shared with the `actor-state-abroad` lint (BT-3761): a `self.<class
     /// variable>` read outside an assignment target (exactly the nodes for which
     /// [`Self::is_class_var_field_read`] holds, the caller having checked
     /// [`Self::in_class_method`]), a non-cascade `self hasField:` probe, which

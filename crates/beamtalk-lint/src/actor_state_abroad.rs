@@ -40,13 +40,12 @@
 //! to `self`, inlined control flow, same-process collection operations,
 //! `on:do:`/`ensure:` and `Result tryDo:` (their receivers are `self`, the
 //! block, a local or a stdlib class), class methods that run in the caller
-//! (no class variables in the receiving class's chain, judged by
-//! [`ClassHierarchy::runs_class_method_in_caller`], ADR 0142 §1), and blocks
+//! (judged by [`ClassHierarchy::runs_class_method_in_caller`], ADR 0142 §1),
+//! and blocks
 //! that touch no field and send nothing to `self`.
 //!
-//! Differences from the `class-state-abroad` lint this is modelled on
-//! (`semantic_analysis::validators::class_state_abroad`): there is no
-//! stored/returned rule (ADR 0137: the lint sees only blocks passed directly
+//! Differences from the former `class-state-abroad` lint this was modelled on
+//! (removed with class variables, ADR 0153): there is no stored/returned rule (ADR 0137: the lint sees only blocks passed directly
 //! to `Timer`, another actor or a class method); a send to the actor's *own*
 //! class's class-side method is abroad (the class process is not the actor
 //! process); and there is no transitive write analysis (a `self` send from an
@@ -486,7 +485,7 @@ fn check_block(
 impl ClassCtx<'_> {
     /// Shape A: a class-side send whose method carries the hierarchy's
     /// `spawns_block` mark (`Timer after:do:`/`every:do:`,
-    /// `Parallel all:`/`any:`) — the same mark `class-state-abroad` reads.
+    /// `Parallel all:`/`any:`).
     fn spawned_shape(&self, receiver: &Expression, selector: &str) -> Option<AbroadShape> {
         let Expression::ClassReference { name, package, .. } = receiver.unwrap_parens() else {
             return None;
