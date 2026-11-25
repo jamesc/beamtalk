@@ -226,6 +226,12 @@ fn value_type_name(value: &toml::Value) -> &'static str {
     }
 }
 
+/// `[diagnostics]` keys of lints that no longer exist (ADR 0153 removed
+/// `class-state-abroad` and `class-process-ffi` with class variables). A
+/// manifest that still sets one keeps building: the key is ignored, as the
+/// matching `@expect` name is accepted and reported stale.
+const REMOVED_DIAGNOSTIC_KEYS: &[&str] = &["class-state-abroad", "class-process-ffi"];
+
 /// Parse and validate the `[diagnostics]` section of a manifest (ADR 0100 Rule 3).
 ///
 /// `diagnostics` is the raw TOML value of the `[diagnostics]` key, already
@@ -258,6 +264,9 @@ pub fn parse_diagnostics_table(
 
     let mut result = DiagnosticsTable::new();
     for (key, value) in table {
+        if REMOVED_DIAGNOSTIC_KEYS.contains(&key.as_str()) {
+            continue;
+        }
         let Some(category) = diagnostic_category_from_kebab(key) else {
             return Err(DiagnosticsTableError::UnknownCategory { key: key.clone() });
         };
@@ -1471,6 +1480,18 @@ dnu = "error"
             .collect();
         assert_eq!(stale.len(), 1, "got: {diagnostics:?}");
         assert_eq!(stale[0].severity, Severity::Warning);
+    }
+
+    /// ADR 0153 (BT-5154): a manifest that still sets a removed lint's
+    /// `[diagnostics]` key keeps parsing; the key is ignored.
+    #[test]
+    fn removed_class_variable_lint_keys_are_ignored() {
+        let value: toml::Value = toml::from_str(
+            "class-state-abroad = \"off\"\nclass-process-ffi = \"off\"\ndnu = \"off\"",
+        )
+        .unwrap();
+        let table = parse_diagnostics_table(Some(&value)).unwrap();
+        assert_eq!(table.len(), 1, "{table:?}");
     }
 
     /// ADR 0153 (BT-5154): the removed class-variable lints' `@expect` names

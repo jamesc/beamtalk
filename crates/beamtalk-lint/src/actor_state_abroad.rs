@@ -34,14 +34,13 @@
 //! A block is reported at most once, in flavor priority order: writes, then
 //! reads, then self-sends.
 //!
-//! This is a lint, not a guarantee: a block passed through a variable, a
-//! field, a parameter or an instance method is only caught at run time, and
-//! only for writes. A block that stays home never fires: self-sends and casts
-//! to `self`, inlined control flow, same-process collection operations,
-//! `on:do:`/`ensure:` and `Result tryDo:` (their receivers are `self`, the
-//! block, a local or a stdlib class), class methods that run in the caller
-//! (judged by [`ClassHierarchy::runs_class_method_in_caller`], ADR 0142 §1),
-//! and blocks
+//! This is a lint, not a guarantee: a block passed through a variable, a field,
+//! a parameter or an instance method is only caught at run time, and only for
+//! writes. A block that stays home never fires: self-sends and casts to `self`,
+//! inlined control flow, same-process collection operations, `on:do:`/`ensure:`
+//! and `Result tryDo:` (their receivers are `self`, the block, a local or a
+//! stdlib class), class methods that run in the caller (judged by
+//! [`ClassHierarchy::runs_class_method_in_caller`], ADR 0142 §1), and blocks
 //! that touch no field and send nothing to `self`.
 //!
 //! Differences from the former `class-state-abroad` lint this was modelled on
@@ -49,12 +48,12 @@
 //! (ADR 0137: the lint sees only blocks passed directly to `Timer`, another
 //! actor or a class method); a send to the actor's *own* class's class-side
 //! method that runs in the class process is abroad (the class process is not
-//! the actor process), like any other; and there is
-//! no transitive write analysis (a `self` send from an away block messages
-//! home, where its writes are kept — only direct field writes raise). Field
-//! reads, writes and `hasField:` probes are read off [`class_var_accesses`],
-//! which is generic over the name set it is given: here the actor's mutable
-//! instance fields, not class variables.
+//! the actor process), like any other; and there is no transitive write
+//! analysis (a `self` send from an away block messages home, where its writes
+//! are kept — only direct field writes raise). Field reads, writes and
+//! `hasField:` probes are read off [`class_var_accesses`], which is generic
+//! over the name set it is given: here the actor's mutable instance fields, not
+//! class variables.
 //!
 //! Overlap: a synchronous `self` send in a `Timer` block also fires
 //! `sync_send_in_timer_block` (at the send); this lint fires at the block,
@@ -543,8 +542,8 @@ impl ClassCtx<'_> {
     }
 
     /// Shape C: a class-side send that runs in the target class's process.
-    /// The target is any user-defined class that is not direct-called —
-    /// including the actor's own class, whose class-side methods run in the
+    /// The target is any user-defined class whose method does not run in the
+    /// caller — the actor's own class included: such a method runs in the
     /// class process, away from an instance method's actor process — reached
     /// as a class reference or through `self class` / `super class`. A
     /// stdlib class is stateless and its blocks run at home (`Result tryDo:`,
