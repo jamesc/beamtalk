@@ -7859,12 +7859,13 @@ SystemAnnouncer current when: NodeVersionSkew do: [:e |
   live event stream. The count is kept on both sides: when one node reloads
   a class, both it and the peer announce `NodeShapeSkew` and update their
   counts. A peer that disconnects drops out of the count.
-- **`NodeVersionSkew`** is announced once per connect when the peer runs a
-  different wire-format version (`localWireVersion` / `remoteWireVersion`)
-  or Beamtalk version (`localBeamtalkVersion` / `remoteBeamtalkVersion`).
-  A peer that cannot report its versions (too old, or too slow to answer)
-  is announced too, with `nil` remote fields. Like `NodeShapeSkew`, it **never refuses the connection**: a
-  Beamtalk version mismatch is the normal state of a rolling upgrade. The
+- **`NodeVersionSkew`** is announced once per connect (best-effort) when
+  the peer runs a different wire-format version (`localWireVersion` /
+  `remoteWireVersion`) or Beamtalk version (`localBeamtalkVersion` /
+  `remoteBeamtalkVersion`). A peer that cannot report its versions (too
+  old, or too slow to answer) is announced too, with `nil` remote fields.
+  Like `NodeShapeSkew`, it **never refuses the connection**: a Beamtalk
+  version mismatch is the normal state of a rolling upgrade. The
   per-message `wire_version_unsupported` check stays the safety net.
 
 **Supervision-tree introspection reaches across nodes too:**

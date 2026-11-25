@@ -144,3 +144,25 @@ shapeManifest_is_an_alias_for_shape_manifest_test() ->
     Dir = fixtures_dir(),
     {ok, _} = beamtalk_release_shapes:extract_shapes([], [Dir]),
     ?assertEqual(beamtalk_release:shape_manifest(), beamtalk_release:shapeManifest()).
+
+%% BT-5232: `project_class_shape_entry/1` answers exactly the class's
+%% `shape_manifest/0` entry (or `undefined` when it has none) for every live
+%% class, project and stdlib alike, so the reload-time skew check and the
+%% connect-time manifest can never disagree about a class's scope.
+project_class_shape_entry_agrees_with_shape_manifest_test() ->
+    ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
+    Dir = fixtures_dir(),
+    {ok, _} = beamtalk_release_shapes:extract_shapes([], [Dir]),
+    Manifest = beamtalk_release:shape_manifest(),
+    ?assert(maps:is_key('ReleaseShapesRoot', Manifest)),
+    Live = [Name || {Name, _Module, _Pid} <- beamtalk_class_registry:live_class_entries()],
+    ?assertEqual(
+        [],
+        [
+            Name
+         || Name <- Live,
+            beamtalk_release:project_class_shape_entry(Name) =/=
+                maps:get(Name, Manifest, undefined)
+        ]
+    ),
+    ?assertEqual(undefined, beamtalk_release:project_class_shape_entry('Bt5232NoSuchClass')).

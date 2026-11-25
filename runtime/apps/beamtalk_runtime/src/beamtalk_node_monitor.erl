@@ -84,6 +84,10 @@ that finishes after its peer has gone does not bring the entry back
 (BT-5232). This is best-effort, not a per-connection guarantee: if the peer
 reconnects before an old check's cast arrives, that cast lands in the new
 entry, and the new connection's own checks then overwrite it per class.
+Likewise two quick reloads of one class can reach a peer out of order, and
+a version read that outlives a reconnect can announce a second
+`NodeVersionSkew` for the same peer. A per-connection generation would close
+these windows (BT-5240).
 
 A reload-time check updates **both** sides: after comparing its own entry
 with a peer's, the reloading node casts the pair to the peer's monitor
@@ -543,7 +547,8 @@ check_one_peer_class(PeerNode, ClassName, LocalEntry) ->
         {ok, RemoteEntry} when is_map(RemoteEntry) ->
             announce_if_skewed(PeerNode, ClassName, LocalEntry, RemoteEntry),
             %% Tell the peer, so its tally and bus see the reload too
-            %% (BT-5232). Skipped if it has gone: a send would re-dial it.
+            %% (BT-5232). Skipped if it has gone: a send would re-dial it
+            %% (best-effort — it can still drop between the check and the cast).
             case lists:member(PeerNode, nodes()) of
                 true ->
                     gen_server:cast(
