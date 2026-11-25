@@ -27,6 +27,21 @@ use beamtalk_core::ast::{
 };
 use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, DeclaredType};
 
+/// The calling convention a compiled module declares as `class_var_abi` in
+/// `__beamtalk_meta/0` (ADR 0130 §3). `1` was "class methods are
+/// `class_<sel>(ClassSelf, Args...)`"; `2` adds the actor-state cell protocol
+/// (ADR 0137); `3` (ADR 0142, BT-4301) retires the `nil` `ClassSelf`. The
+/// runtime's load gate (`beamtalk_class_var_abi:check_class_info_abi/2`,
+/// enforced at class registration, hot reload and the release preflight)
+/// compares it with `?BT_CLASS_VAR_ABI` in
+/// `runtime/apps/beamtalk_runtime/include/beamtalk_class_vars_keys.hrl`;
+/// `class_var_abi_matches_the_runtime_header` keeps the two equal until ADR
+/// 0153 Phase 3 moves the gate.
+///
+/// ADR 0153: compiled code no longer calls `beamtalk_class_vars`, which every
+/// runtime of this ABI still exports, so the value is unchanged.
+pub(super) const CLASS_VAR_ABI: i64 = 3;
+
 /// ADR 0098 Phase 3: producing-toolchain identity baked into a module's
 /// `__beamtalk_meta/0` map so a *loaded* module is self-describing — consumers
 /// (workspace attach, tooling) can detect staleness without re-reading the
@@ -434,7 +449,7 @@ impl CoreErlangGenerator {
             // ADR 0130 §3: the class-variable calling convention this module
             // was compiled for (the runtime's load gate reads it).
             ",\n      'class_var_abi' => ",
-            leaf::int_lit(super::class_var_keys::ABI_VERSION),
+            leaf::int_lit(CLASS_VAR_ABI),
             // ADR 0103: sendability handle scope (omitted when undeclared).
             handle_scope_doc,
             // ADR 0123 §1/§2: declared shape version + migration table

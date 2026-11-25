@@ -320,7 +320,7 @@ The disposition is a first reading from the pattern, the file's role and a read 
 | File | Hits | Disposition | Owner |
 |---|--:|---|---|
 | `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/generated_builtins.rs` | 143 | edit | BT-5154 |
-| `crates/beamtalk-codegen/src/core_erlang/class_var_access.rs` | 116 | delete | BT-5153 |
+| class_var_access.rs (deleted by BT-5153) | 116 | delete | BT-5153 (done) |
 | class_state_abroad.rs (deleted by BT-5152) | 65 | delete | BT-5154 |
 | class_var_capture_catch.rs (deleted by BT-5152) | 50 | delete | BT-5153 |
 | `crates/beamtalk-core/src/semantic_analysis/class_hierarchy/tests.rs` | 47 | edit | BT-5154 |
@@ -329,7 +329,7 @@ The disposition is a first reading from the pattern, the file's role and a read 
 | `crates/beamtalk-core/src/semantic_analysis/validators/class_process_ffi_validators.rs` | 43 | edit | BT-5154 |
 | `crates/beamtalk-codegen/src/core_erlang/tests/dispatch.rs` | 40 | edit | BT-5153 |
 | `crates/beamtalk-core/src/semantic_analysis/validators/class_validators.rs` | 37 | edit | BT-5154 |
-| `crates/beamtalk-codegen/src/core_erlang/class_var_keys.rs` | 36 | delete | BT-5153 |
+| class_var_keys.rs (deleted by BT-5153) | 36 | delete | BT-5153 (done) |
 | `crates/beamtalk-core/src/source_analysis/parser/declarations.rs` | 35 | edit | BT-5152 |
 | `crates/beamtalk-cli/src/commands/release/upgrade.rs` | 31 | edit | BT-5163 |
 | `crates/beamtalk-core/src/semantic_analysis/validators/reserved_name_validators.rs` | 30 | edit | BT-5154 |

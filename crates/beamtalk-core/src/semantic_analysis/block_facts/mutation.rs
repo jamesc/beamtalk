@@ -7,7 +7,7 @@
 //!
 //! This domain service analyzes blocks to detect which variables and fields are
 //! read/written, enabling proper state threading in tail-recursive loops. Also
-//! holds the class-variable access census ([`ClassVarAccesses`]) and the
+//! holds the `self`-slot access walk ([`SelfSlotAccesses`]) and the
 //! while-loop condition predicates that read the analysis.
 
 use super::{RootMethodKind, captured_local_mutations_from_analysis, literal_block_value_arm};
@@ -179,46 +179,39 @@ pub fn is_own_class_reference(receiver: &Expression, class_name: &str) -> bool {
     )
 }
 
-/// How a block literal written in a class method touches its home class's
-/// variables (ADR 0130 §5), nested blocks included: the one answer behind
-/// codegen's block-creation capture (`block_reads_class_var`) and the Phase 0
-/// census (BT-3761).
+/// How a block literal touches the named slots of `self` (nested blocks
+/// included): the one answer behind the `actor-state-abroad` lint (an actor's
+/// fields). ADR 0153: codegen no longer binds a class-variable capture at
+/// block creation, so this walk only feeds diagnostics.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ClassVarAccesses {
-    /// Class variables read as `self.name`, sorted. The target of a
-    /// `self.name := v` write is not a read.
+pub struct SelfSlotAccesses {
+    /// Slots read as `self.name`, sorted. The target of a `self.name := v`
+    /// write is not a read.
     pub reads: std::collections::BTreeSet<String>,
-    /// Class variables written as `self.name := v`, sorted, each with the
-    /// span of its first write in source order.
+    /// Slots written as `self.name := v`, sorted, each with the span of its
+    /// first write in source order.
     pub writes: std::collections::BTreeMap<String, Span>,
-    /// `self hasField: x` probes, which ask the class-variable home (they
-    /// lower to `beamtalk_class_vars:has`, which reads through a capture
-    /// abroad). A probe is not a class-variable read: its argument may name no
-    /// declared variable, or be computed. A `hasField:` that is a cascade
+    /// `self hasField: x` probes, which ask the receiver's slot store. A probe
+    /// is not a slot read: its argument may name no declared slot, or be
+    /// computed. A `hasField:` that is a cascade
     /// message is not a probe: a cascade dispatches every message, the first
     /// included, as an ordinary send, never through the `HasField` intrinsic.
     pub has_field_probes: std::collections::BTreeSet<HasFieldProbe>,
-    /// Variables read reflectively as `self fieldAt: #name`, sorted (BT-4184,
-    /// BT-4421): in a class method this lowers to an in-place read
-    /// (`beamtalk_class_vars:field_at`, through a capture abroad), on an actor
-    /// a read of the cell. A literal name outside `vars` is left out, as a
-    /// `self.name` of a non-variable is: it reads no captured state and
-    /// raises anyway (at home `undeclared_class_variable`, abroad with no
-    /// capture `class_state_unreachable`). `vars` may include inherited
-    /// names, while the runtime's `field_at` checks only the class's own
-    /// declared set (BT-3801). Not a cascade message or a cast, which are
+    /// Slots read reflectively as `self fieldAt: #name`, sorted (BT-4184,
+    /// BT-4421): on an actor a read of the cell. A literal name outside `vars`
+    /// is left out, as a `self.name` of a non-slot is: it reads no captured
+    /// state and raises anyway. Not a cascade message or a cast, which are
     /// ordinary sends.
     pub field_at_reads: std::collections::BTreeSet<String>,
     /// Whether some `self fieldAt: k` read has a computed argument (it may
-    /// name a variable).
+    /// name a slot).
     pub computed_field_at_read: bool,
     /// Reflective writes, `self fieldAt: #name put: v` and
-    /// `self clearField: #name`, in walk order (BT-4184, BT-4428): in a class
-    /// method these lower to in-place writes (`beamtalk_class_vars:field_at_put`
-    /// / `clear`), on an actor to writes of the cell, so away from home they
-    /// raise like a `self.name := v`. Every name is recorded, in `vars` or
-    /// not: what a write of a non-variable does is the caller's to judge. Not
-    /// a cascade message or a cast, which are ordinary sends.
+    /// `self clearField: #name`, in walk order (BT-4184, BT-4428): on an actor
+    /// writes of the cell, so away from home they raise like a
+    /// `self.name := v`. Every name is recorded, in `vars` or not: what a
+    /// write of a non-slot does is the caller's to judge. Not a cascade
+    /// message or a cast, which are ordinary sends.
     pub reflective_writes: Vec<ReflectiveWrite>,
 }
 
@@ -231,7 +224,7 @@ pub enum ReflectiveWriteKind {
     ClearField,
 }
 
-/// A reflective write on `self` ([`ClassVarAccesses::reflective_writes`]).
+/// A reflective write on `self` ([`SelfSlotAccesses::reflective_writes`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReflectiveWrite {
     /// `fieldAt:put:` or `clearField:`.
@@ -259,7 +252,7 @@ impl ReflectiveWrite {
     }
 }
 
-/// The argument of a `self hasField:` probe ([`ClassVarAccesses::has_field_probes`]).
+/// The argument of a `self hasField:` probe ([`SelfSlotAccesses::has_field_probes`]).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum HasFieldProbe {
     /// A symbol literal, `self hasField: #n`: the probed name, declared or not.
@@ -287,12 +280,12 @@ pub fn probe_clause(probes: &std::collections::BTreeSet<HasFieldProbe>) -> Strin
     }
 }
 
-impl ClassVarAccesses {
-    /// Whether the block reads class state at all: a `self.name` read or a
-    /// `hasField:` probe. Exactly the blocks for which codegen binds a capture
-    /// (outside a direct-called method) and the lint's read rule considers.
+impl SelfSlotAccesses {
+    /// Whether the block reads slot state at all: a `self.name` read, a
+    /// `hasField:` probe or a reflective `fieldAt:` read. Exactly the blocks
+    /// the lints' read rule considers.
     #[must_use]
-    pub fn reads_class_state(&self) -> bool {
+    pub fn reads_slots(&self) -> bool {
         !self.reads.is_empty() || !self.has_field_probes.is_empty() || self.reads_with_field_at()
     }
 
@@ -349,14 +342,14 @@ impl ClassVarAccesses {
     }
 }
 
-/// THE walker for "which class variables does `block` read and write"
-/// (BT-3761): see [`ClassVarAccesses`]. `vars` are the class variables
-/// visible to the class (own and inherited); a `self.name` for any other
-/// `name` is an instance-field access and not counted.
+/// THE walker for "which named slots of `self` does `block` read and write"
+/// (BT-3761): see [`SelfSlotAccesses`]. `vars` are the slot names of interest
+/// (an actor's fields, own and inherited); a `self.name` for any other `name`
+/// is not counted.
 #[allow(clippy::implicit_hasher)] // concrete HashSet, matching ClassContext-style callers
 #[must_use]
-pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAccesses {
-    let mut accesses = ClassVarAccesses::default();
+pub fn self_slot_accesses(block: &Block, vars: &HashSet<String>) -> SelfSlotAccesses {
+    let mut accesses = SelfSlotAccesses::default();
     // Write targets, by identity: the walk visits an assignment before its target.
     let mut written_targets: HashSet<*const Expression> = HashSet::new();
     for stmt in &block.body {

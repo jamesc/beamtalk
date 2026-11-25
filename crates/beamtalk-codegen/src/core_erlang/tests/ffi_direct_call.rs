@@ -239,17 +239,13 @@ fn string_arg_is_direct_behind_is_binary_guard() {
         &code,
         &["call 'erlang':'is_binary'(_FfiArg"],
     );
-    // A binary argument can retry on `badarg`, so the call site keeps the
-    // pre-call class-variable snapshot for it (as the proxy does).
-    assert_has(
-        "the snapshot is read before the call",
-        &code,
-        &["= call 'beamtalk_class_vars':'snapshot'() in try call 'erlang':'phash2'("],
-    );
+    // ADR 0153: no class-variable snapshot; the error path is
+    // `ffi_call_raised/8` even though the argument can retry on `badarg`.
     assert!(
-        code.contains("'stock', _FfiSite@") && code.contains(", _FfiSnap@"),
-        "the snapshot is handed to ffi_call_raised/9:\n{code}"
+        code.contains("'stock', _FfiSite@") && !code.contains("FfiSnap"),
+        "no snapshot is handed to ffi_call_raised:\n{code}"
     );
+    assert!(!code.contains("beamtalk_class_vars"), "{code}");
     // No proxy hop on the happy path: the only `direct_call` is the guard's
     // fallback arm.
     assert_eq!(
@@ -486,15 +482,13 @@ fn dictionary_arg_is_direct_behind_is_map_guard() {
         &["call 'erlang':'is_map'(_FfiArg"],
     );
     assert!(!code.contains("'is_binary'"), "{code}");
-    assert_has(
-        "the snapshot is read before the call",
-        &code,
-        &["= call 'beamtalk_class_vars':'snapshot'() in try call 'erlang':'map_size'("],
-    );
+    // ADR 0153: no class-variable snapshot; the error path is
+    // `ffi_call_raised/8` even though the argument can retry on `badarg`.
     assert!(
-        code.contains("'stock', _FfiSite@") && code.contains(", _FfiSnap@"),
-        "the snapshot is handed to ffi_call_raised/9:\n{code}"
+        code.contains("'stock', _FfiSite@") && !code.contains("FfiSnap"),
+        "no snapshot is handed to ffi_call_raised:\n{code}"
     );
+    assert!(!code.contains("beamtalk_class_vars"), "{code}");
     // No proxy hop on the happy path and no dynamic send.
     assert_eq!(
         code.matches("'direct_call'(").count(),

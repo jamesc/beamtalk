@@ -14,8 +14,6 @@ use crate::core_erlang::threaded_ir::FrameId;
 use crate::core_erlang::{CodeGenError, CoreErlangGenerator, Result};
 
 use beamtalk_cerl_doc::Document;
-use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::Expression;
 
 impl CoreErlangGenerator {
@@ -49,14 +47,11 @@ impl CoreErlangGenerator {
         if let Expression::Assignment { target, value, .. } = expr
             && let Expression::FieldAccess { field, .. } = target.as_ref()
         {
-            // ADR 0130 §2: a class-variable write is an in-place `put`,
-            // an expression like any other: bind its value, no rebinding.
+            // ADR 0153: a class has no slots.
             if self.in_class_method() {
-                let val_var = self.fresh_temp_var("Val");
-                let write_doc = self.generate_field_assignment(&field.name, value)?;
-                return Ok((
-                    docvec!["let ", leaf::var(val_var.clone()), " = ", write_doc, " in "],
-                    val_var,
+                return Err(Self::class_side_field_write_error(
+                    &field.name,
+                    value.span(),
                 ));
             }
             // Full-extract mode — rebind field param instead of maps:put.

@@ -71,7 +71,7 @@ Base subclass: C
 #[test]
 fn class_side_extension_super_resolves_against_the_target_superclass() {
     // A class-side extension's `super` starts at the *target's* superclass,
-    // as codegen keys it (`class_var_home`), whatever class hosts the file.
+    // as codegen keys it (`class_method_home`), whatever class hosts the file.
     for host in ["", "Object subclass: Host\n  foo => 1\n"] {
         let clean = format!(
             "Object subclass: Base

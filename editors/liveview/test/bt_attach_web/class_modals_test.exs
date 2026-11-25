@@ -890,4 +890,148 @@ defmodule BtAttachWeb.Live.ClassModalsTest do
       assert socket.assigns.new_class_error == BtAttach.Workspace.render_error(:disk_full)
     end
   end
+
+  # ── BT-5189: queued internal evals ──────────────────────────────────────────
+  #
+  # `eval_running: true` stands in for a long user eval already running in the
+  # session: every internal eval submitted meanwhile waits in the dock's queue.
+
+  describe "queued renames and removals (BT-5189)" do
+    alias BtAttachWeb.Live.Dock
+
+    defp queued_rename_socket(overrides \\ %{}) do
+      base_socket(
+        Map.merge(
+          %{
+            tabs: [def_tab("def:Counter", "Counter")],
+            active_tab: "def:Counter",
+            rename_open: true,
+            rename_kind: :class,
+            rename_class: "Counter",
+            selected_class: "Counter",
+            eval_running: true
+          },
+          overrides
+        )
+      )
+    end
+
+    defp submit_rename(socket, name) do
+      {:noreply, socket} =
+        ClassModals.handle_event("rename_submit", %{"new_name" => name}, socket)
+
+      socket
+    end
+
+    defp queued_job(socket) do
+      [{job, _pid, _code}] = socket.assigns.eval_queue
+      job
+    end
+
+    test "a second submit while the rename is queued is ignored, and the rename is pending" do
+      socket = queued_rename_socket() |> submit_rename("Accumulator")
+
+      assert length(socket.assigns.eval_queue) == 1
+      assert Dock.eval_pending?(socket, ClassModals.rename_key())
+
+      socket = submit_rename(socket, "Accumulator")
+      assert length(socket.assigns.eval_queue) == 1
+    end
+
+    test "reopening the modal while a rename is pending does not retarget it" do
+      socket =
+        queued_rename_socket()
+        |> submit_rename("Accumulator")
+        |> assign_assigns(
+          rename_open: false,
+          tabs: [def_tab("def:Other", "Other")],
+          active_tab: "def:Other"
+        )
+
+      {:noreply, socket} = ClassModals.handle_event("open_rename", %{}, socket)
+      assert socket.assigns.rename_open
+      assert socket.assigns.rename_class == "Counter"
+    end
+
+    test "Stop drops the queued rename and re-opens its modal with the reason" do
+      socket = queued_rename_socket() |> submit_rename("Accumulator")
+      socket = Phoenix.Component.assign(socket, rename_open: false)
+
+      {:noreply, socket} = Dock.handle_event("eval_interrupt", %{}, socket)
+
+      assert socket.assigns.eval_queue == []
+      assert socket.assigns.rename_open
+      assert socket.assigns.rename_new_name == "Accumulator"
+      assert socket.assigns.rename_error =~ "The rename did not complete: Stopped before it ran."
+      refute Dock.eval_pending?(socket, ClassModals.rename_key())
+      # Stop also says what it cancelled, in the dock.
+      assert socket.assigns.eval_notice =~ "1 waiting evaluation was cancelled"
+    end
+
+    test "a rename refused at submit (workspace lost) reports in the modal" do
+      socket =
+        queued_rename_socket(%{eval_running: false, workspace_lost: :killed})
+        |> submit_rename("Accumulator")
+
+      assert socket.assigns.rename_open
+      assert socket.assigns.rename_error =~ "The workspace connection was lost"
+      refute Dock.eval_pending?(socket, ClassModals.rename_key())
+    end
+
+    test "a finished class rename does not pull focus after the user moved to another tab" do
+      other = method_tab("method:Other:instance:foo", "Other", "foo")
+
+      socket =
+        queued_rename_socket(%{tabs: [def_tab("def:Counter", "Counter"), other]})
+        |> submit_rename("Accumulator")
+
+      job = queued_job(socket)
+      socket = assign_assigns(socket, active_tab: other.id)
+      socket = job.fold.(socket, {:ok, nil, "", []})
+
+      assert socket.assigns.active_tab == other.id
+      refute Enum.any?(socket.assigns.tabs, &(&1.id == "def:Counter"))
+      assert socket.assigns.save_result =~ "Renamed Counter to Accumulator"
+    end
+
+    test "a finished method rename closes the renamed method's tab, not whichever is active" do
+      renamed = method_tab("method:Counter:instance:increment", "Counter", "increment")
+      other = method_tab("method:Counter:instance:reset", "Counter", "reset")
+
+      socket =
+        base_socket(%{
+          tabs: [renamed, other],
+          active_tab: renamed.id,
+          rename_open: true,
+          rename_kind: :method,
+          rename_class: "Counter",
+          rename_side: "instance",
+          rename_old_selector: "increment",
+          eval_running: true
+        })
+        |> submit_rename("incrementBy")
+
+      job = queued_job(socket)
+      socket = assign_assigns(socket, active_tab: other.id)
+      socket = job.fold.(socket, {:ok, nil, "", []})
+
+      assert Enum.map(socket.assigns.tabs, & &1.id) == [other.id]
+    end
+
+    test "a second Remove Method while the first is queued is ignored; Stop reports it" do
+      tab = method_tab("method:Counter:instance:increment", "Counter", "increment")
+      socket = base_socket(%{tabs: [tab], active_tab: tab.id, eval_running: true})
+
+      {:noreply, socket} = ClassModals.handle_event("remove_method", %{}, socket)
+      {:noreply, socket} = ClassModals.handle_event("remove_method", %{}, socket)
+      assert length(socket.assigns.eval_queue) == 1
+      assert Dock.eval_pending?(socket, ClassModals.remove_key(tab))
+
+      {:noreply, socket} = Dock.handle_event("eval_interrupt", %{}, socket)
+      assert socket.assigns.save_error =~ "Remove increment from Counter did not complete"
+      refute Dock.eval_pending?(socket, ClassModals.remove_key(tab))
+    end
+  end
+
+  defp assign_assigns(socket, kw), do: Phoenix.Component.assign(socket, kw)
 end
