@@ -147,7 +147,7 @@ fn ensure_runtime_built(
 ) -> Result<()> {
     if layout == repl_startup::RuntimeLayout::Dev && !paths.runtime_ebin.exists() {
         info!("Building Beamtalk runtime...");
-        let status = Command::new("rebar3")
+        let status = crate::commands::build::native::rebar3_tool_command()?
             .arg("compile")
             .current_dir(runtime_dir)
             .status()

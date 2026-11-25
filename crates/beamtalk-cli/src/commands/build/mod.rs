@@ -35,7 +35,7 @@ use super::OutputFormat;
 mod changes;
 mod class_index;
 mod environment;
-mod native;
+pub(crate) mod native;
 mod outputs;
 mod sources;
 mod stubs;

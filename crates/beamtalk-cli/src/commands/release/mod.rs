@@ -333,7 +333,12 @@ fn assemble_release(
     // input, with no on-the-fly-extraction fallback needed. Re-stat
     // afterward — the append step recompresses the tarball in place, so
     // `make_tarball`'s own returned size is stale for the printed summary.
-    assembly::append_shape_manifests_to_tarball(&scratch_tar, &release_dir, &release_vsn)?;
+    assembly::append_shape_manifests_to_tarball(
+        &scratch_tar,
+        &release_dir,
+        &release_vsn,
+        &emit_dirs,
+    )?;
     // `ReleaseSwap` parked anything already at the final path, so this never
     // replaces an unrelated file.
     if final_tarball.symlink_metadata().is_ok() {

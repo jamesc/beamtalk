@@ -9,7 +9,6 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{IntoDiagnostic, Result};
-use std::process::Command;
 use tracing::warn;
 
 use super::erlang_eval::{self, ErlangEval};
@@ -67,7 +66,7 @@ pub fn run_erlfmt(
 /// Build erlfmt using rebar3 and cache the compiled beams.
 fn build_erlfmt(tool_dir: &Utf8Path) -> Result<()> {
     // Check rebar3 is available.
-    if Command::new("rebar3").arg("--version").output().is_err() {
+    if crate::commands::build::native::rebar3_path().is_err() {
         miette::bail!("rebar3 not found on PATH");
     }
 
@@ -92,7 +91,7 @@ fn build_erlfmt(tool_dir: &Utf8Path) -> Result<()> {
 
     eprintln!("Building erlfmt (first time only)...");
 
-    let output = Command::new("rebar3")
+    let output = crate::commands::build::native::rebar3_tool_command()?
         .arg("compile")
         .current_dir(tool_dir.as_std_path())
         .output()
