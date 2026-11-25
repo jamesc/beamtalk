@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Ledger — collects results. Registered cluster-wide with
+/// `spawnAs: #ledger scope: #global`, so any node can find it with
+/// `Ledger named: #ledger scope: #global`.
+Actor subclass: Ledger
+  state: entries = #()
+
+  add: result => self.entries := self.entries add: result
+
+  entries => self.entries
+
+  size => self.entries size

@@ -65,6 +65,8 @@ if [ "${PLATFORM}" = "windows-x86_64" ]; then
     scripts/install-share.sh "${STAGING}/share"
 
     # Create zip
+    # `7z a` updates an existing archive in place; start from a clean slate.
+    rm -f "${ARCHIVE}"
     (cd "beamtalk-staging" && 7z a "../${ARCHIVE}" "${TOPLEVEL}")
     rm -rf "beamtalk-staging"
 else

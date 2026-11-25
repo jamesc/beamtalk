@@ -13,7 +13,17 @@ RELEASE_VSN="__RELEASE_VSN__"
 ERTS_VSN="__ERTS_VERSION__"
 INCLUDE_ERTS="__INCLUDE_ERTS__"
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+# BT-5134: resolve a symlinked `bin/<name>` (e.g. /usr/local/bin/<name> ->
+# <root>/bin/<name>) to the real script before locating the release root.
+SELF="$0"
+while [ -h "$SELF" ]; do
+    LINK_TARGET=$(readlink -- "$SELF")
+    case "$LINK_TARGET" in
+        /*) SELF="$LINK_TARGET" ;;
+        *) SELF="$(dirname -- "$SELF")/$LINK_TARGET" ;;
+    esac
+done
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd -P)
 ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)
 CONFIG_DIR="$ROOT/releases/$RELEASE_VSN"
 PROVENANCE="$CONFIG_DIR/beamtalk-provenance.json"
@@ -155,6 +165,10 @@ client_sname() {
 export_cookie() {
     [ -n "${RELEASE_COOKIE:-}" ] || return 0
     case "$RELEASE_COOKIE" in
+        -* | +*)
+            echo "error: RELEASE_COOKIE must not start with '-' or '+'" >&2
+            exit 2
+            ;;
         *[[:space:]\"\'\\]*)
             echo "error: RELEASE_COOKIE must not contain whitespace, quotes or backslashes" >&2
             exit 2

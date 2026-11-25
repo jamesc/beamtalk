@@ -784,6 +784,13 @@ test-examples: build-stdlib
     fi
     echo "✅ All example tests passed (${passed} packages)"
 
+# Multi-node end-to-end run of examples/cluster (BT-5143): starts three release
+# nodes on this host, runs the scenario, asserts it, removes the nodes.
+# Same-host only (loopback distribution); see examples/cluster/README.md.
+[unix]
+test-cluster: build-stdlib
+    BEAMTALK="cargo run --bin beamtalk --quiet --" examples/cluster/scripts/e2e.sh
+
 # Generate the example corpus for the MCP search tool (ADR 0062) into
 # target/share/beamtalk/corpus.json, where dev binaries find it and `install`
 # copies it from. A build output, not a checked-in file (BT-4614).

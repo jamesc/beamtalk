@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Job — a unit of work farmed out to a worker node.
+///
+/// A `Value` subclass, so it crosses the node boundary by copy, enveloped
+/// and version-tagged (ADR 0126 §5.1, ADR 0123/0125).
+///
+/// ## Examples
+/// ```beamtalk
+/// (Job id: 1 n: 7) square   // => 49
+/// ```
+Value subclass: Job
+  field: id :: Integer = 0
+  field: n :: Integer = 0
+
+  /// The work itself: square `n`.
+  square => self.n * self.n
