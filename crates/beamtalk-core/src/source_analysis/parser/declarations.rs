@@ -744,7 +744,14 @@ impl Parser {
             else if is_class_state_keyword(self.current_kind())
                 || self.is_at_late_class_state_keyword()
             {
-                if let Some(removed) = self.parse_classvar_declaration() {
+                if let Some(mut removed) = self.parse_classvar_declaration() {
+                    // Consume any pending `@expect`/doc comment here so it
+                    // does not leak onto the next member.
+                    pending.apply_to(
+                        &mut removed.expect,
+                        &mut removed.doc_comment,
+                        &mut removed.comments,
+                    );
                     self.diagnostics
                         .push(class_state_removed_diagnostic(removed.span));
                 }
