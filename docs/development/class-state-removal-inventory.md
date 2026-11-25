@@ -389,7 +389,7 @@ The disposition is a first reading from the pattern, the file's role and a read 
 | `crates/beamtalk-core/src/source_analysis/parser/mod.rs` | 7 | edit | BT-5152 |
 | `crates/beamtalk-core/src/semantic_analysis/validators/local_threading/walker.rs` | 7 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/threaded_ir/emit.rs` | 7 | edit | BT-5153 |
-| while_condition_class_method.rs (deleted by BT-5152) | 7 | edit | BT-5153 |
+| while_condition_class_method.rs (deleted by BT-5152) | 7 | delete | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/runtime_export_contract_tests.rs` | 7 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/gen_server/native_facade.rs` | 7 | edit | BT-5153 |
 | `crates/beamtalk-codegen/src/core_erlang/control_flow/plan.rs` | 7 | edit (comments only) | BT-5153 |

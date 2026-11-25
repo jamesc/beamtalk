@@ -22,7 +22,7 @@ use crate::ast::{
     ClassKind, ConstructorSelectors, DeclaredKeyword, Expression, Identifier, MessageSelector,
     MethodDefinition, Module, migrate_from_v_version,
 };
-use crate::ast_walker::{later_cascade_sends, walk_expression, walk_module};
+use crate::ast_walker::{for_each_child, later_cascade_sends, walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, MethodSide, Span};
@@ -1300,19 +1300,32 @@ pub(crate) fn check_class_side_self_field_access(
         );
     for method in class_side {
         for stmt in &method.body {
-            walk_expression(&stmt.expression, &mut |expr| {
-                if let Expression::FieldAccess {
-                    receiver,
-                    field,
-                    span,
-                } = expr
-                    && receiver.is_self()
-                {
-                    diagnostics.push(class_side_self_field_error(&field.name, *span));
-                }
-            });
+            report_class_side_self_fields(&stmt.expression, diagnostics);
         }
     }
+}
+
+/// Reports each `self.x` under `expr`. A block that declares its own `self`
+/// parameter (`[:self | self.total := 1]`, as `ClassBuilder` method blocks do)
+/// rebinds `self`, so its body is the block's own instance side and is skipped.
+fn report_class_side_self_fields(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+    if let Expression::Block(block) = expr
+        && block.parameters.iter().any(|p| p.name == "self")
+    {
+        return;
+    }
+    if let Expression::FieldAccess {
+        receiver,
+        field,
+        span,
+    } = expr
+        && receiver.is_self()
+    {
+        diagnostics.push(class_side_self_field_error(&field.name, *span));
+    }
+    for_each_child(expr, &mut |child| {
+        report_class_side_self_fields(child, diagnostics);
+    });
 }
 
 fn class_side_self_field_error(field: &str, span: Span) -> Diagnostic {

@@ -193,8 +193,9 @@ const IDENTITY: Option<CallerEffect> = Some(CallerEffect::Identity);
 /// they make a table the caller owns, which is what they are for, whereas
 /// a direct `ets:new` there is flagged as an FFI resource escape hatch.
 /// `ets:new` itself stays caller-only: the `class-method-process-resource`
-/// hint offers an Actor as the fix; flagging it in the class process too
-/// would leave no lint-clean home for the call.
+/// Since ADR 0153 no source-declared class runs its class methods in the class
+/// process, so the `class-process-ffi` half of this table is dormant until the
+/// class-variable machinery is removed.
 const CLASS_METHOD_FFI: &[ClassMethodFfi] = &[
     row("erlang", "self", OWNERSHIP, IDENTITY),
     row("erlang", "send", OWNERSHIP, None),
@@ -490,8 +491,8 @@ impl Site<'_> {
             expr.span(),
         )
         .with_hint(format!(
-            "move ownership to an Actor (create the resource in its `initialize`); `{class_name}` \
-             cannot keep its class methods in a class process (ADR 0153)"
+            "move ownership to an Actor (create the resource in its `initialize`); class methods \
+             of `{class_name}` run in whichever process calls them"
         ))
         .with_category(DiagnosticCategory::ClassMethodProcessResource)
     }

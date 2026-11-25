@@ -43,3 +43,11 @@ fn self_field_in_instance_method_is_untouched() {
     let errs = errors("Actor subclass: Foo\n  state: n = 0\n  get => self.n\n");
     assert!(errs.is_empty(), "{errs:?}");
 }
+
+#[test]
+fn block_that_rebinds_self_is_not_a_class_side_slot_access() {
+    // `ClassBuilder` method blocks take `self` as a parameter.
+    let errs =
+        errors("Object subclass: Foo\n  class build => Foo helper: [:self :a | self.total := a]\n");
+    assert!(errs.is_empty(), "{errs:?}");
+}
