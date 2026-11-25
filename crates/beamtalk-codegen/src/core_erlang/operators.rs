@@ -73,8 +73,9 @@ impl OperatorGuard {
                     None => test(first),
                 }
             }
-            // No receiver test: the receiver is a number by proof.
-            Self::ProvenNumber => form::call("erlang", "is_number", [var(subject.to_string())]),
+            // No receiver test: the receiver is a number by proof. (Its guard
+            // is the right-operand test, `right_tested_comparison`.)
+            Self::ProvenNumber => atom("true"),
         }
     }
 
@@ -631,11 +632,6 @@ impl CoreErlangGenerator {
             var(right_var.clone()),
             ")",
         ]);
-        // ADR 0116: see this function's doc comment — the arithmetic
-        // guard's bare-BIF branch becomes the coercion `try`/`catch` when the
-        // right operand's type is genuinely unknown; every other case (the
-        // comparison guard, or a statically-numeric right operand) keeps the
-        // bare BIF unchanged.
         // ADR 0116 § Addendum (BT-5176): a numeric comparison whose right
         // operand is not proven numeric tests it on its number arm.
         if right_tested
@@ -648,6 +644,11 @@ impl CoreErlangGenerator {
                 fast_path: Some(parts.1),
             };
         }
+        // ADR 0116: see this function's doc comment — the arithmetic
+        // guard's bare-BIF branch becomes the coercion `try`/`catch` when the
+        // right operand's type is genuinely unknown; every other case (a
+        // comparison with a proven numeric right operand, a declared `String`,
+        // or a statically-numeric right operand) keeps the bare BIF unchanged.
         let coerces = matches!(guard, OperatorGuard::Arithmetic) && !right_is_statically_numeric;
         let bif_branch = if coerces {
             self.number_coercion_try_catch(

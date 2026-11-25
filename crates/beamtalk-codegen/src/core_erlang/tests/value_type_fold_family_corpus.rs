@@ -311,90 +311,108 @@ fn oracle_programs() -> Vec<(String, String, String)> {
 /// `probe name -> printed result`. A probe that does not answer within five seconds (a loop
 /// whose exit write was dropped) prints `timeout`. `None` without `erlc`/`erl`.
 ///
-/// Shared with `while_condition_carrier_corpus.rs` (BT-4002).
+/// Shared with `while_condition_carrier_corpus.rs` (BT-4002); the general runner is
+/// [`run_erlang_probes`].
 pub(super) fn run_probes(
     core: &str,
     probes: &[String],
     self_map: &str,
 ) -> Option<std::collections::HashMap<String, String>> {
+    let module = core_module_name(core);
+    let calls: Vec<(String, String)> = probes
+        .iter()
+        .map(|p| (p.clone(), format!("'{module}':'{p}'(Self)")))
+        .collect();
+    // `collect:` rebuilds its result with the runtime's `from_list_like/2`, the identity on a
+    // list receiver (the only receiver the probes use).
+    let stubs = [(
+        "beamtalk_collection",
+        "-module(beamtalk_collection).\n-export([from_list_like/2]).\nfrom_list_like(_Receiver, List) -> List.\n",
+    )];
+    run_erlang_probes(&[core], &stubs, &format!("Self = {self_map}"), &calls)
+}
+
+/// The module name a generated Core Erlang module declares.
+pub(super) fn core_module_name(core: &str) -> String {
+    core.strip_prefix("module '")
+        .and_then(|rest| rest.split('\'').next())
+        .expect("generated Core Erlang starts with its module name")
+        .to_string()
+}
+
+/// Compiles each module of `cores` with `erlc` (its `on_load` hook dropped, so it loads
+/// without the Beamtalk runtime), and each `(module, source)` of `stubs` (Erlang stand-ins
+/// for the runtime modules the probes reach), then evaluates every `(name, expression)` of
+/// `calls` in a fresh process, after the Erlang statements `setup` (e.g. `Self = #{}`;
+/// its bindings are in scope of every expression), and answers `name -> printed result`
+/// (`~w`, an exception as its `catch` value). A probe that does not answer within five
+/// seconds prints `timeout`. `None` without `erlc`/`erl`.
+pub(super) fn run_erlang_probes(
+    cores: &[&str],
+    stubs: &[(&str, &str)],
+    setup: &str,
+    calls: &[(String, String)],
+) -> Option<std::collections::HashMap<String, String>> {
     use std::process::Command;
     if !super::erlang_available() {
         return None;
     }
-    // The probes need no Beamtalk runtime (arithmetic, `maps`, list literals), but the module's
-    // `on_load` hook registers the class with it: drop the hook so the module loads bare.
-    let core = &core.replace("'on_load' = [{'register_class', 0}],", "");
     let dir = tempfile::tempdir().expect("temp dir");
-    let module = core
-        .strip_prefix("module '")
-        .and_then(|rest| rest.split('\'').next())
-        .expect("generated Core Erlang starts with its module name")
-        .to_string();
-    let core_file = dir.path().join(format!("{module}.core"));
-    std::fs::write(&core_file, core).expect("write core");
-    let compiled = Command::new("erlc")
-        .arg("+from_core")
-        .arg("-o")
-        .arg(dir.path())
-        .arg(&core_file)
-        .output()
-        .expect("erlc runs");
-    assert!(
-        compiled.status.success(),
-        "erlc rejected the oracle module:\n{}\n{}",
-        String::from_utf8_lossy(&compiled.stderr),
-        String::from_utf8_lossy(&compiled.stdout)
-    );
-    // `collect:` rebuilds its result with the runtime's `from_list_like/2`, the identity on a
-    // list receiver (the only receiver the probes use).
-    let stub = dir.path().join("beamtalk_collection.erl");
-    std::fs::write(
-        &stub,
-        "-module(beamtalk_collection).\n-export([from_list_like/2]).\nfrom_list_like(_Receiver, List) -> List.\n",
-    )
-    .expect("write runtime stub");
-    let stubbed = Command::new("erlc")
-        .arg("-o")
-        .arg(dir.path())
-        .arg(&stub)
-        .output()
-        .expect("erlc runs");
-    assert!(
-        stubbed.status.success(),
-        "{}",
-        String::from_utf8_lossy(&stubbed.stdout)
-    );
-    let names = probes
-        .iter()
-        .map(|p| format!("'{p}'"))
-        .collect::<Vec<_>>()
-        .join(",");
-    // The probe goes in a module rather than `-eval`: a long `-eval` string exceeds the
-    // Windows command-line limit.
+    let erlc = |file: &std::path::Path, from_core: bool| {
+        let mut cmd = Command::new("erlc");
+        if from_core {
+            cmd.arg("+from_core");
+        }
+        let compiled = cmd
+            .arg("-o")
+            .arg(dir.path())
+            .arg(file)
+            .output()
+            .expect("erlc runs");
+        assert!(
+            compiled.status.success(),
+            "erlc rejected {}:\n{}\n{}",
+            file.display(),
+            String::from_utf8_lossy(&compiled.stderr),
+            String::from_utf8_lossy(&compiled.stdout)
+        );
+    };
+    for core in cores {
+        // The module's `on_load` hook registers the class with the runtime: drop it so
+        // the module loads bare.
+        let core = core.replace("'on_load' = [{'register_class', 0}],", "");
+        let module = core_module_name(&core);
+        let core_file = dir.path().join(format!("{module}.core"));
+        std::fs::write(&core_file, &core).expect("write core");
+        erlc(&core_file, true);
+    }
+    for (module, source) in stubs {
+        let stub = dir.path().join(format!("{module}.erl"));
+        std::fs::write(&stub, source).expect("write runtime stub");
+        erlc(&stub, false);
+    }
+    // One function per probe: a long `-eval` string exceeds the Windows command-line
+    // limit, and one huge function body is slow to compile.
+    let mut functions = String::new();
+    for (i, (name, expr)) in calls.iter().enumerate() {
+        functions.push_str(&format!(
+            "p{i}() ->\n    {setup},\n    Parent = self(),\n    \
+             Pid = spawn(fun() -> Parent ! {{self(), (catch ({expr}))}} end),\n    \
+             R = receive {{Pid, V}} -> V after 5000 -> exit(Pid, kill), timeout end,\n    \
+             io:format(\"~s ~w~n\", [\"{name}\", R]).\n"
+        ));
+    }
     let runner = format!(
-        "-module(oracle_runner).\n-export([run/0]).\nrun() ->\n\
-         Self = {self_map}, \
-         lists:foreach(fun(F) -> \
-           Parent = self(), \
-           Pid = spawn(fun() -> Parent ! {{self(), (catch '{module}':F(Self))}} end), \
-           R = receive {{Pid, V}} -> V after 5000 -> exit(Pid, kill), timeout end, \
-           io:format(\"~s ~w~n\", [F, R]) end, [{names}]), \
-         halt().\n"
+        "-module(oracle_runner).\n\
+         -compile([export_all, nowarn_export_all, nowarn_unused_vars]).\n\
+         run() -> lists:foreach(fun(I) -> \
+         apply(?MODULE, list_to_atom(\"p\" ++ integer_to_list(I)), []) end, \
+         lists:seq(0, {})), halt().\n{functions}",
+        calls.len() as i64 - 1
     );
     let runner_path = dir.path().join("oracle_runner.erl");
     std::fs::write(&runner_path, runner).expect("write oracle runner");
-    let runner_compiled = Command::new("erlc")
-        .arg("-o")
-        .arg(dir.path())
-        .arg(&runner_path)
-        .output()
-        .expect("erlc runs");
-    assert!(
-        runner_compiled.status.success(),
-        "{}{}",
-        String::from_utf8_lossy(&runner_compiled.stdout),
-        String::from_utf8_lossy(&runner_compiled.stderr)
-    );
+    erlc(&runner_path, false);
     let output = Command::new("erl")
         .current_dir(dir.path())
         .arg("-noshell")

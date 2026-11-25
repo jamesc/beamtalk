@@ -1881,6 +1881,36 @@ The compiled method has no `make_ref` (the frame stays gone). A two-branch
 guard or a tail conditional on a declared comparison is not covered by the
 helper and keeps its frame again.
 
+### BT-5210: the right operand of a numeric comparison is tested (ADR 0116 addendum)
+
+ADR 0116 § Addendum (BT-5176), Phase 2b: an inlined `<`, `<=`, `>`, `>=`
+whose left operand may be a number now tests its right operand with
+`is_number` unless the compiler proves it numeric (a number or character
+literal, `self` in `Integer`/`Float`/`Character`), and sends a non-number its
+reflected hook through `send_number_comparison/4`. A declared right operand is
+tested. Measured against the Phase 0 baseline rows with a like-for-like repo
+build of `main` and of the change, three interleaved runs per side; the full
+tables are in `benchmarks/vs-elixir/results/bench-bt5176-after.md`.
+
+| Row | base ns | after ns | red / words |
+|---|---|---|---|
+| 11d `a > 0` (proven right) | 7.7–8.7 | 8.0–8.8 | 0 / 0, same code |
+| 11e `a < 10` (proven right) | 7.5–8.4 | 7.7–8.0 | 0 / 0, same code |
+| 11f `[a > i] whileTrue:` | 246–267 | 254–273 | 19 / 7 both |
+| 11g `a max: 3` | 19.3–23.5 | 17.0 | 4 / 0 both |
+| 11h `5 < b` | 0.5–1.1 | 7.7–7.8 | 0 / 0 both |
+| 11i `a < b` untyped | 10.6–11.0 | 7.7–8.0 | 0 / 0 both |
+| 11j `a :: Integer < b` | 7.6–8.2 | 7.7–8.3 | 0 / 0 both |
+| 11k `5 + b` (reference) | 8.8–10.2 | 8.9–9.5 | 0 / 0 both |
+| 11l actor `[0 < self.count] whileTrue:` | 3692–4912 | 3583–3667 | 112–113 → 102 |
+
+The gate holds: rows with a proven right operand compile to the same code;
+the rows that gain the test keep their reductions and words with ns inside the
+spread; `5 < b` (now paying the hook call's frame, as the addendum predicted)
+is still cheaper than `5 + b`. 11l was already a `StateAcc` loop; its
+condition now brackets the comparison with a BT-4279 fast path
+(`is_number(Count)` skips the store) and it measured faster.
+
 ## ADR 0153 baseline: class variables, before removal (BT-5145)
 
 The "before" run for removing `classState:` (epic BT-5144). It records what the class-variable snapshot before every compiled `on:do:`, `protect/1` in `Result tryDo:` and the class-variable input to the per-send class guard cost, so the "after" run (BT-5164, and the ADR 0153 Phase 3 gate) has something to compare against.

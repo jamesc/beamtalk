@@ -425,6 +425,7 @@ mod module_info;
 mod nlr;
 mod nlr_closure_call_corpus;
 mod number_comparison_right_operand;
+mod number_comparison_right_operand_corpus;
 mod open_reach;
 mod operand_evaluation_order;
 mod paren_arm_statements;
