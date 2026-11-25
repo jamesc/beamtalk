@@ -325,6 +325,9 @@ impl ChildEntry {
     /// group, and the reaper just has not noticed yet (it polls every
     /// [`GROUP_POLL`]).
     fn signallable_pgid(&self) -> Option<libc::pid_t> {
+        if self.gate.forgotten.load(Ordering::Acquire) {
+            return None; // Emptied, or recycled into another child's group.
+        }
         (!self.gate.reaped() || watchdog::group_exists(self.pgid)).then_some(self.pgid)
     }
 }
@@ -460,11 +463,18 @@ fn spawn_child(request: &SpawnRequest, port: &Port) -> Result<(), String> {
 
     let gate = Arc::new(EventGate::default());
     if let Ok(mut map) = port.children.lock() {
-        // Registered under the children lock, like the reaper's unregister,
-        // so a recycled group number's `+` and `-` cannot interleave.
+        // Under the children lock, like the reaper's unregister, so a group
+        // number's `-` and `+` cannot interleave. A reaped entry with the same
+        // number belongs to a group that has emptied and been recycled into
+        // this child's: forget it first, so it is never signalled again.
         #[cfg(unix)]
-        if let Some(watchdog) = watchdog {
-            watchdog.register(pgid);
+        {
+            for stale in map.values().filter(|e| e.pgid == pgid && e.gate.reaped()) {
+                port.forget_pgid(pgid, &stale.gate);
+            }
+            if let Some(watchdog) = watchdog {
+                watchdog.register(pgid);
+            }
         }
         map.insert(
             child_id,
@@ -533,8 +543,12 @@ fn reap(
     let group_gone = || {
         if !gate.forgotten.load(Ordering::Acquire) {
             // Under the children lock, so a spawn that reuses this group
-            // number cannot register it between the check and the unregister.
-            let _map = port.children.lock();
+            // number cannot register it between the check and the unregister
+            // (and a spawn that already reused it has forgotten this entry).
+            let _map = port
+                .children
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if !watchdog::group_exists(pgid) {
                 port.forget_pgid(pgid, gate);
             }
@@ -807,8 +821,8 @@ fn handle_kill_with(
         let Some(pgid) = entry.signallable_pgid() else {
             return Ok(()); // Exited, and nothing it left behind remains.
         };
-        // SIGTERM to the whole process group, still under the lock that
-        // vouched for it. The group outlives the child while a grandchild
+        // SIGTERM to the whole process group, still under the lock (so a
+        // spawn cannot recycle the number in between). The group outlives the child while a grandchild
         // holds the pipes, so this reaches it too.
         // SAFETY: kill(2) to a process group this port created.
         let rc = unsafe { libc::kill(-pgid, libc::SIGTERM) };
@@ -1843,6 +1857,35 @@ mod tests {
         entry.gate.mark_reaped();
         assert!(!entry.gate.exit_sent());
         assert_eq!(entry.signallable_pgid(), None, "reaped and empty");
+    }
+
+    /// A spawn that gets a recycled group number forgets the reaped entry
+    /// that held it, which is then never signalled, although "its" group
+    /// (now the new child's) exists.
+    #[test]
+    #[cfg(unix)]
+    #[serial]
+    fn a_recycled_group_number_is_not_signalled_through_the_old_entry() {
+        use std::os::unix::process::CommandExt;
+        let (port, _) = test_port();
+        // Stands in for the new child that was given the recycled number.
+        let mut live = Command::new("sleep")
+            .arg("300")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pgid = libc::pid_t::try_from(live.id()).unwrap();
+        let stale = ChildEntry {
+            stdin: None,
+            gate: Arc::default(),
+            pgid,
+        };
+        stale.gate.mark_reaped();
+        assert_eq!(stale.signallable_pgid(), Some(pgid), "group exists");
+        port.forget_pgid(pgid, &stale.gate);
+        assert_eq!(stale.signallable_pgid(), None, "forgotten: not ours");
+        live.kill().unwrap();
+        live.wait().unwrap();
     }
 
     #[test]
