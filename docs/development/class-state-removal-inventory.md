@@ -225,7 +225,7 @@ Declares `classState:` in 15 fixtures and 3 cases (`constant_class_method_key`, 
 | File | Disposition | Pinned / replacement |
 |---|---|---|
 | `cases/class_var_single_home.btscript` and its fixtures `class_var_single_home_{counter,escaping_write,ids,loud,probechild,reload_v1,reload_v2,tally,tally_main}.bt` | delete (10 files) | ADR 0130 single-home semantics: nesting, escaping write, reload keeps the home |
-| `cases/class_var_nlr_shadow.btscript`, `fixtures/class_var_nlr_shadow_driver.bt`, `fixtures/class_var_nlr_shadow_probe.bt` (no declaration of its own) | delete (3) | ADR 0110 shadow write across `^` relay, REPL column of `stdlib/test/class_var_nlr_shadow_test.bt` |
+| `cases/class_var_nlr_shadow.btscript`, `fixtures/class_var_nlr_shadow_driver.bt`, `fixtures/class_var_nlr_shadow_probe.bt` (no declaration of its own) | delete (3) | ADR 0110 shadow write across `^` relay, REPL column of `class_var_nlr_shadow_test.bt` (deleted by BT-5148) |
 | `cases/storage_family_threading.btscript` and fixtures `storage_family_class_method{,_ensure_direct_write,_foldl_direct_write}.bt` | edit; delete the 3 fixtures and the class-method column | storage-family threading in a class method (field write is the class variable) |
 | `cases/class_methods_run_in_caller.btscript`, `fixtures/class_methods_run_in_caller_counter.bt` | edit; delete the fixture and its stateful rows | ADR 0142: a class with class variables keeps its class process. The stateless rows stay |
 | `cases/workspace_native_api.btscript` (lines 751-775), `fixtures/field_fixture.bt` | edit | `SystemNavigation fieldReadersOf:/fieldWritersOf: #spawnCount in: FieldFixture` on a class-side field. Delete the class-side rows and the `spawnCount` field and its two class methods; the instance rows stay |
@@ -282,7 +282,7 @@ The two setters go (`stdlib/src/class_builder.bt:134` `classVars:`, `:307` `addC
 |---|---|
 | `stdlib/test/class_builder_class_method_test.bt:30, 85, 99, 111, 117` | `classVars: #{#total => 0}` / `#{#n => 10}` seeds the value a `classMethods:` block reads and writes. Rewrite: the blocks answer a literal, or delete the class-variable rows (the ADR 0084 funs stay) |
 | `stdlib/test/class_builder_incremental_test.bt:6, 8, 34, 60, 65` | `addClassState: #total default: 0` and the "BT-873 dropped writes" test. Delete the class-state rows; keep `addMethod:body:` / `addClassMethod:body:` |
-| `stdlib/test/class_var_nlr_shadow_test.bt:126` | `classVars: #{#runs => 0}`; goes with the test |
+| `class_var_nlr_shadow_test.bt:126` (deleted by BT-5148) | `classVars: #{#runs => 0}`; goes with the test |
 | `tests/repl-protocol/cases/class_builder_capstone.btscript:78, 126` | `classVars:` / `addClassState:default:` |
 | `tests/repl-protocol/cases/class_builder_class_methods.btscript:23` | "classState seeded via classVars:, mutation threaded" |
 | `docs/beamtalk-language-features.md:1377-1429` | § on class variables with ClassBuilder (`classVars: #{ #opened => 0 }`, `addClassState: #total default: 10`) |
