@@ -8,7 +8,9 @@
 ///
 /// The step must be an Integer: `1 to: 2 by: 0.5` raises a `TypeError`
 /// ("Interval step must be an Integer"). To loop with a Float step, use
-/// `to:by:do:`, which takes any Number step (BT-5217).
+/// `to:by:do:`, which takes any Number step (BT-5217). The limit must be an
+/// Integer too: `1 to: 2.5` raises a `TypeError` ("Interval limit must be an
+/// Integer", BT-5245); `to:do:` still accepts any Number limit.
 ///
 /// Use `to:` or `to:by:` on any Integer to create an interval:
 /// ```beamtalk
