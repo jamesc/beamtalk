@@ -484,8 +484,8 @@ Run a class method in the caller (ADR 0142 §3). `ClassSelf` is the real class
 reference of the receiving class, the value its class literal evaluates to
 (its metaclass tag, its own module and its registered pid), even for an
 inherited method, as every class-side path now builds it
-(the caller's own `ClassSelf`, `invoke_class_method/7`). `performLocally:`
-(`beamtalk_object_class:local_call/3`) used to apply its selector from
+(the caller's own `ClassSelf`, `invoke_class_method/7`).
+`beamtalk_object_class:local_call/3` used to apply its selector from
 `class_mod` alone; it now walks the class-method chain from the receiving
 class, so an inherited selector is found and a subclass override wins
 (BT-4300). No class-variable
@@ -826,7 +826,7 @@ Shared by every class-side lookup: the external send
 (`handle_class_method_call/6`), the in-caller owner memo
 (`derive_class_method_owner/3`), the class-side self-send
 (`class_self_send/3`, `class_self_dispatch_local/4`), `super`
-(`class_super_dispatch/4`, from the superclass), `performLocally:`
+(`class_super_dispatch/4`, from the superclass), `local_call/3`
 (`find_class_method_from_class/2`) and `respondsTo:`
 (`class_understands_class_selector/2`). `ClassName` names the receiving class
 in the cycle warning.
@@ -1790,8 +1790,8 @@ method_not_found_hint(ClassName, DefiningClass, Selector) ->
 Walk the class-method tables from `ClassName` itself up the superclass chain:
 `{ok, DefiningClass, Module}` for the first
 class whose published selector list (compiled methods and ADR 0084 runtime
-funs) has `Selector`. Used by `performLocally:`
-(`beamtalk_object_class:local_call/3`), which applies only compiled exports.
+funs) has `Selector`. Used by
+`beamtalk_object_class:local_call/3`, which applies only compiled exports.
 A thin adaptation of `find_class_side_method/3`, the one class-side lookup.
 
 Uses the ETS hierarchy and class-methods tables only (no `gen_server:call`),

@@ -268,9 +268,10 @@ impl CoreErlangGenerator {
     /// the one the `class-state-abroad` lint uses too (BT-3761): a `self.<class
     /// variable>` read outside an assignment target (exactly the nodes for which
     /// [`Self::is_class_var_field_read`] holds, the caller having checked
-    /// [`Self::in_class_method`]), a non-cascade `self hasField:` probe, which
-    /// lowers to `beamtalk_class_vars:has`, or a non-cascade `self fieldAt:`
-    /// read, which lowers to `field_at` ([`Self::is_class_side_self_reflection`]).
+    /// [`Self::in_class_method`]), or a non-cascade `self hasField:` /
+    /// `self fieldAt:` (still counted by the walker, though since ADR 0153
+    /// decision 7 these compile as ordinary sends that raise
+    /// `does_not_understand`; BT-5153/BT-5154 remove the walker).
     /// A write-only block reads nothing and binds no capture.
     pub(super) fn block_reads_class_var(&self, block: &Block) -> bool {
         class_var_accesses(block, self.class_var_names()).reads_class_state()

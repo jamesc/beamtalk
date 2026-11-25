@@ -448,7 +448,9 @@ class_send(ClassPid, Selector, Args, Timeout) ->
     beamtalk_class_dispatch:class_send(ClassPid, Selector, Args, Timeout).
 
 -doc """
-Execute a class method in the caller's process.
+Execute a class method in the caller's process. The shape-migration runner's
+entry point (`beamtalk_shape_migration`); it once backed
+`performLocally:withArguments:`, removed by ADR 0153 (BT-5155).
 
 Resolves `Selector` through the class-method chain starting at the receiving
 class (`beamtalk_class_dispatch:find_class_method_from_class/2`, the walk the
@@ -513,7 +515,7 @@ local_call(Receiver, _Selector, _Args) ->
 %% sent to the class tagged `Tag`: the defining class the class-method chain
 %% walk reaches from the receiving class (BT-4300), or `not_found` when no
 %% class in the chain defines it or its definition has no compiled export
-%% (an ADR 0084 runtime fun, which `performLocally:` has never applied).
+%% (an ADR 0084 runtime fun, which `local_call/3` has never applied).
 -spec local_call_module(atom(), atom(), atom(), arity()) -> {ok, module()} | not_found.
 local_call_module(Tag, Selector, FunName, Arity) ->
     case beamtalk_primitive:class_name_from_tag(Tag) of
