@@ -152,7 +152,19 @@ The launcher checks all of this before it starts any node, and refuses with an
 explanation unless the option file sets `{verify, verify_peer}` on **both** the
 server and client sides and `{fail_if_no_peer_cert, true}` on the server side.
 Without them TLS only encrypts the link: any client is let in. `Node connect:`
-uses the same check before it connects off-host.
+uses the same check before it connects off-host. It also refuses `verify_fun`
+and `partial_chain`, which can accept a peer the CA did not sign.
+
+Two things the check cannot see are yours to get right:
+
+- **Trust only your own CA.** Point `cacertfile` at a private CA that signs
+  nothing but your nodes. An option file that trusts public CAs (for example
+  `{cacerts, public_key:cacerts_get()}`) would let in any holder of a publicly
+  issued certificate.
+- **Keep host-name checking on.** By default each node checks that the peer's
+  certificate names the host it dialled. `{server_name_indication, disable}` or
+  a permissive `customize_hostname_check` turns that off, so any certificate
+  from your CA could stand in for any node.
 
 A two-host recipe, with `web1.example.com` (10.0.0.5) and `web2.example.com`
 (10.0.0.6). Issue each host a certificate for its own name from one private CA,
