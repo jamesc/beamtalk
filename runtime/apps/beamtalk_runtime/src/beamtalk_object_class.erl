@@ -447,7 +447,9 @@ class_send(ClassPid, Selector, Args, Timeout) ->
     beamtalk_class_dispatch:class_send(ClassPid, Selector, Args, Timeout).
 
 -doc """
-Execute a class method in the caller's process.
+Execute a class method in the caller's process. The shape-migration runner's
+entry point (`beamtalk_shape_migration`); it once backed
+`performLocally:withArguments:`, removed by ADR 0153 (BT-5155).
 
 Resolves `Selector` through the class-method chain starting at the receiving
 class (`beamtalk_class_dispatch:find_class_method_from_class/2`, the walk the
@@ -489,21 +491,28 @@ local_call(Receiver = #beamtalk_object{class = Tag}, Selector, Args) when
             Error = beamtalk_error:new(
                 type_error,
                 ClassName,
-                'performLocally:withArguments:',
+                Selector,
                 <<"Receiver is not a class object">>
             ),
             beamtalk_error:raise(Error)
     end;
-local_call(Receiver, _Selector, _Args) ->
+local_call(Receiver, Selector, _Args) ->
     ClassName =
         case Receiver of
             #beamtalk_object{class = C} -> C;
             _ -> erlang
         end,
+    %% The selector being applied, when it is one (ADR 0153 removed
+    %% `performLocally:withArguments:`, which used to be named here).
+    ErrorSelector =
+        case is_atom(Selector) of
+            true -> Selector;
+            false -> undefined
+        end,
     Error = beamtalk_error:new(
         type_error,
         ClassName,
-        'performLocally:withArguments:',
+        ErrorSelector,
         <<"Receiver is not a class object">>
     ),
     beamtalk_error:raise(Error).
@@ -512,7 +521,7 @@ local_call(Receiver, _Selector, _Args) ->
 %% sent to the class tagged `Tag`: the defining class the class-method chain
 %% walk reaches from the receiving class (BT-4300), or `not_found` when no
 %% class in the chain defines it or its definition has no compiled export
-%% (an ADR 0084 runtime fun, which `performLocally:` has never applied).
+%% (an ADR 0084 runtime fun, which `local_call/3` has never applied).
 -spec local_call_module(atom(), atom(), atom(), arity()) -> {ok, module()} | not_found.
 local_call_module(Tag, Selector, FunName, Arity) ->
     case beamtalk_primitive:class_name_from_tag(Tag) of
@@ -1587,7 +1596,7 @@ call_new(
 -spec call_get_class_var(atom(), #class_state{}) -> {reply, term(), #class_state{}}.
 call_get_class_var(Name, #class_state{name = ClassName, class_state = ClassVars} = State) ->
     %% ADR 0124 §1/§4i/B4: the read rule (declared-`late`, declared-set) is
-    %% `read_class_var/4`, shared with `Cls fieldAt:` (BT-4148).
+    %% `read_class_var/4`.
     %%
     %% Replies `{error, Error}` rather than raising here: this
     %% `handle_call` clause runs directly in the class gen_server's own
@@ -1663,30 +1672,14 @@ Read class variable `Name` from the class-state map `ClassVars` of `ClassName`:
 `{ok, Value}`, or `{error, Error}` (built, not raised, so the class gen_server
 can reply with it instead of crashing). The rule itself is
 `beamtalk_class_vars:read_in/4`, shared with the in-process `self fieldAt: #x`
-of a class method (BT-4421), so the gen_server's `get_class_var`, the outside
-`Cls fieldAt: #x` (BT-4148) and the inside read cannot drift apart.
+of a class method (BT-4421), so the gen_server's `get_class_var` and the
+inside read cannot drift apart. (The outside `Cls fieldAt: #x` is a
+`does_not_understand` since ADR 0153, BT-5155.)
 """.
 -spec read_class_var(class_name(), map(), atom(), in_process | reflective) ->
     {ok, term()} | {error, #beamtalk_error{}}.
 read_class_var(ClassName, ClassVars, Name, Caller) ->
     beamtalk_class_vars:read_in(ClassName, ClassVars, Name, Caller).
-
--doc """
-Write class variable `Name` into the class-state map `ClassVars` of
-`ClassName` for the `Cls fieldAt: #x put: v` reflection send (BT-4148):
-`{ok, NewClassVars}`, or `{error, Error}` (built, not raised).
-
-**Checked**, unlike the out-of-band `{set_class_var, ...}` runtime-API call
-(ADR 0124). The rule is `beamtalk_class_vars:check_write/3`, shared with the
-in-process `self fieldAt: #x put: v` of a class method (BT-4421).
-""".
--spec write_class_var(class_name(), map(), atom(), term()) ->
-    {ok, map()} | {error, #beamtalk_error{}}.
-write_class_var(ClassName, ClassVars, Name, Value) ->
-    case beamtalk_class_vars:check_write(ClassName, ClassVars, Name) of
-        ok -> {ok, ClassVars#{Name => Value}};
-        {error, _} = Err -> Err
-    end.
 
 -doc """
 Run a class-method (or metaclass-method) call against this class gen_server's
@@ -1706,71 +1699,25 @@ ownership when there is no session context to fall back to (tier 1).
 -spec dispatch_class_method(
     atom(), list(), {pid(), term()} | term(), #class_state{}, fun(() -> ok)
 ) -> {reply, term(), #class_state{}} | {noreply, #class_state{}}.
-%% ADR 0124 §1/§4i/B4, BT-4148: `Cls hasField:`, `Cls clearField:`,
-%% `Cls fieldAt:` and `Cls fieldAt:put:` reach the class gen_server here,
-%% ahead of the local-class-method/superclass-chain/DNU priority order below.
-%% Like `fieldAt:`/`fieldAt:put:` on an instance (`sealed` on `Object`, ADR
-%% 0035), these are reflection primitives, not overridable class methods.
-%% `ClassVars` lives in `State` directly, so none of them needs
-%% `handle_class_method_call/6`'s method-lookup machinery. `has`/`clear` are
-%% `maps:is_key/2`/`maps:remove/2` (the whole operation); `get`
-%% shares `read_class_var/4` with `get_class_var`; and `put` is the checked
-%% counterpart (`write_class_var/4`) of the deliberately unchecked
-%% `set_class_var`.
+%% ADR 0153 decision 7 (BT-5155): `Cls hasField:`, `Cls clearField:`,
+%% `Cls fieldAt:` and `Cls fieldAt:put:` used to be answered here from the
+%% class variables, ahead of the lookup (ADR 0124, BT-4148). A class has no
+%% fields now, so they take the ordinary lookup: a class method of that name
+%% answers, and otherwise the `Class` protocol fallthrough refuses them
+%% (`beamtalk_class_dispatch:try_class_chain_fallthrough/3`), so the send
+%% raises does_not_understand like any selector the class does not understand.
 dispatch_class_method(Selector, Args, From, State, Restore) ->
-    case class_var_reflection_op(Selector, Args) of
-        {has, Name} ->
-            Restore(),
-            #class_state{class_state = ClassVars} = State,
-            %% `{ok, _}`-wrapped, matching invoke_class_method/7's own reply shape
-            %% (`{reply, {ok, Result}, ...}`) — `class_send_dispatch/3`'s caller
-            %% (`beamtalk_class_dispatch.erl`) always unwraps a `class_method_call`
-            %% reply as `{ok, Result} | {error, _}`, so a bare, unwrapped value here
-            %% falls through every clause of that `case` and crashes the class
-            %% gen_server with `function_clause` — found via this issue's own "from
-            %% outside" BUnit test.
-            {reply, {ok, maps:is_key(Name, ClassVars)}, State};
-        {clear, Name} ->
-            Restore(),
-            #class_state{class_state = ClassVars} = State,
-            NewClassVars = maps:remove(Name, ClassVars),
-            beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
-            NewState = State#class_state{class_state = NewClassVars},
-            {reply, {ok, beamtalk_class_registry:class_object_from_pid(self())}, NewState};
-        {get, Name} ->
-            %% BT-4148: `Cls fieldAt: #x` — the `get_class_var` read rule
-            %% (`read_class_var/4`, reflective form). An error is replied as `{error, Error}`,
-            %% which the caller (`class_method_result/4`) raises in its own
-            %% process, so the class gen_server survives it.
-            Restore(),
-            #class_state{name = ClassName, class_state = ClassVars} = State,
-            {reply, read_class_var(ClassName, ClassVars, Name, reflective), State};
-        {put, Name, Value} ->
-            %% BT-4148: `Cls fieldAt: #x put: v` — a checked write
-            %% (`write_class_var/4` records why). Answers the assigned value,
-            %% like instance-side `fieldAt:put:`.
-            Restore(),
-            #class_state{name = ClassName, class_state = ClassVars} = State,
-            case write_class_var(ClassName, ClassVars, Name, Value) of
-                {ok, NewClassVars} ->
-                    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
-                    {reply, {ok, Value}, State#class_state{class_state = NewClassVars}};
-                {error, _} = Err ->
-                    {reply, Err, State}
-            end;
-        none ->
-            dispatch_class_method_lookup(Selector, Args, From, State, Restore)
-    end.
+    dispatch_class_method_lookup(Selector, Args, From, State, Restore).
 
 -doc """
-The class-variable reflection sends `dispatch_class_method/5` answers from the
-class gen_server's own state (`Cls hasField: #x` / `Cls clearField: #x` /
-`Cls fieldAt: #x` / `Cls fieldAt: #x put: v`, ADR 0124 §1/§4i/B4, BT-4148), or
-`none` for every other send. The single decision behind
-`dispatch_class_method/5`, `is_class_var_reflection_send/2`,
-`is_class_var_reflection_selector/1` and the in-place answer to the same
-send made from inside the class's own process
-(`beamtalk_class_dispatch:class_send_from_own_process/2`, BT-4423).
+The instance-field reflection sends (`hasField: #x` / `clearField: #x` /
+`fieldAt: #x` / `fieldAt: #x put: v`), or `none` for every other send. Once
+class-variable reflection (ADR 0124, BT-4148). Since ADR 0153 decision 7
+(BT-5155) a class has no fields: these selectors are not part of the class
+object's protocol (`is_class_var_reflection_selector/1`, read by
+`beamtalk_class_dispatch:try_class_chain_fallthrough/3` and
+`beamtalk_primitive:class_responds_to/2`). The names are kept until ADR 0153
+Phase 3 removes this machinery.
 """.
 -spec class_var_reflection_op(atom(), list()) ->
     {has | clear | get, atom()} | {put, atom(), term()} | none.
@@ -1781,20 +1728,18 @@ class_var_reflection_op('fieldAt:put:', [Name, Value]) when is_atom(Name) -> {pu
 class_var_reflection_op(_Selector, _Args) -> none.
 
 -doc """
-Does the class gen_server answer this class-object send from its own state,
-ahead of the class-method lookup? `beamtalk_class_dispatch` asks before it
-skips the class process for a send no class method defines (BT-4073): these
-sends read or write class variables, which only the class process holds.
+Is this an instance-field reflection send (`class_var_reflection_op/2`)?
 """.
 -spec is_class_var_reflection_send(atom(), list()) -> boolean().
 is_class_var_reflection_send(Selector, Args) ->
     class_var_reflection_op(Selector, Args) =/= none.
 
 -doc """
-Can a send of `Selector` be a class-variable reflection send, whatever its
-argument (`is_class_var_reflection_send/2` with a Symbol argument)? The
-in-caller owner memo (`beamtalk_class_dispatch`, ADR 0142) is keyed by
-selector alone, so it declines these selectors outright.
+Is `Selector` an instance-field reflection selector, whatever its argument
+(`is_class_var_reflection_send/2` with a Symbol argument)? A class object
+does not understand these unless it defines a class method of that name
+(ADR 0153 decision 7): the `Class` protocol fallthrough and `respondsTo:`
+refuse them.
 """.
 -spec is_class_var_reflection_selector(atom()) -> boolean().
 is_class_var_reflection_selector(Selector) ->

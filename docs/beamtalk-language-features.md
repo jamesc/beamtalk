@@ -3613,8 +3613,11 @@ These message sends are Tier 1 optimized — the compiler generates inlined tail
 | `whileTrue` / `whileFalse` (unary: the receiver block is condition and body, so it runs at least once) | `[self.count := self.count + 1. self.count < 10] whileTrue` | ✅ (below) |
 | `timesRepeat:` | `5 timesRepeat: [sum := sum + n]` | ✅ |
 | `to:do:` | `1 to: 10 do: [:n \| total := total + n]` | ✅ |
+| `to:by:do:` (any `Number` step; the block parameter is a `Number`) | `1 to: 2 by: 0.5 do: [:x \| total := total + x]` | ✅ |
 | `do:`, `collect:`, `select:`, `reject:` | `items do: [:x \| sum := sum + x]` | ✅ |
 | `inject:into:` | `items inject: 0 into: [:acc :x \| acc + x]` | ✅ |
+
+`to:by:do:` accepts a Float step, while `to:by:` (the [Interval](#interval--arithmetic-sequences) constructor) accepts only an Integer step and raises `TypeError` otherwise ([BT-5217](https://linear.app/beamtalk/issue/BT-5217)). So `1 to: 2 by: 0.5 do: [...]` loops over 1, 1.5 and 2.0, but `(1 to: 2 by: 0.5) do: [...]` raises. The start of `to:do:` and `to:by:do:` must be an Integer: only `Integer` defines them, so `1.5 to: 3 do: [...]` raises `does_not_understand` ([BT-5235](https://linear.app/beamtalk/issue/BT-5235)).
 
 The unary `[...] whileTrue` / `[...] whileFalse` is the keyword loop with an empty body (`[...] whileTrue: []`), so its receiver follows the rule for a `whileTrue:` condition ([BT-4313](https://linear.app/beamtalk/issue/BT-4313)). A local written in a `whileTrue:`/`whileFalse:` condition threads in every method kind and at the REPL, the unary forms included, whatever the condition or body does ([BT-4602](https://linear.app/beamtalk/issue/BT-4602)): `count := 0. [count := count + 1. count < 10] whileTrue` leaves `count` at 10. The condition runs once more than the body. The one exception is a keyword loop whose body is not a block literal (`[count := count + 1. count < 10] whileTrue: aBlock`): the loop runs its condition as a closure, so a local written in it is a compile error ([BT-4062](https://linear.app/beamtalk/issue/BT-4062)); wrap the block value in a literal (`whileTrue: [aBlock value]`).
 
@@ -7684,6 +7687,12 @@ worker isConnected                              // => true
 worker disconnect                               // => true
 ```
 
+> **`disconnect` does not keep the node away.** The next send to an actor on
+> that node (or `connect`/`ping`) reconnects it automatically (ADR 0126 §9, item 4;
+> not when the node runs with `-kernel dist_auto_connect never`), and `NodeUp`
+> fires again. Use it to drop a connection, not to fence a node
+> off.
+
 `connect` (and `ping`, which auto-connects) apply a security policy (see
 Security, below): a same-host connection always succeeds; an off-host
 connection is refused with `kind = insecure_distribution` unless this node
@@ -7907,8 +7916,8 @@ lookup, cluster events); a **hidden** node (`-hidden`) never appears in
 `Node connected`, never fires `NodeUp`/`NodeDown`, and is excluded from
 shape-skew checks — hidden nodes are for tooling that observes or attaches
 to a cluster without joining it as a peer. Beamtalk's own attach front (ADR
-0097) does not yet start as a hidden node; that is a tracked follow-up, not
-part of this ADR.
+0097) starts as a hidden node (BT-3616), so attaching to a cluster never fires
+`NodeUp` on its members.
 
 ---
 
@@ -8635,7 +8644,9 @@ An `Interval` represents an arithmetic sequence of integers without materialisin
 (1 to: 5) collect: [:x | x * x]                 // => #(1, 4, 9, 16, 25)
 ```
 
-A step of `0` or `0.0` raises, and a step or limit that is `nil` or not a number raises `TypeError`. The compiled counted-loop path (`to:by:do:`) raises the same errors.
+A step of `0` raises, and a step or limit that is `nil` or not a number raises `TypeError`. An `Interval` holds integers only, so `to:by:` also raises `TypeError` ("Interval step must be an Integer") for a step that is a number but not an Integer, such as `1 to: 2 by: 0.5` or `1 to: 10 by: 2.0` ([BT-5217](https://linear.app/beamtalk/issue/BT-5217)).
+
+The counted loop `to:by:do:` is not an `Interval` and takes any `Number` step: `1 to: 2 by: 0.5 do: [:x | ...]` runs with `x` = 1, 1.5, 2.0. Its block is typed `Block(Number, Object)`, so the type checker treats the loop variable as a `Number`, not an `Integer` ([BT-5216](https://linear.app/beamtalk/issue/BT-5216)). A step of `0` or `0.0` raises, and a step or limit that is `nil` or not a number raises `TypeError`; the compiled counted-loop path raises the same errors. See [Control Flow Constructs](#control-flow-constructs).
 
 ### Bag(E) — Multisets
 

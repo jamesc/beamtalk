@@ -6,8 +6,7 @@
 // dynamic (the in-caller owner memo, BT-4300), so the two forms behave
 // identically.
 //
-// Fixtures: fixtures/direct_dispatch_stateless.bt, fixtures/has_field_probe_base.bt,
-// fixtures/has_field_probe_base.bt.
+// Fixtures: fixtures/direct_dispatch_stateless.bt.
 
 TestCase subclass: DirectDispatchTest
 
@@ -45,19 +44,6 @@ TestCase subclass: DirectDispatchTest
     cls := DirectDispatchStateless
     pid := cls callBlock: [Erlang erlang self]
     self assert: pid equals: Erlang erlang self
-
-  // --- hasField: on a class with no class variables (ADR 0130 §2) -------------
-  testHasFieldOnStatelessClassIsFalse =>
-    self assert: DirectDispatchStateless hasMissingField equals: false
-
-  testHasFieldInBlockOnStatelessClassIsFalse =>
-    self assert: DirectDispatchStateless hasMissingFieldInBlock equals: false
-
-  testUnusedBlockWithHasFieldDoesNotRaise =>
-    self assert: DirectDispatchStateless unusedBlockWithHasField equals: 7
-
-  testInheritedHasFieldOnStatelessParentIsFalse =>
-    self assert: HasFieldProbeBase probe equals: false
 
   // --- BT-4065: Result's constructors run in the caller ---------------------
   // Every `Result ok:` in the node used to be a call into the one Result

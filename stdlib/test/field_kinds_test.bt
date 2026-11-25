@@ -3,9 +3,8 @@
 
 // BT-3550 (ADR 0124 §9/B5b): `Behaviour>>fieldKinds` / `allFieldKinds` —
 // reflects B5a's `field_kinds` meta (BT-3547) as a `Dictionary(Symbol,
-// Symbol)` of `#eager` | `#late`. Instance side only: `classVarNames` /
-// `allClassVarNames` own class-side reflection, which is a separate
-// concern from instance slot kinds.
+// Symbol)` of `#eager` | `#late`. Instance side only: a class has no
+// class-side fields (ADR 0153).
 //
 // Fixtures: `LateFieldKindsBase` (`late state: proc`, eager `state:
 // nextId`) and `LateFieldKindsSub` (subclass adding its own eager `extra`,

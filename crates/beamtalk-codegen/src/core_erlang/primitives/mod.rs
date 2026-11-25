@@ -460,14 +460,7 @@ mod tests {
             "perform:withArguments:"
         ));
         // BT-3919: reachable by a dynamic send, so lowered to a real body.
-        for selector in [
-            "==",
-            "/=",
-            "=:=",
-            "=/=",
-            "perform:withArguments:timeout:",
-            "performLocally:withArguments:",
-        ] {
+        for selector in ["==", "/=", "=:=", "=/=", "perform:withArguments:timeout:"] {
             assert!(!is_runtime_dispatched_primitive("ProtoObject", selector));
         }
     }
@@ -516,15 +509,6 @@ mod tests {
         assert_eq!(
             timeout,
             Some("call 'beamtalk_message_dispatch':'send'(Self, Sel, Args, Ms)".to_string())
-        );
-        let local = doc_to_string(generate_primitive_bif(
-            "ProtoObject",
-            "performLocally:withArguments:",
-            &["Sel".to_string(), "Args".to_string()],
-        ));
-        assert_eq!(
-            local,
-            Some("call 'beamtalk_object_class':'local_call'(Self, Sel, Args)".to_string())
         );
     }
 

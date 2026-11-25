@@ -507,16 +507,16 @@ mod tests {
     }
 
     #[test]
-    fn reflection_selector_methods_do_not_run_in_the_caller() {
-        // The class process still answers `hasField:`/`fieldAt:`/
-        // `fieldAt:put:`/`clearField:` itself until BT-5160, so a class
-        // method of that name does not run in the caller and is not reported.
+    fn reflection_selector_methods_run_in_the_caller() {
+        // BT-5155: the class process no longer intercepts `hasField:`/
+        // `fieldAt:`/`fieldAt:put:`/`clearField:`, so a class method of that
+        // name runs in the caller like any other and is reported.
         for src in [
             "Object subclass: Probe\n  class hasField: x => Erlang erlang self\n",
             "Object subclass: Reg\n  class fieldAt: k => Erlang erlang self\n",
             "Object subclass: Reg\n  class fieldAt: k put: v => Erlang erlang self\n",
         ] {
-            assert!(in_caller(src).is_empty(), "{src}");
+            assert_eq!(in_caller(src).len(), 1, "{src}");
         }
     }
 
