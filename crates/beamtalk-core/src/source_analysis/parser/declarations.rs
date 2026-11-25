@@ -534,7 +534,10 @@ impl Parser {
         let span = self.current_token().span();
         self.advance(); // consume the integer literal
         let value = match super::expressions::parse_integer(&text) {
-            Ok(v) if v > 0 => v,
+            Ok(v) if v > 0 => {
+                self.number_spellings.push((span, text));
+                v
+            }
             Ok(_) => {
                 self.diagnostics.push(Diagnostic::error(
                     "'shapeVersion:' expects a positive integer literal (got a non-positive value)",

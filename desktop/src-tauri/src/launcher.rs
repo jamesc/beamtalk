@@ -15,13 +15,18 @@
 //! against a from-source build (`just dist-liveview` under
 //! `editors/liveview/`) in the meantime.
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 
 /// Overrides launcher resolution entirely — points at a `bin/server` (or, on
 /// Windows, `bin\bt_attach.bat`) built from source for local development,
 /// e.g. against a `just dist-liveview` output outside any packaged bundle.
+///
+/// **Debug builds only** (BT-5194): it picks the program the app executes, so
+/// a release build ignores it (and logs that it did) and always runs the
+/// launcher bundled inside the signed app.
 pub const LAUNCHER_PATH_OVERRIDE_ENV: &str = "BEAMTALK_ATTACH_LAUNCHER";
 
 /// Where the bundled release's launcher lives, relative to the resource
@@ -37,8 +42,8 @@ const BUNDLED_LAUNCHER_RELATIVE_PATH: &str = "dist-liveview/bin/server";
 #[cfg(windows)]
 const BUNDLED_LAUNCHER_RELATIVE_PATH: &str = "dist-liveview/bin/bt_attach.bat";
 
-/// Resolve the launcher path: [`LAUNCHER_PATH_OVERRIDE_ENV`] if set, else the
-/// bundled resource path for the current platform.
+/// Resolve the launcher path: [`LAUNCHER_PATH_OVERRIDE_ENV`] if set in a debug
+/// build, else the bundled resource path for the current platform.
 ///
 /// Never fails outright — an unresolvable resource dir falls back to the
 /// bare relative path as a last resort, so startup doesn't crash; the
@@ -48,14 +53,68 @@ const BUNDLED_LAUNCHER_RELATIVE_PATH: &str = "dist-liveview/bin/bt_attach.bat";
 /// `BrokerError::LauncherNotFound`, not a panic and — unlike before that
 /// check existed — not an opaque spawn-I/O error either.
 #[must_use]
-pub fn resolve_launcher_path(app: &AppHandle) -> PathBuf {
-    if let Ok(override_path) = std::env::var(LAUNCHER_PATH_OVERRIDE_ENV) {
-        if !override_path.is_empty() {
-            return PathBuf::from(override_path);
-        }
+pub fn resolve_launcher_path<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
+    resolve_launcher_path_with(app, std::env::var_os(LAUNCHER_PATH_OVERRIDE_ENV))
+}
+
+/// [`resolve_launcher_path`] with the [`LAUNCHER_PATH_OVERRIDE_ENV`] value
+/// passed in, so a test need not mutate the process environment.
+fn resolve_launcher_path_with<R: Runtime>(
+    app: &AppHandle<R>,
+    env_value: Option<OsString>,
+) -> PathBuf {
+    if let Some(override_path) = launcher_override(env_value, cfg!(debug_assertions)) {
+        return override_path;
     }
     app.path().resource_dir().map_or_else(
         |_| PathBuf::from(BUNDLED_LAUNCHER_RELATIVE_PATH),
         |dir| dir.join(BUNDLED_LAUNCHER_RELATIVE_PATH),
     )
+}
+
+/// The [`LAUNCHER_PATH_OVERRIDE_ENV`] value to use, if any: a non-empty value,
+/// and only when `overrides_allowed` (`cfg!(debug_assertions)` in
+/// [`resolve_launcher_path`]).
+fn launcher_override(value: Option<OsString>, overrides_allowed: bool) -> Option<PathBuf> {
+    let value = value.filter(|v| !v.is_empty())?;
+    if overrides_allowed {
+        Some(PathBuf::from(value))
+    } else {
+        tracing::warn!(
+            env = LAUNCHER_PATH_OVERRIDE_ENV,
+            "ignoring the launcher override: release builds run the bundled launcher only"
+        );
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_override_is_honoured_only_when_allowed() {
+        let value = || Some(OsString::from("/dev/build/bin/server"));
+        assert_eq!(
+            launcher_override(value(), true),
+            Some(PathBuf::from("/dev/build/bin/server"))
+        );
+        assert_eq!(launcher_override(value(), false), None);
+        assert_eq!(launcher_override(Some(OsString::new()), true), None);
+        assert_eq!(launcher_override(None, true), None);
+    }
+
+    /// BT-5194: the env var chooses the program the app executes, so a
+    /// release build must ignore it. Under `cargo test` (debug) this checks
+    /// the override still works; `cargo test --release` checks it is ignored.
+    #[test]
+    fn resolve_launcher_path_honours_the_override_in_debug_builds_only() {
+        let app = tauri::test::mock_app();
+        let fake = "/nonexistent/override/bin/server";
+        let resolved = resolve_launcher_path_with(app.handle(), Some(OsString::from(fake)));
+        assert_eq!(
+            resolved == std::path::Path::new(fake),
+            cfg!(debug_assertions)
+        );
+    }
 }

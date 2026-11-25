@@ -10,10 +10,10 @@ use super::common::*;
 // --- format_source ---
 
 #[test]
-fn format_source_parse_error_returns_none() {
-    // Source with a parse error must return None.
+fn format_source_parse_error_returns_parse_errors() {
+    // Source with a parse error must be refused, not formatted.
     let result = format_source("@@@invalid beamtalk source@@@");
-    assert!(result.is_none(), "parse error should return None");
+    assert_eq!(result, Err(FormatError::ParseErrors));
 }
 
 #[test]
@@ -21,7 +21,10 @@ fn format_source_valid_source_is_formatted() {
     // Valid source must be returned formatted (with trailing newline).
     let source = "Object subclass: Foo\n  bar => 42\n";
     let result = format_source(source);
-    assert!(result.is_some(), "valid source should return Some");
+    assert!(
+        result.is_ok(),
+        "valid source should be formatted: {result:?}"
+    );
     let formatted = result.unwrap();
     assert!(formatted.ends_with('\n'), "output must end with newline");
     assert!(

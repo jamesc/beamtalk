@@ -9,6 +9,11 @@
 //! 2. **`format_source` is idempotent** — formatting twice yields the same output
 //! 3. **Round-trip preserves structure** — parse → unparse → re-parse → unparse
 //!    produces the same string on both passes
+//! 4. **Formatting preserves the source** (BT-5183) — for every input that
+//!    parses cleanly, the output keeps every comment, every number spelling
+//!    and the same AST as the *input* (not just as pass 1), in LF and CRLF
+//!    files alike, over fragments with comments in every position, cascades,
+//!    negative and radix numbers, symbols and Unicode
 //!
 //! **DDD Context:** Language Service — Formatting / Unparse
 //!
@@ -18,8 +23,9 @@ use proptest::prelude::*;
 
 use crate::test_helpers::test_support::near_valid_from;
 
-use super::super::{format_source, unparse_module};
-use crate::source_analysis::{lex_with_eof, parse};
+use super::super::round_trip::{ast_fingerprint, comment_multiset, number_spellings};
+use super::super::{FormatError, format_source, unparse_module};
+use crate::source_analysis::{Severity, lex_with_eof, parse};
 
 // ============================================================================
 // Generators
@@ -48,6 +54,45 @@ const FRAGMENTS: &[&str] = &[
     "Object subclass: Bar\n  greet => \"hello\"",
     "Object subclass: Baz\n  foo: x => x + 1",
     "sealed Object subclass: Shape",
+];
+
+/// Fragments for the fidelity property (BT-5183): each exercises source the
+/// formatter must not lose or change — comments in every position the issue
+/// listed, cascades, negative, radix and exponent numbers, quoted and
+/// keyword symbols, and Unicode.
+const FIDELITY_FRAGMENTS: &[&str] = &[
+    "x := 16rFF",
+    "x := 2r1010 + 36rZZ",
+    "x := 1e10",
+    "x := 2.5e-3",
+    "x := -1.5e3",
+    "x := -7",
+    "x := 1.50",
+    "x := #(16rFF, -3, 1e3)",
+    "x := <<16rFF:8, 1e3/float>>",
+    "x match: [- 16rFF -> 1; - 5 -> 2; _ -> 0]",
+    "x := #'café'",
+    "x := #'it''s'",
+    "x := #'a:b'",
+    "x := #at:put:",
+    "x := #'+'",
+    "x := #'with space'",
+    "x := \"héllo wörld\"",
+    "x := $é",
+    "// leading comment\nx := 1",
+    "x := 1  // trailing comment",
+    "/* block */ x := 1",
+    "/* multi\n   line */\nx := 1",
+    "/// doc\nObject subclass: Foo\n  bar => 1",
+    "x foo: 1 // between keywords\n  bar: 2",
+    "Transcript show: 1; // after cascade\n  show: 2",
+    "Transcript show: 1; show: 2; cr",
+    "x := (1 // inside parens\n  + 2)",
+    "x := [:a // after param\n  | a]",
+    "x := [:a | a\n  // before close\n]",
+    "x := 1 /// trailing doc",
+    "x := #(1, // in list\n  2)",
+    "x\n  |> foo  // pipeline\n  |> bar",
 ];
 
 // ============================================================================
@@ -89,11 +134,11 @@ proptest! {
     /// return `Some` with the same output.
     #[test]
     fn format_source_idempotent(input in near_valid_from(FRAGMENTS)) {
-        if let Some(pass1) = format_source(&input) {
+        if let Ok(pass1) = format_source(&input) {
             let pass2 = format_source(&pass1);
             prop_assert!(
-                pass2.is_some(),
-                "format_source returned None on already-formatted output for input {:?}",
+                pass2.is_ok(),
+                "format_source refused on already-formatted output for input {:?}",
                 input,
             );
             prop_assert_eq!(
@@ -102,6 +147,43 @@ proptest! {
                 "format_source is not idempotent for input {:?}",
                 input,
             );
+        }
+    }
+
+    /// Property 4 (BT-5183): formatting preserves the source.
+    ///
+    /// For every input (LF or CRLF) that parses cleanly, `format_source`
+    /// either returns text with the input's comments, number spellings and
+    /// AST, or refuses with [`FormatError::CommentsChanged`] (a comment in a
+    /// position the parser does not attach yet). Never a lossy result,
+    /// never another refusal. Checked here directly, not through the
+    /// formatter's own gate.
+    #[test]
+    fn format_source_preserves_the_source(
+        input in near_valid_from(FIDELITY_FRAGMENTS),
+        crlf in any::<bool>(),
+    ) {
+        // A trailing newline gives every input a line ending to keep.
+        let input = format!("{input}\n");
+        let input = if crlf { input.replace('\n', "\r\n") } else { input };
+        let (module, diags) = parse(lex_with_eof(&input));
+        prop_assume!(!diags.iter().any(|d| d.severity == Severity::Error));
+        match format_source(&input) {
+            Ok(out) => {
+                prop_assert_eq!(comment_multiset(&out), comment_multiset(&input), "comments of {:?}", input);
+                prop_assert_eq!(number_spellings(&out), number_spellings(&input), "numbers of {:?}", input);
+                let (reparsed, _) = parse(lex_with_eof(&out));
+                prop_assert_eq!(ast_fingerprint(&reparsed), ast_fingerprint(&module), "AST of {:?}", input);
+                let stripped = if crlf { out.replace("\r\n", "") } else { out.clone() };
+                prop_assert!(
+                    !stripped.contains(if crlf { '\n' } else { '\r' }),
+                    "mixed line endings for {:?}: {:?}", input, out
+                );
+                let pass2 = format_source(&out).ok();
+                prop_assert_eq!(pass2.as_deref(), Some(out.as_str()), "not idempotent");
+            }
+            Err(FormatError::CommentsChanged { .. }) => {}
+            Err(e) => prop_assert!(false, "{:?} refused: {}", input, e),
         }
     }
 
