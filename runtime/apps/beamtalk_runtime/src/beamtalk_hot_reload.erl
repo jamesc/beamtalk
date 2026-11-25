@@ -358,15 +358,21 @@ try_change_code(Pid, Module, Extra) ->
     %% 2 = the caller gave up. Whoever moves it off 0 first decides, so a
     %% failure is reported exactly once: by the caller's reply, or by the worker.
     Claim = atomics:new(1, []),
+    Caller = self(),
     {Worker, Mon} = spawn_monitor(fun() ->
         Result = run_change(Pid, Module, Extra, ?CHANGE_RETRIES),
         case atomics:compare_exchange(Claim, 1, 0, 1) of
-            ok -> Alias ! {Alias, Result};
-            _ -> report_late_failure(Module, Pid, Result)
+            ok ->
+                CallerMon = erlang:monitor(process, Caller),
+                Alias ! {Alias, Result},
+                await_result_received(Module, Pid, Result, Alias, CallerMon);
+            _ ->
+                report_late_failure(Module, Pid, Result)
         end
     end),
     receive
         {Alias, Result} ->
+            Worker ! {result_received, Alias},
             erlang:demonitor(Mon, [flush]),
             Result;
         {'DOWN', Mon, process, Worker, Other} ->
@@ -400,12 +406,40 @@ try_change_code(Pid, Module, Extra) ->
                 %% Bounded: if the worker died between its claim and the send,
                 %% report a timeout rather than block the reloading process.
                 receive
-                    {Alias, LateResult} -> LateResult
+                    {Alias, LateResult} ->
+                        Worker ! {result_received, Alias},
+                        LateResult
                 after ?CHANGE_WAIT_MS ->
                     unalias(Alias),
                     {error, timeout}
                 end
         end
+    end.
+
+%% BT-5167: the worker delivered a failed result, but the caller may have died
+%% before reading it (the send to a dead alias is silently dropped). The caller
+%% acks a result it read; a failure with no ack and a dead caller is reported
+%% here. A caller that is alive yet never acks (it answered `timeout` in the
+%% instant the worker claimed) is covered by the bounded wait.
+-spec await_result_received(atom(), pid(), ok | {error, term()}, reference(), reference()) -> ok.
+await_result_received(_Module, _Pid, ok, _Alias, CallerMon) ->
+    erlang:demonitor(CallerMon, [flush]),
+    ok;
+await_result_received(Module, Pid, Failure, Alias, CallerMon) ->
+    receive
+        {result_received, Alias} ->
+            erlang:demonitor(CallerMon, [flush]),
+            ok;
+        {'DOWN', CallerMon, process, _, _} ->
+            %% The caller may have acked just before dying.
+            receive
+                {result_received, Alias} -> ok
+            after 0 ->
+                report_late_failure(Module, Pid, Failure)
+            end
+    after ?CHANGE_WAIT_MS * 2 ->
+        erlang:demonitor(CallerMon, [flush]),
+        report_late_failure(Module, Pid, Failure)
     end.
 
 -doc """

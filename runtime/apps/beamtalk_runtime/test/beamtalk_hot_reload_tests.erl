@@ -780,6 +780,41 @@ reloader_killed_mid_change_still_resumes_actor_test_() ->
         end
     end}.
 
+%% BT-5167: the reloading process dies mid-change and the migration then fails.
+%% The worker's result goes to a dead caller; the failure must still be reported
+%% through the workspace callback (it used to reach only the ERROR log).
+failure_after_reloader_death_is_reported_test_() ->
+    {timeout, 30, fun() ->
+        Name = bt5136_late_report,
+        true = register(Name, self()),
+        ok = beamtalk_workspace_callback:register(?MODULE),
+        {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+        unlink(Pid),
+        Parent = self(),
+        Reloader = spawn(fun() ->
+            beamtalk_hot_reload:trigger_code_change(
+                ?MODULE, [Pid], {slow_fail_notify, 1500, Parent}
+            )
+        end),
+        try
+            ?awaitMessage(change_started, 5000),
+            exit(Reloader, kill),
+            beamtalk_test_wait:dead(Reloader),
+            ?awaitMessage(
+                {late_failure, ?MODULE, Pid, {error, {left_suspended, _}}}, 15000
+            )
+        after
+            ok = beamtalk_workspace_callback:unregister(),
+            unregister(Name),
+            try
+                sys:resume(Pid)
+            catch
+                _:_ -> ok
+            end,
+            beamtalk_test_proc:stop(Pid)
+        end
+    end}.
+
 %% BT-5084 (review): a migration that outlasts the caller's wait and THEN FAILS
 %% must not be resumed onto new code with old-shaped state (ADR 0123 §3).
 slow_failing_migration_is_not_resumed_test_() ->
