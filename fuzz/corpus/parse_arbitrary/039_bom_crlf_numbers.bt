@@ -1,0 +1,11 @@
+﻿// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5182: BOM, CRLF comments and number edge cases.
+/// doc comment
+x := -16rFF // trailing
+y := 100000000000000000000
+z := -36rZZZZZZZZZZZZZZZZ + 1e
+w := 16r
+c := $\0
+q := $\q

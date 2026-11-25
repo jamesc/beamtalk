@@ -184,13 +184,31 @@ fn number_spellings_survive_in_every_literal_position() {
 #[test]
 fn negated_pattern_numbers_keep_their_spelling() {
     assert_kept("x match: [\n  16rFF -> 1;\n  1e3 -> 2;\n  _ -> 0\n]\n");
-    // `-16rFF` would lex as `-16 rFF`, so a negated radix keeps its `- `.
-    assert_kept("x match: [\n  - 16rFF -> 1;\n  _ -> 0\n]\n");
-    assert_kept("x := <<- 16rFF:8>>\n");
+    // `-16rFF` is one literal (BT-5182), so a negated radix joins its `-`
+    // like any other negated number.
+    assert_kept("x match: [\n  -16rFF -> 1;\n  _ -> 0\n]\n");
+    assert_eq!(
+        fmt("x match: [- 16rFF -> 1; _ -> 0]\n").as_deref(),
+        Some("x match: [\n  -16rFF -> 1;\n  _ -> 0\n]\n")
+    );
+    assert_kept("x := <<-16rFF:8>>\n");
+    assert_eq!(
+        fmt("x := <<- 16rFF:8>>\n").as_deref(),
+        Some("x := <<-16rFF:8>>\n")
+    );
     assert_eq!(
         fmt("x match: [- 5 -> 1; - 1e3 -> 2; _ -> 0]\n").as_deref(),
         Some("x match: [\n  -5 -> 1;\n  -1e3 -> 2;\n  _ -> 0\n]\n")
     );
+}
+
+#[test]
+fn big_integer_numbers_keep_their_spelling() {
+    // BT-5182: literals past `i64` are `Literal::BigInteger`; their radix
+    // spelling survives like any other number's.
+    assert_kept("x := 16rFFFFFFFFFFFFFFFFFF\n");
+    assert_kept("x := -36rZZZZZZZZZZZZZZZZ + 100000000000000000000\n");
+    assert_kept("x match: [\n  -16rFFFFFFFFFFFFFFFFFF -> 1;\n  _ -> 0\n]\n");
 }
 
 #[test]

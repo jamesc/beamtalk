@@ -191,14 +191,14 @@ pub(crate) fn term_to_atom_bool_map(
     }
 }
 
-/// Deserialize an atom→`SlotKind` map (for `field_kinds`/`class_field_kinds`,
-/// ADR 0124 §1/B5a — `meta_field_kinds_map`, beamtalk-codegen).
+/// Deserialize an atom→`SlotKind` map (for `field_kinds`, ADR 0124 §1 —
+/// `meta_field_kinds_map`, beamtalk-codegen).
 ///
 /// An unrecognised value (anything but the atom `'late'`) degrades to
-/// [`SlotKind::Eager`] — the pre-ADR-0124 default every slot had, and the
-/// same "missing metadata means eager" convention `state_field_kind`/
-/// `class_variable_kind` (beamtalk-core) fall back to when the map itself is
-/// absent (an older BEAM artifact predating this key).
+/// [`SlotKind::Eager`] — the pre-ADR-0124 default every slot had, and the same
+/// "missing metadata means eager" convention `state_field_kind` (beamtalk-core)
+/// falls back to when the map itself is absent (an older BEAM artifact
+/// predating this key).
 pub(crate) fn term_to_slot_kind_map(
     term: &Term,
 ) -> std::collections::HashMap<ecow::EcoString, beamtalk_core::ast::SlotKind> {
@@ -413,34 +413,6 @@ pub(crate) fn parse_class_info_from_meta_term(
             .unwrap_or_default()
             .into_iter()
             .collect();
-    // Class variables: name list from `class_fields` (the key codegen
-    // actually emits — `meta_atom_list(&class.class_variables...)` in
-    // `class_meta.rs`), paired with per-name slot kind from
-    // `class_field_kinds`. There is no wire representation yet for a class
-    // variable's declared type or default-value presence (only instance
-    // `field_types`/`field_has_default` exist), so those degrade to
-    // `None`/`false` for a cross-file class — the same "AST-less metadata is
-    // best-effort" contract `state_types`/`state_has_default` already have
-    // for fields absent from their maps.
-    let class_field_kinds = map_get(m, "class_field_kinds")
-        .map(term_to_slot_kind_map)
-        .unwrap_or_default();
-    let class_variables = map_get(m, "class_fields")
-        .map(term_to_atom_list)
-        .unwrap_or_default()
-        .into_iter()
-        .map(
-            |name| beamtalk_core::semantic_analysis::class_hierarchy::ClassVarInfo {
-                kind: class_field_kinds
-                    .get(&name)
-                    .copied()
-                    .unwrap_or(beamtalk_core::ast::SlotKind::Eager),
-                name,
-                ty: None,
-                has_default: false,
-            },
-        )
-        .collect();
 
     let methods = parse_method_infos_from_map(m, "method_info", class_name);
     let class_methods = parse_method_infos_from_map(m, "class_method_info", class_name);
@@ -493,7 +465,6 @@ pub(crate) fn parse_class_info_from_meta_term(
         has_dynamic_field_writer: false,
         methods,
         class_methods,
-        class_variables,
         type_params: Vec::new(),
         type_param_bounds: Vec::new(),
         superclass_type_args: Vec::new(),

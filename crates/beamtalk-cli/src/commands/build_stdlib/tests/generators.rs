@@ -538,20 +538,6 @@ fn test_generate_class_entry_multi_item_fields_use_separators() {
             ("second".to_string(), beamtalk_core::ast::SlotKind::Late),
         ],
         initialize_assigns: vec!["first".to_string()],
-        class_variables: vec![
-            ClassVarMeta {
-                name: "counterA".to_string(),
-                ty: Some(DeclaredType::simple("Integer")),
-                has_default: true,
-                kind: beamtalk_core::ast::SlotKind::Eager,
-            },
-            ClassVarMeta {
-                name: "counterB".to_string(),
-                ty: None,
-                has_default: false,
-                kind: beamtalk_core::ast::SlotKind::Late,
-            },
-        ],
         type_params: vec!["T".to_string(), "U".to_string()],
         superclass_type_args: vec![DeclaredType::simple("T"), DeclaredType::simple("Concrete")],
         ..ClassMeta::test("bt@stdlib@pair", "Pair", "Object")
@@ -570,9 +556,6 @@ fn test_generate_class_entry_multi_item_fields_use_separators() {
         r#"state_kinds: HashMap::from([("first".into(), SlotKind::Eager), ("second".into(), SlotKind::Late)])"#
     ));
     assert!(code.contains(r#"initialize_assigns: BTreeSet::from(["first".into()])"#));
-    assert!(code.contains(
-        r#"class_variables: vec![ClassVarInfo { name: "counterA".into(), ty: Some(DeclaredType::simple("Integer")), has_default: true, kind: SlotKind::Eager }, ClassVarInfo { name: "counterB".into(), ty: None, has_default: false, kind: SlotKind::Late }]"#
-    ));
     assert!(code.contains(r#"type_params: vec!["T".into(), "U".into()]"#));
     assert!(code.contains("type_param_bounds: vec![None, None]"));
     assert!(code.contains(

@@ -32,17 +32,17 @@ use std::os::unix::process::CommandExt as _;
 ///
 /// - **Environment allowlist**: `env_clear()` prevents leaking sensitive env vars
 ///   (`AWS_*`, `DATABASE_URL`, `SSH_AUTH_SOCK`, etc.) to the BEAM node.
-/// - **Cookie via the environment** (BT-5126): `-setcookie`, `ERL_AFLAGS` and
-///   `-args_file` all expand into the emulator's argv, so the cookie travels
-///   in `BEAMTALK_ERL_COOKIE` (owner-only `/proc/<pid>/environ`) and the node
-///   adopts it on boot; argv carries only a random placeholder. See
+/// - **Cookie from a private home** (BT-5126, BT-5185): `-setcookie`,
+///   `ERL_AFLAGS` and `-args_file` all expand into the emulator's argv, so the
+///   node boots with its cookie read from `cookie_home` (a private directory
+///   made its `HOME`) and no cookie appears in argv or the environment. See
 ///   `commands::cookie_env`.
 /// - **Umask**: Set to 0077 on Unix so workspace files are owner-only.
 /// - **setsid**: Creates a new session on Unix for proper daemon detachment.
 #[allow(clippy::too_many_lines)] // BEAM node command construction is necessarily verbose
 pub(super) fn build_detached_node_command(
     node_name: &str,
-    cookie: &str,
+    cookie_home: &cookie_env::CookieHome,
     beam_paths: &BeamPaths,
     extra_code_paths: &[PathBuf],
     eval_cmd: &str,
@@ -72,26 +72,23 @@ pub(super) fn build_detached_node_command(
         node_arg,
     ];
 
-    let mut cmd = Command::new("erl");
+    // The real `erl`, not a shim that needs `HOME` (BT-5185; `cookie_env`).
+    let mut cmd = Command::new(cookie_env::erl_program());
 
     // Add initial args, then BEAM code paths via the canonical beam_pa_args helper
     // (same ordering as the foreground REPL startup).
     cmd.args(&initial_args)
-        // Throwaway `-setcookie`: the real cookie is adopted from the
-        // environment by the first `-eval` below (BT-5126).
-        .args(cookie_env::placeholder_args())
         .args(beamtalk_workspace::loopback_dist_args())
         .args(beam_pa_args(beam_paths));
 
     // Add extra code paths (e.g. package ebin from auto-compile)
     cmd.args(pa_args(extra_code_paths));
 
-    cmd.arg("-eval").arg(cookie_env::adopt_then(eval_cmd));
+    cmd.arg("-eval").arg(cookie_env::restore_then(eval_cmd));
 
     // Security: clear inherited environment, then allowlist only required vars.
     // Prevents leaking AWS_*, DATABASE_URL, SSH_AUTH_SOCK, etc.
     cmd.env_clear();
-    cookie_env::hand_over(&mut cmd, cookie);
 
     // Erlang needs PATH to find epmd and other tools
     if let Ok(path) = std::env::var("PATH") {
@@ -196,6 +193,9 @@ pub(super) fn build_detached_node_command(
         );
     }
 
+    // Last, so it replaces the HOME forwarded above (BT-5185).
+    cookie_home.apply_cleared(&mut cmd);
+
     cmd
 }
 
@@ -223,7 +223,7 @@ mod tests {
         };
         build_detached_node_command(
             "test_node@localhost",
-            "test-cookie",
+            &cookie_env::CookieHome::new("test-cookie").unwrap(),
             &paths,
             &[],
             "ok.",
@@ -298,25 +298,36 @@ mod tests {
             "must include -eval arg"
         );
         assert!(
-            args.contains(&OsStr::new("beamtalk_ws_cookie:adopt_env_cookie(), ok.")),
-            "must include the eval command, prefixed by the cookie adoption"
+            args.contains(&OsStr::new("beamtalk_cookie_home:restore(), ok.")),
+            "must include the eval command, prefixed by the home restore"
         );
     }
 
-    /// BT-5126: the cookie is in the child's environment and nowhere in argv.
+    /// BT-5126 / BT-5185: no cookie in argv (not even a placeholder) or the
+    /// environment; the node's home is the private cookie home.
     #[test]
-    fn test_build_command_hands_cookie_over_in_env_not_argv() {
+    fn test_build_command_boots_from_a_private_cookie_home() {
         let cmd = build_test_command();
         assert!(
-            cmd.get_args()
-                .all(|a| !a.to_string_lossy().contains("test-cookie")),
-            "the cookie must not appear in argv"
+            cmd.get_args().all(|a| {
+                let a = a.to_string_lossy();
+                !a.contains("test-cookie") && a != "-setcookie"
+            }),
+            "no cookie may appear in argv"
         );
-        let env = cmd
-            .get_envs()
-            .find(|(k, _)| *k == OsStr::new(cookie_env::COOKIE_ENV))
-            .and_then(|(_, v)| v);
-        assert_eq!(env, Some(OsStr::new("test-cookie")));
+        assert!(
+            cmd.get_envs()
+                .all(|(_, v)| v.is_none_or(|v| v != OsStr::new("test-cookie"))),
+            "the cookie must not be in the environment"
+        );
+        let env = |k: &str| {
+            cmd.get_envs()
+                .find(|(n, _)| *n == OsStr::new(k))
+                .and_then(|(_, v)| v)
+        };
+        assert!(env(cookie_env::COOKIE_HOME_ENV).is_some());
+        #[cfg(unix)]
+        assert_eq!(env("HOME"), env(cookie_env::COOKIE_HOME_ENV));
     }
 
     // --- node_flag / node_arg selection ---
@@ -336,7 +347,14 @@ mod tests {
             stdlib_ebin: beam_dir.clone(),
             stdlib_erlang_ebin: beam_dir,
         };
-        build_detached_node_command(node_name, "test-cookie", &paths, &[], "ok.", &tmp)
+        build_detached_node_command(
+            node_name,
+            &cookie_env::CookieHome::new("test-cookie").unwrap(),
+            &paths,
+            &[],
+            "ok.",
+            &tmp,
+        )
     }
 
     #[test]
@@ -407,7 +425,7 @@ mod tests {
         let extra = vec![tmp.join("extra1"), tmp.join("extra2")];
         let cmd = build_detached_node_command(
             "node@localhost",
-            "test-cookie",
+            &cookie_env::CookieHome::new("test-cookie").unwrap(),
             &paths,
             &extra,
             "ok.",

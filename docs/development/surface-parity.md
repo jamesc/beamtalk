@@ -600,36 +600,6 @@ file, so it is only meaningful there.
   dependencies) in both `ProtocolRegistry::add_pre_loaded` and
   `analyse_full`'s carried protocol map, and in the source map (BT-3665).
 
-### `class-state-abroad` diagnostic (ADR 0130 §5, BT-3712)
-
-A block literal that touches its home class's variables where it runs outside
-an invocation of that class gets a `class-state-abroad` warning at the block.
-It is computed in `beamtalk-core` semantic analysis (`analyse_full`), so every
-surface that reports semantic diagnostics (CLI `build`/`check`/`lint`/`test`,
-REPL load, LSP `textDocument/publishDiagnostics`, MCP `lint`/
-`diagnostic_summary`) reports the same message at the same span. No operation
-is surface-specific.
-
-- Category `ClassStateAbroad`; `[diagnostics]` key `class-state-abroad`
-  (`"off"` drops it); site-level `@expect class_state_abroad`.
-- Replaces the BT-3681 `stored-closure` advisory (removed with the ClassVars
-  threading family, BT-3710). `@expect stored_closure` still parses and is
-  reported as a stale expectation.
-- The `class-state-abroad` rule is lexical and per-class-method: it does not
-  follow a block through a variable or an instance method.
-- Known gaps (false negatives; the lint is a hint, not a guarantee): cascade
-  messages after the first are not inspected
-  ([BT-3716](https://linear.app/beamtalk/issue/BT-3716)), and a late-bound
-  `self` send inside a `class sealed` method of an open class is judged by
-  its defining class alone
-  ([BT-3717](https://linear.app/beamtalk/issue/BT-3717)).
-- The runtime errors the lint predicts, `class_state_unreachable`,
-  `class_state_read_only` and `abi_mismatch` (ADR 0130), are ordinary
-  `#beamtalk_error{}` values and reach every surface through its existing
-  error path; none is surface-specific. A
-  class-variable write from a supervisor factory or `performLocally:` raises
-  `class_state_read_only` on every surface.
-
 ### `actor-state-abroad` lint (ADR 0137, BT-4011)
 
 A block literal written in an actor's instance method that reads or writes a
@@ -649,8 +619,9 @@ and the LSP never see it. No operation is surface-specific.
 - The rule is lexical and per-instance-method: it does not follow a block
   through a variable, a field, a parameter or an instance method, and it
   checks actor classes only (value types and plain objects have no actor
-  cell). Unlike `class-state-abroad`, there is no stored/returned rule, and a
-  send to the actor's own class's class-side method is abroad.
+  cell). There is no stored/returned rule, and a send to the actor's own
+  class's class-side method is abroad when that method runs in the class
+  process (not for one that runs in the caller).
 - Both lint surfaces run the passes through the shared
   `run_post_analysis_lint_pipeline` hook against `analyse_full`'s cross-file
   hierarchy (BT-4183), so they agree on out-of-file classes: a subclass whose

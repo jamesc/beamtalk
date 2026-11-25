@@ -54,7 +54,7 @@ greeting := "Howdy"
 
 // Unterminated string (missing closing quote)
 "Hello {name
-// => ERROR: "Hello {name
+// => ERROR: unterminated string literal starting at line 1, column 1
 
 // ===========================================================================
 // REPL DISPLAY CORRECTNESS

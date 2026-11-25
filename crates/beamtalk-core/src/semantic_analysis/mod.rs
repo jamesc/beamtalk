@@ -1483,18 +1483,10 @@ fn run_class_aware_validators(
     // Warn on a class method named after a class-variable reflection
     // selector, which the class process answers ahead of it (BT-4422).
     validators::check_class_var_reflection_shadowing(module, &mut result.diagnostics);
-    validators::check_class_variable_access(
-        module,
-        &result.class_hierarchy,
-        &mut result.diagnostics,
-    );
     validators::check_empty_method_bodies(module, &mut result.diagnostics);
     // ADR 0153: a class has no slots, so class-side `self.x` is an error.
     validators::check_class_side_self_field_access(module, &mut result.diagnostics);
-    // ADR 0130 §5 (BT-3712): a block that touches its home class's variables
-    // where it runs outside an invocation of that class.
-    validators::check_class_state_abroad(module, &result.class_hierarchy, &mut result.diagnostics);
-    // BT-4031: process-sensitive FFI in a class method that runs in the class process.
+    // BT-4302: a class method that creates a resource tied to the caller.
     validators::check_class_method_ffi(module, &result.class_hierarchy, &mut result.diagnostics);
     // ADR 0131 §6 and Phase 0 (BT-3745): outer-local writes that no
     // construct threads back are compile errors, not silent wrong answers.

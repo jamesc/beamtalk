@@ -24,7 +24,8 @@
 //!
 //! The enclosing `fn` is the span from the preceding `fn` line to the next
 //! one. `erl` reached through a computed path (`Command::new(erl_path)`) is
-//! not detected; no such spawn exists in this crate today.
+//! not detected; the one such spawn, `cookie_env::erl_command`, pins itself,
+//! and `build_detached_node_command` pins after its `env_clear()`.
 
 use std::path::{Path, PathBuf};
 

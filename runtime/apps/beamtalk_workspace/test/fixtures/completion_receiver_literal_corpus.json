@@ -123,9 +123,11 @@
     "receiver": "16r",
     "class": "Integer",
     "tokens": [
-      "integer"
+      "error"
     ],
-    "why": "half-typed radix literal: the lexer still reads one Integer token"
+    "lexer_class": null,
+    "divergence": "Completion runs on half-typed lines: a radix literal with no digits yet still completes as an Integer, whereas the lexer reports an error token (BT-5182).",
+    "why": "half-typed radix literal: no digits after `r` yet"
   },
   {
     "receiver": "-5",
@@ -177,12 +179,11 @@
   },
   {
     "receiver": "-16rFF",
-    "class": null,
+    "class": "Integer",
     "tokens": [
-      "integer",
-      "identifier"
+      "integer"
     ],
-    "why": "the lexer has no negative radix form: `-16` is an Integer and `rFF` a separate identifier, so this is not one literal"
+    "why": "negative radix integer literal: the lexer folds the `-` into one radix Integer token (BT-5182)"
   },
   {
     "receiver": "5abs",
