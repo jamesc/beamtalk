@@ -126,7 +126,12 @@ defmodule BtAttach.MixProject do
       # containers (some can't bring up epmd/dist post-boot), so the hostname
       # self-resolution bug is reproduced by mocking the two arities directly
       # instead of a live epmd. Never included in a release (`only: :test`).
-      {:meck, "~> 1.0", only: :test}
+      {:meck, "~> 1.0", only: :test},
+      # Dev-only: provides `mix deps.audit` for the weekly advisory scan
+      # (scripts/ci/advisory-scan.sh, BT-5253). It must be a project dependency:
+      # installed as an archive it has no yaml_elixir and crashes in
+      # MixAudit.Repo.map_advisory/1. Never in a release (`only: :dev`).
+      {:mix_audit, "~> 2.1", only: :dev, runtime: false}
     ]
   end
 
