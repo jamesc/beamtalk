@@ -64,6 +64,9 @@ sealed typed Object subclass: PersistentTerm
   /// that first value is kept and answered. A miss whose value is a pid, an
   /// actor or a class raises a `type_error`.
   ///
+  /// The answer is typed by *this* block. Keys are untyped and node-global, so
+  /// every call site for one key must build the same type.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// PersistentTerm at: #doc_once ifAbsentPut: [42]   // => 42

@@ -215,7 +215,7 @@ Object subclass: HpackHuffman
 - When the built value's shape changes, change the key (`#hpack_huffman_tables_v2`), which is the usual Erlang practice. During development, `PersistentTerm erase:` from the REPL rebuilds it on the next read.
 - **This is a deliberate exception to principles §4.** After the builder method is edited at the REPL the stored value is stale, while `beamtalk run` builds it fresh, so the value can differ between surfaces until the key is changed or erased. It is listed under Consequences.
 
-**Implementation.** `stdlib/src/persistent_term.bt` plus a native module `beamtalk_persistent_term.erl` of a few dozen lines. The class is `sealed typed`, like `ProcessDictionary`. It declares no state and its selectors are not process-bound, so its methods, and the block passed to them, run in the caller. Type signatures follow `ProcessDictionary`'s (`key :: Object`, `block :: Block(Object) -> Object`).
+**Implementation.** `stdlib/src/persistent_term.bt` plus a native module `beamtalk_persistent_term.erl` of a few dozen lines. The class is `sealed typed`, like `ProcessDictionary`. It declares no state and its selectors are not process-bound, so its methods, and the block passed to them, run in the caller. Type signatures follow `ProcessDictionary`'s (`key :: Object`), except that the answer follows the block: `at:ifAbsentPut:` is `Block(T) -> T` and `at:ifAbsent:` is `Block(T) -> Object | T` (BT-5168). Every call site for one key must build the same type.
 
 **Follow-up:** move beamtalk-hpack's `class tables` and `class fastTables` to the helper (a change in that repository).
 
