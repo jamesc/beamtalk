@@ -23,6 +23,17 @@ pub(in crate::server) struct ByteEdit {
     pub new_text: String,
 }
 
+/// The result of formatting a range.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(in crate::server) struct RangeEdits {
+    /// Edits confined to the touched constructs.
+    pub edits: Vec<ByteEdit>,
+    /// Changes inside the touched constructs that could not be applied
+    /// because the formatter's diff merged them with a change to neighbouring
+    /// code (BT-5188). Non-zero means the selection is not fully formatted.
+    pub unapplied: usize,
+}
+
 /// Computes the edits needed to format the top-level constructs overlapping
 /// the byte range `start..end` of `source`.
 ///
@@ -32,10 +43,10 @@ pub(in crate::server) fn format_range_edits(
     source: &str,
     start: usize,
     end: usize,
-) -> Option<Vec<ByteEdit>> {
+) -> Option<RangeEdits> {
     let formatted = format_source(source)?;
     if formatted == source {
-        return Some(vec![]);
+        return Some(RangeEdits::default());
     }
     let (start, end) = (start.min(end), start.max(end));
 
@@ -78,7 +89,7 @@ pub(in crate::server) fn format_range_edits(
     }
     if !touched {
         // Range lies entirely between constructs (blank lines / comments): nothing to format.
-        return Some(vec![]);
+        return Some(RangeEdits::default());
     }
 
     // Line offsets of the original.
@@ -90,7 +101,7 @@ pub(in crate::server) fn format_range_edits(
 
     let new_lines: Vec<&str> = formatted.split_inclusive('\n').collect();
     let diff = TextDiff::from_lines(source, &formatted);
-    let mut edits = Vec::new();
+    let mut out = RangeEdits::default();
     for op in diff.ops() {
         if op.tag() == DiffTag::Equal {
             continue;
@@ -101,21 +112,25 @@ pub(in crate::server) fn format_range_edits(
         // the range when that boundary is inside or at the edges of it.
         // BT-5132: a replacement must lie wholly inside the touched constructs'
         // lines; a hunk that also rewrites neighbouring lines (blank-line
-        // separators, an adjacent construct) is skipped rather than applied
-        // beyond the construct.
-        let overlaps = if old.is_empty() {
+        // separators, an adjacent construct) is not applied beyond the
+        // construct. BT-5188: it is counted, so the caller can say so.
+        let inside = if old.is_empty() {
             old.start >= lo_line && old.start <= hi_line + 1
         } else {
             old.start >= lo_line && old.end <= hi_line + 1
         };
-        if !overlaps {
+        if !inside {
+            let reaches_range = !old.is_empty() && old.start <= hi_line && old.end > lo_line;
+            if reaches_range {
+                out.unapplied += 1;
+            }
             continue;
         }
-        edits.push(ByteEdit {
+        out.edits.push(ByteEdit {
             start: line_off(old.start),
             end: line_off(old.end),
             new_text: new_lines[new.start..new.end].concat(),
         });
     }
-    Some(edits)
+    Some(out)
 }
