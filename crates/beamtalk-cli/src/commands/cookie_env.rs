@@ -50,9 +50,8 @@ pub(crate) const ORIG_PREFIX: &str = "BEAMTALK_ORIG_";
 
 /// Name prefix of every private cookie home, from the CLI and both release
 /// launchers. `beamtalk_cookie_home:restore/0` deletes nothing in a directory
-/// without it (Erlang: `beamtalk_cookie_home:cookie_dir_prefix/0`; the
-/// real-node tests here and in `cli_release.rs` fail if the two disagree,
-/// because the private home is then left behind).
+/// without it (Erlang: `beamtalk_cookie_home:cookie_dir_prefix/0`;
+/// `names_match_the_erlang_restore_module` checks they agree).
 pub(crate) const COOKIE_DIR_PREFIX: &str = "beamtalk-cookie-";
 
 /// Erlang expression, first in a node's `-eval`, that undoes the private home.
@@ -361,6 +360,12 @@ mod tests {
         assert!(
             src.contains(&format!("-define(ORIG_PREFIX, \"{ORIG_PREFIX}\").")),
             "beamtalk_cookie_home.erl must read {ORIG_PREFIX}*"
+        );
+        assert!(
+            src.contains(&format!(
+                "-define(COOKIE_DIR_PREFIX, \"{COOKIE_DIR_PREFIX}\")."
+            )),
+            "beamtalk_cookie_home.erl must only clean {COOKIE_DIR_PREFIX}* directories"
         );
         for var in HOME_VARS {
             assert!(
