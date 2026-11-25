@@ -225,11 +225,18 @@ export_cookie() {
 # by the node itself, or left behind if it dies first (see deploying.md).
 run_client() {
     status=0
+    # A Ctrl-C on a hung client, or TERM/HUP from a supervisor, still cleans up.
+    trap 'cleanup_cookie_home; exit 130' INT
+    trap 'cleanup_cookie_home; exit 143' TERM HUP
     "$ERL" "$@" || status=$?
+    cleanup_cookie_home
+    exit "$status"
+}
+
+cleanup_cookie_home() {
     case "$COOKIE_HOME_DIR" in
         */beamtalk-cookie.*) rm -rf "$COOKIE_HOME_DIR" ;;
     esac
-    exit "$status"
 }
 
 # This node's own `-sname`: `RELEASE_NODE` if set, else the release name

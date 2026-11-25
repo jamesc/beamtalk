@@ -194,10 +194,17 @@ fn installed_erl_on_path() -> Option<OsString> {
         .map(|dir| dir.join(name))
         .find(|candidate| candidate.is_file())?;
     let real = std::fs::canonicalize(&found).ok()?;
+    // A shim symlinked to another binary (mise's are links to `mise`) is not
+    // the launcher, whatever directory it lands in.
+    if real.file_name() != Some(OsStr::new(name)) {
+        return None;
+    }
     let root = real.parent()?.parent()?;
+    // Windows: keep the PATH hit; `canonicalize` gives a `\\?\` path.
+    let program = if cfg!(windows) { found } else { real.clone() };
     root.join("releases")
         .is_dir()
-        .then(|| real.into_os_string())
+        .then(|| program.into_os_string())
 }
 
 /// Ask `erl` (through any shim, with this process's environment) where its
