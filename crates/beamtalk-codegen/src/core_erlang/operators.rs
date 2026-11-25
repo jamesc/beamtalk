@@ -138,7 +138,9 @@ fn number_fallback_entry_point(family: OperatorFamily) -> &'static str {
 /// ADR 0116: the one call that sends the right operand `right` of `left op
 /// right` its reflected selector, through the family's runtime entry point:
 /// `beamtalk_message_dispatch:<entry>(Right, '<selector>', [Left], '<op>')`.
-fn reflected_hook_call(
+/// Shared by the inlined path ([`CoreErlangGenerator::number_comparison_arm`])
+/// and the primitive bodies (`primitives::generate_numeric_comparison_bif`).
+pub(in crate::core_erlang) fn reflected_hook_call(
     reflected: beamtalk_core::semantic_analysis::number_coercion::ReflectedOperator,
     op: &str,
     right: Document<'static>,
@@ -881,16 +883,31 @@ impl CoreErlangGenerator {
             var(left_var.to_string()),
         ));
         let fallback = self.fresh_temp_var("BinOpNoMatch");
-        form::case_of(
-            form::call("erlang", "is_number", [var(right_var.to_string())]),
-            [
-                form::clause([atom("true")], None, bare_bif, form::Layout::Flat),
-                form::clause([atom("false")], None, hook, form::Layout::Flat),
-                Self::case_clause_fallback_clause(fallback),
-            ],
-            form::Layout::Flat,
-        )
+        right_tested_comparison(right_var, bare_bif, hook, fallback)
     }
+}
+
+/// The one right-operand test of a numeric ordering comparison (ADR 0116
+/// § Addendum, BT-5176): `bare_bif` when `right_var` is a number, else
+/// `hook` (a [`reflected_hook_call`]). Built by both send paths: the inlined
+/// one ([`CoreErlangGenerator::number_comparison_arm`]) and the `@primitive`
+/// bodies of `Integer`, `Float` and `Character`
+/// (`primitives::generate_numeric_comparison_bif`, BT-5211), so the two agree.
+pub(in crate::core_erlang) fn right_tested_comparison(
+    right_var: &str,
+    bare_bif: Document<'static>,
+    hook: Document<'static>,
+    fallback_var: String,
+) -> Document<'static> {
+    form::case_of(
+        form::call("erlang", "is_number", [var(right_var.to_string())]),
+        [
+            form::clause([atom("true")], None, bare_bif, form::Layout::Flat),
+            form::clause([atom("false")], None, hook, form::Layout::Flat),
+            CoreErlangGenerator::case_clause_fallback_clause(fallback_var),
+        ],
+        form::Layout::Flat,
+    )
 }
 
 /// What [`CoreErlangGenerator::guarded_op_doc`] knows of the right operand.
