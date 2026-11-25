@@ -13,6 +13,7 @@ use super::{
     nest, nil, unparse_comment, unparse_comment_attachment_leading, unparse_expect_categories,
     unparse_keyword_part, unparse_type_annotation,
 };
+use crate::source_analysis::{TokenKind, lex_with_eof, parse_integer_literal};
 
 /// Builds a [`Document`] for an [`ExpressionStatement`].
 ///
@@ -52,7 +53,7 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
     #[cfg(test)]
     UNPARSE_EXPRESSION_CALLS.with(|n| n.set(n.get() + 1));
     match expr {
-        Expression::Literal(lit, _) => unparse_literal(lit),
+        Expression::Literal(lit, span) => unparse_literal_at(lit, *span),
         Expression::Identifier(id) => unparse_identifier(id),
         Expression::ClassReference { name, package, .. } => {
             leaf::class_ref(package.as_ref().map(|pkg| pkg.name.as_str()), &name.name)
@@ -202,7 +203,7 @@ pub(super) fn unparse_literal(lit: &Literal) -> Document<'static> {
         Literal::Symbol(s) => {
             // Symbols: #name or #'name with spaces'
             if needs_symbol_quoting(s) {
-                docvec!["#'", leaf::symbol_content(s), "'"]
+                docvec!["#'", leaf::quoted_symbol_content(s), "'"]
             } else {
                 docvec!["#", leaf::symbol_content(s)]
             }
@@ -222,15 +223,142 @@ pub(super) fn unparse_literal(lit: &Literal) -> Document<'static> {
     }
 }
 
-/// Returns true if a symbol name needs quoting.
+/// Whether symbol `s` must be printed quoted (`#'…'`).
+///
+/// A symbol is printed bare only when it is an identifier or keyword symbol
+/// (`#foo`, `#at:put:`) **and** the lexer reads the bare spelling back as
+/// that same single symbol token (BT-5183). Asking the lexer, rather than
+/// restating its rules, keeps the two from drifting: the lexer's bare
+/// symbols are ASCII-only, so `#'café'` must stay quoted. Binary-operator
+/// symbols (`#'+'`), which the lexer also accepts bare, are kept quoted as
+/// the canonical spelling.
 fn needs_symbol_quoting(s: &str) -> bool {
-    s.is_empty()
-        || s.contains(' ')
-        || s.chars()
-            .next()
-            .is_none_or(|c| !c.is_alphabetic() && c != '_')
-        || s.chars()
-            .any(|c| !c.is_alphanumeric() && c != '_' && c != ':')
+    let starts_like_identifier = s
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+    if !starts_like_identifier {
+        return true;
+    }
+    let mut bare = String::with_capacity(s.len() + 1);
+    bare.push('#');
+    bare.push_str(s);
+    let tokens = lex_with_eof(&bare);
+    !matches!(
+        tokens.as_slice(),
+        [symbol, eof]
+            if matches!(symbol.kind(), TokenKind::Symbol(name) if name == s)
+                && symbol.trailing_trivia().is_empty()
+                && eof.leading_trivia().is_empty()
+                && matches!(eof.kind(), TokenKind::Eof)
+    )
+}
+
+/// Prints the literal at `span`, using its recorded source spelling when it
+/// is a number (BT-5183): `16rFF` stays `16rFF` rather than becoming `255`.
+pub(super) fn unparse_literal_at(lit: &Literal, span: Span) -> Document<'static> {
+    if matches!(
+        lit,
+        Literal::Integer(_) | Literal::BigInteger(_) | Literal::Float(_)
+    ) && let Some(doc) = source_number_spelling(lit, span)
+    {
+        return doc;
+    }
+    unparse_literal(lit)
+}
+
+/// The source spelling of the number `lit` at `span`, if one was recorded
+/// and it reads back as exactly `lit`.
+///
+/// The spelling is keyed by the number token's span. A negated literal —
+/// a match-arm pattern or binary segment written `- 5` or `<<- 16rFF:8>>`,
+/// the only places the parser negates a number — holds the negated value,
+/// and its span may also cover the `-`, so the one spelling inside the span
+/// is used with the sign moved onto it (`-5`), or, where that does not lex
+/// back as one token (`-16rFF` reads as `-16 rFF`), kept as a separate `- `. Every candidate is checked by lexing
+/// and parsing it back; when none reads back as `lit`, `None` is returned
+/// and the value is printed canonically (and the round-trip check in
+/// `format_source` then reports the lost spelling rather than writing it).
+fn source_number_spelling(lit: &Literal, span: Span) -> Option<Document<'static>> {
+    let recorded = LITERAL_COMMENTS.with(|current| {
+        let table = current.borrow();
+        table.spelling(span).cloned().or_else(|| {
+            let mut inside = table.spellings_within(span);
+            if inside.len() == 1 {
+                inside.pop()
+            } else {
+                None
+            }
+        })
+    })?;
+    if number_reads_back_as(&recorded, lit) {
+        return Some(leaf::number_spelling(recorded));
+    }
+    let negated = negate_literal(lit)?;
+    if let Some(positive) = recorded.strip_prefix('-') {
+        return number_reads_back_as(positive, lit).then(|| leaf::number_spelling(positive));
+    }
+    let mut joined = String::from("-");
+    joined.push_str(&recorded);
+    if number_reads_back_as(&joined, lit) {
+        return Some(leaf::number_spelling(joined));
+    }
+    number_reads_back_as(&recorded, &negated)
+        .then(|| docvec!["- ", leaf::number_spelling(recorded)])
+}
+
+/// A binary segment's `unit:` value, in its source spelling (`unit:16r8`)
+/// when one was recorded (BT-5183). The AST keeps no span for the unit, but
+/// it is the last number written in its segment (the value and size come
+/// before the `/`), so the segment's last recorded spelling is the unit's
+/// when it reads back as the unit.
+fn unparse_unit(unit: usize, segment: Span) -> Document<'static> {
+    let spelling =
+        LITERAL_COMMENTS.with(|current| current.borrow().spellings_within(segment).pop());
+    match (spelling, i64::try_from(unit)) {
+        (Some(spelling), Ok(value))
+            if number_reads_back_as(&spelling, &Literal::Integer(value)) =>
+        {
+            leaf::number_spelling(spelling)
+        }
+        _ => leaf::nat_lit(unit),
+    }
+}
+
+/// `-lit` for a number literal, if it is representable.
+fn negate_literal(lit: &Literal) -> Option<Literal> {
+    match lit {
+        Literal::Integer(_) | Literal::BigInteger(_) | Literal::Float(_) => {
+            Some(lit.clone().negated())
+        }
+        _ => None,
+    }
+}
+
+/// Whether `spelling` lexes as one number token whose value is exactly `lit`.
+fn number_reads_back_as(spelling: &str, lit: &Literal) -> bool {
+    let tokens = lex_with_eof(spelling);
+    let [token, eof] = tokens.as_slice() else {
+        return false;
+    };
+    if !matches!(eof.kind(), TokenKind::Eof)
+        || !token.trailing_trivia().is_empty()
+        || !eof.leading_trivia().is_empty()
+    {
+        return false;
+    }
+    match (token.kind(), lit) {
+        (TokenKind::Integer(text), Literal::Integer(_) | Literal::BigInteger(_)) => {
+            text == spelling && parse_integer_literal(text).is_ok_and(|v| v == *lit)
+        }
+        (TokenKind::Float(text), Literal::Float(value)) => {
+            text == spelling
+                && text
+                    .parse::<f64>()
+                    .is_ok_and(|v| v.to_bits() == value.to_bits())
+        }
+        _ => false,
+    }
 }
 
 // --- Identifier unparsing ---
@@ -1140,7 +1268,7 @@ fn unparse_match_arm(arm: &MatchArm) -> Document<'static> {
 fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
     match pattern {
         Pattern::Wildcard(_) => Document::Str("_"),
-        Pattern::Literal(lit, _) => unparse_literal(lit),
+        Pattern::Literal(lit, span) => unparse_literal_at(lit, *span),
         Pattern::Nil(_) => Document::Str("nil"),
         Pattern::Variable(id) => unparse_identifier(id),
         Pattern::Type { binding, class, .. } => {
@@ -1266,7 +1394,7 @@ fn unparse_binary_segment<V>(
         }));
     }
     if let Some(unit) = seg.unit {
-        specs.push(docvec!["unit:", leaf::nat_lit(unit)]);
+        specs.push(docvec!["unit:", unparse_unit(unit, seg.span)]);
     }
     if !specs.is_empty() {
         docs.push(Document::Str("/"));

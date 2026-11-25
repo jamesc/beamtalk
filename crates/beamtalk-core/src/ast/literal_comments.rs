@@ -23,10 +23,23 @@
 //! written after the last item and before the closing delimiter (`closing`).
 //! An item's `leading` comments are on their own lines before it; its
 //! `trailing` comment is the end-of-line comment after the item or its comma.
+//!
+//! # Number spellings (BT-5183)
+//!
+//! The same per-definition table also records the source spelling of every
+//! number literal (`16rFF`, `1e10`, `1_000`), keyed by the literal token's
+//! span. The AST holds only the value (`Literal::Integer(255)`), so without
+//! this the formatter would rewrite `16rFF` as `255`. Spellings ride on this
+//! table rather than a new field because they need exactly its lifecycle:
+//! recorded by the parser, owned by the definition, installed by the
+//! unparser for that definition's code, and narrowed by
+//! [`LiteralComments::within`] for a rebuilt definition.
 
 use std::collections::BTreeMap;
 
 use super::span_table::{entries_within, span_key as key};
+use ecow::EcoString;
+
 use super::{Comment, CommentAttachment};
 use crate::span::Span;
 
@@ -51,13 +64,19 @@ impl LiteralCommentSlots {
     }
 }
 
-/// The comments inside the collection literals of one definition (BT-3983).
+/// The comments inside the collection literals of one definition (BT-3983),
+/// and the source spellings of its number literals (BT-5183).
 ///
-/// Keyed by the literal's span. Ordered by source position, so its `Debug`
-/// form is deterministic.
+/// Keyed by span. Ordered by source position, so its `Debug` form is
+/// deterministic. The `Debug` form shows only the comments: a spelling, like
+/// a span, records how the source was written, not what it means, so two
+/// trees that differ only in layout (the printer may reorder
+/// `ifFalse:ifTrue:`) still print alike. `format_source` checks spellings
+/// separately, from the lexer's tokens.
 #[derive(Clone, Default, PartialEq)]
 pub struct LiteralComments {
     literals: BTreeMap<(u32, u32), LiteralCommentSlots>,
+    spellings: BTreeMap<(u32, u32), EcoString>,
 }
 
 impl std::fmt::Debug for LiteralComments {
@@ -73,13 +92,14 @@ impl std::fmt::Debug for LiteralComments {
 }
 
 impl LiteralComments {
-    /// `true` if no literal has a comment.
+    /// `true` if no literal has a comment. Recorded number spellings do not
+    /// count: they are not comments.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.literals.is_empty()
     }
 
-    /// The number of literals with comments.
+    /// The number of literals with comments (number spellings do not count).
     #[must_use]
     pub fn len(&self) -> usize {
         self.literals.len()
@@ -99,6 +119,39 @@ impl LiteralComments {
         self.literals.get(&key(span))
     }
 
+    /// Records the source spelling of the number literal token at `span`
+    /// (BT-5183).
+    pub fn record_spelling(&mut self, span: Span, spelling: EcoString) {
+        self.spellings.insert(key(span), spelling);
+    }
+
+    /// The source spelling of the number literal token at `span`, if one was
+    /// recorded.
+    #[must_use]
+    pub fn spelling(&self, span: Span) -> Option<&EcoString> {
+        self.spellings.get(&key(span))
+    }
+
+    /// The recorded number spellings that lie inside `span`, in source order.
+    #[must_use]
+    pub fn spellings_within(&self, span: Span) -> Vec<EcoString> {
+        entries_within(&self.spellings, span)
+            .into_values()
+            .collect()
+    }
+
+    /// Builds the table of one definition from the parser's records.
+    pub fn from_records(
+        comments: impl IntoIterator<Item = (Span, LiteralCommentSlots)>,
+        spellings: impl IntoIterator<Item = (Span, EcoString)>,
+    ) -> Self {
+        let mut out: Self = comments.into_iter().collect();
+        for (span, spelling) in spellings {
+            out.record_spelling(span, spelling);
+        }
+        out
+    }
+
     /// The entries whose literals lie inside `span`.
     ///
     /// For a definition rebuilt from part of another one's code, such as a
@@ -109,6 +162,7 @@ impl LiteralComments {
     pub fn within(&self, span: Span) -> Self {
         Self {
             literals: entries_within(&self.literals, span),
+            spellings: entries_within(&self.spellings, span),
         }
     }
 }

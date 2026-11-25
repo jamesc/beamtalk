@@ -1,9 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-5182: radix and big integer literals evaluated end to end. These live
-// here rather than in stdlib/test because `beamtalk fmt` still rewrites radix
-// literals to decimal (BT-5183), which would erase what they test.
+// BT-5182: radix and big integer literals, and the literal errors, through
+// the REPL (stdlib/test/integer_literal_edge_test.bt covers compiled code).
 
 // A negative radix literal is one literal, not `-16` sent `rFF`
 -16rFF

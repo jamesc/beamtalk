@@ -135,9 +135,9 @@ fn escape_corpus_format_is_identity_and_idempotent() {
     // already canonical (fmt emits exactly these bytes) and stable.
     for case in escape_corpus() {
         let snippet = format!("x := {}\n", case.display);
-        let pass1 = format_source(&snippet).unwrap_or_else(|| {
+        let pass1 = format_source(&snippet).unwrap_or_else(|e| {
             panic!(
-                "format_source refused {:?} ({}) — the display spelling must parse cleanly",
+                "format_source refused {:?} ({}): {e} — the display spelling must parse cleanly",
                 case.display, case.why
             )
         });
@@ -220,7 +220,7 @@ mod escape_properties {
         fn display_spelling_is_fmt_stable(s in arb_string_value()) {
             let display = unparse_literal_display(&Literal::String(s.into()));
             let snippet = format!("x := {display}\n");
-            let pass1 = format_source(&snippet);
+            let pass1 = format_source(&snippet).ok();
             prop_assert_eq!(pass1.as_deref(), Some(snippet.as_str()));
         }
 

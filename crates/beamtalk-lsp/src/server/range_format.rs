@@ -12,8 +12,20 @@
 //! outside those constructs is returned unchanged (BT-5080).
 
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
-use beamtalk_core::unparse::format_source;
+use beamtalk_core::unparse::{FormatError, format_source};
 use similar::{DiffTag, TextDiff};
+
+/// Logs why formatting produced no edits. A parse error is routine while
+/// typing; a round-trip refusal (BT-5183) is a formatter bug, so it is a
+/// warning that names what would have been lost — the same message
+/// `beamtalk fmt` prints.
+pub(in crate::server) fn log_format_refusal(error: &FormatError) {
+    if matches!(error, FormatError::ParseErrors) {
+        tracing::debug!("formatting skipped: {error}");
+    } else {
+        tracing::warn!("formatting refused: {error}");
+    }
+}
 
 /// A replacement of `source[start..end]` with `new_text`.
 #[derive(Debug, PartialEq, Eq)]
@@ -38,13 +50,13 @@ pub(in crate::server) struct RangeEdits {
 /// the byte range `start..end` of `source`.
 ///
 /// Returns `None` when the source has parse errors (formatting a broken file
-/// could corrupt it).
+/// could corrupt it) or the formatter's round-trip check refuses its output.
 pub(in crate::server) fn format_range_edits(
     source: &str,
     start: usize,
     end: usize,
 ) -> Option<RangeEdits> {
-    let formatted = format_source(source)?;
+    let formatted = format_source(source).inspect_err(log_format_refusal).ok()?;
     if formatted == source {
         return Some(RangeEdits::default());
     }

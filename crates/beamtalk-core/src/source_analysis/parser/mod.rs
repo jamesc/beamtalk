@@ -84,7 +84,9 @@ mod error_recovery_tests;
 #[cfg(test)]
 mod tests;
 
-// Re-export helper functions for tests
+// The integer-literal reader, shared with the formatter (BT-5183), which
+// checks that a recorded number spelling reads back as the printed value.
+pub(crate) use expressions::parse_integer_literal;
 #[cfg(test)]
 use expressions::parse_integer;
 
@@ -1186,6 +1188,10 @@ pub(super) struct Parser {
     /// The comments inside collection literals so far, keyed by the literal's
     /// span (BT-3983). Taken by the owning definition like `pipeline_sends`.
     pub(super) literal_comments: Vec<(Span, crate::ast::LiteralCommentSlots)>,
+    /// The source spelling of every number literal so far, keyed by its
+    /// token's span (BT-5183), so the formatter can print `16rFF` rather
+    /// than `255`. Taken by the owning definition like `literal_comments`.
+    pub(super) number_spellings: Vec<(Span, EcoString)>,
 }
 
 impl Parser {
@@ -1216,6 +1222,7 @@ impl Parser {
             attached_doc_comment_positions: None,
             pipeline_sends: Vec::new(),
             literal_comments: Vec::new(),
+            number_spellings: Vec::new(),
         }
     }
 
@@ -2081,9 +2088,10 @@ impl Parser {
             pipeline_sends: std::mem::take(&mut self.pipeline_sends)
                 .into_iter()
                 .collect(),
-            literal_comments: std::mem::take(&mut self.literal_comments)
-                .into_iter()
-                .collect(),
+            literal_comments: crate::ast::LiteralComments::from_records(
+                std::mem::take(&mut self.literal_comments),
+                std::mem::take(&mut self.number_spellings),
+            ),
         }
     }
 

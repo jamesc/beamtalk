@@ -45,7 +45,7 @@ const MAX_INTEGER_LITERAL_DIGITS: usize = 10_000;
 /// Accepts an optional leading `-` (the lexer folds a `-` written directly
 /// before the digits into the token), decimal digits, or radix notation
 /// `<radix>r<digits>` with a radix from 2 to 36 (`16rFF`, `-2r1010`).
-pub(super) fn parse_integer_literal(s: &str) -> Result<Literal, String> {
+pub(crate) fn parse_integer_literal(s: &str) -> Result<Literal, String> {
     // Converting digits to decimal is quadratic in their count; no real
     // literal comes near this, and a pasted megabyte of digits must not
     // stall the parser (and with it the language server).
@@ -1334,7 +1334,10 @@ impl Parser {
             TokenKind::Integer(s) => {
                 // Parse integer (handle radix notation like 16rFF)
                 match parse_integer_literal(&s) {
-                    Ok(literal) => literal,
+                    Ok(literal) => {
+                        self.number_spellings.push((span, s));
+                        literal
+                    }
                     Err(e) => {
                         self.diagnostics.push(Diagnostic::error(e, span));
                         return Expression::Error {
@@ -1350,7 +1353,10 @@ impl Parser {
                     // or that parse to `NaN`. A non-finite literal would otherwise reach
                     // codegen and emit `inf.0` / `NaN.0`, which Core Erlang cannot parse,
                     // surfacing as a confusing `erlc` failure instead of a diagnostic here.
-                    Ok(val) if val.is_finite() => Literal::Float(val),
+                    Ok(val) if val.is_finite() => {
+                        self.number_spellings.push((span, s));
+                        Literal::Float(val)
+                    }
                     Ok(_) => {
                         self.diagnostics.push(Diagnostic::error(
                             format!("Float literal out of range: {s}"),

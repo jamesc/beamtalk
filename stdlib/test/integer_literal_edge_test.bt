@@ -1,10 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-5182: integer literals of any size (BEAM bignums) and character
-// escapes that mean what the string escapes mean. Radix literals are covered
-// in tests/repl-protocol/cases/literal_edge_cases.btscript, since `beamtalk
-// fmt` still rewrites them to decimal (BT-5183).
+// BT-5182: integer literals of any size (BEAM bignums), negative radix
+// literals, and character escapes that mean what the string escapes mean.
 
 TestCase subclass: IntegerLiteralEdgeTest
 
@@ -16,6 +14,15 @@ TestCase subclass: IntegerLiteralEdgeTest
   testNegativeIntegerLiteralBelowI64 =>
     self assert: -9223372036854775809 equals: -9223372036854775808 - 1
     self assert: (-100000000000000000000 + 100000000000000000000) equals: 0
+
+  testRadixLiteralAboveI64 =>
+    self assert: 16rFFFFFFFFFFFFFFFFFF equals: ("FFFFFFFFFFFFFFFFFF" asIntegerRadix: 16)
+    self assert: 2r10000000000000000000000000000000000000000000000000000000000000000 equals: 18446744073709551616
+
+  testNegativeRadixLiteral =>
+    self assert: -16rFF equals: -255
+    self assert: -2r1010 equals: -10
+    self assert: 3 + -16rFF equals: -252
 
   testCharacterEscapesMatchStringEscapes =>
     self assert: $\0 equals: 0
