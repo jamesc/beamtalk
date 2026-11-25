@@ -228,10 +228,13 @@ run_client() {
     # Background plus `wait`, so a signal to the launcher (Ctrl-C, `timeout`,
     # a supervisor's TERM/HUP) runs the trap at once: it stops the client and
     # cleans up. These verbs are `-noshell` and read no stdin.
+    # Traps first (a signal right after the fork is covered too), and a `kill`
+    # of an already-exited client must not abort the trap under `set -e`.
+    erl_pid=
+    trap '[ -z "$erl_pid" ] || kill "$erl_pid" 2>/dev/null || :; cleanup_cookie_home; exit 130' INT
+    trap '[ -z "$erl_pid" ] || kill "$erl_pid" 2>/dev/null || :; cleanup_cookie_home; exit 143' TERM HUP
     "$ERL" "$@" &
     erl_pid=$!
-    trap 'kill "$erl_pid" 2>/dev/null; cleanup_cookie_home; exit 130' INT
-    trap 'kill "$erl_pid" 2>/dev/null; cleanup_cookie_home; exit 143' TERM HUP
     wait "$erl_pid" || status=$?
     cleanup_cookie_home
     exit "$status"

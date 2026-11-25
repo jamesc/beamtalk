@@ -207,9 +207,14 @@ rem cleared so no process erl starts inherits it. See launcher.sh's
 rem `export_cookie`.
 set "COOKIE_HOME="
 if not defined RELEASE_COOKIE exit /b 0
-set "COOKIE_HOME=%TEMP%\beamtalk-cookie-%RANDOM%%RANDOM%%RANDOM%%RANDOM%"
-mkdir "!COOKIE_HOME!" 2>nul
-if errorlevel 1 (
+rem %RANDOM% is clock-seeded, so two launchers started together draw the same
+rem name; retry with a fresh delayed !RANDOM! draw (as check_otp_window does).
+rem mkdir fails on an existing path, so a directory is never reused.
+for /l %%N in (1,1,50) do if not defined COOKIE_HOME (
+    set "COOKIE_TRY=%TEMP%\beamtalk-cookie-!RANDOM!!RANDOM!!RANDOM!!RANDOM!"
+    mkdir "!COOKIE_TRY!" >nul 2>&1 && set "COOKIE_HOME=!COOKIE_TRY!"
+)
+if not defined COOKIE_HOME (
     echo error: could not create a private directory for the cookie 1>&2
     exit /b 1
 )
