@@ -6,14 +6,13 @@
 %%% **DDD Context:** Object System Context
 
 -moduledoc """
-ADR 0142 Phase 1b (BT-4300): a dynamic class send
-(`beamtalk_class_dispatch:class_send/3`) to a class whose chain declares no
-class variables, and that nothing shadows, runs the class method in the caller,
-resolved through the `{class_method_owner, ClassPid, Selector}` memo. Each
-decline (a process-bound selector, a class-variable reflection selector, a
-class-side extension) keeps the class process, and so does a chain with class
-variables, which the memo records as the `process` verdict (BT-4771). An error
-has the same value on both paths.
+ADR 0142 Phase 1b (BT-4300), ADR 0153 Phase 3a (BT-5158): a dynamic class
+send (`beamtalk_class_dispatch:class_send/3`) to a class that nothing shadows
+runs the class method in the caller, resolved through the
+`{class_method_owner, ClassPid, Selector}` memo. Class variables, in the class
+or its chain, are no input. Each decline (a process-bound selector, a
+class-side extension) keeps the class
+process. An error has the same value on both paths.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -66,11 +65,6 @@ outcome(Pid, Selector) ->
         Class:Reason -> {Class, strip_stacktrace(Reason)}
     end.
 
-%% The error kind of a raised outcome, whatever its wrapping.
-dnu_kind({error, #{error := #beamtalk_error{kind = Kind}}}) -> Kind;
-dnu_kind({error, #beamtalk_error{kind = Kind}}) -> Kind;
-dnu_kind(Other) -> Other.
-
 strip_stacktrace(#{} = Wrapped) -> maps:remove(raw_stacktrace, Wrapped);
 strip_stacktrace(Other) -> Other.
 
@@ -108,53 +102,19 @@ in_caller_test_() ->
                 )
             end)
         end},
-        {"a class with class variables keeps its process", fun() ->
-            with_class('Bt4300Stateful', none, #{count => 0}, fun(Pid) ->
-                ?assertEqual(Pid, send(Pid, testSelf, []))
+        {"class-variable defaults no longer keep the class process (ADR 0153)", fun() ->
+            with_class('Bt5158Stateful', none, #{count => 0}, fun(Pid) ->
+                ?assertEqual(self(), send(Pid, testSelf, [])),
+                ?assertMatch({owner, 'Bt5158Stateful', _, _, _, _, _}, memo(Pid, testSelf))
             end)
         end},
-        {"a stateful class's method is memoised as a process verdict (BT-4771)", fun() ->
-            with_class('Bt4771Stateful', none, #{count => 0}, fun(Pid) ->
-                ?assertEqual(Pid, send(Pid, testSelf, [])),
-                %% A positive verdict, not a miss: the caller asks the class
-                %% process directly instead of walking the chain again.
-                ?assertEqual(
-                    process,
-                    beamtalk_class_derived_cache:fetch(
-                        {class_method_owner, Pid, testSelf}, fun() -> {nocache, miss} end
-                    )
-                ),
-                %% Served from the memo, the send is unchanged.
-                ?assertEqual(Pid, send(Pid, testSelf, [])),
-                ?assertEqual({with_arg, 3}, send(Pid, 'testWith:', [3]))
-            end)
-        end},
-        {"a stale process verdict falls back to the class process's own lookup", fun() ->
-            with_class('Bt4771Stale', none, #{count => 0}, fun(Pid) ->
-                %% Plant `process` for a selector the class does not define: the
-                %% class process does the authoritative lookup, finds nothing
-                %% and the send raises the same DNU a fresh send does.
-                Fresh = outcome(Pid, bt4771Missing),
-                beamtalk_class_derived_cache:invalidate(),
-                _ = beamtalk_class_derived_cache:fetch(
-                    {class_method_owner, Pid, bt4771Missing2}, fun() -> {cache, process} end
-                ),
-                Planted = outcome(Pid, bt4771Missing2),
-                ?assertMatch({error, _}, Fresh),
-                ?assertMatch({error, _}, Planted),
-                ?assertEqual(
-                    dnu_kind(Fresh),
-                    dnu_kind(Planted)
-                )
-            end)
-        end},
-        {"a stateless subclass of a stateful class keeps its process", fun() ->
-            with_class('Bt4300Parent', none, #{count => 0}, fun(_ParentPid) ->
+        {"a subclass of a class with class-variable defaults runs in the caller", fun() ->
+            with_class('Bt5158Parent', none, #{count => 0}, fun(_ParentPid) ->
                 Child = beamtalk_test_class:start(
-                    'Bt4300Child', class_info('Bt4300Parent', #{}, #{})
+                    'Bt5158Child', class_info('Bt5158Parent', #{}, #{})
                 ),
                 try
-                    ?assertEqual(Child, send(Child, testSelf, []))
+                    ?assertEqual(self(), send(Child, testSelf, []))
                 after
                     beamtalk_test_proc:stop(Child)
                 end
@@ -203,26 +163,21 @@ in_caller_test_() ->
                 )
             end)
         end},
-        {"a stateless class's state reads as empty in the caller", fun() ->
-            with_class('Bt4300NoHome', none, #{}, fun(Pid) ->
-                ?assertEqual(false, send(Pid, testHasCount, [])),
-                %% `clearField:` answers the class, as against the empty map in
-                %% the class process; a write still has nowhere to go.
+        {"with no class-variable home a class's state is unreachable", fun() ->
+            %% ADR 0153 Phase 3a: no per-chain class-variable fact lets a
+            %% home-less read answer the empty map any more (BT-5160 deletes
+            %% the access module).
+            with_class('Bt5158NoHome', none, #{}, fun(Pid) ->
                 ClassSelf = #beamtalk_object{
-                    class = tag('Bt4300NoHome'), class_mod = ?HELPER, pid = Pid
+                    class = tag('Bt5158NoHome'), class_mod = ?HELPER, pid = Pid
                 },
-                ?assertEqual(ClassSelf, beamtalk_class_vars:clear(ClassSelf, count)),
+                ?assertBtError(class_state_unreachable, beamtalk_class_vars:has(ClassSelf, count)),
+                ?assertBtError(
+                    class_state_unreachable, beamtalk_class_vars:clear(ClassSelf, count)
+                ),
                 ?assertBtError(
                     class_state_unreachable, beamtalk_class_vars:put(ClassSelf, count, 1)
                 )
-            end),
-            with_class('Bt4300Home', none, #{count => 0}, fun(Pid) ->
-                ?assertEqual(true, send(Pid, testHasCount, [])),
-                ClassSelf = #beamtalk_object{
-                    class = tag('Bt4300Home'), class_mod = ?HELPER, pid = Pid
-                },
-                ?assertBtError(class_state_unreachable, beamtalk_class_vars:has(ClassSelf, count)),
-                ?assertBtError(class_state_unreachable, beamtalk_class_vars:clear(ClassSelf, count))
             end)
         end},
         {"every error has the value it has through the class process", fun() ->
@@ -243,14 +198,14 @@ errors_match() ->
             testRaise, testSignal, testDnu, testInternalUndef, testScriptExit, testNlrThrow
         ],
         InCaller = [outcome(Pid, S) || S <- Selectors],
-        %% The raw class-variable input bars the in-caller path, so
-        %% the same sends now go through the class process.
-        ok = beamtalk_class_shadow_flags:set_class_vars('Bt4300Errors', true),
+        %% A runtime-fun shadow bars the in-caller path, so the same sends now
+        %% go through the class process.
+        ok = beamtalk_class_shadow_flags:set(runtime_fun, 'Bt4300Errors'),
         try
             ?assertEqual(Pid, send(Pid, testSelf, [])),
             ?assertEqual(InCaller, [outcome(Pid, S) || S <- Selectors])
         after
-            beamtalk_class_shadow_flags:set_class_vars('Bt4300Errors', false)
+            beamtalk_class_shadow_flags:clear(runtime_fun, 'Bt4300Errors')
         end
     end).
 
@@ -267,12 +222,12 @@ outcome_with(Pid, Selector, Args) ->
         Class:Reason -> {Class, Reason}
     end.
 
-%% ADR 0142 §2 (BT-4301): the guard of every static class-side direct call,
-%% `beamtalk_class_shadow_flags:direct_call_ok/2`, agrees with the dynamic
-%% path's chain-wide rule 2 (`chain_has_class_variables/1`).
+%% ADR 0142 §2 (BT-4301), ADR 0153 §5: the guard of every static class-side
+%% direct call, `beamtalk_class_shadow_flags:direct_call_ok/2`, has no
+%% class-variable or chain input; only readiness and shadows count.
 static_guard_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
-        {"the guard holds for a stateless chain and not under a stateful ancestor", fun() ->
+        {"the guard holds whatever an ancestor's class-variable defaults", fun() ->
             with_class('Bt4301Root', none, #{}, fun(_RootPid) ->
                 Leaf = beamtalk_test_class:start('Bt4301Leaf', class_info('Bt4301Root', #{}, #{})),
                 try
@@ -288,14 +243,8 @@ static_guard_test_() ->
                     'Bt4301StatefulLeaf', class_info('Bt4301StatefulRoot', #{}, #{})
                 ),
                 try
-                    ?assertNot(
-                        beamtalk_class_shadow_flags:direct_call_ok(
-                            tag('Bt4301StatefulLeaf'), 'Bt4301StatefulLeaf'
-                        )
-                    ),
-                    %% The class-side self-send guard only asks about shadows.
                     ?assert(
-                        beamtalk_class_shadow_flags:shadow_free(
+                        beamtalk_class_shadow_flags:direct_call_ok(
                             tag('Bt4301StatefulLeaf'), 'Bt4301StatefulLeaf'
                         )
                     )
@@ -304,27 +253,7 @@ static_guard_test_() ->
                 end
             end)
         end},
-        {"an ancestor gaining class variables turns a descendant's installed guard off", fun() ->
-            with_class('Bt4301GainRoot', none, #{}, fun(_RootPid) ->
-                Leaf = beamtalk_test_class:start(
-                    'Bt4301GainLeaf', class_info('Bt4301GainRoot', #{}, #{})
-                ),
-                LeafTag = tag('Bt4301GainLeaf'),
-                try
-                    ?assert(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, 'Bt4301GainLeaf')),
-                    ?assertEqual(true, beamtalk_class_shadow_flags:direct_flag_value(LeafTag)),
-                    ok = beamtalk_class_metadata:put_class_variables('Bt4301GainRoot', true),
-                    ?assertNot(
-                        beamtalk_class_shadow_flags:direct_call_ok(LeafTag, 'Bt4301GainLeaf')
-                    ),
-                    ok = beamtalk_class_metadata:put_class_variables('Bt4301GainRoot', false),
-                    ?assert(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, 'Bt4301GainLeaf'))
-                after
-                    beamtalk_test_proc:stop(Leaf)
-                end
-            end)
-        end},
-        {"re-parenting under a class with class variables turns the guard off (BT-4134)", fun() ->
+        {"re-parenting erases the descendant's derived flag (BT-4134)", fun() ->
             with_class('Bt4301ReparentPlain', none, #{}, fun(_PlainPid) ->
                 with_class('Bt4301ReparentStateful', none, #{count => 0}, fun(_StatefulPid) ->
                     Leaf = beamtalk_test_class:start(
@@ -341,39 +270,31 @@ static_guard_test_() ->
                             module => ?HELPER,
                             meta => maps:put(superclass, 'Bt4301ReparentStateful', ?META)
                         }),
-                        ?assertNot(
+                        ?assertEqual(false, beamtalk_class_shadow_flags:direct_flag_value(LeafTag)),
+                        ?assert(
                             beamtalk_class_shadow_flags:direct_call_ok(
                                 LeafTag, 'Bt4301ReparentLeaf'
                             )
                         ),
-                        ?assertEqual(Leaf, send(Leaf, testSelf, []))
+                        ?assertEqual(self(), send(Leaf, testSelf, []))
                     after
                         beamtalk_test_proc:stop(Leaf)
                     end
                 end)
             end)
         end},
-        {"an ancestor whose class-variable fact is unpublished keeps the guard off", fun() ->
-            %% The guard reads `chain_has_class_variables/1`, the dynamic path's
-            %% own answer, and fails closed with it: an ancestor row with no
-            %% published fact (or no row at all) is a doubt, never "stateless".
+        {"an ancestor with no published facts, or no row, does not bar the guard", fun() ->
+            %% Before ADR 0153 the guard failed closed on such a chain
+            %% (BT-5154's window); the chain is no input now.
             Parent = 'Bt4301UnpubParent',
             Leaf = 'Bt4301UnpubLeaf',
             beamtalk_class_metadata:new(),
             ok = beamtalk_class_metadata:insert(Parent, undefined, [], 'Object', false),
             ok = beamtalk_class_metadata:insert(Leaf, undefined, [], Parent, false),
-            ok = beamtalk_class_metadata:put_class_variables(Leaf, false),
             try
-                ?assert(beamtalk_class_metadata:chain_has_class_variables(Leaf)),
-                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(tag(Leaf), Leaf)),
-                ?assert(beamtalk_class_shadow_flags:shadow_free(tag(Leaf), Leaf)),
-                %% Publishing the parent's fact erases the leaf's derived flag.
-                ok = beamtalk_class_metadata:put_class_variables(Parent, false),
-                ?assertNot(beamtalk_class_metadata:chain_has_class_variables(Leaf)),
                 ?assert(beamtalk_class_shadow_flags:direct_call_ok(tag(Leaf), Leaf)),
-                %% A missing ancestor row is the same doubt.
                 ok = beamtalk_class_metadata:delete(Parent),
-                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(tag(Leaf), Leaf))
+                ?assert(beamtalk_class_shadow_flags:direct_call_ok(tag(Leaf), Leaf))
             after
                 beamtalk_class_metadata:delete(Leaf),
                 beamtalk_class_metadata:delete(Parent)
@@ -404,21 +325,20 @@ static_guard_test_() ->
 
 invalidation_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
-        {"an install in flight when an ancestor gains class variables leaves no stale flag",
+        {"an install in flight when an ancestor's metadata is written leaves no stale flag",
             fun() ->
-                %% BT-4301: the derived flag reads published metadata, so an
-                %% install holding `Leaf`'s tag lock may already have derived
-                %% `true` from the ancestor's old row. The ancestor's write must
-                %% wait for it (the erase always takes the lock, even with no
-                %% flag installed yet) and then remove what it put.
+                %% BT-4301: a static call key's install reads published
+                %% metadata, so an install holding `Leaf`'s tag lock may
+                %% already have derived its answer from the ancestor's old
+                %% row. The ancestor's erase must wait for it (it always takes
+                %% the lock, even with no flag installed yet) and then remove
+                %% what it put.
                 Base = 'Bt4301RaceBase',
                 Leaf = 'Bt4301RaceLeaf',
                 LeafTag = tag(Leaf),
                 beamtalk_class_metadata:new(),
                 ok = beamtalk_class_metadata:insert(Base, undefined, [], 'Object', false),
-                ok = beamtalk_class_metadata:put_class_variables(Base, false),
                 ok = beamtalk_class_metadata:insert(Leaf, undefined, [], Base, false),
-                ok = beamtalk_class_metadata:put_class_variables(Leaf, false),
                 _ = persistent_term:erase(LeafTag),
                 Self = self(),
                 %% The install: under Leaf's lock, having derived `true` from
@@ -433,10 +353,10 @@ invalidation_test_() ->
                     Self ! installed
                 end),
                 ?awaitMessage(derived),
-                %% The writer: publishes Base's class variables, then erases
-                %% the descendants' flags.
+                %% The writer: a metadata write to Base erases the
+                %% descendants' flags (as reload and `removeSelector:` do).
                 Writer = spawn(fun() ->
-                    ok = beamtalk_class_metadata:put_class_variables(Base, true),
+                    ok = beamtalk_class_shadow_flags:invalidate(Base),
                     Self ! written
                 end),
                 try
@@ -448,8 +368,7 @@ invalidation_test_() ->
                     Installer ! release,
                     ?awaitMessage(installed),
                     ?awaitMessage(written),
-                    ?assertEqual(false, beamtalk_class_shadow_flags:direct_flag_value(LeafTag)),
-                    ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, Leaf))
+                    ?assertEqual(false, beamtalk_class_shadow_flags:direct_flag_value(LeafTag))
                 after
                     exit(Installer, kill),
                     exit(Writer, kill),
@@ -472,9 +391,7 @@ invalidation_test_() ->
             LeafTag = tag(Leaf),
             beamtalk_class_metadata:new(),
             ok = beamtalk_class_metadata:insert(Base, undefined, [], 'Object', false),
-            ok = beamtalk_class_metadata:put_class_variables(Base, false),
             ok = beamtalk_class_metadata:insert(Leaf, undefined, [], Base, false),
-            ok = beamtalk_class_metadata:put_class_variables(Leaf, false),
             _ = persistent_term:erase(LeafTag),
             Self = self(),
             Installer = spawn(fun() ->
@@ -493,8 +410,7 @@ invalidation_test_() ->
             try
                 ?awaitMessage({deleted, Writer}),
                 ?awaitMessage({installed, Installer}),
-                ?assertEqual(false, beamtalk_class_shadow_flags:direct_flag_value(LeafTag)),
-                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, Leaf))
+                ?assertEqual(false, beamtalk_class_shadow_flags:direct_flag_value(LeafTag))
             after
                 exit(Installer, kill),
                 exit(Writer, kill),
@@ -523,67 +439,28 @@ invalidation_test_() ->
         end}
     ]}.
 
-%% BT-4771: the `process` verdict is memoised under the same generation as the
-%% in-caller owner, so every write that can change which process runs a method,
-%% or which method runs, must retire it. Each case reads the memo through a
-%% probe fetch (a miss computes nothing) and checks the send's behaviour.
-process_verdict_invalidation_test_() ->
+%% The in-caller owner memo is retired by every write that can change which
+%% method runs. Each case reads the memo through a probe fetch (a miss computes
+%% nothing) and checks the send's behaviour.
+owner_memo_invalidation_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
-        {"dropping and regaining class variables retires the verdict", fun() ->
-            with_class('Bt4771VarsInval', none, #{count => 0}, fun(Pid) ->
-                ?assertEqual(Pid, send(Pid, testSelf, [])),
-                ?assertEqual(process, memo(Pid, testSelf)),
-                ok = beamtalk_class_metadata:put_class_variables('Bt4771VarsInval', false),
-                try
-                    %% No class variables in the chain: the caller runs it.
-                    ?assertEqual(self(), send(Pid, testSelf, [])),
-                    ?assertMatch({owner, 'Bt4771VarsInval', _, _, _, _, _}, memo(Pid, testSelf))
-                after
-                    ok = beamtalk_class_metadata:put_class_variables('Bt4771VarsInval', true)
-                end,
-                ?assertEqual(Pid, send(Pid, testSelf, [])),
-                ?assertEqual(process, memo(Pid, testSelf))
-            end)
-        end},
-        {"re-parenting under a class with class variables retires the owner and sets the verdict",
-            fun() ->
-                with_class('Bt4771ReparentPlain', none, #{}, fun(_PlainPid) ->
-                    with_class('Bt4771ReparentStateful', none, #{count => 0}, fun(_StatefulPid) ->
-                        Leaf = beamtalk_test_class:start(
-                            'Bt4771ReparentLeaf', class_info('Bt4771ReparentPlain', #{}, #{})
-                        ),
-                        try
-                            ?assertEqual(self(), send(Leaf, testSelf, [])),
-                            ?assertMatch({owner, _, _, _, _, _, _}, memo(Leaf, testSelf)),
-                            {ok, _} = beamtalk_object_class:update_class('Bt4771ReparentLeaf', #{
-                                module => ?HELPER,
-                                meta => maps:put(superclass, 'Bt4771ReparentStateful', ?META)
-                            }),
-                            ?assertEqual(Leaf, send(Leaf, testSelf, [])),
-                            ?assertEqual(process, memo(Leaf, testSelf))
-                        after
-                            beamtalk_test_proc:stop(Leaf)
-                        end
-                    end)
-                end)
-            end},
-        {"a redefinition that removes the selector retires the verdict", fun() ->
-            with_class('Bt4771Redefine', none, #{count => 0}, fun(Pid) ->
-                ?assertEqual(Pid, send(Pid, testSelf, [])),
-                ?assertEqual(process, memo(Pid, testSelf)),
+        {"a redefinition that removes the selector retires the owner", fun() ->
+            with_class('Bt4771Redefine', none, #{}, fun(Pid) ->
+                ?assertEqual(self(), send(Pid, testSelf, [])),
+                ?assertMatch({owner, _, _, _, _, _, _}, memo(Pid, testSelf)),
                 {ok, _} = beamtalk_object_class:update_class('Bt4771Redefine', #{
                     module => ?HELPER, class_methods => #{}, meta => ?META
                 }),
-                %% The selector is gone: the verdict must not send it to the
-                %% class process as if it were still defined.
-                ?assertNotEqual(process, memo(Pid, testSelf)),
+                %% The selector is gone: the memo must not run it in the
+                %% caller as if it were still defined.
+                ?assertNotMatch({owner, _, _, _, _, _, _}, memo(Pid, testSelf)),
                 ?assertMatch({error, _}, outcome(Pid, testSelf)),
-                ?assertNotEqual(process, memo(Pid, testSelf)),
+                ?assertNotMatch({owner, _, _, _, _, _, _}, memo(Pid, testSelf)),
                 {ok, _} = beamtalk_object_class:update_class('Bt4771Redefine', #{
                     module => ?HELPER, class_methods => ?METHODS, meta => ?META
                 }),
-                ?assertEqual(Pid, send(Pid, testSelf, [])),
-                ?assertEqual(process, memo(Pid, testSelf))
+                ?assertEqual(self(), send(Pid, testSelf, [])),
+                ?assertMatch({owner, _, _, _, _, _, _}, memo(Pid, testSelf))
             end)
         end}
     ]}.

@@ -1473,10 +1473,7 @@ impl Parser {
                 let end = p.skip_string_interpolation();
                 Self::nesting_error(start.merge(end))
             },
-            |p| {
-                let expr = p.parse_string_interpolation_body();
-                p.bound_expression_depth(expr)
-            },
+            |p| p.bounded_expression_level(Self::parse_string_interpolation_body),
         )
     }
 

@@ -63,6 +63,7 @@ use ecow::EcoString;
 // Submodules with additional impl blocks for Parser
 mod binary;
 mod declarations;
+mod depth_ledger;
 mod expressions;
 mod literals;
 mod methods;
@@ -70,6 +71,7 @@ mod patterns;
 mod protocols;
 mod types;
 
+use depth_ledger::DepthLedger;
 use types::DoubleColonSkip;
 
 // Property-based tests (ADR 0011 Phase 2)
@@ -1146,6 +1148,13 @@ pub(super) struct Parser {
     pub(super) current_method_header_indent: Option<usize>,
     /// Current expression nesting depth (guards against stack overflow).
     nesting_depth: usize,
+    /// The depths of the expression trees answered by the nesting levels
+    /// open around the parser, so each level's depth bound walks only the
+    /// nodes it built itself ([`Self::bound_expression_depth`], BT-5237).
+    expression_depths: DepthLedger<Expression>,
+    /// [`Self::expression_depths`] for type annotations
+    /// ([`Self::bound_type_depth`]).
+    type_depths: DepthLedger<TypeAnnotation>,
     /// Current recursion depth of the type-annotation lookahead skippers,
     /// which take `&self` (see `skip_type_operand`).
     pub(super) lookahead_depth: std::cell::Cell<usize>,
@@ -1254,6 +1263,8 @@ impl Parser {
             in_protocol_body: false,
             current_method_header_indent: None,
             nesting_depth: 0,
+            expression_depths: DepthLedger::default(),
+            type_depths: DepthLedger::default(),
             lookahead_depth: std::cell::Cell::new(0),
             unattached_doc_comment_indices,
             attached_doc_comment_positions: None,
@@ -1775,7 +1786,7 @@ impl Parser {
 
     /// [`Self::with_nesting`] for a parse path that answers an
     /// [`Expression`]: past the limit it answers an error node, and the
-    /// answer is held to [`MAX_EXPRESSION_DEPTH`] ([`Self::bound_expression_depth`]).
+    /// answer is held to [`MAX_EXPRESSION_DEPTH`] ([`Self::bounded_expression_level`]).
     pub(super) fn with_expression_nesting(
         &mut self,
         span: Span,
@@ -1784,10 +1795,7 @@ impl Parser {
         self.with_nesting(
             span,
             |_| Self::nesting_error(span),
-            |p| {
-                let expr = body(p);
-                p.bound_expression_depth(expr)
-            },
+            |p| p.bounded_expression_level(body),
         )
     }
 
@@ -1806,10 +1814,7 @@ impl Parser {
                 let end = p.skip_bracketed_group();
                 Self::nesting_error(start.merge(end))
             },
-            |p| {
-                let expr = body(p);
-                p.bound_expression_depth(expr)
-            },
+            |p| p.bounded_expression_level(body),
         )
     }
 
@@ -1921,15 +1926,48 @@ impl Parser {
             .map_or_else(|| self.current_token().span(), Token::span)
     }
 
+    /// Runs `body` as one expression nesting level and holds its answer to
+    /// [`MAX_EXPRESSION_DEPTH`] ([`Self::bound_expression_depth`]).
+    pub(super) fn bounded_expression_level(
+        &mut self,
+        body: impl FnOnce(&mut Self) -> Expression,
+    ) -> Expression {
+        let mark = self.expression_depths.open();
+        let expr = body(self);
+        self.bound_expression_depth(expr, mark)
+    }
+
     /// Replaces `expr` with an error node, reporting a diagnostic, when its
     /// syntax tree is deeper than [`MAX_EXPRESSION_DEPTH`]. Checked on the
-    /// result of every nesting level ([`Self::with_expression_nesting`]):
+    /// result of every nesting level ([`Self::bounded_expression_level`]):
     /// long chains nested inside each other can be deep together while each
     /// chain and each nesting level is within its own limit, so bounding
     /// each level keeps every tree the parser holds — and every tree a later
     /// pass walks — shallow enough to recurse over and drop (BT-5181).
-    pub(super) fn bound_expression_depth(&mut self, expr: Expression) -> Expression {
-        if crate::ast_walker::expression_depth(&expr) <= MAX_EXPRESSION_DEPTH {
+    ///
+    /// `mark` opened the level in [`Self::expression_depths`]: the trees of
+    /// the levels inside it are not walked again, their recorded depths are
+    /// taken instead, and this tree's depth is recorded in turn for the
+    /// level around it. Each node is visited by the bound of the level that
+    /// built it (and looked up once more as the root of a measured subtree),
+    /// rather than once per level around it: O(n) visits over a parse, not
+    /// O(n × depth) (BT-5237). Debug builds also check the result against a
+    /// full walk.
+    fn bound_expression_depth(&mut self, expr: Expression, mark: usize) -> Expression {
+        let depth = self.expression_depths.frame(mark).measure(
+            &expr,
+            Expression::span,
+            crate::ast_walker::expression_depth_with,
+        );
+        debug_assert_eq!(
+            depth,
+            crate::ast_walker::expression_depth(&expr),
+            "recorded subtree depths disagree with a full walk of the expression at {:?}",
+            expr.span()
+        );
+        if depth <= MAX_EXPRESSION_DEPTH {
+            self.expression_depths
+                .close(mark, expr.span(), std::mem::discriminant(&expr), depth);
             return expr;
         }
         let span = expr.span();
@@ -1943,17 +1981,69 @@ impl Parser {
             .with_hint("split it across statements with intermediate variables"),
         );
         self.discard_expression(expr, span);
-        Expression::Error {
+        let error = Expression::Error {
             message: "Expression too deep".into(),
             span,
-        }
+        };
+        self.expression_depths
+            .close(mark, span, std::mem::discriminant(&error), 1);
+        error
+    }
+
+    /// Runs `body` as one type-annotation nesting level and holds its answer
+    /// to [`MAX_EXPRESSION_DEPTH`] ([`Self::bound_type_depth`]).
+    pub(super) fn bounded_type_level(
+        &mut self,
+        body: impl FnOnce(&mut Self) -> TypeAnnotation,
+    ) -> TypeAnnotation {
+        let mark = self.type_depths.open();
+        let ty = body(self);
+        self.bound_type_depth(ty, mark)
     }
 
     /// The type-annotation counterpart of [`Self::bound_expression_depth`]:
     /// grouping parentheses let `&`/`\` chains nest inside each other, so a
     /// type tree can be deep while each chain and level is within its limit.
-    pub(super) fn bound_type_depth(&mut self, ty: TypeAnnotation) -> TypeAnnotation {
-        if crate::ast_walker::type_annotation_depth(&ty) <= MAX_EXPRESSION_DEPTH {
+    /// Measured against [`Self::type_depths`] in the same way (BT-5237).
+    ///
+    /// A union's members are measured and recorded one by one as well: a
+    /// grouped union, `(A | B) | C`, is spliced into the union around it,
+    /// so the enclosing level finds the members rather than this union.
+    fn bound_type_depth(&mut self, ty: TypeAnnotation, mark: usize) -> TypeAnnotation {
+        let mut frame = self.type_depths.frame(mark);
+        let mut measure = |node: &TypeAnnotation| {
+            let depth = frame.measure(
+                node,
+                TypeAnnotation::span,
+                crate::ast_walker::type_annotation_depth_with,
+            );
+            (node.span(), std::mem::discriminant(node), depth)
+        };
+        let (members, depth) = if let TypeAnnotation::Union { types, .. } = &ty {
+            let members: Vec<_> = types.iter().map(&mut measure).collect();
+            let depth = 1 + members
+                .iter()
+                .map(|&(_, _, depth)| depth)
+                .max()
+                .unwrap_or(0);
+            (members, depth)
+        } else {
+            (Vec::new(), measure(&ty).2)
+        };
+        debug_assert_eq!(
+            depth,
+            crate::ast_walker::type_annotation_depth(&ty),
+            "recorded subtree depths disagree with a full walk of the type annotation at {:?}",
+            ty.span()
+        );
+        if depth <= MAX_EXPRESSION_DEPTH {
+            self.type_depths.close_with(
+                mark,
+                members,
+                ty.span(),
+                std::mem::discriminant(&ty),
+                depth,
+            );
             return ty;
         }
         let span = ty.span();
@@ -1964,7 +2054,10 @@ impl Parser {
             span,
         ));
         crate::ast_walker::dismantle_type_annotation(ty);
-        TypeAnnotation::Simple(crate::ast::Identifier::new("Error", span))
+        let error = TypeAnnotation::Simple(crate::ast::Identifier::new("Error", span));
+        self.type_depths
+            .close(mark, span, std::mem::discriminant(&error), 1);
+        error
     }
 
     /// Synchronizes parser to a safe recovery point.

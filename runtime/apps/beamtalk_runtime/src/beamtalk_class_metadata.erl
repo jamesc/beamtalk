@@ -135,12 +135,8 @@ a table deleted between an existence check and the op (teardown/shutdown).
     set_runtime_class_methods/2,
     reset_runtime_class_methods/1,
     %% ADR 0129 Phase 0b: direct-dispatch eligibility set for dynamic class-side sends.
-    %% ADR 0142 §1 (BT-4299): the class-variable fact behind
-    %% `beamtalk_class_shadow_flags:direct_call_ok/2`, and the generated
-    %% process-bound class-side selector list.
-    put_class_variables/2,
-    lookup_has_class_variables/1,
-    chain_has_class_variables/1,
+    %% ADR 0142 §1 rule 3 / ADR 0153 §5: the generated process-bound
+    %% class-side selector list, the one input to where a class method runs.
     put_process_bound_selectors/2,
     lookup_process_bound_selectors/1,
     %% direct-construction eligibility set for dynamic `new`/`new:`.
@@ -276,13 +272,6 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% classes and modules compiled before the key existed, which
     %% `chain_has_user_new0/1` reads as "no user `new`" (today's behaviour).
     defines_user_class_new0 :: boolean() | undefined,
-    %% ADR 0142 §1 rule 1 (BT-4299): whether the class declares class
-    %% variables (`classState:`), from the compiled `__beamtalk_meta/0`'s
-    %% `class_field_kinds` or the builder's `classState`. Written only by
-    %% `put_class_variables/2`, which mirrors it into the `class_vars` input of
-    %% `beamtalk_class_shadow_flags:direct_call_ok/2`. `undefined` until the
-    %% owning class publishes it.
-    has_class_variables :: boolean() | undefined,
     %% ADR 0142 §1 rule 3 (BT-4299): `process_bound_class_selectors` from the
     %% compiled module's `__beamtalk_meta/0`, the class-side selectors that
     %% keep their class-process routing. Rust owns the list
@@ -465,6 +454,13 @@ insert(Name, Module, Selectors, Superclass, IsAbstract) ->
     %% BT-3669: a full-row write resets has_runtime_class_methods to false;
     %% clear the shadow flag only AFTER the gate is closed (a stale true is safe).
     beamtalk_class_shadow_flags:clear(runtime_fun, Name),
+    %% BT-4316: a (re)created row is a new incarnation of the class. Its static
+    %% call keys (and its descendants') may still name an earlier incarnation's
+    %% pid as `ClassSelf` when no 'DOWN' erased them (a class restarted while no
+    %% monitor watched it), so erase them now that the row has landed. Until
+    %% ADR 0153 Phase 3a this erase rode on the class-variable fact's
+    %% publication in `init/1`.
+    beamtalk_class_shadow_flags:invalidate(Name),
     %% BT-4064: only after the row has landed (see beamtalk_class_derived_cache).
     beamtalk_class_derived_cache:invalidate().
 
@@ -558,8 +554,8 @@ re-check.
 The row claim is one atomic `ets:select_delete/2` on the row's owner. Every
 dependent carries its writer's pid and is deleted by an atomic delete that
 matches it (`drop_dependents/2`, `finish_removal/3`): class-method funs,
-method records and the subclass edge by ETS match, the `runtime_fun` and
-`class_vars` flags by `beamtalk_class_shadow_flags:clear_if_owner/3`. A class
+method records and the subclass edge by ETS match, the `runtime_fun` flag by
+`beamtalk_class_shadow_flags:clear_if_owner/3`. A class
 rebuilt under the same name at any point of the teardown replaces the row and
 stamps its own funs, records, flags and edge with its own pid, so none of its
 entries can be matched, and no re-check between steps (or lock on
@@ -619,14 +615,9 @@ delete_if_owner(Name, Owner) when is_pid(Owner) ->
 drop_dependents(Name, Owner) ->
     case Owner of
         '_' ->
-            beamtalk_class_shadow_flags:clear(runtime_fun, Name),
-            %% BT-4299: a removed class keeps no class-variable input and no
-            %% derived direct-call flag (a later class of the same name
-            %% re-derives both).
-            beamtalk_class_shadow_flags:set_class_vars(Name, false);
+            beamtalk_class_shadow_flags:clear(runtime_fun, Name);
         _ ->
-            beamtalk_class_shadow_flags:clear_if_owner(runtime_fun, Name, Owner),
-            beamtalk_class_shadow_flags:clear_if_owner(class_vars, Name, Owner)
+            beamtalk_class_shadow_flags:clear_if_owner(runtime_fun, Name, Owner)
     end,
     drop_class_method_funs(Name, Owner),
     drop_method_records(Name, Owner).
@@ -660,10 +651,10 @@ finish_removal(Name, OldSuperclass, Owner) ->
         _ -> delete_subclass_edge(OldSuperclass, Name, Owner)
     end,
     %% BT-4299 / BT-4301: erase the class's derived flag and its descendants'
-    %% only now that the row is gone. Their derived values read this row
-    %% (`chain_has_class_variables/1`), so an erase before the removal could
-    %% be followed by an install from the row still present; after it, the
-    %% chain is unresolvable and re-derives fail closed. The edges keyed on
+    %% only now that the row is gone. Their static call keys read this row
+    %% (`in_caller_owner/2`), so an erase before the removal could be followed
+    %% by an install from the row still present; after it, the row is gone and
+    %% re-derives decline. The edges keyed on
     %% Name (its children) survive the row, so the descendants are still
     %% found; each erase takes its tag lock, so an install in flight that read
     %% the old row is waited for and its value removed. (A class rebuilt under
@@ -1348,96 +1339,6 @@ put_class_method_fun(Name, Selector, Info) ->
             ets:insert(?FUN_TABLE, Entry),
             ok
     end.
-
--doc """
-Publish whether a class declares class variables (ADR 0142 §1 rule 1, BT-4299).
-
-The one writer of the fact `beamtalk_class_shadow_flags:direct_call_ok/2` reads
-as its `class_vars` input; called from the class's own gen_server on `init/1`,
-reload and rename, with the value `beamtalk_object_class` reads from the
-compiled `__beamtalk_meta/0` (or the builder's `classState`). On a change it
-erases the class's own derived direct-call flag under the per-tag lock
-*before* the row field becomes visible (raising: `set_class_vars/2` first;
-dropping: the row first, since a stale "has class variables" only costs the
-slow path), and drops the derived-fact cache.
-
-Descendants' derived flags read this row field through
-`chain_has_class_variables/1`, so they are erased *after* it is written
-(`beamtalk_class_shadow_flags:invalidate/1`, which always takes each tag lock
-and so also removes a value an in-flight install derived from the old row,
-BT-4301). Between the write and that erase, a descendant's static send may
-still see its old `true` and run in the caller: the same window a reload has
-for its own new code; no stale value outlives the erase. A no-op when
-unchanged; the row field is a no-op when the row is absent.
-""".
--spec put_class_variables(class_name(), boolean()) -> ok.
-put_class_variables(Name, HasClassVars) when is_boolean(HasClassVars) ->
-    new(),
-    case field(Name, #class_metadata.has_class_variables) of
-        HasClassVars ->
-            %% The raw flag may still lag a recreated row; re-mirror (a no-op
-            %% when it already agrees).
-            beamtalk_class_shadow_flags:set_class_vars(Name, HasClassVars);
-        _ when HasClassVars ->
-            beamtalk_class_shadow_flags:set_class_vars(Name, true),
-            update_has_class_variables(Name, true),
-            %% BT-4301: descendants' derived flags read this row field
-            %% (`chain_has_class_variables/1`); erase them once it is written.
-            beamtalk_class_shadow_flags:invalidate(Name),
-            beamtalk_class_derived_cache:invalidate();
-        _ ->
-            update_has_class_variables(Name, false),
-            beamtalk_class_shadow_flags:set_class_vars(Name, false),
-            beamtalk_class_shadow_flags:invalidate(Name),
-            beamtalk_class_derived_cache:invalidate()
-    end.
-
--spec update_has_class_variables(class_name(), boolean()) -> ok.
-update_has_class_variables(Name, HasClassVars) ->
-    set_field(Name, #class_metadata.has_class_variables, HasClassVars).
-
--doc """
-Whether a class declares class variables: the fact `put_class_variables/2`
-published, or `unknown` when it never did (no row, or not yet published).
-""".
--spec lookup_has_class_variables(class_name()) -> boolean() | unknown.
-lookup_has_class_variables(Name) ->
-    case field(Name, #class_metadata.has_class_variables) of
-        B when is_boolean(B) -> B;
-        _ -> unknown
-    end.
-
--doc """
-Does `Name` or any ancestor declare class variables, or has one of them not
-published the fact (`lookup_has_class_variables/1` is `unknown`)? ADR 0142 §1
-rule 2 taken over the whole chain (BT-4300). A stateless subclass of a
-stateful class holds, in its own class process, the inherited variables its
-ancestor's methods write (`CvsOverrideSub` in
-`class_var_semantics_override_test.bt`), and a class method it defines itself
-reaches them through a class-side `self` send. Such a class keeps its process
-for every class method; only a chain with no class variables at all runs in
-the caller, and only there is "no class-variable home" the same as an empty
-one (`beamtalk_class_vars`). A hierarchy cycle answers `true`, like any other
-doubt.
-""".
--spec chain_has_class_variables(class_name()) -> boolean().
-chain_has_class_variables(Name) ->
-    StepFun = fun(Class, _Depth) ->
-        case lookup_has_class_variables(Class) of
-            false ->
-                case lookup_superclass(Class) of
-                    {ok, Super} -> {next, Super};
-                    not_found -> not_found
-                end;
-            _ ->
-                {found, true}
-        end
-    end,
-    %% `not_found`: every fact up to the root is `false`. A cycle also counts as
-    %% "has class variables" (the conservative answer) and is deliberately not
-    %% logged here: this is a per-send gate and nothing caches the cycle
-    %% answer, so a warning would repeat on every send.
-    beamtalk_hierarchy:walk_ancestors(Name, StepFun, ?MAX_HIERARCHY_DEPTH) =/= not_found.
 
 -doc """
 Store a class's process-bound class-side selector list (ADR 0142 §1 rule 3,
