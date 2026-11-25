@@ -491,21 +491,28 @@ local_call(Receiver = #beamtalk_object{class = Tag}, Selector, Args) when
             Error = beamtalk_error:new(
                 type_error,
                 ClassName,
-                'performLocally:withArguments:',
+                Selector,
                 <<"Receiver is not a class object">>
             ),
             beamtalk_error:raise(Error)
     end;
-local_call(Receiver, _Selector, _Args) ->
+local_call(Receiver, Selector, _Args) ->
     ClassName =
         case Receiver of
             #beamtalk_object{class = C} -> C;
             _ -> erlang
         end,
+    %% The selector being applied, when it is one (ADR 0153 removed
+    %% `performLocally:withArguments:`, which used to be named here).
+    ErrorSelector =
+        case is_atom(Selector) of
+            true -> Selector;
+            false -> undefined
+        end,
     Error = beamtalk_error:new(
         type_error,
         ClassName,
-        'performLocally:withArguments:',
+        ErrorSelector,
         <<"Receiver is not a class object">>
     ),
     beamtalk_error:raise(Error).

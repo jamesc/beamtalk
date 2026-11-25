@@ -28,8 +28,8 @@ populate those keys.
 
 **Migrations run in the calling process**, not the class's gen_server:
 `invoke_hook/3` resolves the class's registered class object and calls
-`beamtalk_object_class:local_call/3` — proven safe mid-reload by BT-3535's napkin spike. A raised
-exception, a `does_not_understand` (stale/mismatched migrations table), or a
+`beamtalk_object_class:local_call/3`, proven safe mid-reload by BT-3535's
+napkin spike. A raised exception, a `does_not_understand` (stale/mismatched migrations table), or a
 non-`Dictionary` hook result all become a `{error, {Step, Selector, Reason}}`
 from `beamtalk_shape_chain:migrate/4`, wrapped here as
 `#beamtalk_error{kind = shape_migration_failed}`.

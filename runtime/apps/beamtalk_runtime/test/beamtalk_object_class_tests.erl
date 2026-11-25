@@ -1426,10 +1426,14 @@ test_local_call_non_class_receiver() ->
         class_mod = counter,
         pid = self()
     },
-    ?assertBtError(type_error, beamtalk_object_class:local_call(FakeActor, testSuccess, [])).
+    ?assertBtError(
+        type_error, _, testSuccess, beamtalk_object_class:local_call(FakeActor, testSuccess, [])
+    ).
 
 test_local_call_non_object() ->
-    ?assertBtError(type_error, beamtalk_object_class:local_call(not_an_object, testSuccess, [])).
+    ?assertBtError(
+        type_error, _, testSuccess, beamtalk_object_class:local_call(not_an_object, testSuccess, [])
+    ).
 
 %%====================================================================
 %% local_call/3 class-variable snapshot region (ADR 0130 §5, BT-3708)
