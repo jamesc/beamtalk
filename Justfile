@@ -1056,7 +1056,7 @@ test-cache-keys:
 # other job, every job is gated on a `changes` output (so a docs-only PR runs only
 # `changes` and `ci-ok`), and the `code` filter equals the former pull_request
 # `paths:` list. A job added to ci.yml cannot be left out of the one required check.
-# test_merge_queue (BT-5247): ci.yml and claude-review.yml report their required
+# test_merge_queue (BT-5247): ci.yml and claude-review-queue.yml report the required
 # checks on the merge queue's `merge_group` commit, and every other PR workflow is
 # listed as one that cannot be required.
 test-ci-ok:

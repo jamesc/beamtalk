@@ -9,12 +9,13 @@ tests pin that:
 * ci.yml runs on `merge_group`, its `changes` job treats it like a push to
   main (the full Linux suite, `code` true), and an event it does not know
   fails instead of silently picking a gate set;
-* neither ci.yml's nor claude-review.yml's concurrency group cancels a
-  merge-group run or shares a group with a PR run;
-* claude-review.yml reports "Claude BeamTalk Review" on `merge_group` without
-  running a review, from the same single job that runs the review on
-  `pull_request` (so a PR commit never carries a second, skipped check of
-  that name);
+* ci.yml's concurrency group never cancels a merge-group run or shares a
+  group with a PR run;
+* claude-review-queue.yml, on `merge_group` only, reports "Claude BeamTalk
+  Review" without running a review, and claude-review.yml stays
+  `pull_request`-only. Two files, not one: claude-code-action refuses to run
+  on a PR that edits its own workflow, and a second same-named job in
+  claude-review.yml would put a skipped check of that name on every PR commit;
 * every other workflow a PR starts is listed in NOT_REQUIRED with the reason
   its check cannot be a required one, so a new PR workflow has to decide.
 """
@@ -33,12 +34,14 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github/workflows"
 CI_YML = WORKFLOWS / "ci.yml"
 REVIEW_YML = WORKFLOWS / "claude-review.yml"
+QUEUE_YML = WORKFLOWS / "claude-review-queue.yml"
 REVIEW_CHECK = "Claude BeamTalk Review"
 
 # Workflows that run on pull_request but must never be required checks, so they
 # need no merge_group trigger. A path- or label-gated workflow does not run on
 # every PR, and GitHub shows a required check that never started as pending
-# forever, so none of these can be required.
+# forever, so none of these can be required. claude-review.yml IS required:
+# its merge_group counterpart is claude-review-queue.yml (see ReviewWorkflow).
 NOT_REQUIRED = {
     "ci-platforms.yml": "label-gated (`ci:all-platforms`) and path-filtered; stays PR-only",
     "core-diff.yml": "label-gated (`ci:core-diff`); compares against the PR base",
@@ -154,66 +157,49 @@ class CiWorkflow(unittest.TestCase):
         self.assertNotEqual(render(conc["group"], q1), render(conc["group"], pr))
 
 
-# Event contexts for claude-review.yml's `if:` expressions.
-MERGE_GROUP = {"github": {"event_name": "merge_group", "event": {}}}
-PULL_REQUEST = {"github": {"event_name": "pull_request", "repository": "o/r", "event": {
-    "pull_request": {"draft": False, "number": 7, "head": {"repo": {"full_name": "o/r"}},
-                     "user": {"login": "jamesc"}}}}}
+def jobs_named(name):
+    """(workflow file, job) for every job in .github/workflows called `name`."""
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        for job in (load(path).get("jobs") or {}).values():
+            if job.get("name") == name:
+                yield path.name, job
 
 
 class ReviewWorkflow(unittest.TestCase):
     def setUp(self):
-        self.doc = load(REVIEW_YML)
-        named = [j for j in self.doc["jobs"].values() if j.get("name") == REVIEW_CHECK]
-        # One job: a second job of the same name would put a *skipped* check of
-        # that name on every PR commit, next to the real review.
-        self.assertEqual(len(named), 1, f"exactly one `{REVIEW_CHECK}` job")
-        self.job = named[0]
+        self.review = load(REVIEW_YML)
+        self.queue = load(QUEUE_YML)
 
-    def runs(self, cond, ctx):
-        return cond is None or bool(evaluate(str(cond), **ctx))
+    def test_the_review_runs_on_pull_request_only(self):
+        self.assertEqual(set(triggers(self.review)), {"pull_request"})
 
-    def steps_run(self, ctx):
-        return [s for s in self.job["steps"] if self.runs(s.get("if"), ctx)]
+    def test_the_queue_workflow_runs_on_merge_group_only(self):
+        self.assertEqual(set(triggers(self.queue)), {"merge_group"})
 
-    def test_runs_on_merge_group(self):
-        self.assertIn("merge_group", triggers(self.doc))
+    def test_exactly_two_jobs_report_the_check_one_per_event(self):
+        named = sorted(f for f, _ in jobs_named(REVIEW_CHECK))
+        self.assertEqual(named, ["claude-review-queue.yml", "claude-review.yml"])
 
-    def test_merge_group_reports_the_required_check_without_a_review(self):
-        self.assertTrue(self.runs(self.job["if"], MERGE_GROUP))
-        steps = self.steps_run(MERGE_GROUP)
-        self.assertTrue(steps, "the job needs at least one step to report a pass")
-        for step in steps:
+    def test_merge_group_reports_a_pass_without_a_review(self):
+        (job,) = [j for f, j in jobs_named(REVIEW_CHECK) if f == QUEUE_YML.name]
+        self.assertNotIn("if", job, "a skipped job may not count as the required check")
+        self.assertEqual(job.get("permissions"), {})
+        self.assertEqual(self.queue.get("permissions"), {})
+        self.assertTrue(job["steps"])
+        for step in job["steps"]:
             self.assertIn("run", step, step)
             self.assertNotIn("uses", step, step)
+            self.assertNotIn("if", step, step)
             text = yaml.safe_dump(step)
             self.assertNotIn("secrets.", text)
             self.assertNotIn("exit", text)
 
-    def test_the_review_runs_only_on_pull_request(self):
-        self.assertTrue(self.runs(self.job["if"], PULL_REQUEST))
-        queue_only = self.steps_run(MERGE_GROUP)
-        pr_steps = self.steps_run(PULL_REQUEST)
-        self.assertFalse([s for s in queue_only if s in pr_steps], "a step runs on both events")
-        self.assertTrue(any("anthropics/claude-code-action" in str(s.get("uses")) for s in pr_steps))
-        self.assertTrue(any(s.get("name") == "Gate on verdict" for s in pr_steps))
-
-    def test_a_pull_request_from_someone_else_is_still_skipped(self):
-        ctx = {"github": {**PULL_REQUEST["github"]}}
-        ctx["github"]["event"] = {"pull_request": {**PULL_REQUEST["github"]["event"]["pull_request"],
-                                                   "user": {"login": "someone-else"}}}
-        self.assertFalse(self.runs(self.job["if"], ctx))
-
-    def test_concurrency_never_cancels_a_merge_group_run(self):
-        conc = self.doc["concurrency"]
-        q1 = {"github": {"event_name": "merge_group", "sha": "a", "event": {}}}
-        q2 = {"github": {"event_name": "merge_group", "sha": "b", "event": {}}}
-        pr = {"github": {"event_name": "pull_request", "sha": "a",
-                         "event": {"pull_request": {"number": 7}}}}
+    def test_queue_concurrency_never_cancels_or_merges_entries(self):
+        conc = self.queue["concurrency"]
+        q1 = {"github": {"event_name": "merge_group", "sha": "a"}}
+        q2 = {"github": {"event_name": "merge_group", "sha": "b"}}
         self.assertNotEqual(render(conc["group"], q1), render(conc["group"], q2))
-        self.assertNotEqual(render(conc["group"], q1), render(conc["group"], pr))
         self.assertFalse(evaluate(str(conc["cancel-in-progress"]), **q1))
-        self.assertTrue(evaluate(str(conc["cancel-in-progress"]), **pr))
 
 
 class Inventory(unittest.TestCase):
@@ -224,6 +210,8 @@ class Inventory(unittest.TestCase):
                 continue
             if path.name in NOT_REQUIRED:
                 self.assertNotIn("merge_group", on, f"{path.name} is listed as not required")
+            elif path == REVIEW_YML:
+                continue  # claude-review-queue.yml reports its check (ReviewWorkflow)
             else:
                 self.assertIn("merge_group", on, f"{path.name}: add merge_group or list it in NOT_REQUIRED")
 

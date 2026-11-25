@@ -1057,7 +1057,7 @@ it re-queues while auto-merge is still on.
 | Check | Workflow | On `merge_group` |
 |-------|----------|------------------|
 | `ci-ok` | `ci.yml` | The full Linux suite, as on a push to `main`: every path gate true, every OTP in the window. Not the corpus tier: `corpus.yml` runs on `main` after the merge, and the queue run has only its fixture-reader subset |
-| `Claude BeamTalk Review` | `claude-review.yml` | Reports a pass without reviewing: the review already ran on the PR |
+| `Claude BeamTalk Review` | `claude-review.yml` on the PR; `claude-review-queue.yml` on `merge_group` | Reports a pass without reviewing: the review already ran on the PR |
 
 No other check may be required. The other workflows a PR starts
 (`ci-platforms.yml`, `core-diff.yml`, `corpus.yml` and the LiveView ones) are
@@ -1072,8 +1072,15 @@ until the workflow either gets a `merge_group` trigger or is added to that list.
 failure costs every PR in it a re-run. A queue run is the full suite, as long as
 a run on `main`, so a batch of a few keeps the queue moving.
 
-A queue run is keyed on its own commit in both workflows' `concurrency:`
-groups, so it is never cancelled by another queue entry or by a PR run.
+The queue's "Claude BeamTalk Review" comes from its own workflow,
+`claude-review-queue.yml` (`merge_group` only, no permissions). It isn't a
+second job in `claude-review.yml`, for two reasons. claude-code-action refuses
+to review a PR that edits the workflow invoking it. And a same-named job
+skipped on `pull_request` would put a skipped check next to the running review,
+which branch protection can count as a pass.
+
+A queue run is keyed on its own commit in the `concurrency:` groups, so it is
+never cancelled by another queue entry or by a PR run.
 `main` still runs `ci.yml` and `corpus.yml` on every merge: the queue does not
 replace that run. A failed queue run files no issue: `ci-triage.yml` triages
 only runs whose head branch is `main`, and a queue run's branch is
