@@ -501,3 +501,19 @@ fn comment_before_a_block_parameter_is_kept() {
     );
     assert_formats_to("x := [ // c\n  :a | a]\n", "x := [  // c\n  :a |\n  a\n]\n");
 }
+
+#[test]
+fn comment_before_the_next_statement_is_not_taken_by_a_missing_argument() {
+    // `bar:` has no argument: the `at:` on the next line cannot be one. The
+    // comment before it leads that next statement and must not also be
+    // filed as `bar:`'s argument gap.
+    let source = "object foo: 1 bar:\n\n// next\nat: 42\n";
+    let module = parse_source(source);
+    let anchor = u32::try_from(source.find("at:").expect("at:")).expect("offset");
+    assert_eq!(
+        module
+            .literal_comments
+            .gap(anchor, crate::ast::GapSlot::AfterKeyword),
+        None
+    );
+}

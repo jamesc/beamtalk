@@ -69,28 +69,42 @@ impl Parser {
     /// Parses a return statement.
     fn parse_return(&mut self) -> Expression {
         let start = self.tokens[self.current - 1].span();
-        self.record_value_gap();
-        let value = Box::new(self.parse_assignment());
+        let value = Box::new(self.parse_after_gap(GapSlot::BeforeValue, Self::parse_assignment));
         let end = value.span();
         let span = start.merge(end);
 
         Expression::Return { value, span }
     }
 
-    /// Files the comments between a just-consumed keyword and its argument
-    /// (BT-5183), anchored at the argument's first token.
-    fn record_argument_gap(&mut self) {
+    /// Parses, with `parse`, the value after a just-consumed `:=`, `^`, `=`
+    /// or keyword, filing the comments written before it under `slot`
+    /// (BT-5183).
+    pub(super) fn parse_after_gap(
+        &mut self,
+        slot: GapSlot,
+        parse: impl FnOnce(&mut Self) -> Expression,
+    ) -> Expression {
         let gap = self.gap_before_current();
-        let anchor = self.current_token().span().start();
-        self.record_gap(anchor, GapSlot::AfterKeyword, gap);
+        self.parse_with_gap(gap, slot, parse)
     }
 
-    /// Files the comments between a just-consumed `:=` or `^` and the value
-    /// that follows (BT-5183), anchored at the value's first token.
-    pub(super) fn record_value_gap(&mut self) {
-        let gap = self.gap_before_current();
+    /// Parses a value with `parse`, filing `gap` (the comments written just
+    /// before it) under `slot`, anchored at the value's first token — but
+    /// only when a value starting there was parsed. In broken code
+    /// (`foo:` with its argument missing) the next token starts the next
+    /// statement, and the comments before it are that statement's.
+    fn parse_with_gap(
+        &mut self,
+        gap: GapComments,
+        slot: GapSlot,
+        parse: impl FnOnce(&mut Self) -> Expression,
+    ) -> Expression {
         let anchor = self.current_token().span().start();
-        self.record_gap(anchor, GapSlot::BeforeValue, gap);
+        let value = parse(self);
+        if !value.is_error() && value.span().start() == anchor {
+            self.record_gap(anchor, slot, gap);
+        }
+        value
     }
 
     /// Parses an assignment or regular expression.
@@ -149,8 +163,9 @@ impl Parser {
         let start = self.current_token().span();
         let pattern = self.parse_tuple_pattern();
         self.expect(&TokenKind::Assign, "Expected ':=' after tuple pattern");
-        self.record_value_gap();
-        let value = Box::new(self.with_expression_nesting(start, Self::parse_assignment));
+        let value = Box::new(self.parse_after_gap(GapSlot::BeforeValue, |p| {
+            p.with_expression_nesting(start, Self::parse_assignment)
+        }));
         let span = start.merge(value.span());
         Expression::DestructureAssignment {
             pattern,
@@ -220,9 +235,9 @@ impl Parser {
     ) -> Expression {
         match Self::collection_elements_to_pattern(elements, lhs_span, list_syntax) {
             Ok(pattern) => {
-                self.record_value_gap();
-                let value =
-                    Box::new(self.with_expression_nesting(lhs_span, Self::parse_assignment));
+                let value = Box::new(self.parse_after_gap(GapSlot::BeforeValue, |p| {
+                    p.with_expression_nesting(lhs_span, Self::parse_assignment)
+                }));
                 let span = lhs_span.merge(value.span());
                 Expression::DestructureAssignment {
                     pattern,
@@ -247,9 +262,9 @@ impl Parser {
     fn parse_map_destructure(&mut self, pairs: &[MapPair], lhs_span: Span) -> Expression {
         match Self::map_pairs_to_pattern(pairs, lhs_span) {
             Ok(pattern) => {
-                self.record_value_gap();
-                let value =
-                    Box::new(self.with_expression_nesting(lhs_span, Self::parse_assignment));
+                let value = Box::new(self.parse_after_gap(GapSlot::BeforeValue, |p| {
+                    p.with_expression_nesting(lhs_span, Self::parse_assignment)
+                }));
                 let span = lhs_span.merge(value.span());
                 Expression::DestructureAssignment {
                     pattern,
@@ -288,8 +303,9 @@ impl Parser {
             };
         }
 
-        self.record_value_gap();
-        let value = Box::new(self.with_expression_nesting(expr.span(), Self::parse_assignment));
+        let value = Box::new(self.parse_after_gap(GapSlot::BeforeValue, |p| {
+            p.with_expression_nesting(expr.span(), Self::parse_assignment)
+        }));
         let span = expr.span().merge(value.span());
         Expression::Assignment {
             target: Box::new(expr),
@@ -321,8 +337,9 @@ impl Parser {
             };
         }
 
-        self.record_value_gap();
-        let value = Box::new(self.with_expression_nesting(start, Self::parse_assignment));
+        let value = Box::new(self.parse_after_gap(GapSlot::BeforeValue, |p| {
+            p.with_expression_nesting(start, Self::parse_assignment)
+        }));
         let span = start.merge(value.span());
         Expression::Assignment {
             target: Box::new(target),
@@ -749,8 +766,8 @@ impl Parser {
 
                 // Parse argument (which is a binary message), after any
                 // comments between the keyword and it (BT-5183).
-                self.record_argument_gap();
-                arguments.push(self.parse_binary_message());
+                arguments
+                    .push(self.parse_after_gap(GapSlot::AfterKeyword, Self::parse_binary_message));
             }
 
             if keywords.is_empty() {
@@ -785,9 +802,11 @@ impl Parser {
             // the `;`) are the cascade's own gap (BT-5183).
             let gap = self.gap_before(self.current + 1);
             self.advance();
-            let anchor = self.current_token().span().start();
-            self.record_gap(anchor, GapSlot::AroundBinaryOperator, gap);
-            let arg = self.parse_unary_message();
+            let arg = self.parse_with_gap(
+                gap,
+                GapSlot::AroundBinaryOperator,
+                Self::parse_unary_message,
+            );
             let span = start_span.merge(arg.span());
             return CascadeMessage::new(selector, vec![arg], span);
         }
@@ -968,8 +987,7 @@ impl Parser {
 
             // Parse argument (which is a binary message), after any
             // comments between the keyword and it (BT-5183).
-            self.record_argument_gap();
-            arguments.push(self.parse_binary_message());
+            arguments.push(self.parse_after_gap(GapSlot::AfterKeyword, Self::parse_binary_message));
         }
 
         // Safety: the pre-loop guard above returns early for any leading-newline
@@ -1063,8 +1081,6 @@ impl Parser {
             // it against its argument (BT-5183).
             let gap = self.gaps_around_current();
             let op_span = self.advance().span();
-            let anchor = self.current_token().span().start();
-            self.record_gap(anchor, GapSlot::AroundBinaryOperator, gap);
 
             // Parse the right-hand side with the operator's right binding
             // power. A right-associative operator's right operand repeats
@@ -1072,18 +1088,20 @@ impl Parser {
             // (`2 ** 2 ** ...`) and goes through the nesting guard; a
             // left-associative operator's recursion is bounded by the number
             // of precedence levels.
-            let right = if bp.right < bp.left {
-                self.with_nesting(
-                    op_span,
-                    |p| {
-                        let end = p.skip_binary_operands();
-                        Self::nesting_error(op_span.merge(end))
-                    },
-                    |p| p.parse_binary_with_pratt(bp.right),
-                )
-            } else {
-                self.parse_binary_with_pratt(bp.right)
-            };
+            let right = self.parse_with_gap(gap, GapSlot::AroundBinaryOperator, |p| {
+                if bp.right < bp.left {
+                    p.with_nesting(
+                        op_span,
+                        |p| {
+                            let end = p.skip_binary_operands();
+                            Self::nesting_error(op_span.merge(end))
+                        },
+                        |p| p.parse_binary_with_pratt(bp.right),
+                    )
+                } else {
+                    p.parse_binary_with_pratt(bp.right)
+                }
+            });
 
             if !self.chain_may_grow(&mut links, op_span) {
                 // Past the chain limit: consume the rest without building it.
