@@ -669,7 +669,7 @@ Do **not** add license headers to `.md` files. The repo `LICENSE` file covers al
 
 ### Blocks Passed Into Class Methods
 
-A class method runs in the caller's process, and so does a block passed into it, unless the selector is process-bound (`new`, `new:`, `spawn`, `spawnWith:`, `startLink`, …). A class has no state of its own (ADR 0153), so nothing else decides it, and sealing plays no part (ADR 0142). In the caller, `self()`, the process dictionary, links, monitors and any resource the method creates are the caller's, and calls are not serialised.
+A class method runs in the caller's process, and so does a block passed into it, unless the selector is process-bound (`new`, `new:`, `spawn`, `spawnWith:`, `startLink`, …). A class has no state of its own (ADR 0153), so nothing else decides it (until the ADR 0153 Phase 3 issues land, a class method installed as a runtime fun, e.g. from `ClassBuilder classMethods:`, still runs in the class process), and sealing plays no part (ADR 0142). In the caller, `self()`, the process dictionary, links, monitors and any resource the method creates are the caller's, and calls are not serialised.
 
 When a process-bound selector runs in the class process, a block passed in runs there, not where it was written. Values and non-local returns (`^`) cross that boundary fine; **process-local side effects do not** — a block that writes the process dictionary or reads `self()` affects the class process, and a block that messages the same class back raises `dispatch_error` rather than deadlocking (BT-3022).
 
