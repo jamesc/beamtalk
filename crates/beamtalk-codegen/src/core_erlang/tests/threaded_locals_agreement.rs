@@ -195,6 +195,51 @@ fn threaded_locals_of_agrees_with_the_core_recognizer_over_the_program_corpus() 
     assert!(agreed > 0, "only {agreed} non-empty threaded sets compared");
 }
 
+/// Hand-written shapes for the constructs `arb_program` does not generate: the ones
+/// that bind block parameters (`do:`, `inject:into:`, `to:do:`, `timesRepeat:`) or open
+/// a protected region (`on:do:`, `ensure:`), where codegen's `lookup_var` scope and the
+/// source scope can diverge: parameter shadowing, fold accumulators, nested constructs
+/// writing an outer local, and locals first bound inside a block.
+const BLOCK_PARAM_SOURCES: &[&str] = &[
+    "Object subclass: Bp1\n  run =>\n    t := 0\n    #(1, 2, 3) do: [:x | t := t + x]\n    t\n",
+    "Object subclass: Bp2\n  run =>\n    t := 0\n    #(1, 2) do: [:t | t := t + 1]\n    t\n",
+    "Object subclass: Bp3\n  run =>\n    n := 0\n    s := #(1, 2, 3) inject: 0 into: [:acc :x | n := n + 1. acc + x]\n    s + n\n",
+    "Object subclass: Bp4\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + i]\n    sum\n",
+    "Object subclass: Bp5\n  run =>\n    c := 0\n    3 timesRepeat: [c := c + 1]\n    c\n",
+    "Object subclass: Bp6\n  run =>\n    r := 0\n    [r := 1. nil foo] on: Error do: [:e | r := r + 2]\n    r\n",
+    "Object subclass: Bp7\n  run =>\n    r := 0\n    [r := 1] ensure: [r := r + 1]\n    r\n",
+    "Object subclass: Bp8\n  run =>\n    t := 0\n    #(1, 2) do: [:x | #(3, 4) do: [:y | t := t + x + y]]\n    t\n",
+    "Object subclass: Bp9\n  run =>\n    t := 0\n    1 to: 3 do: [:i | [t := t + i] ensure: [u := i]]\n    t\n",
+    "Object subclass: Bp10\n  run =>\n    t := 0\n    #(1, 2) do: [:x | [t := t + x. nil bar] on: Error do: [:e | t := t + 10]]\n    t\n",
+    "Object subclass: Bp11\n  run =>\n    t := 0\n    #(1, 2) do: [:x | u := x. t := t + u]\n    t\n",
+];
+
+#[test]
+fn threaded_locals_of_agrees_with_the_core_recognizer_over_block_param_constructs() {
+    let mut agreed = 0;
+    let mut compiled = 0;
+    for source in BLOCK_PARAM_SOURCES {
+        let name = source
+            .strip_prefix("Object subclass: ")
+            .and_then(|rest| rest.split_whitespace().next())
+            .expect("source names its class");
+        match check_class(name, source) {
+            Ok(Some(n)) => {
+                compiled += 1;
+                agreed += n;
+            }
+            Ok(None) => {}
+            Err(e) => panic!("{name}: {e}"),
+        }
+    }
+    // Not vacuous: most shapes compile and each construct yields a non-empty set.
+    assert!(compiled >= 10, "only {compiled} classes compiled");
+    assert!(
+        agreed >= 25,
+        "only {agreed} non-empty threaded sets compared"
+    );
+}
+
 #[test]
 fn source_sets_walk_sees_assignment_order() {
     // Sanity check of the oracle itself: `t` is bound before the loop, `u`
