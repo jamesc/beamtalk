@@ -1154,6 +1154,21 @@ defmodule BtAttachWeb.Live.DockTest do
       assert socket.assigns.eval_queue == []
     end
 
+    test "a crashed dock eval keeps its crash reason even with a dock eval queued behind it" do
+      running = %{kind: :eval, action: :print_it, expr: "1"}
+      queued = %{kind: :eval, action: :print_it, expr: "2"}
+
+      socket =
+        base_socket(%{
+          eval_running: true,
+          eval_current: running,
+          eval_queue: [{queued, self(), "2"}]
+        })
+
+      {:noreply, socket} = Dock.handle_async(:eval, {:exit, :boom}, socket)
+      assert socket.assigns.error =~ "The evaluation failed unexpectedly: :boom"
+    end
+
     test "abandon_evals (workspace DOWN) tells the running and queued operations" do
       running = %{kind: :fold, fold: fn s, _ -> s end, reject: &reject_to_error/2, key: nil}
 

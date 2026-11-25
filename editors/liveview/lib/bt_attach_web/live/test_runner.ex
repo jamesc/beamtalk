@@ -301,9 +301,16 @@ defmodule BtAttachWeb.Live.TestRunner do
   # replaced or stopped meanwhile) carries an old token and is ignored.
   @doc false
   def handle_info({:test_op_task, token, pid}, socket) do
-    if socket.assigns[:test_op_token] == token,
-      do: {:noreply, assign(socket, test_op_pid: pid)},
-      else: {:noreply, socket}
+    if socket.assigns[:test_op_token] == token do
+      # Only now may the task start its workspace call: Stop, or a newer run,
+      # is processed either before this (the task is cancelled before it ever
+      # calls the workspace) or after (`test_op_pid` is known, so its worker
+      # is found and killed). No window leaves a worker unreachable.
+      send(pid, {:test_op_go, token})
+      {:noreply, assign(socket, test_op_pid: pid)}
+    else
+      {:noreply, socket}
+    end
   end
 
   # ── Test-runner pane data source (BT-2557) ──────────────────────────────────
@@ -423,8 +430,9 @@ defmodule BtAttachWeb.Live.TestRunner do
   end
 
   # Start a run/load in the `:test_op` task. The task first tells the LiveView
-  # its pid (tagged with a fresh token), so `stop_test_op/1` can reach the
-  # workspace-side worker its `:erpc` call is waiting on (BT-5189).
+  # its pid (tagged with a fresh token) and waits for the go-ahead, so
+  # `stop_test_op/1` can always reach the workspace-side worker its `:erpc`
+  # call waits on (BT-5189) — see `handle_info({:test_op_task, …})`.
   defp start_test_op(socket, op) do
     lv = self()
     token = make_ref()
@@ -441,7 +449,10 @@ defmodule BtAttachWeb.Live.TestRunner do
     |> cancel_async(:test_op, :cancelled)
     |> start_async(:test_op, fn ->
       send(lv, {:test_op_task, token, self()})
-      op.()
+
+      receive do
+        {:test_op_go, ^token} -> op.()
+      end
     end)
   end
 

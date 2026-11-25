@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type * as WsModule from "ws";
@@ -250,10 +250,10 @@ export class WorkspaceClient {
    * @param options.baseDir  Override base directory (default: `$BEAMTALK_HOME/workspaces`, else `~/.beamtalk/workspaces`).
    * @param options.wsFactory  Override WebSocket factory (for testing).
    */
-  static fromFiles(
+  static async fromFiles(
     workspaceId: string,
     options?: { baseDir?: string; wsFactory?: WebSocketFactory }
-  ): WorkspaceClient {
+  ): Promise<WorkspaceClient> {
     const base = options?.baseDir ?? workspacesBaseDir();
     if (base === undefined) {
       throw new Error("Cannot locate the Beamtalk workspaces directory: no home directory");
@@ -269,7 +269,7 @@ export class WorkspaceClient {
     }
     const port = parsed.port;
 
-    assertPortFileFresh(wsDir, port, parsed.nonce);
+    await assertPortFileFresh(wsDir, port, parsed.nonce);
 
     const cookie = fs.readFileSync(path.join(wsDir, "cookie"), "utf8").trim();
     if (!cookie) {
@@ -277,12 +277,20 @@ export class WorkspaceClient {
     }
 
     // A restarted node rewrites its port file with a fresh nonce, so the nonce
-    // tells a transient reconnect to the same node from one to a new node.
+    // tells a transient reconnect to the same node from one to a new node. A
+    // crashed node's files linger until its successor rewrites them, so the
+    // identity also needs the node pid recorded in node.info to be alive —
+    // otherwise it is unknown, which counts as a new node.
     const portFile = path.join(wsDir, "port");
     const nodeIdentity = (): string | undefined => {
       try {
         const reread = parsePortFileContent(fs.readFileSync(portFile, "utf8"));
-        return reread.ok ? reread.nonce : undefined;
+        if (!reread.ok || reread.nonce === undefined) return undefined;
+        const info = JSON.parse(fs.readFileSync(path.join(wsDir, "node.info"), "utf8")) as {
+          pid?: unknown;
+        };
+        if (typeof info.pid === "number" && !pidAlive(info.pid)) return undefined;
+        return reread.nonce;
       } catch {
         return undefined;
       }
@@ -967,7 +975,11 @@ export function parsePortFileContent(content: string): PortFileParse {
  * alive. A killed node whose port was re-bound by another process therefore
  * never receives the cookie. Old files without a nonce/pid stay accepted.
  */
-function assertPortFileFresh(wsDir: string, port: number, fileNonce: string | undefined): void {
+async function assertPortFileFresh(
+  wsDir: string,
+  port: number,
+  fileNonce: string | undefined
+): Promise<void> {
   let raw: string;
   try {
     raw = fs.readFileSync(path.join(wsDir, "node.info"), "utf8");
@@ -1008,7 +1020,7 @@ function assertPortFileFresh(wsDir: string, port: number, fileNonce: string | un
     // Windows). Read as digits from the raw text: a Windows FILETIME tick count
     // is past 2^53, so `JSON.parse` would round it.
     const expected = rawStartTime(raw, info.start_time);
-    if (!startTimeMatches(expected, procStartTime(info.pid))) {
+    if (!startTimeMatches(expected, await procStartTime(info.pid))) {
       throw new Error(
         `Stale port file in ${wsDir}: pid ${info.pid} is alive but its start time differs from node.info (pid reused)`
       );
@@ -1041,22 +1053,33 @@ export type StartTimeObservation =
   | { kind: "gone" }
   | { kind: "unknown" };
 
-/** Runs a probe command: its stdout, or throws (a spawn error or non-zero exit). */
-export type ProbeRunner = (file: string, args: string[]) => string;
+/**
+ * Runs a probe command: resolves to its stdout, or rejects (a spawn error or
+ * a non-zero exit). Asynchronous so a slow probe (a PowerShell cold start
+ * takes seconds) never blocks the extension host (BT-5189).
+ */
+export type ProbeRunner = (file: string, args: string[]) => Promise<string>;
 
 const runProbe: ProbeRunner = (file, args) =>
-  execFileSync(file, args, {
-    encoding: "utf8",
-    timeout: 10_000,
-    windowsHide: true,
-    stdio: ["ignore", "pipe", "ignore"],
-    env: { ...process.env, LC_ALL: "C" },
+  new Promise((resolve, reject) => {
+    execFile(
+      file,
+      args,
+      {
+        encoding: "utf8",
+        timeout: 10_000,
+        windowsHide: true,
+        // `TZ=UTC`: `ps -o lstart=` then prints UTC, which has no repeated hour.
+        env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
+      },
+      (err, stdout) => (err ? reject(err) : resolve(stdout))
+    );
   });
 
-/** A spawn failure (tool missing, timed out) rather than the tool's own non-zero exit. */
+/** A spawn failure (tool missing) or a kill (timed out) rather than the tool's own non-zero exit. */
 function probeUnavailable(err: unknown): boolean {
-  const e = err as { code?: unknown; status?: unknown; signal?: unknown };
-  return typeof e.code === "string" || (e.status == null && e.signal != null);
+  const e = err as { code?: unknown; killed?: unknown; signal?: unknown };
+  return typeof e.code === "string" || e.killed === true || e.signal != null;
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -1070,11 +1093,11 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
  * - macOS: microseconds since the epoch. `ps -o lstart=` gives whole seconds,
  *   so the observation's resolution is one second.
  */
-export function procStartTime(
+export async function procStartTime(
   pid: number,
   platform: NodeJS.Platform = process.platform,
   run: ProbeRunner = runProbe
-): StartTimeObservation {
+): Promise<StartTimeObservation> {
   if (!Number.isSafeInteger(pid) || pid <= 0) return { kind: "gone" };
   switch (platform) {
     case "linux":
@@ -1103,7 +1126,7 @@ function linuxStartTime(pid: number): StartTimeObservation {
   }
 }
 
-function windowsStartTime(pid: number, run: ProbeRunner): StartTimeObservation {
+async function windowsStartTime(pid: number, run: ProbeRunner): Promise<StartTimeObservation> {
   // `gone` only when the process does not exist; any other failure (access
   // denied reading another user's process) is `unknown`, never a mismatch.
   const script =
@@ -1111,7 +1134,9 @@ function windowsStartTime(pid: number, run: ProbeRunner): StartTimeObservation {
     `try { $p.StartTime.ToFileTimeUtc() } catch { 'unknown' }`;
   let out: string;
   try {
-    out = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]).trim();
+    out = (
+      await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script])
+    ).trim();
   } catch {
     return { kind: "unknown" };
   }
@@ -1121,26 +1146,19 @@ function windowsStartTime(pid: number, run: ProbeRunner): StartTimeObservation {
     : { kind: "unknown" };
 }
 
-function macosStartTime(pid: number, run: ProbeRunner): StartTimeObservation {
+async function macosStartTime(pid: number, run: ProbeRunner): Promise<StartTimeObservation> {
   let out: string;
   try {
-    out = run("ps", ["-o", "lstart=", "-p", String(pid)]).trim();
+    out = (await run("ps", ["-o", "lstart=", "-p", String(pid)])).trim();
   } catch (err) {
     // `ps` exits non-zero when no process has that pid.
     return probeUnavailable(err) ? { kind: "unknown" } : { kind: "gone" };
   }
-  // `lstart` (LC_ALL=C), local time: "Wed Nov 25 11:00:00 2026".
+  // `lstart` (LC_ALL=C, TZ=UTC): "Wed Nov 25 11:00:00 2026", in UTC.
   const m = /^\w{3}\s+(\w{3})\s+(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+(\d{4})$/.exec(out);
   const month = m ? MONTHS.indexOf(m[1]) : -1;
   if (!m || month < 0) return out === "" ? { kind: "gone" } : { kind: "unknown" };
-  const ms = new Date(
-    Number(m[6]),
-    month,
-    Number(m[2]),
-    Number(m[3]),
-    Number(m[4]),
-    Number(m[5])
-  ).getTime();
+  const ms = Date.UTC(Number(m[6]), month, Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5]));
   if (!Number.isFinite(ms)) return { kind: "unknown" };
   return { kind: "time", value: BigInt(ms / 1000) * 1_000_000n, resolution: 1_000_000n };
 }

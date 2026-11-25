@@ -254,4 +254,14 @@ describe("InspectorPanel error states and waiters (BT-5189)", () => {
     await flush();
     expect(next.bindingValue).not.toHaveBeenCalled();
   });
+
+  it("keeps the last value when the workspace goes away", async () => {
+    InspectorPanel.show(fakeClient("kept"), binding);
+    await flush();
+    expect(lastPosted()).toContain("kept");
+
+    InspectorPanel.setClient(null);
+    await flush();
+    expect(lastPosted()).toContain("kept");
+  });
 });

@@ -698,9 +698,15 @@ defmodule BtAttachWeb.Live.Dock do
   """
   def abandon_evals(socket, running_message, queued_message) do
     current = Map.get(socket.assigns, :eval_current)
-    socket = assign(socket, eval_running: false, eval_current: nil)
-    socket = if current, do: fail_job(socket, current, running_message), else: socket
-    drop_queued_evals(socket, queued_message, :abandon)
+
+    # The queued jobs first: dock evals share one error line, and the running
+    # job's message (e.g. why its task crashed) is the one that must stay.
+    socket =
+      socket
+      |> assign(eval_running: false, eval_current: nil)
+      |> drop_queued_evals(queued_message, :abandon)
+
+    if current, do: fail_job(socket, current, running_message), else: socket
   end
 
   # Cap the backlog (BT-5108): each queued entry holds its source text, and a

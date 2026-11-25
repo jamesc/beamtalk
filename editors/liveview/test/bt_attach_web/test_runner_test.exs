@@ -505,4 +505,20 @@ defmodule BtAttachWeb.Live.TestRunnerTest do
     assert_receive {:DOWN, ^ref, :process, ^task, _}
     assert :ok = TestRunner.kill_remote_workers(task)
   end
+
+  # BT-5189: a run's task waits for the LiveView's go-ahead before calling the
+  # workspace, so Stop either cancels it before it calls or finds its pid.
+  test "the current run's task gets the go-ahead and its pid is recorded; a stale one gets neither" do
+    token = make_ref()
+    socket = base_socket(%{tests_running: true, test_op_token: token, test_op_pid: nil})
+
+    {:noreply, socket} = TestRunner.handle_info({:test_op_task, token, self()}, socket)
+    assert_received {:test_op_go, ^token}
+    assert socket.assigns.test_op_pid == self()
+
+    stale = make_ref()
+    {:noreply, socket} = TestRunner.handle_info({:test_op_task, stale, self()}, socket)
+    refute_received {:test_op_go, ^stale}
+    assert socket.assigns.test_op_pid == self()
+  end
 end

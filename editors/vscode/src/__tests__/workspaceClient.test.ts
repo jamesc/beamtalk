@@ -740,8 +740,14 @@ describe("WorkspaceClient reconnect, timeout and close handling", () => {
     mkdirSync(dir);
     writeFileSync(path.join(dir, "port"), "4000\nnonce-a");
     writeFileSync(path.join(dir, "cookie"), "secret");
+    const nodeInfo = (pid: number) =>
+      writeFileSync(
+        path.join(dir, "node.info"),
+        JSON.stringify({ port: 4000, pid, nonce: "nonce-a" })
+      );
+    nodeInfo(process.pid);
     const sockets: MockWebSocket[] = [];
-    const client = WorkspaceClient.fromFiles("ws1", {
+    const client = await WorkspaceClient.fromFiles("ws1", {
       baseDir: base,
       wsFactory: (_url, callbacks) => {
         const s = new MockWebSocket(callbacks);
@@ -770,6 +776,14 @@ describe("WorkspaceClient reconnect, timeout and close handling", () => {
     sockets[1].drop();
     await vi.advanceTimersByTimeAsync(1000);
     handshake(sockets[2]);
+    expect(client.nodeChangedOnLastConnect).toBe(true);
+
+    // The node crashed and a successor took the port before rewriting the
+    // files: the old nonce lingers, but the recorded node pid is dead.
+    sockets[2].drop();
+    nodeInfo(2147483646);
+    await vi.advanceTimersByTimeAsync(1000);
+    handshake(sockets[3]);
     expect(client.nodeChangedOnLastConnect).toBe(true);
     client.dispose();
   });

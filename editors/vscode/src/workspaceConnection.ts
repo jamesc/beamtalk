@@ -57,10 +57,23 @@ const MAX_CONNECT_RETRIES = 3;
 const CONNECT_RETRY_MS = 500;
 
 /**
+ * Bumped by every connect and disconnect. Creating a client is asynchronous
+ * (its stale-port check may run a start-time probe, BT-5189), so a connect
+ * that finishes after a newer connect or a disconnect must not install its
+ * client.
+ */
+let connectGeneration = 0;
+
+/**
  * Connect the WorkspaceClient to the workspace identified by `workspaceId`.
  * Disposes any existing connection first.
  */
 function connectWorkspace(workspaceId: string, attempt = 0): void {
+  void connectWorkspaceAsync(workspaceId, attempt);
+}
+
+async function connectWorkspaceAsync(workspaceId: string, attempt: number): Promise<void> {
+  const generation = ++connectGeneration;
   // Always dispose the previous connection — even if the workspace ID matches,
   // the port number may have changed (workspace restart overwrites the port file).
   if (state.workspaceWsClient) {
@@ -73,8 +86,9 @@ function connectWorkspace(workspaceId: string, attempt = 0): void {
 
   let newClient: WorkspaceClient;
   try {
-    newClient = WorkspaceClient.fromFiles(workspaceId);
+    newClient = await WorkspaceClient.fromFiles(workspaceId);
   } catch (err) {
+    if (generation !== connectGeneration) return;
     const msg = err instanceof Error ? err.message : String(err);
     state.outputChannel?.warn(
       `Failed to create WorkspaceClient for workspace ${workspaceId}: ${msg}`
@@ -88,6 +102,11 @@ function connectWorkspace(workspaceId: string, attempt = 0): void {
         connectWorkspace(workspaceId, attempt + 1);
       }, CONNECT_RETRY_MS);
     }
+    return;
+  }
+  if (generation !== connectGeneration) {
+    // A newer connect or a disconnect ran meanwhile; it owns the connection.
+    newClient.dispose();
     return;
   }
 
@@ -138,6 +157,7 @@ function connectWorkspace(workspaceId: string, attempt = 0): void {
 
 /** Disconnect from the current workspace and show disconnected state. */
 function disconnectWorkspace(reason: "port-removed"): void {
+  ++connectGeneration;
   if (!state.workspaceWsClient) {
     return;
   }

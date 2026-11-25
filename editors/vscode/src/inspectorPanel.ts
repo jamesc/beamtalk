@@ -169,6 +169,9 @@ export class InspectorPanel {
     this._client = client;
     this._clientChanged = clientChanged;
     if (this._disposed) return;
+    // The workspace went away: keep showing the last value (refetching would
+    // only replace it with "Not connected"); the next client refetches.
+    if (!client && clientChanged) return;
     if (!client || client.state === "connected") {
       void this._refetch();
       return;
