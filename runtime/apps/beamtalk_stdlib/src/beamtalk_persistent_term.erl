@@ -154,8 +154,8 @@ build_locked(Key, Block, Miss) ->
                         runtime_error,
                         'PersistentTerm',
                         'at:ifAbsentPut:',
-                        "Gave up waiting (~ts after ~p ms) for another process building key ~tp",
-                        [Reason, Timeout, Key]
+                        "Could not take the build lock for key ~tp (~ts; timeout ~p ms)",
+                        [Key, Reason, Timeout]
                     ),
                     #{key => Key, reason => Reason, timeout_ms => Timeout}
                 )

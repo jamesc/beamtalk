@@ -975,6 +975,33 @@ fn sync_parent_dir(path: &Utf8Path) {
     let _ = path;
 }
 
+/// Flush one file's data to disk.
+///
+/// On Windows `sync_all` is `FlushFileBuffers`, which needs a handle with
+/// write access: a read-only `File::open` handle fails with "Access is
+/// denied" (os error 5), which failed every release swap there. A file whose
+/// read-only attribute refuses a write handle (copied that way from the
+/// install) cannot be flushed this way at all, so it is skipped.
+fn sync_file(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        match std::fs::OpenOptions::new().write(true).open(path) {
+            Ok(file) => file.sync_all(),
+            Err(e)
+                if e.kind() == std::io::ErrorKind::PermissionDenied
+                    && std::fs::metadata(path).is_ok_and(|m| m.permissions().readonly()) =>
+            {
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::File::open(path)?.sync_all()
+    }
+}
+
 /// Flush the new release — every file under `release_dir`, the tarball, and
 /// their directory entries — so a `committed` journal can never outlive, on
 /// power loss, the release it vouches for.
@@ -986,7 +1013,7 @@ fn sync_new_release(release_dir: &Utf8Path, tarball: &Utf8Path) -> Result<()> {
             if file_type.is_dir() {
                 sync_tree(&entry.path())?;
             } else if file_type.is_file() {
-                std::fs::File::open(entry.path())?.sync_all()?;
+                sync_file(&entry.path())?;
             }
         }
         #[cfg(unix)]
@@ -999,8 +1026,7 @@ fn sync_new_release(release_dir: &Utf8Path, tarball: &Utf8Path) -> Result<()> {
             .wrap_err_with(|| format!("Failed to flush the new release '{release_dir}' to disk"))?;
     }
     if tarball.is_file() {
-        std::fs::File::open(tarball.as_std_path())
-            .and_then(|f| f.sync_all())
+        sync_file(tarball.as_std_path())
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to flush '{tarball}' to disk"))?;
     }
