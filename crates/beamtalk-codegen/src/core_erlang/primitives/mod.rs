@@ -234,7 +234,7 @@ pub(crate) fn generate_numeric_comparison_bif(
     selector: &str,
     params: &[String],
 ) -> Option<Document<'static>> {
-    use beamtalk_cerl_doc::form;
+    use super::operators::{reflected_hook_call, right_tested_comparison};
     use beamtalk_core::semantic_analysis::number_coercion::{OperatorFamily, reflected_operator};
     let bif = generate_comparison_bif(selector, params)?;
     let Some(reflected) =
@@ -243,20 +243,20 @@ pub(crate) fn generate_numeric_comparison_bif(
         return Some(bif);
     };
     let p0 = params.first()?;
-    let hook = super::operators::reflected_hook_call(
+    // No source-line annotation on the hook call, unlike the inlined path:
+    // a primitive body has no send site of its own, and the caller's
+    // `perform:` (or dynamic send) carries the line.
+    let hook = reflected_hook_call(
         reflected,
         selector,
         leaf::var(p0.clone()),
         leaf::var("Self"),
     );
-    Some(form::case_of(
-        form::call("erlang", "is_number", [leaf::var(p0.clone())]),
-        [
-            form::clause([leaf::atom("true")], None, bif, form::Layout::Flat),
-            form::clause([leaf::atom("false")], None, hook, form::Layout::Flat),
-            super::CoreErlangGenerator::case_clause_fallback_clause("CmpNoMatch".to_string()),
-        ],
-        form::Layout::Flat,
+    Some(right_tested_comparison(
+        p0,
+        bif,
+        hook,
+        "CmpNoMatch".to_string(),
     ))
 }
 

@@ -13,7 +13,8 @@
 // reaches the `@primitive` bodies of `Integer`, `Float` and `Character`
 // rather than the inlined comparison, so the `perform:` tests at the end check
 // those bodies against every right operand above, and that `perform:` and the
-// inlined send agree.
+// inlined send agree. A Character is an integer at run time, so only a
+// Character literal receiver reaches the `Character` body (`charPerformLt:`).
 //
 // Every helper below is compiled with its receiver of one kind (a literal,
 // `self` in `Integer`, a typed parameter, an untyped one, a `Float`, a
@@ -297,8 +298,46 @@ TestCase subclass: NumberComparisonArgTest
 
   performGe: a with: x => a perform: #'>=' withArguments: #(x)
 
-  /// One receiver of each primitive kind.
+  /// A Character is an integer at run time, so `performLt:with:` on `$m`
+  /// reaches the `Integer` body. A Character *literal* receiver dispatches
+  /// through the `Character` module, so these reach the `Character` body.
+  charPerformLt: x => $m perform: #'<' withArguments: #(x)
+
+  charPerformLe: x => $m perform: #'<=' withArguments: #(x)
+
+  charPerformGt: x => $m perform: #'>' withArguments: #(x)
+
+  charPerformGe: x => $m perform: #'>=' withArguments: #(x)
+
+  /// One receiver of each primitive kind (`$m` reaches the `Integer` body;
+  /// see `charPerformLt:`).
   numericReceivers => #[5, 1.5, $m]
+
+  testCharacterPerformWithAWrongRightOperandRaises =>
+    self
+      assertWrongsRaise: [:w | self charPerformLt: w]
+      le: [:w | self charPerformLe: w]
+      gt: [:w | self charPerformGt: w]
+      ge: [:w | self charPerformGe: w]
+
+  testCharacterPerformAgreesWithTheInlinedSend =>
+    m := self money: 500
+    rights := #[nil, #sym, "str", true, m, 3, 2.5, $a, $z, 500]
+    rights
+      do: [:x |
+        self assert: (self outcomeOf: [
+          self charPerformLt: x
+        ]) equals: (self outcomeOf: [self charLt: x])
+        self assert: (self outcomeOf: [
+          self charPerformLe: x
+        ]) equals: (self outcomeOf: [self charLe: x])
+        self assert: (self outcomeOf: [
+          self charPerformGt: x
+        ]) equals: (self outcomeOf: [self charGt: x])
+        self assert: (self outcomeOf: [
+          self charPerformGe: x
+        ]) equals: (self outcomeOf: [self charGe: x])
+      ]
 
   testPerformWithAWrongRightOperandRaises =>
     self numericReceivers

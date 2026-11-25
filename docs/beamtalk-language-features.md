@@ -1135,7 +1135,8 @@ This covers every send: an inlined `5 < x`, `perform:`, and the methods built on
 // => ERROR: UndefinedObject does not understand 'lessOrEqualFromNumber:'
 // => ERROR: '<=' cannot order a number against UndefinedObject — the right operand must be a number, or a value whose class implements 'lessOrEqualFromNumber:'
 
-500 < aMoney     // => true    (aMoney lessThanFromNumber: 500)
+aMoney := (Money new) withCents: 500   // Money as defined below
+499 < aMoney     // => true    (aMoney lessThanFromNumber: 499)
 3 == nil         // => false   (equality stays total)
 nil < 3          // => ERROR: UndefinedObject does not understand '<'
 ```
