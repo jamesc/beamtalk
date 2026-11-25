@@ -92,6 +92,18 @@ describe("captureSessionId closes the session only when the REPL exited (BT-5199
     expect(client.closeSession).toHaveBeenCalledWith("sess-live");
   });
 
+  it("follows a reconnect even when one chunk also carries a long retried result", async () => {
+    const { terminal, client } = setup();
+    await captureSessionId(
+      execution(
+        false,
+        `Reconnected (new session). Retrying evaluation...\r\n[beamtalk] session: sess-new\r\n${"x".repeat(600)}\r\n`
+      ),
+      terminal
+    );
+    expect(client.closeSession).toHaveBeenCalledWith("sess-new");
+  });
+
   it("follows the REPL to the new session it got on reconnect", async () => {
     const { terminal, client } = setup();
     await captureSessionId(

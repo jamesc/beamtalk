@@ -92,14 +92,20 @@ export async function captureSessionId(
   // of a run (the REPL's startup line), or a later one the REPL printed right
   // after its "Reconnected (new session)" notice. Any other later marker may
   // be user output (`Transcript show:` of a marker-shaped string), so it moves
-  // the sidebar as before but never picks the session `close` ends.
+  // the sidebar as before but does not pick the session `close` ends. The
+  // notice check is a heuristic: output that forges both lines can still pick
+  // it, which only affects the user's own workspace (one cookie, one trust
+  // boundary — docs/repl-protocol.md § close).
   let closeTargetRecorded = false;
   // The most recent output, so a later marker can be checked against the
   // reconnect notice printed just before it (possibly in an earlier chunk).
   let recent = "";
   try {
     for await (const chunk of execution.read()) {
-      recent = (recent + chunk).slice(-RECENT_OUTPUT_CHARS);
+      // Check against the untrimmed window: one chunk can hold the notice, the
+      // marker and a long retried result after them.
+      const window = recent + chunk;
+      recent = window.slice(-RECENT_OUTPUT_CHARS);
       const scanned = scanSessionChunk(tail, chunk);
       const sessionId = scanned.sessionId;
       tail = scanned.tail;
@@ -110,7 +116,7 @@ export async function captureSessionId(
           break;
         }
         setReplRunning(true);
-        if (!closeTargetRecorded || followsReconnectNotice(recent, sessionId)) {
+        if (!closeTargetRecorded || followsReconnectNotice(window, sessionId)) {
           closeTargetRecorded = true;
           state.replSessionId = sessionId;
         }
