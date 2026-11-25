@@ -1,7 +1,7 @@
 # ADR 0126: Distribution and Location-Transparent Actors
 
 ## Status
-Implemented (2026-09-24) — accepted 2026-09-22; Phases 0–7 shipped under Epic BT-3577 (all done); the BT-3633 `Node` introspection amendment landed 2026-09-29.
+Implemented (2026-09-24) — accepted 2026-09-22; Phases 0–7 shipped under Epic BT-3577 (all done); the BT-3633 `Node` introspection amendment landed 2026-09-29; the BT-5193 amendment (heal conflicts, version skew, cross-host releases) was accepted 2026-11-25.
 
 The Phase 0.5 wire-check spike (BT-3579; see
 Implementation and the Amendment section) confirmed four of this ADR's five
@@ -350,7 +350,8 @@ registrant (the older, by start time, falling back to `random_exit_name`'s
 choice) and **stops** the other with `gen_server:stop(Loser,
 {shutdown, global_name_conflict}, Timeout)`, so the losing actor's
 `ActorStopped` announcement carries `reason: #globalNameConflict` and its
-`terminate` runs. User-supplied resolvers are future work.
+`terminate` runs. User-supplied resolvers are future work. The fallback and
+the supervised loser are amended by the Amendment (BT-5193) section.
 
 **The start time (BT-4937).** The age is the `'$beamtalk_actor_started_at'`
 process-dictionary key (`erlang:system_time(microsecond)`), read with
@@ -536,7 +537,8 @@ Negotiation **informs; it does not refuse the connection**. Refusing would
 make every rolling upgrade (ADR 0125: "one shape-version bump per deploy,
 upgrade the receiving side first") impossible. The per-envelope strict check
 in §5.2 is the safety net; the handshake makes the skew visible before the
-first failure.
+first failure. Wire and Beamtalk version skew is announced the same way
+(`NodeVersionSkew`); see the Amendment (BT-5193) section.
 
 #### 5.4 Sendability across nodes — per tier
 
@@ -812,7 +814,10 @@ code execution, and the distribution boundary is single-user.
 2. **Off-host requires TLS.** `Node connect` to a host that does not resolve to
    loopback succeeds only if this node runs TLS distribution (`-proto_dist
    inet_tls`); otherwise it returns
-   `#beamtalk_error{kind = insecure_distribution, hint = "configure TLS distribution (ADR 0091) or use a tunnel"}`.
+   `#beamtalk_error{kind = insecure_distribution, hint = "configure TLS distribution (ADR 0126 §9) or use a tunnel"}`.
+   The configuration is ADR 0020 Layer 3 Option B; ADR 0091 is the remote-attach
+   rule, not a TLS recipe. Releases reach off-host only through the TLS opt-in of
+   the Amendment (BT-5193) section.
    This is a guard on the Beamtalk API, not a firewall — FFI and raw
    `net_kernel` remain available to operators who configure distribution
    themselves.
@@ -1400,6 +1405,92 @@ scenario (d). A new `beamtalk_dist_wire_tests` case sends a remote
 If remote async sends are wanted later, that is a new decision: the receiver
 must be generated code (`handle_cast/2` decoding the envelope and resolving the
 future), which changes the Core Erlang of every actor.
+
+## Amendment (BT-5193): heal conflicts, version skew, cross-host releases
+
+**Status:** Accepted (2026-11-25). Owner decisions D1–D3 on BT-5193 (epic
+BT-5180), with the instruction to keep it simple. Implementation: BT-5193's
+child issues.
+
+### D1. A supervised `#global` child that loses a heal conflict stays down (§4)
+
+A losing child is stopped with `{shutdown, global_name_conflict}`. A
+`permanent` child then restart-looped, because `global:register_name/3`
+answers `no` while the winner lives. The supervisor reached its maximum
+restart intensity and died with its siblings, and the same failure spread up
+the tree. A `transient` child stayed down with no signal.
+
+**Decision.** A `{global, Name}` start that finds `Name` held by a live pid
+**on another node** answers `ignore`, not `{error, already_started}`. The
+supervisor keeps the child spec with no pid, so siblings are unaffected. The
+start logs a warning naming the child and the holder's node. The announcement
+is the loser's existing `ActorStopped` with `reason: #globalNameConflict`; no
+new announcement class is added. A later `restartChild:` retries. A holder on
+the **same** node stays an error, because that is a programming mistake.
+
+**Resolver fallback (a correction, not a new decision).** OTP runs the resolve
+function once per name, on one node, in a resolver process, so it does not
+block `global_name_server`; only the name exchange for that node pair waits.
+Every case that cannot compare start times (an `unreachable` read, or neither
+side timed) no longer calls `random_exit_name/3`, which kills with
+`exit(Pid, kill)`. It keeps the pid on the lower-named node (on one node, the
+lower pid) and stops the other with `stop_global_conflict_loser/1`. Equal start
+times use the same rule, so every tie-break agrees. The start-time read times
+out after about 1 s, not 5 s (`?BT_REMOTE_CALL_TIMEOUT`), which bounds the sync
+delay per conflicting name. The §4 paragraphs above that name
+`random_exit_name/3` as the fallback describe the behaviour before this
+amendment.
+
+*Rejected:* a standby that takes the name over when the holder dies. That is a
+cluster-singleton feature and needs its own ADR.
+
+### D2. Cross-host releases: an explicit, TLS-only opt-in (§9)
+
+Release nodes are pinned to one host three times: `-sname X@localhost`,
+`ERL_EPMD_ADDRESS=127.0.0.1` and `inet_dist_use_interface {127,0,0,1}`. There
+was no opt-out, and `tls_distribution/0` checked only the `-proto_dist`
+suffix, not peer verification.
+
+**Decision.** The loopback pins stay the default. An operator can opt in with
+`RELEASE_DISTRIBUTION=tls`, `RELEASE_DIST_INTERFACE=<ip>` and
+`RELEASE_HOST=<fqdn>`. The launcher then starts `-name X@<fqdn>` with
+`-proto_dist inet_tls` and `-ssl_dist_optfile`. It refuses to start unless the
+optfile sets `verify_peer` on both the server and client sides. It never binds
+`0.0.0.0` unless the operator names it. `tls_distribution/0` checks
+`verify_peer` too. Plain TCP off-host is not offered; operators who hand-edit
+`vm.args` keep that escape hatch (§9.2). The opt-in waits for BT-5185: the
+placeholder cookie is live during boot, which is local-only today but remote
+once distribution leaves loopback. It reuses BT-5185's shared loopback parser.
+
+*Rejected:* declaring releases same-host only and removing the
+`insecure_distribution` route. It is cheaper, but leaves `tls_distribution/0`
+as dead code and no supported multi-host path.
+
+### D3. Version skew at connect is announced, never refused (§5.3)
+
+Only class-shape skew was reported at connect. A wire-format or Beamtalk
+version mismatch was silent until the first envelope failed.
+
+**Decision.** At connect, `beamtalk_node_monitor` exchanges
+`{wireVersion, beamtalkVersion}` with the shape manifest. On a mismatch it
+announces one `NodeVersionSkew`:
+
+```beamtalk
+sealed typed Announcement subclass: NodeVersionSkew
+  field: node :: Node
+  field: localWireVersion :: Integer
+  field: remoteWireVersion :: Integer
+  field: localBeamtalkVersion :: String
+  field: remoteBeamtalkVersion :: String
+```
+
+The connection is not refused, which keeps rolling upgrades (ADR 0125)
+possible. The per-envelope `wire_version_unsupported` check (§5.2) stays the
+safety net. Method-body skew (same shape, different code) and classes present
+on one side only are out of scope.
+
+*Rejected:* refusing the connection on a wire-version mismatch. It would make
+any wire-format bump impossible to roll out.
 
 ## Migration Path
 
