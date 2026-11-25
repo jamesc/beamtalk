@@ -18,7 +18,7 @@
 //   transparent, ADR 0104).
 //
 // Fixtures: fixtures/then_probe_actor.bt, fixtures/then_promise.bt,
-// fixtures/in_caller_probe.bt, fixtures/in_caller_stateful.bt,
+// fixtures/in_caller_probe.bt,
 // fixtures/slow_actor.bt.
 
 TestCase subclass: ThenTest
