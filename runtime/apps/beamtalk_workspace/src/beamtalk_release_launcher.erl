@@ -37,6 +37,12 @@ WebSocket `run-entry` op and these launcher verbs — never a second one.
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
+%% How long the `rpc` client waits for the target node's run-entry. Keep it
+%% below the outer wall-clock limit in examples/cluster/scripts/e2e.sh
+%% (CLUSTER_E2E_TIMEOUT, default 150 s) so the `{badrpc, timeout}` failure
+%% is reported before the outer limit kills the client.
+-define(RPC_CALL_TIMEOUT_MS, 120000).
+
 -export([
     eval_main/0,
     rpc_entry/3,
@@ -223,7 +229,11 @@ rpc_client_main() ->
             ClassBin = unicode:characters_to_binary(ClassStr),
             SelectorBin = unicode:characters_to_binary(SelectorStr),
             Argv = [unicode:characters_to_binary(A) || A <- RestArgs],
-            case rpc:call(Node, ?MODULE, rpc_entry, [ClassBin, SelectorBin, Argv], 60000) of
+            case
+                rpc:call(
+                    Node, ?MODULE, rpc_entry, [ClassBin, SelectorBin, Argv], ?RPC_CALL_TIMEOUT_MS
+                )
+            of
                 {ok, Value} ->
                     io:format("~tp~n", [Value]),
                     erlang:halt(0);
