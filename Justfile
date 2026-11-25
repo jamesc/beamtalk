@@ -623,6 +623,8 @@ test-desktop:
     # desktop/src-tauri is outside the workspace, so `just clippy` skips it (BT-5087).
     cargo clippy --locked --all-targets -- -D warnings
     cargo test --locked
+    # The picker frontend's IPC bridge (BT-5194); node expands the glob itself.
+    node --test '../ui/test/*.test.mjs'
 
 [windows]
 test-desktop:
@@ -633,6 +635,8 @@ test-desktop:
     cargo clippy --locked --all-targets -- -D warnings
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     cargo test --locked
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    node --test '../ui/test/*.test.mjs'
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Ensure the loopback hex-bridge proxy is up before any rebar3/mix dep fetch.

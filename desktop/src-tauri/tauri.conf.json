@@ -7,7 +7,7 @@
     "frontendDist": "../ui"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "label": "picker",
