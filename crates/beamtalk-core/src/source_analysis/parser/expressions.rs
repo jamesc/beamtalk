@@ -27,22 +27,91 @@ use ecow::EcoString;
 use super::{Diagnostic, MAX_EXPRESSION_DEPTH, Parser, binary_binding_power};
 
 /// Helper function for parsing integers with radix notation.
-pub(crate) fn parse_integer(s: &str) -> Result<i64, String> {
-    if let Some((radix_str, digits)) = s.split_once('r') {
+pub(super) fn parse_integer(s: &str) -> Result<i64, String> {
+    match parse_integer_literal(s)? {
+        Literal::Integer(value) => Ok(value),
+        _ => Err(format!("Integer literal out of range: {s}")),
+    }
+}
+
+/// The longest integer literal, in characters, [`parse_integer_literal`]
+/// accepts.
+const MAX_INTEGER_LITERAL_DIGITS: usize = 10_000;
+
+/// Parses an integer literal token's text into a [`Literal::Integer`] when
+/// it fits `i64`, else a [`Literal::BigInteger`] (BT-5182): integer literals
+/// have no size limit, as BEAM integers have none.
+///
+/// Accepts an optional leading `-` (the lexer folds a `-` written directly
+/// before the digits into the token), decimal digits, or radix notation
+/// `<radix>r<digits>` with a radix from 2 to 36 (`16rFF`, `-2r1010`).
+pub(crate) fn parse_integer_literal(s: &str) -> Result<Literal, String> {
+    // Converting digits to decimal is quadratic in their count; no real
+    // literal comes near this, and a pasted megabyte of digits must not
+    // stall the parser (and with it the language server).
+    if s.len() > MAX_INTEGER_LITERAL_DIGITS {
+        return Err(format!(
+            "Integer literal is too long ({} characters, maximum {MAX_INTEGER_LITERAL_DIGITS})",
+            s.len()
+        ));
+    }
+    let (negative, unsigned) = match s.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, s),
+    };
+    let (radix, digits) = if let Some((radix_str, digits)) = unsigned.split_once('r') {
         let radix = radix_str
             .parse::<u32>()
             .map_err(|_| format!("Invalid radix: {radix_str}"))?;
-
         if !(2..=36).contains(&radix) {
             return Err(format!("Radix must be between 2 and 36, got {radix}"));
         }
-
-        i64::from_str_radix(digits, radix)
-            .map_err(|_| format!("Invalid digit for radix {radix}: {digits}"))
+        if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
+            return Err(format!("Invalid digit for radix {radix}: {digits}"));
+        }
+        (radix, digits)
     } else {
-        s.parse::<i64>()
-            .map_err(|_| format!("Invalid integer: {s}"))
+        if unsigned.is_empty() || !unsigned.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(format!("Invalid integer: {s}"));
+        }
+        (10, unsigned)
+    };
+    let magnitude = digits_to_decimal(digits, radix);
+    let decimal = if negative && magnitude != "0" {
+        format!("-{magnitude}")
+    } else {
+        magnitude
+    };
+    Ok(Literal::integer_from_decimal(&decimal))
+}
+
+/// The canonical decimal spelling (no sign, no leading zeros) of `digits`
+/// read in `radix`; every digit must already be valid for `radix`.
+fn digits_to_decimal(digits: &str, radix: u32) -> String {
+    use std::fmt::Write as _;
+
+    // Little-endian base-10^9 limbs: multiply by `radix`, add each digit.
+    const LIMB: u64 = 1_000_000_000;
+    let mut limbs: Vec<u64> = vec![0];
+    for digit in digits.chars().filter_map(|c| c.to_digit(radix)) {
+        let mut carry = u64::from(digit);
+        for limb in &mut limbs {
+            let value = *limb * u64::from(radix) + carry;
+            *limb = value % LIMB;
+            carry = value / LIMB;
+        }
+        while carry > 0 {
+            limbs.push(carry % LIMB);
+            carry /= LIMB;
+        }
     }
+    let mut iter = limbs.iter().rev();
+    let mut out = iter.next().map_or_else(String::new, u64::to_string);
+    for limb in iter {
+        // Writing to a `String` cannot fail.
+        let _ = write!(out, "{limb:09}");
+    }
+    out
 }
 
 impl Parser {
@@ -1289,6 +1358,24 @@ impl Parser {
             // submitted, which is the usual way to get here.
             TokenKind::PipeGt => self.parse_leading_pipe(),
 
+            // A lexer error token: report the lexer's own message (an
+            // unterminated string names the construct and where it starts),
+            // not the token kind and its text (BT-5182).
+            TokenKind::Error(text) => {
+                let text = text.clone();
+                let span = self.advance().span();
+                let message: EcoString = if super::super::lexer::is_message_error(&text) {
+                    text
+                } else {
+                    // A raw source fragment (an unknown character, or `$`
+                    // at end of input).
+                    format!("Unexpected token: expected expression, found `{text}`").into()
+                };
+                self.diagnostics
+                    .push(Diagnostic::error(message.clone(), span));
+                Expression::Error { message, span }
+            }
+
             // Unexpected token - consume it to avoid getting stuck
             _ => {
                 let bad_token = self.advance();
@@ -1313,10 +1400,10 @@ impl Parser {
         let literal = match token.into_kind() {
             TokenKind::Integer(s) => {
                 // Parse integer (handle radix notation like 16rFF)
-                match parse_integer(&s) {
-                    Ok(val) => {
+                match parse_integer_literal(&s) {
+                    Ok(literal) => {
                         self.number_spellings.push((span, s));
-                        Literal::Integer(val)
+                        literal
                     }
                     Err(e) => {
                         self.diagnostics.push(Diagnostic::error(e, span));

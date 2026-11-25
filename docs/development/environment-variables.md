@@ -22,7 +22,10 @@ Read by shipped binaries and the runtime. Unset means the default behaviour.
 | `BEAMTALK_NO_BUILD_LOCK` | Set to a non-empty value other than `0` to skip the project build lock (`_build/.build.lock`), for filesystems without advisory-lock support; concurrent beamtalk processes in one project are then not serialised (`crates/beamtalk-cli/src/commands/dir_lock.rs`). |
 | `BEAMTALK_NODE_NAME` | Node name for the REPL; the `--node` flag takes priority. |
 | `BEAMTALK_REPL_PORT` | Port for the REPL listener (`crates/beamtalk-cli/src/commands/repl/mod.rs`); `0` is OS-assigned. |
-| `BEAMTALK_ERL_COOKIE` | Internal. How the CLI and the release launcher hand a cookie to a child `erl` without putting it in argv, where `ps` shows it; the node adopts it on boot and unsets it (`crates/beamtalk-cli/src/commands/cookie_env.rs`, `beamtalk_ws_cookie:adopt_env_cookie/0`). Not meant to be set by hand. |
+| `BEAMTALK_COOKIE_HOME` | Internal. The CLI and the release launcher start `erl` with a private directory holding the cookie as its home, so no cookie is in argv (BT-5185); this names that directory. The node restores the home variables and removes it on boot (`crates/beamtalk-cli/src/commands/cookie_env.rs`, `beamtalk_cookie_home:restore/0`). Not meant to be set by hand. |
+| `BEAMTALK_ORIG_HOME` | Internal. The `HOME` the private cookie home replaced (`set:<value>` or `unset`), for `beamtalk_cookie_home:restore/0`. |
+| `BEAMTALK_ORIG_HOMEDRIVE` | Internal. As `BEAMTALK_ORIG_HOME`, for Windows' `HOMEDRIVE` (and the same name with a `HOMEPATH` suffix for `HOMEPATH`). |
+| `HOMEDRIVE` | Windows. With `HOMEPATH`, where `erlexec` takes a node's home (and so `.erlang.cookie`) from; the CLI and launcher point both at the private cookie home while a node boots. |
 | `BEAMTALK_WS_ALLOWED_HOSTS` | Comma-separated hostnames the workspace WebSocket accepts in `Host`/`Origin` besides loopback and the bound IP (reverse proxy, MagicDNS). See `docs/development/remote-access.md`. |
 | `BEAMTALK_COOKIE` | Erlang cookie the MCP server uses with `--port`; must be non-empty then. |
 | `BEAMTALK_WORKSPACE_BOOT_TIMEOUT_SECS` | MCP server: how long to wait for `beamtalk repl` to report its port. |

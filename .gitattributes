@@ -51,3 +51,6 @@ docs/** linguist-documentation
 
 # Checked-in generated tables compared byte-for-byte by tests (BT-3841)
 *.tsv text eol=lf
+
+# Fuzz seed that must keep its BOM and CRLF line endings (BT-5182)
+fuzz/corpus/parse_arbitrary/039_bom_crlf_numbers.bt -text
