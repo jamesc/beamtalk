@@ -86,7 +86,7 @@ global_native_conflict_keeps_the_older_test() ->
     [unlink(P) || P <- [Older, Younger1, Younger2]],
     Mon1 = erlang:monitor(process, Younger1),
     Mon2 = erlang:monitor(process, Younger2),
-    %% On one node `random_exit_name/3` keeps its second argument, so only a
+    %% Untimed, the one-node tie-break would keep the lower pid, so only a
     %% start-time rule keeps the older whichever order the pids arrive in.
     ?assertEqual(Older, beamtalk_actor_registry:resolve_global_conflict(name, Older, Younger1)),
     ?assertEqual(Older, beamtalk_actor_registry:resolve_global_conflict(name, Younger2, Older)),

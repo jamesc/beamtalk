@@ -7762,7 +7762,11 @@ When a netsplit heals and the same global name was registered on both sides,
 Beamtalk's own resolver keeps the *older* registrant (by start time) and
 stops the other with a `#globalNameConflict` reason — never OTP's default
 `exit(Pid, kill)`, so the losing actor's `terminate` still runs and its
-`ActorStopped` announcement carries the reason.
+`ActorStopped` announcement carries the reason. A supervised `scope: #global`
+child that loses stays down rather than restart-looping: its start is ignored
+while the name is held on another node (with a logged warning), its siblings
+are unaffected, and a later `restartChild:` retries (`Result ok: nil` while
+the name is still held).
 
 ### The wire — what crosses a node boundary, and what doesn't
 
