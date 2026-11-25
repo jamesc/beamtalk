@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 James Casey -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!--
+  Hardened Runtime entitlements for the bundled BEAM VM executable only
+  (ADR 0097, BT-2987; narrowed in BT-5194). scripts/ci/sign-macos-nested-
+  binaries.sh applies this file to `beam*.smp` under dist-liveview/ and to
+  nothing else: every other nested Mach-O (epmd, erlexec, run_erl, NIF
+  .so/.dylib files) and the Tauri host app itself are signed with no
+  entitlements at all (tauri.conf.json sets no `bundle.macOS.entitlements`).
+
+  beam.smp needs all three under the Hardened Runtime that notarization
+  requires: BeamAsm (OTP's JIT, default since OTP 24) needs allow-jit +
+  allow-unsigned-executable-memory to allocate executable memory at
+  runtime, and NIFs load into beam.smp as independently-built,
+  independently- (or un-)signed dynamic libraries that library validation
+  would otherwise refuse. Entitlements only take effect on the main
+  executable of a process, so the NIF libraries themselves need none; no
+  other ERTS helper JITs or loads NIFs.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>
