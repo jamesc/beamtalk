@@ -841,8 +841,22 @@ fn spawn_foreground_and_wait_for_ping(
     node: &str,
     cookie: &str,
 ) -> ForegroundGuard {
+    spawn_foreground_and_wait_for_ping_with_env(output_dir, name, node, cookie, &[])
+}
+
+/// [`spawn_foreground_and_wait_for_ping`] with `env` added to the
+/// `foreground` and every `ping` (the `RELEASE_DISTRIBUTION=tls` settings,
+/// BT-5233).
+fn spawn_foreground_and_wait_for_ping_with_env(
+    output_dir: &std::path::Path,
+    name: &str,
+    node: &str,
+    cookie: &str,
+    env: &[(&str, &std::ffi::OsStr)],
+) -> ForegroundGuard {
     let child = launcher_command(output_dir, name)
         .arg("foreground")
+        .envs(env.iter().copied())
         .env("RELEASE_NODE", node)
         .env("RELEASE_COOKIE", cookie)
         .stdout(std::process::Stdio::piped())
@@ -879,6 +893,7 @@ fn spawn_foreground_and_wait_for_ping(
         }
         let ping = launcher_command(output_dir, name)
             .arg("ping")
+            .envs(env.iter().copied())
             .env("RELEASE_NODE", node)
             .env("RELEASE_COOKIE", cookie)
             .output()
@@ -969,8 +984,21 @@ fn stop_and_wait_for_exit(
     node: &str,
     cookie: &str,
 ) {
+    stop_and_wait_for_exit_with_env(foreground, output_dir, name, node, cookie, &[]);
+}
+
+/// [`stop_and_wait_for_exit`] with `env` added to `stop` (BT-5233).
+fn stop_and_wait_for_exit_with_env(
+    foreground: &mut ForegroundGuard,
+    output_dir: &std::path::Path,
+    name: &str,
+    node: &str,
+    cookie: &str,
+    env: &[(&str, &std::ffi::OsStr)],
+) {
     let stop = launcher_command(output_dir, name)
         .arg("stop")
+        .envs(env.iter().copied())
         .env("RELEASE_NODE", node)
         .env("RELEASE_COOKIE", cookie)
         .output()
@@ -1207,6 +1235,322 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
     // `stop` — graceful `init:stop()` over distribution; the foreground
     // process must exit on its own shortly after.
     stop_and_wait_for_exit(&mut foreground, &output_dir, name, &node, &cookie);
+}
+
+/// Write TLS distribution option files for the BT-5233 tests into `dir`, with
+/// a throwaway CA, server and client certificate from
+/// `public_key:pkix_test_data/1` (no `openssl` needed, so this runs on every
+/// platform): `good.conf` sets everything the opt-in requires; each other file
+/// leaves out one setting. Host-name checking is off (`server_name_indication,
+/// disable`) because the test certificates do not name the test host.
+fn write_tls_optfiles(dir: &std::path::Path) {
+    std::fs::create_dir_all(dir).unwrap();
+    let eval = r#"[Dir] = init:get_plain_arguments(),
+        Cert = [{digest, sha256}, {key, {namedCurve, secp256r1}}],
+        Chain = #{root => Cert, intermediates => [], peer => Cert},
+        #{server_config := S, client_config := C} =
+            public_key:pkix_test_data(#{server_chain => Chain, client_chain => Chain}),
+        Keep = fun(Opts) -> [O || {K, _} = O <- Opts, lists:member(K, [cert, key, cacerts])] end,
+        Srv = Keep(S),
+        Cli = Keep(C) ++ [{server_name_indication, disable}],
+        Write = fun(File, Term) ->
+            ok = file:write_file(filename:join(Dir, File), io_lib:format("~p.~n", [Term]))
+        end,
+        Write("good.conf", [{server, Srv ++ [{verify, verify_peer}, {fail_if_no_peer_cert, true}]},
+                            {client, Cli ++ [{verify, verify_peer}]}]),
+        Write("no_fail_if_no_peer_cert.conf", [{server, Srv ++ [{verify, verify_peer}]},
+                                               {client, Cli ++ [{verify, verify_peer}]}]),
+        Write("no_server_verify.conf", [{server, Srv ++ [{fail_if_no_peer_cert, true}]},
+                                        {client, Cli ++ [{verify, verify_peer}]}]),
+        Write("no_client_verify.conf", [{server, Srv ++ [{verify, verify_peer}, {fail_if_no_peer_cert, true}]},
+                                        {client, Cli}]),
+        halt()."#;
+    let status = beamtalk_workspace::erl_command()
+        .args(["-noshell", "-eval", eval, "-extra"])
+        .arg(dir)
+        .status()
+        .expect("spawn erl to write the TLS option files");
+    assert!(status.success(), "writing the TLS option files failed");
+}
+
+/// An epmd port for one test, and on drop a kill request to whatever epmd
+/// listens there. epmd honours it only once no node is registered, so the
+/// request is retried briefly (a stopped node's registration closes a moment
+/// later), and an epmd that is still there afterwards is reported.
+struct PrivateEpmd(u16);
+impl PrivateEpmd {
+    fn new() -> Self {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("pick a free port");
+        Self(listener.local_addr().expect("local addr").port())
+    }
+}
+impl Drop for PrivateEpmd {
+    fn drop(&mut self) {
+        use std::io::{Read, Write};
+        for _ in 0..50 {
+            let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", self.0)) else {
+                return; // nothing listening: no epmd was started, or it is gone
+            };
+            // EPMD_KILL_REQ: a 2-byte length, then 'k'; epmd answers OK or NO.
+            let mut reply = [0u8; 2];
+            if stream.write_all(&[0, 1, b'k']).is_ok()
+                && stream.read_exact(&mut reply).is_ok()
+                && &reply == b"OK"
+            {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100)); // sleep: wait for the stopped node to deregister
+        }
+        eprintln!("warning: the test's epmd on port {} did not stop", self.0);
+    }
+}
+
+/// BT-5233 (ADR 0126 amendment D2): with `RELEASE_DISTRIBUTION=tls` the
+/// launcher refuses to start when the option file is missing or leaves out
+/// `verify_peer` on either side or `fail_if_no_peer_cert`, each with an
+/// actionable error and before any node starts; with a valid opt-in the node
+/// boots on TLS distribution under `-name`, and `ping`, `rpc`,
+/// `remote_console` and `stop` reach it over TLS with the same option file.
+#[test]
+#[allow(clippy::too_many_lines)]
+fn release_launcher_tls_distribution_opt_in_test() {
+    let project = cli_common::fixture_project();
+    let output_dir = project.path().join("dist");
+    build_release_fixture(project.path(), &output_dir);
+    let tls_dir = project.path().join("tls");
+    write_tls_optfiles(&tls_dir);
+    let name = "cli_subprocess_fixture";
+    let cookie = format!("bt5233_test_cookie_{}", std::process::id());
+    let node = format!("bt5233_node_{}", std::process::id());
+
+    // On Unix the node listens on every interface, a different value from
+    // `vm.args`'s loopback pin, so `remote_console` below can show the
+    // launcher's `-kernel inet_dist_use_interface` won (first-wins). epmd
+    // follows the interface, so the test runs its own epmd on a private port
+    // and stops it at the end: the host's shared epmd is never widened.
+    let interface = if cfg!(unix) { "0.0.0.0" } else { "127.0.0.1" };
+    let epmd = PrivateEpmd::new();
+    let epmd_port = epmd.0.to_string();
+    let tls_env = |optfile: &std::path::Path| -> Vec<(&'static str, std::ffi::OsString)> {
+        vec![
+            ("ERL_EPMD_PORT", epmd_port.clone().into()),
+            ("RELEASE_DISTRIBUTION", "tls".into()),
+            ("RELEASE_HOST", "127.0.0.1".into()),
+            ("RELEASE_DIST_INTERFACE", interface.into()),
+            ("RELEASE_SSL_DIST_OPTFILE", optfile.as_os_str().to_owned()),
+        ]
+    };
+
+    // Each refusal names its fix, and no node starts (`foreground` returns).
+    for (file, expected) in [
+        ("absent.conf", "does not exist"),
+        (
+            "no_fail_if_no_peer_cert.conf",
+            "{fail_if_no_peer_cert, true} to the server list",
+        ),
+        (
+            "no_server_verify.conf",
+            "{verify, verify_peer} to the server list",
+        ),
+        (
+            "no_client_verify.conf",
+            "{verify, verify_peer} to the client list",
+        ),
+    ] {
+        let out = launcher_command(&output_dir, name)
+            .arg("foreground")
+            .envs(tls_env(&tls_dir.join(file)))
+            .env("RELEASE_NODE", &node)
+            .env("RELEASE_COOKIE", &cookie)
+            .output()
+            .expect("spawn bin/<name> foreground");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(2), "{file}: {stderr}");
+        assert!(
+            stderr.contains("RELEASE_DISTRIBUTION=tls is set") && stderr.contains(expected),
+            "{file}: {stderr}"
+        );
+    }
+    // A weaker `-ssl_dist_opt` in `vm.args` (a `[release] vm-args` overlay)
+    // overrides the option file in the node, so the check counts it too.
+    let vm_args = output_dir.join("releases").join("0.1.0").join("vm.args");
+    let original_vm_args = std::fs::read_to_string(&vm_args).expect("read vm.args");
+    std::fs::write(
+        &vm_args,
+        format!("{original_vm_args}\n-ssl_dist_opt server_verify verify_none\n"),
+    )
+    .expect("write vm.args");
+    let out = launcher_command(&output_dir, name)
+        .arg("foreground")
+        .envs(tls_env(&tls_dir.join("good.conf")))
+        .env("RELEASE_NODE", &node)
+        .env("RELEASE_COOKIE", &cookie)
+        .output()
+        .expect("spawn bin/<name> foreground");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "vm.args override: {stderr}");
+    assert!(
+        stderr.contains("{verify, verify_peer} to the server list"),
+        "vm.args override: {stderr}"
+    );
+    std::fs::write(&vm_args, original_vm_args).expect("restore vm.args");
+
+    // The client verbs refuse the same way.
+    let out = launcher_command(&output_dir, name)
+        .arg("ping")
+        .envs(tls_env(&tls_dir.join("no_client_verify.conf")))
+        .env("RELEASE_NODE", &node)
+        .env("RELEASE_COOKIE", &cookie)
+        .output()
+        .expect("spawn bin/<name> ping");
+    assert_eq!(out.status.code(), Some(2));
+    // Plain TCP off-host is not offered.
+    let out = launcher_command(&output_dir, name)
+        .arg("ping")
+        .env("RELEASE_DISTRIBUTION", "tcp")
+        .output()
+        .expect("spawn bin/<name> ping");
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("plain TCP off-host is not offered"));
+
+    // A valid opt-in: the node and its clients run TLS distribution.
+    let good = tls_env(&tls_dir.join("good.conf"));
+    let env: Vec<(&str, &std::ffi::OsStr)> =
+        good.iter().map(|(k, v)| (*k, v.as_os_str())).collect();
+    let mut foreground =
+        spawn_foreground_and_wait_for_ping_with_env(&output_dir, name, &node, &cookie, &env);
+
+    #[cfg(target_os = "linux")]
+    {
+        let pid = foreground.0.id();
+        let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).expect("read cmdline");
+        let args: Vec<String> = cmdline
+            .split(|b| *b == 0)
+            .map(|a| String::from_utf8_lossy(a).into_owned())
+            .collect();
+        let after = |flag: &str| {
+            args.iter()
+                .position(|a| a == flag)
+                .and_then(|i| args.get(i + 1).cloned())
+        };
+        assert_eq!(
+            after("-name"),
+            Some(format!("{node}@127.0.0.1")),
+            "{args:?}"
+        );
+        assert_eq!(
+            after("-proto_dist").as_deref(),
+            Some("inet_tls"),
+            "{args:?}"
+        );
+        assert!(!args.iter().any(|a| a == "-sname"), "{args:?}");
+    }
+
+    // `ping` answers once distribution is up, which can be before the
+    // project's application has registered `Smoke`; retry until it has.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_mins(1);
+    let rpc = loop {
+        let rpc = launcher_command(&output_dir, name)
+            .args(["rpc", "Smoke run"])
+            .envs(env.iter().copied())
+            .env("RELEASE_NODE", &node)
+            .env("RELEASE_COOKIE", &cookie)
+            .output()
+            .expect("spawn bin/<name> rpc");
+        let booting = String::from_utf8_lossy(&rpc.stderr).contains("Unknown class: Smoke");
+        if rpc.status.success() || !booting || std::time::Instant::now() > deadline {
+            break rpc;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300)); // sleep: poll for the project app to finish starting
+    };
+    let rpc_stdout = String::from_utf8_lossy(&rpc.stdout);
+    assert!(
+        rpc.status.success() && rpc_stdout.contains("42"),
+        "rpc over TLS failed: stdout={rpc_stdout} stderr={}",
+        String::from_utf8_lossy(&rpc.stderr)
+    );
+    // The check's notes (here: an epmd is already running, with every
+    // interface named) are for `foreground` only, not each client call.
+    assert!(
+        !String::from_utf8_lossy(&rpc.stderr).contains("note:"),
+        "client verbs must not repeat the check's notes: {}",
+        String::from_utf8_lossy(&rpc.stderr)
+    );
+
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        let mut rc = launcher_command(&output_dir, name)
+            .arg("remote_console")
+            .envs(env.iter().copied())
+            .env("RELEASE_NODE", &node)
+            .env("RELEASE_COOKIE", &cookie)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn bin/<name> remote_console");
+        let mut stdin = rc.stdin.take().unwrap();
+        stdin
+            .write_all(
+                b"{node(), init:get_argument(proto_dist), \
+                  application:get_env(kernel, inet_dist_use_interface)}.\n",
+            )
+            .expect("feed remote_console");
+        drop(stdin);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while rc.try_wait().expect("poll remote_console").is_none() {
+            if std::time::Instant::now() > deadline {
+                let _ = rc.kill();
+                let _ = rc.wait();
+                panic!("remote_console did not exit within 30s of stdin EOF");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100)); // sleep: poll for exit under the watchdog
+        }
+        let out = rc.wait_with_output().expect("remote_console output");
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            text.contains(&format!("{node}@127.0.0.1"))
+                && text.contains("inet_tls")
+                && text.contains("{ok,{0,0,0,0}}"),
+            "remote_console must reach the TLS node: stdout={text} stderr={}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    // A loopback client (no opt-in) cannot reach the TLS node. It shares the
+    // node's epmd here, so it does dial the TLS listener with a plain
+    // handshake, and the next TLS client must still get through. Linux only:
+    // on macOS CI the listener stopped accepting after such a client, which
+    // BT-5256 investigates.
+    #[cfg(target_os = "linux")]
+    {
+        let plain = launcher_command(&output_dir, name)
+            .arg("ping")
+            .env("ERL_EPMD_PORT", &epmd_port)
+            .env("RELEASE_NODE", &node)
+            .env("RELEASE_COOKIE", &cookie)
+            .output()
+            .expect("spawn bin/<name> ping");
+        assert!(
+            !plain.status.success(),
+            "a plain loopback ping must not reach the TLS node"
+        );
+        let ping = launcher_command(&output_dir, name)
+            .arg("ping")
+            .envs(env.iter().copied())
+            .env("RELEASE_NODE", &node)
+            .env("RELEASE_COOKIE", &cookie)
+            .output()
+            .expect("spawn bin/<name> ping");
+        assert!(
+            ping.status.success(),
+            "the TLS node must still answer after a plain client: {}",
+            String::from_utf8_lossy(&ping.stderr)
+        );
+    }
+
+    stop_and_wait_for_exit_with_env(&mut foreground, &output_dir, name, &node, &cookie, &env);
 }
 
 /// BT-3619: `bin/<name> foreground` under `--no-include-erts` (host ERTS) —

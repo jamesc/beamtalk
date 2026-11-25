@@ -226,7 +226,10 @@ pub fn generate_sys_config(
 /// Erlang distribution, no baked-in cookie (ADR 0125 §1.2/§1.6). A user
 /// `[release] vm-args` file, if present, is appended after the generated
 /// base so its flags (the last of a repeated flag wins, per `erl`'s own
-/// arg-file reading) take precedence.
+/// arg-file reading) take precedence — except application parameters
+/// (`-kernel Par Val` and the like), where `erl` keeps the *first* one. The
+/// launcher relies on that: under `RELEASE_DISTRIBUTION=tls` it passes its
+/// own `-kernel inet_dist_use_interface` ahead of `-args_file` (BT-5233).
 ///
 /// **No `-sname` here** — deliberately, unlike an ordinary repeated flag.
 /// `erl` special-cases `-sname`/`-name`: given twice, it logs "Multiple
