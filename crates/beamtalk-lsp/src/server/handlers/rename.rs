@@ -118,7 +118,7 @@ pub(in crate::server) fn build_rename_edit(
     caps: RenameClientCaps,
     source_of: &dyn Fn(&Utf8PathBuf) -> Option<String>,
     versions: &HashMap<Utf8PathBuf, i32>,
-) -> RenameOutcome {
+) -> std::result::Result<RenameOutcome, String> {
     let annotate = caps.document_changes && caps.change_annotations;
     let mut notes: Vec<String> = Vec::new();
 
@@ -135,33 +135,40 @@ pub(in crate::server) fn build_rename_edit(
         notes.push(candidate_message(plan, source_of));
     }
 
-    let to_range =
-        |edit: &RenameEdit| source_of(&edit.file).map(|src| span_to_range(edit.span, &src));
+    // BT-5132: an edit that cannot be converted fails the whole rename. A
+    // dropped file or edit would apply as a partial rename that reports
+    // success and leaves dangling references.
+    let to_range = |edit: &RenameEdit| -> std::result::Result<tower_lsp::lsp_types::Range, String> {
+        let src =
+            source_of(&edit.file).ok_or_else(|| format!("{} is no longer indexed", edit.file))?;
+        if edit.span.end() as usize > src.len()
+            || !src.is_char_boundary(edit.span.start() as usize)
+            || !src.is_char_boundary(edit.span.end() as usize)
+        {
+            return Err(format!("an edit in {} is outside the file", edit.file));
+        }
+        Ok(span_to_range(edit.span, &src))
+    };
 
     let mut text_edits: Vec<FileEdits> = Vec::new();
     for (file, (confirmed, candidates)) in by_file {
-        let Some(uri) = path_to_uri(file) else {
-            continue;
-        };
+        let uri = path_to_uri(file)
+            .ok_or_else(|| format!("{file} cannot be represented as a document URI"))?;
         let mut edits = Vec::new();
         for edit in confirmed {
-            if let Some(range) = to_range(edit) {
-                edits.push(OneOf::Left(TextEdit {
-                    range,
-                    new_text: edit.new_text.clone(),
-                }));
-            }
+            edits.push(OneOf::Left(TextEdit {
+                range: to_range(edit)?,
+                new_text: edit.new_text.clone(),
+            }));
         }
         for edit in candidates {
-            if let Some(range) = to_range(edit) {
-                edits.push(OneOf::Right(AnnotatedTextEdit {
-                    text_edit: TextEdit {
-                        range,
-                        new_text: edit.new_text.clone(),
-                    },
-                    annotation_id: CANDIDATE_ANNOTATION.to_string(),
-                }));
-            }
+            edits.push(OneOf::Right(AnnotatedTextEdit {
+                text_edit: TextEdit {
+                    range: to_range(edit)?,
+                    new_text: edit.new_text.clone(),
+                },
+                annotation_id: CANDIDATE_ANNOTATION.to_string(),
+            }));
         }
         text_edits.push(FileEdits {
             uri,
@@ -170,18 +177,23 @@ pub(in crate::server) fn build_rename_edit(
         });
     }
 
-    let file_move = plan.file_move.as_ref().and_then(|mv| {
-        let (from, to) = (path_to_uri(&mv.from)?, path_to_uri(&mv.to)?);
-        if caps.document_changes && caps.rename_file {
+    let file_move = match plan.file_move.as_ref() {
+        Some(mv) if caps.document_changes && caps.rename_file => {
+            let from = path_to_uri(&mv.from)
+                .ok_or_else(|| format!("{} cannot be represented as a document URI", mv.from))?;
+            let to = path_to_uri(&mv.to)
+                .ok_or_else(|| format!("{} cannot be represented as a document URI", mv.to))?;
             Some((from, to))
-        } else {
+        }
+        Some(mv) => {
             notes.push(format!(
                 "Rename the file {} to {} to match the new class name.",
                 mv.from, mv.to
             ));
             None
         }
-    });
+        None => None,
+    };
 
     let edit = if caps.document_changes {
         document_changes_edit(
@@ -193,10 +205,10 @@ pub(in crate::server) fn build_rename_edit(
         changes_map_edit(text_edits)
     };
 
-    RenameOutcome {
+    Ok(RenameOutcome {
         edit,
         message: (!notes.is_empty()).then(|| notes.join("\n")),
-    }
+    })
 }
 
 /// The edits for one file, ready for a `TextDocumentEdit`.
@@ -338,9 +350,14 @@ impl Backend {
             return Err(refusal("This document cannot be renamed in."));
         };
         let caps = *self.rename_caps.lock_recover();
-        // Plan under the lock, snapshot the text of every file the plan
-        // touches, then release it before any disk I/O.
-        let (plan, sources) = {
+        // Plan under the lock and snapshot, in the same critical section, the
+        // text of every file the plan touches plus the document versions and
+        // the open set. `text_sync` serialises this with `did_change` /
+        // `did_open` (which update text and version together), so a version
+        // can never be newer than the text its ranges were computed from
+        // (BT-5132). Disk I/O happens after release.
+        let (plan, sources, versions, open_files) = {
+            let _sync = self.text_sync.lock_recover();
             let svc = self.service.lock_recover();
             let Some(source) = svc.file_source(&path) else {
                 return Err(refusal("This document is not open."));
@@ -353,26 +370,30 @@ impl Backend {
                 .into_iter()
                 .filter_map(|f| svc.file_source(&f).map(|src| (f, src)))
                 .collect();
-            (plan, sources)
+            let versions: HashMap<Utf8PathBuf, i32> = self.versions.lock_recover().clone();
+            let open_files: HashSet<Utf8PathBuf> = versions.keys().cloned().collect();
+            (plan, sources, versions, open_files)
         };
         // BT-5078: spans are byte offsets into the *indexed* text. For a file
         // the editor does not have open, that text may be older than what is
         // on disk (`git pull`, an external edit, a delete), and the client
         // would apply our ranges to the real file. Refuse rather than write
         // edits computed from stale text.
-        let open_files: HashSet<Utf8PathBuf> = {
-            let versions = self.versions.lock_recover();
-            versions.keys().cloned().collect()
-        };
         let stale = stale_closed_files(&plan, &open_files, &sources, &|f| {
             fs::read_to_string(f).ok()
         });
         if !stale.is_empty() {
             // Bring the index up to date so the user's retry plans against
-            // the real text.
+            // the real text. BT-5132: under `text_sync`, and skipping a file
+            // opened since the snapshot, whose buffer text must win.
             {
+                let _sync = self.text_sync.lock_recover();
                 let mut svc = self.service.lock_recover();
+                let versions = self.versions.lock_recover();
                 for (file, disk) in &stale {
+                    if versions.contains_key(file) {
+                        continue;
+                    }
                     match disk {
                         Some(text) => svc.update_file(file.clone(), text.clone()),
                         None => svc.remove_file(file),
@@ -386,10 +407,13 @@ impl Backend {
                 names.join(", ")
             )));
         }
-        let outcome = {
-            let versions = self.versions.lock_recover();
-            build_rename_edit(&plan, caps, &|f| sources.get(f).cloned(), &versions)
-        };
+        let outcome = build_rename_edit(&plan, caps, &|f| sources.get(f).cloned(), &versions)
+            .map_err(|why| {
+                refusal(format!(
+                    "Rename cancelled: {why}, so the rename would be incomplete. Nothing was \
+                     changed."
+                ))
+            })?;
         if let Some(message) = outcome.message {
             self.client
                 .show_message(MessageType::WARNING, message)

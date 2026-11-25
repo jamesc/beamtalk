@@ -33,6 +33,10 @@ from pathlib import Path
 
 JOB = "ci-ok"
 
+# Jobs that deliberately run on every PR, docs-only included (BT-5137): the docs
+# checks exist for the PR that touches only docs. They may never be skipped.
+ALWAYS_RUN = {"docs-checks"}
+
 
 OUTPUT = re.compile(r"needs\.changes\.outputs\.(\w+)")
 
@@ -94,7 +98,7 @@ def structure(jobs):
     # Every job but the two must be skippable for a stated reason; otherwise it
     # would run (and cost a runner) on a docs-only PR.
     for name, job in sorted(jobs.items()):
-        if name in ("changes", JOB):
+        if name in ("changes", JOB) or name in ALWAYS_RUN:
             continue
         if not (path_gated(job) or code_gated(name, jobs)):
             problems.append(f"{name} is not gated on a `changes` output (it would run on docs-only PRs)")

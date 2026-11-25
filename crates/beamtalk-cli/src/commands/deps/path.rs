@@ -191,8 +191,12 @@ pub(crate) fn compile_dependency_at(
     if let Some(dep_build) = ebin_path.parent() {
         let src = dep_root.join("priv");
         let dest = dep_build.join("priv");
-        if src.is_dir() && src != dest {
+        if src != dest {
+            // Always drop the old mirror: a dependency that no longer ships
+            // `priv/` must not keep shipping the stale copy (BT-5134).
             remove_stale_dir(&dest)?;
+        }
+        if src.is_dir() && src != dest {
             beamtalk_workspace::copy_tree(src.as_std_path(), dest.as_std_path())
                 .into_diagnostic()
                 .wrap_err_with(|| format!("Failed to copy '{src}' to '{dest}'"))?;
@@ -202,7 +206,7 @@ pub(crate) fn compile_dependency_at(
     let (_, class_infos, protocol_infos, protocol_defs, alias_infos, protocol_sources) =
         build_dep_class_index(dep_root, dep_name, prior_deps).unwrap_or_default();
 
-    let stubs_dir = manifest::parse_manifest_full(&dep_root.join("beamtalk.toml"))
+    let stubs_dir = manifest::parse_dependency_manifest_full(&dep_root.join("beamtalk.toml"))
         .ok()
         .and_then(|dep_manifest| dep_manifest.stubs_dir(dep_root));
 
@@ -463,18 +467,27 @@ fn compile_dependency_with_context(
         &source_files,
     )?;
 
-    // ADR 0098 Phase 2: stamp the dependency with the producing toolchain, LAST
-    // (after its ebin, .app, and corpus have all landed). On the next resolve a
-    // version/OTP mismatch marks this dep stale so it is rebuilt rather than
-    // reused — the beamtalk-http stale-`_build` fix.
-    crate::commands::build_stamp::write_stamp(
-        &BuildLayout::new(project_root).dep_stamp_path(dep_name),
-        crate::commands::build_stamp::current_otp_version(),
-    );
+    stamp_dependency(project_root, dep_name, options);
 
     info!(dep = %dep_name, "Dependency compiled successfully");
 
     Ok((ebin_path, own_class_module_index))
+}
+
+/// ADR 0098 Phase 2: stamp the dependency with the producing toolchain and the
+/// build flags that reached its compile (BT-5133), LAST (after its ebin,
+/// `.app`, and corpus have all landed). On the next resolve a version, OTP or
+/// flag mismatch marks this dep stale so it is rebuilt rather than reused.
+fn stamp_dependency(
+    project_root: &Utf8Path,
+    dep_name: &str,
+    options: &beamtalk_core::CompilerOptions,
+) {
+    crate::commands::build_stamp::write_stamp_with_flags(
+        &BuildLayout::new(project_root).dep_stamp_path(dep_name),
+        crate::commands::build_stamp::current_otp_version(),
+        &super::dep_stamp_flags(options),
+    );
 }
 
 /// The options a dependency compiles with, from the downstream build's.
@@ -734,7 +747,14 @@ fn generate_dependency_app_file(
     // downstream, at browse time (`beamtalk_repl_ops_browse.erl`), not here.
     let alias_metadata = crate::commands::build::build_alias_metadata(source_files, Some(dep_root));
     // Read full manifest to get dependency names for {applications} list
-    let full_manifest = manifest::find_manifest_full(dep_root)?;
+    let dep_manifest_path = dep_root.join("beamtalk.toml");
+    let full_manifest = if dep_manifest_path.try_exists().into_diagnostic()? {
+        Some(manifest::parse_dependency_manifest_full(
+            &dep_manifest_path,
+        )?)
+    } else {
+        None
+    };
     let dep_hex_dep_names: Vec<String> = full_manifest
         .as_ref()
         .map(|m| m.native_dependencies.keys().cloned().collect())

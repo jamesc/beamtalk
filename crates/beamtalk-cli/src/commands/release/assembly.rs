@@ -120,7 +120,7 @@ fn stage_one_app(lib_dir: &Utf8Path, app: &StagedApp) -> Result<Utf8PathBuf> {
         .filter_map(|src| src.parent().map(|p| p.join("priv")));
     for priv_src in sibling_privs.chain(app.source_priv.iter().cloned()) {
         if priv_src.is_dir() {
-            copy_dir_recursive(&priv_src, &app_dir.join("priv"))
+            copy_priv_dir(&priv_src, &app_dir.join("priv"), 0)
                 .wrap_err_with(|| format!("Failed to stage '{priv_src}' into '{app_dir}/priv'"))?;
         }
     }
@@ -677,6 +677,54 @@ pub fn copy_erts(
     Ok(dest)
 }
 
+/// Copy a `priv/` tree for [`stage_one_app`] (BT-5134). Unlike
+/// [`copy_dir_recursive`] (which preserves ERTS's own symlinks), a release's
+/// `priv/` must be self-contained: a relative link would dangle once the tree
+/// moves, so symlinks are *resolved* (their target's content is copied) and a
+/// dangling or looping link is an error. When several `priv/` sources merge
+/// into one app, a same-named file with different content is a collision
+/// error instead of a silent overwrite.
+fn copy_priv_dir(src: &Utf8Path, dest: &Utf8Path, depth: usize) -> Result<()> {
+    if depth > 32 {
+        miette::bail!("'{src}' is nested or linked too deeply (symlink loop?)");
+    }
+    std::fs::create_dir_all(dest.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to create '{dest}'"))?;
+    for entry in std::fs::read_dir(src.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read '{src}'"))?
+    {
+        let entry = entry.into_diagnostic()?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let src_path = src.join(&name);
+        let dest_path = dest.join(&name);
+        // `metadata` follows symlinks; a dangling link fails here.
+        let meta = std::fs::metadata(src_path.as_std_path())
+            .into_diagnostic()
+            .wrap_err_with(|| format!("'{src_path}' is a broken symlink or unreadable"))?;
+        if meta.is_dir() {
+            copy_priv_dir(&src_path, &dest_path, depth + 1)?;
+            continue;
+        }
+        if dest_path.exists() {
+            let same = std::fs::read(src_path.as_std_path()).into_diagnostic()?
+                == std::fs::read(dest_path.as_std_path()).into_diagnostic()?;
+            if !same {
+                miette::bail!(
+                    "priv/ collision: '{src_path}' would overwrite a different file already \
+                     staged at '{dest_path}' from another priv/ source"
+                );
+            }
+            continue;
+        }
+        std::fs::copy(src_path.as_std_path(), dest_path.as_std_path())
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to copy '{src_path}' to '{dest_path}'"))?;
+    }
+    Ok(())
+}
+
 /// Recursively copy every file and subdirectory under `src` into `dest`
 /// (created if absent), preserving Unix executable permissions (ERTS's
 /// `bin/` binaries must stay executable) — the one recursive-copy leaf
@@ -887,6 +935,7 @@ pub fn append_shape_manifests_to_tarball(
     tar_path: &Utf8Path,
     release_dir: &Utf8Path,
     release_vsn: &str,
+    project_ebins: &[Utf8PathBuf],
 ) -> Result<()> {
     let shapes_rel = Utf8PathBuf::from("releases")
         .join(release_vsn)
@@ -894,7 +943,28 @@ pub fn append_shape_manifests_to_tarball(
     let provenance_rel = Utf8PathBuf::from("releases")
         .join(release_vsn)
         .join("beamtalk-provenance.json");
-    append_files_to_tarball(tar_path, release_dir, &[shapes_rel, provenance_rel])
+    let mut rel_files = vec![shapes_rel, provenance_rel];
+    // `systools:make_tar/2` archives only the modules an app's `.app` lists,
+    // and the native Erlang beams staged next to a project's/dependency's own
+    // beams are not listed — so the tarball silently lacked them while the
+    // directory had them (BT-5134). Add every staged `.beam` the archive does
+    // not already hold (`write_tarball_with_appended` skips present entries).
+    for ebin in project_ebins {
+        let Ok(rel_ebin) = ebin.strip_prefix(release_dir) else {
+            continue;
+        };
+        let Ok(entries) = std::fs::read_dir(ebin.as_std_path()) else {
+            continue;
+        };
+        let mut beams: Vec<Utf8PathBuf> = entries
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "beam"))
+            .map(|e| rel_ebin.join(e.file_name().to_string_lossy().as_ref()))
+            .collect();
+        beams.sort();
+        rel_files.extend(beams);
+    }
+    append_files_to_tarball(tar_path, release_dir, &rel_files)
 }
 
 /// Rewrite the gzip'd tar at `tar_path` with `rel_files` (paths relative to
@@ -940,6 +1010,7 @@ fn write_tarball_with_appended(
         flate2::Compression::default(),
     ));
 
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let entries = archive
         .entries()
         .into_diagnostic()
@@ -954,6 +1025,7 @@ fn write_tarball_with_appended(
             .into_diagnostic()
             .wrap_err("Archive entry has an unreadable path")?
             .into_owned();
+        seen.insert(to_forward_slash(&path.to_string_lossy()));
         let link = entry
             .link_name()
             .into_diagnostic()
@@ -968,6 +1040,9 @@ fn write_tarball_with_appended(
     }
 
     for rel in rel_files {
+        if seen.contains(&to_forward_slash(rel.as_str())) {
+            continue;
+        }
         builder
             .append_path_with_name(
                 base_dir.join(rel).as_std_path(),
@@ -1272,7 +1347,7 @@ mod tests {
             .unwrap();
         builder.into_inner().unwrap().finish().unwrap();
 
-        append_shape_manifests_to_tarball(&tar_path, &release_dir, "1.0.0").unwrap();
+        append_shape_manifests_to_tarball(&tar_path, &release_dir, "1.0.0", &[]).unwrap();
 
         let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(
             fs::File::open(tar_path.as_std_path()).unwrap(),
@@ -1311,7 +1386,7 @@ mod tests {
         let before = fs::read(tar_path.as_std_path()).unwrap();
 
         // The release dir has no manifests, so the append step fails.
-        let err = append_shape_manifests_to_tarball(&tar_path, &root.join("missing"), "1.0.0");
+        let err = append_shape_manifests_to_tarball(&tar_path, &root.join("missing"), "1.0.0", &[]);
         assert!(err.is_err());
         assert_eq!(fs::read(tar_path.as_std_path()).unwrap(), before);
         assert!(!root.join("app.tar.gz.scratch").exists());
@@ -1901,5 +1976,48 @@ mod tests {
             content.contains("orders\\\">>}, {evil, true}, {workspace_id, <<\\\"orders"),
             "release name must be escaped as a single binary literal: {content}"
         );
+    }
+
+    /// BT-5134: `priv/` symlinks are resolved, broken ones refused, and
+    /// differing same-name files from two sources reported.
+    #[test]
+    #[cfg(unix)]
+    fn copy_priv_dir_resolves_symlinks_and_reports_collisions() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let a = root.join("a");
+        let b = root.join("b");
+        let out = root.join("out");
+        fs::create_dir_all(a.join("sub").as_std_path()).unwrap();
+        fs::create_dir_all(b.as_std_path()).unwrap();
+        fs::write(a.join("real.txt").as_std_path(), "real").unwrap();
+        std::os::unix::fs::symlink("real.txt", a.join("link.txt").as_std_path()).unwrap();
+        std::os::unix::fs::symlink("sub", a.join("dirlink").as_std_path()).unwrap();
+        fs::write(a.join("sub/x").as_std_path(), "x").unwrap();
+        copy_priv_dir(&a, &out, 0).unwrap();
+        assert!(
+            !out.join("link.txt")
+                .symlink_metadata()
+                .unwrap()
+                .is_symlink()
+        );
+        assert_eq!(
+            fs::read_to_string(out.join("link.txt").as_std_path()).unwrap(),
+            "real"
+        );
+        assert!(out.join("dirlink/x").is_file());
+
+        // Identical duplicate is fine; differing content is a collision.
+        fs::write(b.join("real.txt").as_std_path(), "real").unwrap();
+        copy_priv_dir(&b, &out, 0).unwrap();
+        fs::write(b.join("real.txt").as_std_path(), "other").unwrap();
+        let err = copy_priv_dir(&b, &out, 0).unwrap_err();
+        assert!(err.to_string().contains("collision"), "{err}");
+
+        // Dangling link.
+        let c = root.join("c");
+        fs::create_dir_all(c.as_std_path()).unwrap();
+        std::os::unix::fs::symlink("missing", c.join("dangling").as_std_path()).unwrap();
+        assert!(copy_priv_dir(&c, &root.join("out2"), 0).is_err());
     }
 }

@@ -59,6 +59,7 @@ fails. Each entry kind passes its own span resolver as a fun.
 -endif.
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% Outcome of recording one ChangeLog entry: `ok`, or a user-visible warning
 %% when the live change was not recorded.
@@ -105,7 +106,7 @@ append_entry(Label, Meta, BuildFun) ->
                     reason => AppendReason,
                     domain => [beamtalk, runtime]
                 }),
-                {warning, unrecorded_warning(Meta)}
+                {warning, append_failure_warning(AppendReason, Meta)}
         end
     catch
         Class:Reason:Stack ->
@@ -117,6 +118,18 @@ append_entry(Label, Meta, BuildFun) ->
             }),
             {warning, unrecorded_warning(Meta)}
     end.
+
+%% BT-5136: a timed-out append is unconfirmed, not failed: the server still
+%% completes every append it received, so the entry may be recorded after all.
+-spec append_failure_warning(term(), map()) -> binary().
+append_failure_warning(#beamtalk_error{details = #{reason := timeout}}, _Meta) ->
+    <<
+        "The change is live, but the ChangeLog write timed out and is unconfirmed: "
+        "the entry may still be recorded. Check `Workspace changes` before repeating "
+        "the change, or the entry may be recorded twice."
+    >>;
+append_failure_warning(_Reason, Meta) ->
+    unrecorded_warning(Meta).
 
 -spec unrecorded_warning(map()) -> binary().
 unrecorded_warning(_Meta) ->
@@ -1190,6 +1203,15 @@ emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
     case cancel_pending_new_class(ClassNameBin) of
         cancelled ->
             ok;
+        retire_unconfirmed ->
+            %% BT-5136: the queued retire may still run, so appending a
+            %% `remove-class` entry as well would leave a retire and a remove
+            %% for a class that never reached disk.
+            {warning, <<
+                "The class was removed, but retiring its pending ChangeLog entries timed "
+                "out and is unconfirmed, so no `remove-class` entry was recorded. Check "
+                "`Workspace changes` before a `Workspace flush`."
+            >>};
         not_cancelled ->
             append_remove_class_entry(ClassNameBin, Snapshot, Author, AuthorKind)
     end.
@@ -1205,9 +1227,11 @@ fail with `mixed_new_class_and_splice`.
 
 Returns `not_cancelled` when there is no pending `'new-class'` for the class
 (the normal removal path) or the entries could not be retired, in which case
-the removal is recorded as usual.
+the removal is recorded as usual. Returns `retire_unconfirmed` when the retire
+call timed out: the server still runs it, so the removal is not also recorded
+(BT-5136).
 """.
--spec cancel_pending_new_class(binary()) -> cancelled | not_cancelled.
+-spec cancel_pending_new_class(binary()) -> cancelled | not_cancelled | retire_unconfirmed.
 cancel_pending_new_class(ClassNameBin) ->
     try
         Pending = [
@@ -1243,6 +1267,17 @@ cancel_pending_new_class(ClassNameBin) ->
                 end
         end
     catch
+        exit:{timeout, _} = ErrReason:Stack ->
+            ?LOG_WARNING(
+                "Retiring pending entries of a removed new class timed out",
+                #{
+                    class => ClassNameBin,
+                    reason => ErrReason,
+                    stack => Stack,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            retire_unconfirmed;
         %% BT-5084: any failure (not only an `exit` from a stopped server) falls
         %% back to recording the removal; the caller must never see a raise.
         ErrClass:ErrReason:Stack ->

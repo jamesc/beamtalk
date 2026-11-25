@@ -34,7 +34,8 @@ wrapper fails the test.
     validate_sites/2,
     emit_rewrite_change_entry/2,
     capture_class_removal_snapshot/1,
-    emit_remove_class_change_entry/4
+    emit_remove_class_change_entry/4,
+    report_late_hot_reload_failure/3
 ]).
 
 reload_class_file(P, C) -> {echo, reload_class_file, [P, C]}.
@@ -50,6 +51,8 @@ capture_class_removal_snapshot(A) -> {echo, capture_class_removal_snapshot, [A]}
 emit_remove_class_change_entry(A, B, C, D) ->
     {echo, emit_remove_class_change_entry, [A, B, C, D]}.
 
+report_late_hot_reload_failure(A, B, C) -> {echo, report_late_hot_reload_failure, [A, B, C]}.
+
 %% One entry per wrapper: {Name, Args}.
 calls() ->
     [
@@ -63,7 +66,8 @@ calls() ->
         {validate_sites, [undefined, [#{}]]},
         {emit_rewrite_change_entry, [#{k => v}, #{r => s}]},
         {capture_class_removal_snapshot, [<<"Foo">>]},
-        {emit_remove_class_change_entry, [<<"Foo">>, #{}, <<"a">>, human]}
+        {emit_remove_class_change_entry, [<<"Foo">>, #{}, <<"a">>, human]},
+        {report_late_hot_reload_failure, [foo, self(), {error, {left_suspended, x}}]}
     ].
 
 with_registration(Fun) ->

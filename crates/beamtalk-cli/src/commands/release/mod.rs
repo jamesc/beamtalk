@@ -70,6 +70,12 @@ pub fn build_release(
 
     let parsed = load_release_manifest(project_root)?;
 
+    // `--upgrade-from` is checked before the (slow) build, so a typo costs
+    // nothing (BT-5134).
+    if let Some(prev) = upgrade_from {
+        validate_upgrade_from(prev)?;
+    }
+
     // ADR 0125 §3.1: a release is an artifact whose validity the operator
     // cannot state if it was produced on an OTP major outside the declared
     // support window — unlike `beamtalk build`'s warning (`build::
@@ -121,22 +127,40 @@ pub fn build_release(
     // substitution depends on.
     let release_dir = assembly::absolutize(&release_dir)?;
 
+    let tarball = release_tarball_path(&release_dir, &release_name, &release_vsn);
+    // A run killed by a signal (or power loss) leaves the previous output
+    // parked; put it back before anything else looks at the paths (BT-5134).
+    recover_interrupted_release(&release_dir, &tarball)?;
     ensure_clean_release_dir(&release_dir, output.is_some(), force_output, &layout)?;
+    ensure_clean_tarball(&tarball, output.is_some(), force_output)?;
+    // `--upgrade-from` may name the very output being replaced; resolve that
+    // now, while the paths still exist, and read the parked copy instead.
+    let upgrade_target =
+        upgrade_from.map(|prev| classify_upgrade_from(prev, &release_dir, &tarball));
     // The previous output (directory and tarball) is set aside, not deleted,
     // until the new release is fully assembled: any failure below — an error
     // *or* a panic, since the guard restores on drop — puts it back
     // (BT-5071, BT-5107).
-    let swap = ReleaseSwap::begin(
-        &release_dir,
-        release_tarball_path(&release_dir, &release_name, &release_vsn),
-    )?;
+    let swap = ReleaseSwap::begin(&release_dir, tarball.clone())?;
+    let upgrade_from = upgrade_target.map(|t| match t {
+        UpgradeFrom::Path(p) => p,
+        UpgradeFrom::ReplacedDir => swap
+            .parked_dir
+            .clone()
+            .unwrap_or_else(|| release_dir.clone()),
+        UpgradeFrom::ReplacedTarball => swap
+            .parked_tarball
+            .clone()
+            .unwrap_or_else(|| tarball.clone()),
+    });
     let assembled = assemble_release(
         &parsed,
         project_root,
         &layout,
         &release_dir,
+        &tarball,
         no_include_erts,
-        upgrade_from,
+        upgrade_from.as_deref(),
     );
     if assembled.is_ok() {
         swap.commit();
@@ -151,8 +175,9 @@ fn assemble_release(
     project_root: &Utf8Path,
     layout: &BuildLayout,
     release_dir: &Utf8Path,
+    final_tarball: &Utf8Path,
     no_include_erts: bool,
-    upgrade_from: Option<&str>,
+    upgrade_from: Option<&Utf8Path>,
 ) -> Result<()> {
     let release_cfg = &parsed.release;
     let release_name = release_cfg
@@ -280,13 +305,24 @@ fn assemble_release(
     )?;
 
     eprintln!("Building tarball...");
-    let tar_out_dir = tarball_out_dir(&release_dir);
-    let (tar_path, _) = assembly::make_tarball(
+    // systools writes `<release_name>.tar.gz` into its `outdir`: give it a
+    // private scratch directory beside the final location (same filesystem,
+    // so the final move is atomic) rather than the shared output directory,
+    // where that name could belong to an unrelated file, or be left behind
+    // by a failed build (BT-5134).
+    let tar_scratch = tempfile::Builder::new()
+        .prefix(".beamtalk-tarball-")
+        .tempdir_in(tarball_out_dir(&release_dir).as_std_path())
+        .into_diagnostic()
+        .wrap_err("Failed to create a scratch directory for the release tarball")?;
+    let tar_scratch_dir = Utf8PathBuf::from_path_buf(tar_scratch.path().to_path_buf())
+        .map_err(|p| miette::miette!("Scratch directory '{}' is not valid UTF-8", p.display()))?;
+    let (scratch_tar, _) = assembly::make_tarball(
         &release_dir,
         &release_name,
         &release_vsn,
         &staged_ebins,
-        &tar_out_dir,
+        &tar_scratch_dir,
         include_erts,
         &erts_root,
     )?;
@@ -297,7 +333,24 @@ fn assemble_release(
     // input, with no on-the-fly-extraction fallback needed. Re-stat
     // afterward — the append step recompresses the tarball in place, so
     // `make_tarball`'s own returned size is stale for the printed summary.
-    assembly::append_shape_manifests_to_tarball(&tar_path, &release_dir, &release_vsn)?;
+    assembly::append_shape_manifests_to_tarball(
+        &scratch_tar,
+        &release_dir,
+        &release_vsn,
+        &emit_dirs,
+    )?;
+    // `ReleaseSwap` parked anything already at the final path, so this never
+    // replaces an unrelated file.
+    if final_tarball.symlink_metadata().is_ok() {
+        miette::bail!("'{final_tarball}' appeared during the build — refusing to overwrite it.");
+    }
+    std::fs::rename(scratch_tar.as_std_path(), final_tarball.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| {
+            format!("Failed to move '{scratch_tar}' into place at '{final_tarball}'")
+        })?;
+    let tar_path = final_tarball.to_path_buf();
+    drop(tar_scratch);
     let tar_size = std::fs::metadata(tar_path.as_std_path())
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to stat '{tar_path}' after appending manifests"))?
@@ -307,7 +360,7 @@ fn assemble_release(
     // own shapes.json/beamtalk-provenance.json now exist) — the preflight
     // compares the two releases' finished manifests, never a partial build.
     if let Some(prev) = upgrade_from {
-        check_upgrade_from(prev, &release_dir, &release_name, &release_vsn)?;
+        check_upgrade_from(prev.as_str(), &release_dir, &release_name, &release_vsn)?;
     }
 
     println!(
@@ -596,16 +649,43 @@ fn is_previous_release_output(dir: &Utf8Path) -> bool {
     })
 }
 
-/// Directories no `--output` may ever name, even with `--force-output`: the
-/// current directory, the project root and every ancestor of either.
+/// Project subdirectories holding hand-written sources; an `--output` naming
+/// (or containing) one would delete them.
+const SOURCE_DIRS: &[&str] = &["src", "test", "native", "priv", "deps", ".git"];
+
+/// Directories no `--output` may ever name, even with `--force-output`: a
+/// filesystem root, the home directory, the current directory, the project
+/// root and every ancestor of any of them, and the project's source
+/// directories.
 fn is_protected_output(release_dir: &Utf8Path, project_root: &Utf8Path) -> bool {
+    is_protected_output_with(
+        release_dir,
+        project_root,
+        std::env::current_dir().ok().as_deref(),
+        dirs::home_dir().as_deref(),
+    )
+}
+
+fn is_protected_output_with(
+    release_dir: &Utf8Path,
+    project_root: &Utf8Path,
+    cwd: Option<&std::path::Path>,
+    home: Option<&std::path::Path>,
+) -> bool {
     let Ok(target) = std::fs::canonicalize(release_dir.as_std_path()) else {
         return false;
     };
-    let mut roots = vec![project_root.as_std_path().to_path_buf()];
-    if let Ok(cwd) = std::env::current_dir() {
-        roots.push(cwd);
+    if target.parent().is_none() {
+        return true; // a filesystem root
     }
+    let mut roots = vec![project_root.as_std_path().to_path_buf()];
+    roots.extend(cwd.map(std::path::Path::to_path_buf));
+    roots.extend(home.map(std::path::Path::to_path_buf));
+    roots.extend(
+        SOURCE_DIRS
+            .iter()
+            .map(|d| project_root.join(d).into_std_path_buf()),
+    );
     roots
         .iter()
         .any(|root| std::fs::canonicalize(root).is_ok_and(|root| root.starts_with(&target)))
@@ -641,8 +721,9 @@ fn ensure_clean_release_dir(
     if user_supplied_output {
         if is_protected_output(release_dir, layout.project_root()) {
             miette::bail!(
-                "'--output {release_dir}' is the current directory, the project root or one \
-                 of their ancestors — refusing to replace it, even with --force-output.\n\n\
+                "'--output {release_dir}' is the current directory, the home directory, a filesystem \
+                 root, the project root, one of the project's source directories or an ancestor \
+                 of any of them — refusing to replace it, even with --force-output.\n\n\
                  \x20 Pass an --output path that is a new or dedicated directory."
             );
         }
@@ -699,6 +780,133 @@ fn release_tarball_path(release_dir: &Utf8Path, name: &str, vsn: &str) -> Utf8Pa
 /// `<path>.beamtalk-previous`, where a previous output is parked.
 fn parked_path(path: &Utf8Path) -> Utf8PathBuf {
     Utf8PathBuf::from(format!("{path}{PREVIOUS_SUFFIX}"))
+}
+
+/// What `--upgrade-from` names, relative to the output being replaced.
+enum UpgradeFrom {
+    Path(Utf8PathBuf),
+    /// The output directory about to be parked.
+    ReplacedDir,
+    /// The output tarball about to be parked.
+    ReplacedTarball,
+}
+
+/// Reject a missing `--upgrade-from` path before any work is done.
+fn validate_upgrade_from(prev: &str) -> Result<()> {
+    if !Utf8Path::new(prev).exists() {
+        miette::bail!(
+            "--upgrade-from '{prev}' does not exist.\n\n\
+             \x20 Pass a previous `beamtalk release` output directory or its .tar.gz."
+        );
+    }
+    Ok(())
+}
+
+/// Whether `--upgrade-from` names the directory or tarball this build is
+/// about to replace (`beamtalk release --output dist --upgrade-from dist`).
+fn classify_upgrade_from(prev: &str, release_dir: &Utf8Path, tarball: &Utf8Path) -> UpgradeFrom {
+    let same = |a: &Utf8Path, b: &Utf8Path| {
+        matches!(
+            (std::fs::canonicalize(a.as_std_path()), std::fs::canonicalize(b.as_std_path())),
+            (Ok(a), Ok(b)) if a == b
+        )
+    };
+    let prev = Utf8Path::new(prev);
+    if same(prev, release_dir) {
+        UpgradeFrom::ReplacedDir
+    } else if same(prev, tarball) {
+        UpgradeFrom::ReplacedTarball
+    } else {
+        UpgradeFrom::Path(prev.to_path_buf())
+    }
+}
+
+/// Whether the file at `path` is a gzip'd tar written by `beamtalk release`
+/// (it carries `releases/<vsn>/beamtalk-provenance.json`).
+fn is_previous_release_tarball(path: &Utf8Path) -> bool {
+    let Ok(file) = std::fs::File::open(path.as_std_path()) else {
+        return false;
+    };
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(file));
+    let Ok(entries) = archive.entries() else {
+        return false;
+    };
+    entries.flatten().any(|e| {
+        e.path().is_ok_and(|p| {
+            p.file_name()
+                .is_some_and(|n| n == "beamtalk-provenance.json")
+                && p.components().count() == 3
+                && p.starts_with("releases")
+        })
+    })
+}
+
+/// Validate that an existing file at the tarball path may be replaced: it
+/// must be a regular file and, for a user-supplied `--output` without
+/// `--force-output`, a tarball an earlier `beamtalk release` wrote.
+fn ensure_clean_tarball(
+    tarball: &Utf8Path,
+    user_supplied_output: bool,
+    force_output: bool,
+) -> Result<()> {
+    let Ok(meta) = tarball.symlink_metadata() else {
+        return Ok(());
+    };
+    if !meta.is_file() {
+        miette::bail!(
+            "'{tarball}' already exists and is not a regular file — refusing to replace it."
+        );
+    }
+    if user_supplied_output && !force_output && !is_previous_release_tarball(tarball) {
+        miette::bail!(
+            "'{tarball}' already exists and was not written by `beamtalk release` — refusing \
+             to replace it.\n\n\
+             \x20 Pass a different --output path, remove it yourself, or pass --force-output."
+        );
+    }
+    Ok(())
+}
+
+/// Undo an interrupted run: `ReleaseSwap::begin` parks the previous output at
+/// `<path>.beamtalk-previous`, and only `commit`/`Drop` clear it, so a parked
+/// copy found at startup means the last run died (signal, power loss) before
+/// either ran. Remove whatever partial output sits at `path` and restore.
+fn recover_interrupted_release(release_dir: &Utf8Path, tarball: &Utf8Path) -> Result<()> {
+    for path in [release_dir, tarball] {
+        let parked = parked_path(path);
+        if parked.symlink_metadata().is_err() {
+            continue;
+        }
+        if let Ok(meta) = path.symlink_metadata() {
+            // Only discard what a build of ours could have left: a marked (or
+            // still empty) directory, or a tarball file.
+            let ours = if meta.is_dir() {
+                path.join(RELEASE_MARKER).is_file()
+                    || std::fs::read_dir(path.as_std_path()).is_ok_and(|mut d| d.next().is_none())
+            } else {
+                meta.is_file()
+            };
+            if !ours {
+                miette::bail!(
+                    "'{parked}' is left over from an interrupted `beamtalk release`, but \
+                     '{path}' now holds something else. Move one of them, then re-run."
+                );
+            }
+            let removed = if meta.is_dir() {
+                std::fs::remove_dir_all(path.as_std_path())
+            } else {
+                std::fs::remove_file(path.as_std_path())
+            };
+            removed
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to remove the partial output '{path}'"))?;
+        }
+        eprintln!("Restoring the previous release left by an interrupted run: '{path}'");
+        std::fs::rename(parked.as_std_path(), path.as_std_path())
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to restore '{parked}' to '{path}'"))?;
+    }
+    Ok(())
 }
 
 /// Transactional replacement of a previous release's output: its directory
@@ -1259,5 +1467,152 @@ mod tests {
                 .is_file(),
             "the symlink target's contents must be untouched"
         );
+    }
+
+    // -- BT-5134: upgrade-from, tarball, recovery, protection -----------
+
+    #[test]
+    fn validate_upgrade_from_rejects_missing_path() {
+        let err = validate_upgrade_from("/definitely/not/here").unwrap_err();
+        assert!(err.to_string().contains("does not exist"), "{err}");
+    }
+
+    /// `--upgrade-from dist` while replacing `dist` reads the parked copy.
+    #[test]
+    fn classify_upgrade_from_recognises_the_replaced_output() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let dir = root.join("dist");
+        let tarball = root.join("dist-1.0.0.tar.gz");
+        let other = root.join("other");
+        fs::create_dir_all(dir.as_std_path()).unwrap();
+        fs::create_dir_all(other.as_std_path()).unwrap();
+        write(&tarball, "x");
+        assert!(matches!(
+            classify_upgrade_from(dir.as_str(), &dir, &tarball),
+            UpgradeFrom::ReplacedDir
+        ));
+        assert!(matches!(
+            classify_upgrade_from(tarball.as_str(), &dir, &tarball),
+            UpgradeFrom::ReplacedTarball
+        ));
+        assert!(matches!(
+            classify_upgrade_from(other.as_str(), &dir, &tarball),
+            UpgradeFrom::Path(_)
+        ));
+    }
+
+    #[test]
+    fn ensure_clean_tarball_refuses_unrelated_file_unless_forced() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let tarball = root.join("dist-1.0.0.tar.gz");
+        ensure_clean_tarball(&tarball, true, false).unwrap(); // absent
+        write(&tarball, "not a tarball");
+        let err = ensure_clean_tarball(&tarball, true, false).unwrap_err();
+        assert!(err.to_string().contains("not written by"), "{err}");
+        ensure_clean_tarball(&tarball, true, true).unwrap();
+        ensure_clean_tarball(&tarball, false, false).unwrap(); // default location
+        let dir = root.join("adir.tar.gz");
+        fs::create_dir_all(dir.as_std_path()).unwrap();
+        assert!(ensure_clean_tarball(&dir, false, true).is_err());
+    }
+
+    #[test]
+    fn ensure_clean_tarball_accepts_a_previous_release_tarball() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let tarball = root.join("dist-1.0.0.tar.gz");
+        let mut builder = tar::Builder::new(flate2::write::GzEncoder::new(
+            fs::File::create(tarball.as_std_path()).unwrap(),
+            flate2::Compression::fast(),
+        ));
+        let mut header = tar::Header::new_gnu();
+        header.set_size(2);
+        header.set_mode(0o644);
+        builder
+            .append_data(
+                &mut header,
+                "releases/1.0.0/beamtalk-provenance.json",
+                &b"{}"[..],
+            )
+            .unwrap();
+        builder.into_inner().unwrap().finish().unwrap();
+        ensure_clean_tarball(&tarball, true, false).unwrap();
+    }
+
+    /// A parked copy left by a killed run is restored, whether the output
+    /// path is absent or holds a partial new build.
+    #[test]
+    fn recover_interrupted_release_restores_parked_output() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let target = root.join("dist");
+        let tarball = root.join("dist-1.0.0.tar.gz");
+
+        // Output absent.
+        fs::create_dir_all(parked_path(&target).as_std_path()).unwrap();
+        write(&parked_path(&target).join("old.txt"), "old");
+        write(&parked_path(&tarball), "old tarball");
+        recover_interrupted_release(&target, &tarball).unwrap();
+        assert!(target.join("old.txt").is_file());
+        assert_eq!(
+            fs::read_to_string(tarball.as_std_path()).unwrap(),
+            "old tarball"
+        );
+        assert!(!parked_path(&target).exists() && !parked_path(&tarball).exists());
+
+        // Partial new output present.
+        fs::rename(target.as_std_path(), parked_path(&target).as_std_path()).unwrap();
+        fs::rename(tarball.as_std_path(), parked_path(&tarball).as_std_path()).unwrap();
+        fs::create_dir_all(target.as_std_path()).unwrap();
+        write_release_marker(&target).unwrap();
+        write(&target.join("partial.txt"), "new");
+        write(&tarball, "partial");
+        recover_interrupted_release(&target, &tarball).unwrap();
+        assert!(target.join("old.txt").is_file() && !target.join("partial.txt").exists());
+        assert_eq!(
+            fs::read_to_string(tarball.as_std_path()).unwrap(),
+            "old tarball"
+        );
+    }
+
+    #[test]
+    fn recover_interrupted_release_refuses_to_delete_foreign_content() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let target = root.join("dist");
+        let tarball = root.join("dist-1.0.0.tar.gz");
+        fs::create_dir_all(parked_path(&target).as_std_path()).unwrap();
+        fs::create_dir_all(target.as_std_path()).unwrap();
+        write(&target.join("mine.txt"), "keep");
+        let err = recover_interrupted_release(&target, &tarball).unwrap_err();
+        assert!(err.to_string().contains("interrupted"), "{err}");
+        assert!(target.join("mine.txt").is_file());
+        assert!(parked_path(&target).is_dir());
+    }
+
+    #[test]
+    fn is_protected_output_refuses_home_root_and_source_dirs() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let home = root.join("home");
+        let project = home.join("work/proj");
+        let elsewhere = root.join("elsewhere");
+        for d in [&project.join("src"), &project.join("dist"), &elsewhere] {
+            fs::create_dir_all(d.as_std_path()).unwrap();
+        }
+        let cwd = elsewhere.as_std_path();
+        let check = |dir: &Utf8Path| {
+            is_protected_output_with(dir, &project, Some(cwd), Some(home.as_std_path()))
+        };
+        assert!(check(&home), "home directory");
+        assert!(check(&home.join("work")), "ancestor of the project");
+        assert!(check(&project.join("src")), "source directory");
+        assert!(
+            check(Utf8Path::new(std::path::MAIN_SEPARATOR_STR)),
+            "filesystem root"
+        );
+        assert!(!check(&project.join("dist")));
     }
 }

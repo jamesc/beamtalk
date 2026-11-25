@@ -433,7 +433,7 @@ pub(crate) fn aggregate_native_dependencies(
         if !manifest_path.exists() {
             continue;
         }
-        let Ok(parsed) = manifest::parse_manifest_full(&manifest_path) else {
+        let Ok(parsed) = manifest::parse_dependency_manifest_full(&manifest_path) else {
             debug!(
                 dep = %dep.name,
                 "Failed to parse manifest for native dep aggregation — skipping"
@@ -619,9 +619,26 @@ fn apply_rebar3_env_from(
     passed
 }
 
+/// A rebar3 command for the call sites outside the native build path
+/// (runtime compile in `repl`/`run`, the `erlfmt` bootstrap): the Windows
+/// escript wrapper and the cleared, allowlisted environment, but without the
+/// git/ssh group (`SSH_AUTH_SOCK`, `GIT_*`, `SSH_ASKPASS`) — these builds
+/// fetch nothing over ssh, so the agent socket is not forwarded (BT-5134).
+pub(crate) fn rebar3_tool_command() -> Result<std::process::Command> {
+    let mut cmd = rebar3_base_command(&rebar3_path()?);
+    apply_rebar3_env_from(&mut cmd, |k| {
+        if k.starts_with("GIT_") || k.starts_with("SSH_") {
+            None
+        } else {
+            std::env::var_os(k)
+        }
+    });
+    Ok(cmd)
+}
+
 /// Appended to a failed rebar3 run: the inner tool's error never mentions
 /// that the environment was restricted (BT-5103).
-fn rebar3_restricted_env_hint() -> &'static str {
+pub(crate) fn rebar3_restricted_env_hint() -> &'static str {
     "\nNote: rebar3 ran with a restricted environment (only an allowlist of variables is \
      passed; secrets and unlisted toolchain settings are withheld). If a build tool \
      could not find its toolchain or credentials, run with `-v` to see the variable \
@@ -1371,6 +1388,16 @@ mod rebar3_env_tests {
         cmd.get_envs()
             .map(|(k, v)| (k.to_os_string(), v.map(std::ffi::OsStr::to_os_string)))
             .collect()
+    }
+
+    #[test]
+    fn tool_command_env_withholds_ssh_and_git_variables() {
+        let mut cmd = std::process::Command::new("rebar3");
+        let passed = apply_rebar3_env_from(&mut cmd, |k| {
+            (!(k.starts_with("GIT_") || k.starts_with("SSH_"))).then(|| "v".into())
+        });
+        assert!(passed.contains(&"HOME") && passed.contains(&"HTTPS_PROXY"));
+        assert!(!passed.contains(&"SSH_AUTH_SOCK") && !passed.contains(&"GIT_SSH_COMMAND"));
     }
 
     #[test]

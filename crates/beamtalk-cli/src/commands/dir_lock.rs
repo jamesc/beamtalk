@@ -124,6 +124,23 @@ impl Drop for ProjectBuildLock {
     }
 }
 
+/// Environment variable that turns the project build lock off (BT-5133), for
+/// filesystems without advisory-lock support (some NFS/FUSE mounts). With it
+/// set, concurrent beamtalk processes in one project are not serialised.
+pub(crate) const NO_BUILD_LOCK_ENV: &str = "BEAMTALK_NO_BUILD_LOCK";
+
+fn build_lock_disabled() -> bool {
+    std::env::var_os(NO_BUILD_LOCK_ENV).is_some_and(|v| !v.is_empty() && v != "0")
+}
+
+/// Whether a `try_lock_exclusive` failure means another holder has the lock
+/// (as opposed to the filesystem not supporting locks, or an I/O error).
+fn is_contention(e: &std::io::Error) -> bool {
+    let contended = fs2::lock_contended_error();
+    e.kind() == std::io::ErrorKind::WouldBlock
+        || (e.raw_os_error().is_some() && e.raw_os_error() == contended.raw_os_error())
+}
+
 /// Path of the project build lock file for `project_root`.
 pub(crate) fn project_build_lock_path(project_root: &Utf8Path) -> camino::Utf8PathBuf {
     BuildLayout::new(project_root)
@@ -150,6 +167,13 @@ pub(crate) fn project_build_lock_path(project_root: &Utf8Path) -> camino::Utf8Pa
 ///
 /// Returns an error if `_build/` cannot be created or the lock cannot be taken.
 pub(crate) fn lock_project_build(project_root: &Utf8Path) -> Result<ProjectBuildLock> {
+    if build_lock_disabled() {
+        debug!("not taking the project build lock ({NO_BUILD_LOCK_ENV} is on)");
+        return Ok(ProjectBuildLock {
+            file: None,
+            key: None,
+        });
+    }
     let lock_path = project_build_lock_path(project_root);
     let dir = lock_path.parent().unwrap_or(project_root);
     std::fs::create_dir_all(dir)
@@ -210,9 +234,25 @@ fn open_and_lock(
                 format!("Failed to open {what} lock file '{}'", lock_path.display())
             })?;
         if let Err(e) = file.try_lock_exclusive() {
-            // `WouldBlock` is contention; anything else (e.g. an NFS mount
-            // without lock support) fails the same way in the blocking call
-            // below, which then reports it.
+            // Only `WouldBlock` is contention. Anything else (e.g. an NFS mount
+            // without lock support) would never clear by waiting, so report it
+            // as what it is rather than printing "waiting…" and then failing.
+            if !is_contention(&e) {
+                // The opt-out only covers the project build lock.
+                let hint = if what == "build" {
+                    format!(
+                        "\nSet {NO_BUILD_LOCK_ENV}=1 to build without the project lock \
+                         (concurrent beamtalk processes are then not serialised)."
+                    )
+                } else {
+                    String::new()
+                };
+                return Err(miette::miette!(
+                    "Failed to take the {what} lock '{}': {e}\n\
+                     The filesystem may not support advisory file locks.{hint}",
+                    lock_path.display()
+                ));
+            }
             debug!(error = %e, "{what} lock contended, waiting: {}", lock_path.display());
             if let Some(announce) = announce.take() {
                 announce();
@@ -277,6 +317,17 @@ mod tests {
         });
         assert!(other.join().unwrap(), "outer hold released by nested drop");
         drop(outer);
+    }
+
+    #[test]
+    fn contention_is_would_block_only() {
+        assert!(is_contention(&fs2::lock_contended_error()));
+        assert!(!is_contention(&std::io::Error::from(
+            std::io::ErrorKind::Unsupported
+        )));
+        assert!(!is_contention(&std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied
+        )));
     }
 
     #[test]

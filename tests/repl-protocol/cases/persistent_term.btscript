@@ -1,0 +1,30 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for PersistentTerm (ADR 0153 Phase 1, BT-5146).
+// Runs the ADR's `>>` examples through the live REPL, where the store is
+// shared across turns.
+
+PersistentTerm at: #replptdemo_squares ifAbsentPut: [(1 to: 5) collect: [:n | n * n]]
+// => [1,4,9,16,25]
+
+PersistentTerm at: #replptdemo_squares ifAbsentPut: [Error signal: "not run"]
+// => [1,4,9,16,25]
+
+PersistentTerm includesKey: #replptdemo_squares
+// => true
+
+PersistentTerm at: #replptdemo_squares ifAbsent: [0]
+// => [1,4,9,16,25]
+
+PersistentTerm erase: #replptdemo_squares
+// => true
+
+PersistentTerm erase: #replptdemo_squares
+// => false
+
+PersistentTerm includesKey: #replptdemo_squares
+// => false
+
+PersistentTerm at: #replptdemo_nope ifAbsent: [0]
+// => 0

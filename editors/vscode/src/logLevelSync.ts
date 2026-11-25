@@ -12,6 +12,8 @@ export interface LogLevelWorkspace {
 /** The slice of `WorkspaceClient` the log-level sync needs. */
 export interface LogSubscriber {
   subscribeLogs(level: string): Promise<unknown>;
+  /** Connection state, when known; a non-connected client subscribes on `connected`. */
+  readonly state?: string;
 }
 
 /**
@@ -25,6 +27,7 @@ export function resubscribeLogs(
   warn: (msg: string) => void
 ): void {
   if (!client) return;
+  if (client.state !== undefined && client.state !== "connected") return; // re-subscribed on connect
   client.subscribeLogs(level).catch((err) => {
     warn(`Failed to update log subscription: ${err instanceof Error ? err.message : String(err)}`);
   });

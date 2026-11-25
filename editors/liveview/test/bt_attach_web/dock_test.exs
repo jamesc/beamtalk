@@ -1043,4 +1043,42 @@ defmodule BtAttachWeb.Live.DockTest do
       end
     end
   end
+
+  describe "eval_async/5 (BT-5129: the single off-process path for non-dock eval sites)" do
+    test "folds the raw eval result through the caller's fold on the socket" do
+      socket =
+        Dock.eval_async(base_socket(), self(), "1 + 1", fn socket, result ->
+          Phoenix.Component.assign(socket, error: "folded #{inspect(result)}")
+        end)
+
+      assert socket.assigns.error =~ "folded {:ok"
+      assert socket.assigns.eval_running == false
+    end
+
+    test "is refused with the caller's rejection when the workspace is lost" do
+      socket =
+        base_socket(%{workspace_lost: :killed})
+        |> Dock.eval_async(
+          self(),
+          "1",
+          fn socket, _ -> socket end,
+          fn socket, message ->
+            Phoenix.Component.assign(socket, error: "rejected: #{message}")
+          end
+        )
+
+      assert socket.assigns.error =~ "rejected: The workspace connection was lost"
+    end
+
+    test "the queue is bounded by source size as well as entry count" do
+      big = String.duplicate("x", 600_000)
+      socket = base_socket(%{eval_running: true})
+      socket = Dock.eval_async(socket, self(), big, fn s, _ -> s end)
+      assert length(socket.assigns.eval_queue) == 1
+
+      socket = Dock.eval_async(socket, self(), big, fn s, _ -> s end)
+      assert length(socket.assigns.eval_queue) == 1
+      assert socket.assigns.error =~ "too large"
+    end
+  end
 end

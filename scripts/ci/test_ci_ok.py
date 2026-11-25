@@ -101,7 +101,8 @@ class Structure(unittest.TestCase):
     def test_real_workflow_docs_only_is_green_and_code_job_skip_is_red(self):
         jobs = c.load_jobs(Path(c.__file__).resolve().parents[2] / ".github/workflows/ci.yml")
         names = [j for j in jobs if j not in ("changes", "ci-ok")]
-        docs_only = {j: {"result": "skipped"} for j in names}
+        docs_only = {j: {"result": "skipped"} for j in names if j not in c.ALWAYS_RUN}
+        docs_only.update({j: {"result": "success"} for j in c.ALWAYS_RUN})
         docs_only["changes"] = {"result": "success", "outputs": {"code": "false"}}
         self.assertEqual(c.verdict(docs_only, jobs), [])
         code_pr = {j: {"result": "success"} for j in names}
@@ -109,6 +110,9 @@ class Structure(unittest.TestCase):
         self.assertEqual(c.verdict(code_pr, jobs), [])
         code_pr["lint"]["result"] = "skipped"
         self.assertEqual(c.verdict(code_pr, jobs), ["lint: skipped"])
+        # The docs checks run on a docs-only PR, so skipping them is red (BT-5137).
+        docs_only["docs-checks"]["result"] = "skipped"
+        self.assertEqual(c.verdict(docs_only, jobs), ["docs-checks: skipped"])
 
 
 if __name__ == "__main__":

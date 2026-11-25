@@ -89,6 +89,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "ObjectStateChanged"
             | "Package"
             | "Parallel"
+            | "PersistentTerm"
             | "Pid"
             | "Port"
             | "ProcessDictionary"
@@ -2638,7 +2639,7 @@ fn class_info_Integer() -> ClassInfo {
                 MethodInfo { selector: "isOdd".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![], doc: Some("Test if the receiver is odd.\n\n## Examples\n```beamtalk\n7 isOdd       // => true\n4 isOdd       // => false\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
                 MethodInfo { selector: "timesRepeat:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::generic("Block", vec![DeclaredType::simple("R")]))], doc: Some("Evaluate `block` the receiver number of times.\n\n## Examples\n```beamtalk\n3 timesRepeat: [Transcript show: \"hi\"]\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
                 MethodInfo { selector: "to:do:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("Integer")), Some(DeclaredType::generic("Block", vec![DeclaredType::simple("Integer"), DeclaredType::simple("Object")]))], doc: Some("Iterate from the receiver to `end`, evaluating `block` with each value.\n\n## Examples\n```beamtalk\n1 to: 3 do: [:i | Transcript show: i]\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
-                MethodInfo { selector: "to:by:do:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("Integer")), Some(DeclaredType::simple("Integer")), Some(DeclaredType::generic("Block", vec![DeclaredType::simple("Integer"), DeclaredType::simple("Object")]))], doc: Some("Iterate from the receiver to `end` by `step`, evaluating `block` with each value.\n\n## Examples\n```beamtalk\n1 to: 10 by: 3 do: [:i | Transcript show: i]\n```\n\nA step of 0 raises. A literal block that writes an outer local is inlined\nby the compiler as a counted loop; that path raises the same error (BT-5098).".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
+                MethodInfo { selector: "to:by:do:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Nil")), param_types: vec![Some(DeclaredType::simple("Integer")), Some(DeclaredType::simple("Integer")), Some(DeclaredType::generic("Block", vec![DeclaredType::simple("Integer"), DeclaredType::simple("Object")]))], doc: Some("Iterate from the receiver to `end` by `step`, evaluating `block` with each value.\n\n## Examples\n```beamtalk\n1 to: 10 by: 3 do: [:i | Transcript show: i]\n```\n\nA step of 0 (or 0.0) raises, and a step or limit that is not a number raises a\n`TypeError`. A literal block that writes an outer local is inlined\nby the compiler as a counted loop; that path raises the same error (BT-5098).".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
                 MethodInfo { selector: "to:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Interval")), param_types: vec![Some(DeclaredType::simple("Integer"))], doc: Some("Return an Interval from the receiver to `stop` with step 1.\n\n## Examples\n```beamtalk\n1 to: 10   // => (1 to: 10)\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
                 MethodInfo { selector: "to:by:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Interval")), param_types: vec![Some(DeclaredType::simple("Integer")), Some(DeclaredType::simple("Integer"))], doc: Some("Return an Interval from the receiver to `stop` with the given step.\n\nRaises an error if `step` is zero.\n\n## Examples\n```beamtalk\n1 to: 10 by: 2   // => (1 to: 10 by: 2)\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
                 MethodInfo { selector: "asFloat".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Integer".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Float")), param_types: vec![], doc: Some("Convert the receiver to a Float.\n\n## Examples\n```beamtalk\n42 asFloat    // => 42.0\n```".into()), origin: None, primitive: Some("asFloat".into()), constant_value: None, answers_receiver: false },
@@ -3471,6 +3472,46 @@ fn class_info_Parallel() -> ClassInfo {
                 MethodInfo { selector: "all:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Parallel".into(), is_sealed: true, is_internal: false, spawns_block: true, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Result")])), param_types: vec![Some(DeclaredType::generic("List", vec![DeclaredType::simple("Block")]))], doc: Some("Run each zero-argument block in `blocks` in its own process; block the\ncaller until every block finishes. Returns one `Result` per block, in\nthe same order as `blocks` — a block that raises yields `Result\nerror:` for its slot, but the other blocks still run to completion.\n\n## Examples\n```beamtalk\n(Parallel all: #([1 + 1], [2 + 2])) collect: [:r | r value]  // => #(2, 4)\n((Parallel all: #([1 / 0], [42])) at: 1) isError             // => true\nParallel all: #()                                            // => #()\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
                 MethodInfo { selector: "all:timeout:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Parallel".into(), is_sealed: true, is_internal: false, spawns_block: true, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Result")])), param_types: vec![Some(DeclaredType::generic("List", vec![DeclaredType::simple("Block")])), Some(DeclaredType::union(vec![DeclaredType::simple("Integer"), DeclaredType::simple("Duration")]))], doc: Some("Like `all:`, but with an overall wall-clock deadline (Integer\nmilliseconds or a `Duration`), measured from when `all:timeout:` is\nsent — not per block.\n\nOn timeout, every block still running is killed and its slot becomes\n`Result error:` with a `#timeout` error; blocks that already finished\nkeep their real result.\n\n## Examples\n```beamtalk\nresults := Parallel all: #([Timer sleep: 2000. 1], [2]) timeout: 50\n(results at: 1) isError    // => true\n(results at: 2) value      // => 2\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
                 MethodInfo { selector: "any:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Parallel".into(), is_sealed: true, is_internal: false, spawns_block: true, return_type: Some(DeclaredType::simple("Result")), param_types: vec![Some(DeclaredType::generic("List", vec![DeclaredType::simple("Block")]))], doc: Some("Run each zero-argument block in `blocks` in its own process; return the\nfirst successful `Result`. Every still-running block is killed as soon\nas a winner is found. If every block fails, returns `Result error:`\nwrapping a `List` of the individual failure reasons, in input order.\n\nRaises `#type_error` if `blocks` is empty.\n\n**No overall timeout**: unlike `all:timeout:`, there is no `any:timeout:`\ntoday. If every block hangs (blocked I/O, an infinite loop, a deadlock),\nthis call blocks its caller forever — there is no escape. Give every\nblock its own internal deadline (e.g. via `Timer`) if it calls into\nanything that might not return.\n\n## Examples\n```beamtalk\n(Parallel any: #([1], [2])) isOk           // => true\n(Parallel any: #([1 / 0], [2 / 0])) isError // => true\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+    }
+}
+
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_PersistentTerm() -> ClassInfo {
+    ClassInfo {
+            name: "PersistentTerm".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            handle_scope: None,
+            surface_incomplete: false,
+            in_caller_new1: false,
+            is_module_less: false,
+            auto_ctors: None,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            state_kinds: HashMap::new(),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "at:ifAbsentPut:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "PersistentTerm".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Object")), param_types: vec![Some(DeclaredType::simple("Object")), Some(DeclaredType::generic("Block", vec![DeclaredType::simple("Object")]))], doc: Some("Answer the value stored under `key`. On a miss, evaluate `block`, store\nthe result and answer it. The block is not run on a hit.\n\nIf the block raises, nothing is stored. If another process stored first,\nthat first value is kept and answered. A miss whose value is a pid, an\nactor or a class raises a `type_error`.\n\n## Examples\n```beamtalk\nPersistentTerm at: #doc_once ifAbsentPut: [42]   // => 42\nPersistentTerm at: #doc_once ifAbsentPut: [99]   // => 42\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
+                MethodInfo { selector: "at:ifAbsent:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "PersistentTerm".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Object")), param_types: vec![Some(DeclaredType::simple("Object")), Some(DeclaredType::generic("Block", vec![DeclaredType::simple("Object")]))], doc: Some("Answer the value stored under `key`, or the result of evaluating\n`block` if there is none. Stores nothing.\n\n## Examples\n```beamtalk\nPersistentTerm at: #doc_nothing_here ifAbsent: [0]   // => 0\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
+                MethodInfo { selector: "includesKey:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "PersistentTerm".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![Some(DeclaredType::simple("Object"))], doc: Some("Answer whether a value is stored under `key`. A stored `nil` counts.\n\n## Examples\n```beamtalk\nPersistentTerm includesKey: #doc_nothing_here   // => false\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
+                MethodInfo { selector: "erase:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "PersistentTerm".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Boolean")), param_types: vec![Some(DeclaredType::simple("Object"))], doc: Some("Remove the value stored under `key`. Answers `true` if a value was\nremoved, `false` if there was none. **Forces a global GC**: do not call\nit on a hot path.\n\n## Examples\n```beamtalk\nPersistentTerm erase: #doc_nothing_here   // => false\n```".into()), origin: None, primitive: None, constant_value: None, answers_receiver: false },
             ],
             class_variables: vec![],
             type_params: vec![],
@@ -6285,6 +6326,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     classes.insert("ObjectStateChanged".into(), class_info_ObjectStateChanged());
     classes.insert("Package".into(), class_info_Package());
     classes.insert("Parallel".into(), class_info_Parallel());
+    classes.insert("PersistentTerm".into(), class_info_PersistentTerm());
     classes.insert("Pid".into(), class_info_Pid());
     classes.insert("Port".into(), class_info_Port());
     classes.insert("ProcessDictionary".into(), class_info_ProcessDictionary());

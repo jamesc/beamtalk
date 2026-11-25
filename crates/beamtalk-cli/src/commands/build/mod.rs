@@ -35,7 +35,7 @@ use super::OutputFormat;
 mod changes;
 mod class_index;
 mod environment;
-mod native;
+pub(crate) mod native;
 mod outputs;
 mod sources;
 mod stubs;
@@ -120,18 +120,20 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     crate::commands::build_stamp::require_supported_otp()?;
     warn_if_otp_out_of_window();
 
-    let env = setup_build_environment(path)?;
-
     // Serialise package builds of one project across processes (BT-5075): the
     // build, dependency resolution and `beamtalk.lock` all write `_build/` and
-    // the lock. Held to the end of `build`; released on every exit path.
-    let _project_lock = if env.full_manifest.is_some() {
+    // the lock. Taken *before* the manifest and source list are read (BT-5133),
+    // so a build that waited on `deps add` sees the manifest it left behind.
+    // Held to the end of `build`; released on every exit path.
+    let _project_lock = if environment::is_package_build(path) {
         Some(crate::commands::dir_lock::lock_project_build(
-            &env.project_root,
+            &environment::project_root_of(path),
         )?)
     } else {
         None
     };
+
+    let env = setup_build_environment(path)?;
 
     let options = prepare_options(&env, path, options);
     let options = &options;

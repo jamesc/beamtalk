@@ -4110,6 +4110,32 @@ MyClass performLocally: #add:to: withArguments: #(3, 7)
 
 **Limitations:** Local dispatch resolves the selector through the class-method chain from the receiving class, so an inherited class method is found and a subclass override wins (BT-4300). It applies compiled methods only: it does not apply ADR 0084 runtime class-method funs, so a selector whose nearest definition is a runtime fun raises `does_not_understand`. Class variables follow the read-only snapshot rule ([ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md) §5): the method *reads* the class variables as of the last completed class-method invocation, and a *write* raises `class_state_read_only`. When `performLocally:withArguments:` is reached from inside the class's own method mid-invocation, it reads and writes the live class variables instead. Use this only for stateless or read-only class methods.
 
+### PersistentTerm: build-once computed constants (ADR 0153)
+
+`PersistentTerm` is a sealed, class-side facade over Erlang's `persistent_term`, beside `ProcessDictionary`. It holds a value that is expensive to build and read many times, such as a lookup table. There is no `at:put:`.
+
+```beamtalk
+Object subclass: HpackHuffman
+  class tables -> Tuple =>
+    PersistentTerm at: #hpack_huffman_tables ifAbsentPut: [self buildTables]
+```
+
+| Method | Answers |
+|---|---|
+| `PersistentTerm at: key ifAbsentPut: block` | The stored value. On a miss it runs `block`, stores the result and answers it |
+| `PersistentTerm at: key ifAbsent: block` | The stored value, or the block's value. Stores nothing |
+| `PersistentTerm includesKey: key` | Whether a value is stored (a stored `nil` counts) |
+| `PersistentTerm erase: key` | `true` if a value was removed. **Forces a global GC** |
+
+Rules:
+
+- **Build-once only.** Reads copy nothing; `erase:` makes the VM scan every process heap. Use an Actor or `Ets` for anything that changes.
+- **The block must be pure and deterministic.** Two processes that miss together both run it; the helper reads again before storing and keeps the first value. A raising block stores nothing and is run again on the next call.
+- **Do not store a pid, port, actor, class, `Ets` handle or block.** On a miss, a value that is itself a pid, an actor or a class raises a `type_error` naming the key; store a registered name and look the process up. A process identity nested inside a larger value is not detected.
+- **Keys are node-global.** Use a package-prefixed Symbol (`#mypkg_tables`). The helper stores under `{beamtalk_persistent_term, Key}`, so a key cannot collide with the runtime's own `persistent_term` keys.
+- **Nothing is cleared on reload.** A value stays until `erase:` or the node stops. When its shape changes, change the key (`#mypkg_tables_v2`); in the REPL, `PersistentTerm erase:` rebuilds it on the next read. This is a deliberate exception to principles §4: after the builder method is edited at the REPL the stored value is stale, while `beamtalk run` builds it fresh.
+- **Tests.** The store is node-global: a test class that uses fixed keys overrides `class serial -> Boolean => true`, or uses keys unique to the test.
+
 ### Passing Blocks Through Class Methods
 
 *See also:* process-sensitive FFI written directly in a class method that runs in the class process runs there too; the `class-process-ffi` lint flags it, and `class-method-process-resource` flags process-tied resources created in one that runs in the caller (see [Class-Side Methods](#class-side-methods-adr-0048)).
@@ -7622,12 +7648,19 @@ Announcements (typed domain events you subscribe to in app logic):
 
 ## Distribution — Location-Transparent Actors (ADR 0126)
 
-Beamtalk actors are **location-transparent**: the same `.` (sync), `!`
-(cast), and `Future`-returning async sends that work between local actors
-work identically against an actor running on another BEAM node in the
-cluster. There is no special "remote actor" type — an `Actor` reference is
-an `Actor` reference, whether the process behind it lives here or across the
-network. Distribution builds directly on the supervision, announcement, and
+Beamtalk actors are **location-transparent**: the same `.` (sync) and `!`
+(cast) sends that work between local actors work identically against an actor
+running on another BEAM node in the cluster. (`Future`-returning async sends
+do **not** cross nodes: they raise `unsupported_operation` at once, ADR 0126
+amendment BT-4989.) There is no special "remote actor" type — an `Actor`
+reference is an `Actor` reference, whether the process behind it lives here or
+across the network.
+
+A runnable three-node example, with a CI end-to-end run, is
+[`examples/cluster`](../examples/cluster/README.md): a coordinator farms jobs
+out to two worker nodes, loses one mid-call, and reassigns the work.
+
+Distribution builds directly on the supervision, announcement, and
 value-object machinery described earlier in this document; see
 [ADR 0126](ADR/0126-distribution-location-transparent-actors.md) for the full
 design, including the failure-mode analysis and security model this section
@@ -7720,6 +7753,10 @@ real operational cost, not just a lookup convenience:
 > also inherits the full-mesh registry's known scaling limits (every node
 > locks the global name table during a registration) — reach for it
 > deliberately, not as the default choice for cluster-wide lookup.
+
+> **Connect waits for `global`.** `Node connect` answers only after OTP's
+> `global` has synced names with the new peer, so a `scope: #global` name
+> registered right after `connect` is visible from the peer at once.
 
 When a netsplit heals and the same global name was registered on both sides,
 Beamtalk's own resolver keeps the *older* registrant (by start time) and

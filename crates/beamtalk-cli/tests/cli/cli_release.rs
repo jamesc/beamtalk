@@ -911,6 +911,12 @@ fn spawn_foreground_and_wait_for_ping(
              foreground stderr so far={fg_stderr:?}"
         );
     }
+    // BT-5126: `ping` only succeeded because the node adopted `RELEASE_COOKIE`
+    // from its environment; assert the running BEAM's own argv (`ps` and
+    // `/proc/<pid>/cmdline`) never carried it — not via `-setcookie`,
+    // `ERL_AFLAGS` or `-args_file`.
+    #[cfg(unix)]
+    beamtalk_workspace::test_argv::assert_not_in_argv(foreground.0.id(), cookie);
     foreground
 }
 
@@ -1071,6 +1077,46 @@ fn release_launcher_foreground_ping_eval_rpc_stop_lifecycle_test() {
         rpc_stdout.contains("42"),
         "expected `Smoke run`'s result (42) in rpc output: {rpc_stdout}"
     );
+
+    // BT-5126: `remote_console` connects with `-remsh` while the placeholder
+    // `-setcookie` is in argv; it only reaches the node if the real cookie
+    // is adopted (from the environment) before the shell connects. Feed it
+    // one expression, then EOF, and expect the *remote* node's name back.
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        let mut rc = launcher_command(&output_dir, name)
+            .arg("remote_console")
+            .env("RELEASE_NODE", &node)
+            .env("RELEASE_COOKIE", &cookie)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn bin/<name> remote_console");
+        // Dropping stdin sends EOF; a watchdog fails the test instead of
+        // hanging CI if the console never exits.
+        let mut stdin = rc.stdin.take().unwrap();
+        stdin.write_all(b"node().\n").expect("feed remote_console");
+        drop(stdin);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while rc.try_wait().expect("poll remote_console").is_none() {
+            if std::time::Instant::now() > deadline {
+                let _ = rc.kill();
+                let _ = rc.wait();
+                panic!("remote_console did not exit within 30s of stdin EOF");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100)); // sleep: poll for exit under the watchdog
+        }
+        let out = rc.wait_with_output().expect("remote_console output");
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            text.contains(&format!("{node}@localhost")),
+            "remote_console must reach the running node with the real cookie: \
+             stdout={text} stderr={}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
 
     // `rpc "Beamtalk releaseInfo"` — ADR 0125 §1.1/§1.8's other headline
     // example, verbatim (BT-3576, BT-3612): a parity-neutral reflective
@@ -1452,6 +1498,60 @@ fn release_upgrade_from_accepts_a_tarball() {
         .stdout(contains("0 errors, 0 warnings."));
 }
 
+/// BT-5134: `--upgrade-from` may name the very output being replaced — the
+/// previous release is read from where it was parked during the rebuild.
+#[test]
+fn release_upgrade_from_the_output_being_replaced() {
+    let project = cli_common::fixture_project();
+    make_releasable(project.path());
+    let manifest_path = project.path().join("beamtalk.toml");
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+    std::fs::write(
+        &manifest_path,
+        manifest.replace("version = \"0.1.0\"", "version = \"1.3.0\""),
+    )
+    .unwrap();
+    let dist = project.path().join("dist");
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["release", "--output"])
+        .arg(&dist)
+        .timeout(std::time::Duration::from_mins(3))
+        .assert()
+        .success();
+
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+    std::fs::write(
+        &manifest_path,
+        manifest.replace("version = \"1.3.0\"", "version = \"1.4.0\""),
+    )
+    .unwrap();
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["release", "--output"])
+        .arg(&dist)
+        .arg("--upgrade-from")
+        .arg(&dist)
+        .timeout(std::time::Duration::from_mins(3))
+        .assert()
+        .success()
+        .stdout(contains(
+            "Upgrade check: cli_subprocess_fixture 1.3.0 → 1.4.0",
+        ));
+    assert!(dist.join("releases/1.4.0").is_dir());
+    assert!(!dist.join("releases/1.3.0").exists());
+    assert!(!project.path().join("dist.beamtalk-previous").exists());
+
+    // A typo is rejected before any build.
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["release", "--upgrade-from"])
+        .arg(project.path().join("nope"))
+        .assert()
+        .failure()
+        .stderr(contains("does not exist"));
+}
+
 /// BT-5072: a package's own `native/*.erl`, a path dependency's `native/*.erl`
 /// and a dependency's `priv/` file all reach the release. Before the fix the
 /// native beams were never staged (`undef` at the first `(Erlang foo)` call)
@@ -1563,6 +1663,29 @@ fn release_stages_native_modules_and_dependency_priv_test() {
         std::fs::read_to_string(&dep_priv).expect("dep priv/data.txt staged"),
         "from-dep-priv"
     );
+    // BT-5134: the *tarball* carries them too (`systools:make_tar` archives
+    // only what each `.app` lists, so the directory alone proves nothing).
+    // The tarball sits beside the output: `<release name>-<vsn>.tar.gz`.
+    let tarball = root.path().join("native_release_fixture-0.1.0.tar.gz");
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(
+        std::fs::File::open(&tarball).expect("release tarball"),
+    ));
+    let entries: Vec<String> = archive
+        .entries()
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|e| e.path().unwrap().to_string_lossy().into_owned())
+        .collect();
+    for wanted in [
+        "lib/native_release_fixture-0.1.0/ebin/foo.beam",
+        "lib/native_release_fixture-0.1.0/ebin/helper_native.beam",
+        "lib/helper-0.1.0/priv/data.txt",
+    ] {
+        assert!(
+            entries.iter().any(|e| e.trim_start_matches("./") == wanted),
+            "tarball is missing {wanted}; entries: {entries:#?}"
+        );
+    }
     // Only the computed closure is staged: no test-support apps.
     for entry in std::fs::read_dir(&lib).unwrap().filter_map(Result::ok) {
         let name = entry.file_name().to_string_lossy().into_owned();

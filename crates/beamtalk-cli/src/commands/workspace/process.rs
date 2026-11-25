@@ -27,7 +27,7 @@ use super::node_state::{
     PID_DISCOVERY_INITIAL_DELAY_MS, PID_DISCOVERY_MAX_RETRIES, PID_DISCOVERY_RETRY_DELAY_MS,
     is_process_alive,
 };
-use super::startup_command::{build_detached_node_command, write_cookie_args_file};
+use super::startup_command::build_detached_node_command;
 
 use crate::beam_compiler::escape_erlang_string;
 use crate::commands::protocol::ProtocolClient;
@@ -288,13 +288,10 @@ pub fn start_detached_node(
 
     let (eval_cmd, project_path) = prepare_workspace_paths(workspace_id, config)?;
 
-    // Write cookie to args file (not visible in `ps aux`)
-    let cookie_args_file = write_cookie_args_file(workspace_id, &cookie)?;
-
     // Start detached BEAM node
     let mut cmd = build_detached_node_command(
         &node_name,
-        &cookie_args_file,
+        &cookie,
         beam_paths,
         extra_code_paths,
         &eval_cmd,

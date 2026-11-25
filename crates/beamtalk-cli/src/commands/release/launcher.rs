@@ -21,6 +21,8 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 
+use crate::commands::cookie_env;
+
 const LAUNCHER_SH_TEMPLATE: &str = include_str!("templates/launcher.sh");
 const LAUNCHER_CMD_TEMPLATE: &str = include_str!("templates/launcher.cmd");
 
@@ -96,9 +98,13 @@ fn render_template(
     // spell another placeholder verbatim (e.g. `[release] name =
     // "__RELEASE_VSN__"`) would otherwise have its own already-substituted
     // occurrence corrupted by a later `.replace()` in the chain.
-    let placeholders: [(&str, &str); 5] = [
+    let placeholders: [(&str, &str); 7] = [
         // A literal TAB for `launcher.cmd`'s `RELEASE_COOKIE` check (BT-5107).
         ("__TAB__", "\t"),
+        // The cookie handoff names come from `cookie_env`, the one source
+        // for the CLI's own nodes too (BT-5126).
+        ("__COOKIE_ENV__", cookie_env::COOKIE_ENV),
+        ("__ADOPT_COOKIE_EVAL__", cookie_env::ADOPT_COOKIE_EVAL),
         ("__RELEASE_NAME__", release_name),
         ("__RELEASE_VSN__", release_vsn),
         ("__ERTS_VERSION__", erts_version),
@@ -243,6 +249,31 @@ mod tests {
         );
     }
 
+    /// BT-5127: every client verb that starts a distributed node pins its
+    /// listener to loopback (the foreground node gets it from `vm.args`).
+    #[test]
+    fn write_launcher_scripts_pin_client_nodes_to_loopback() {
+        let (root, _temp) = write_scripts(true);
+        let sh = std::fs::read_to_string(root.join("bin/orders").as_std_path()).unwrap();
+        let cmd = std::fs::read_to_string(root.join("bin/orders.cmd").as_std_path()).unwrap();
+        assert_eq!(sh.matches("-hidden -sname").count(), 4);
+        assert_eq!(
+            sh.matches(
+                "-hidden -sname \\\"\\$SNAME\\\" -kernel inet_dist_use_interface '{127,0,0,1}'"
+            )
+            .count(),
+            4,
+            "launcher.sh client verbs must pin loopback: {sh}"
+        );
+        assert_eq!(cmd.matches("-hidden -sname").count(), 4);
+        assert_eq!(
+            cmd.matches("-kernel inet_dist_use_interface \"{127,0,0,1}\"")
+                .count(),
+            4,
+            "launcher.cmd client verbs must pin loopback: {cmd}"
+        );
+    }
+
     #[test]
     fn write_launcher_scripts_lists_every_verb() {
         let (root, _temp) = write_scripts(true);
@@ -380,7 +411,7 @@ mod tests {
 
     /// BT-5077: `launcher.cmd` must reject a `RELEASE_COOKIE` containing
     /// whitespace, quotes or backslashes, like `launcher.sh` does — otherwise
-    /// a cookie with a space is split into two `ERL_AFLAGS` words. Text
+    /// a cookie with a space is split into two words. Text
     /// inspection only: there is no Windows runner for this test, so the
     /// check itself is exercised only by reading the script.
     #[test]
@@ -408,24 +439,49 @@ mod tests {
         assert!(sh.contains("RELEASE_COOKIE must not contain whitespace, quotes or backslashes"));
     }
 
-    /// BT-5067: no verb may put the cookie on the `erl` command line.
+    /// BT-5126: no verb may put the cookie on the `erl` command line, in
+    /// `ERL_AFLAGS` or in an `-args_file` — all of them expand into the BEAM's
+    /// argv. The cookie travels in `BEAMTALK_ERL_COOKIE`; text inspection of
+    /// the scripts here, a real node's `/proc/<pid>/cmdline` in
+    /// `tests/cli/cli_release.rs`.
     #[test]
-    fn write_launcher_scripts_never_pass_setcookie_on_the_command_line() {
+    fn write_launcher_scripts_hand_the_cookie_over_in_the_environment() {
         let (root, _temp) = write_scripts(true);
         let sh = std::fs::read_to_string(root.join("bin/orders").as_std_path()).unwrap();
         let cmd = std::fs::read_to_string(root.join("bin/orders.cmd").as_std_path()).unwrap();
         for (name, script) in [("launcher.sh", &sh), ("launcher.cmd", &cmd)] {
             assert!(
-                !script.contains("COOKIE_ARGS") && !script.contains("cookie_args"),
+                !script.contains("-setcookie $RELEASE_COOKIE")
+                    && !script.contains("-setcookie !RELEASE_COOKIE!")
+                    && !script.contains("-setcookie %RELEASE_COOKIE%"),
                 "{name} must not expand the cookie into argv"
             );
-            assert!(script.contains("ERL_AFLAGS"), "{name} must use ERL_AFLAGS");
+            assert!(
+                !script.contains("ERL_AFLAGS="),
+                "{name} must not put the cookie in ERL_AFLAGS"
+            );
+            assert!(
+                script.contains(cookie_env::COOKIE_ENV),
+                "{name} must hand the cookie over in {}",
+                cookie_env::COOKIE_ENV
+            );
+            assert!(
+                script.contains(cookie_env::ADOPT_COOKIE_EVAL),
+                "{name} must adopt it with {}",
+                cookie_env::ADOPT_COOKIE_EVAL
+            );
+            assert!(!script.contains("__COOKIE_ENV__"), "{name}: placeholder");
+            assert!(
+                !script.contains("__ADOPT_COOKIE_EVAL__"),
+                "{name}: placeholder"
+            );
         }
     }
 
     /// BT-5067: run each client verb against a fake `erl` from a release root
     /// containing a space; assert every `-pa` path survives as one argument and
-    /// the cookie is only in `ERL_AFLAGS`, never an argument.
+    /// the cookie is only in `BEAMTALK_ERL_COOKIE`, never an argument or
+    /// `ERL_AFLAGS` (BT-5126).
     #[cfg(unix)]
     #[test]
     fn write_launcher_scripts_sh_handles_spaced_root_and_hides_cookie() {
@@ -439,7 +495,7 @@ mod tests {
         let erl = fake.join("erl");
         std::fs::write(
             &erl,
-            "#!/bin/sh\nfor a; do echo \"ARG[$a]\"; done\necho \"AFLAGS=$ERL_AFLAGS\"\n",
+            "#!/bin/sh\nfor a; do echo \"ARG[$a]\"; done\necho \"AFLAGS=$ERL_AFLAGS\"\necho \"COOKIEENV=$BEAMTALK_ERL_COOKIE\"\n",
         )
         .unwrap();
         std::fs::set_permissions(&erl, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -464,13 +520,17 @@ mod tests {
                 .filter(|l| l.starts_with("ARG["))
                 .collect::<Vec<_>>()
                 .join("\n");
+            assert!(!args.contains("s3cr3t"), "{verb}: {args}");
+            assert!(stdout.contains("AFLAGS=\n"), "{verb}: {stdout}");
             assert!(
-                !args.contains("setcookie") && !args.contains("s3cr3t"),
-                "{verb}: {args}"
-            );
-            assert!(
-                stdout.contains("AFLAGS=-setcookie s3cr3t-cookie"),
+                stdout.contains("COOKIEENV=s3cr3t-cookie"),
                 "{verb}: {stdout}"
+            );
+            // A random, non-secret placeholder `-setcookie` keeps OTP off
+            // `~/.erlang.cookie`.
+            assert!(
+                args.contains("ARG[-setcookie]\nARG["),
+                "{verb}: expected placeholder -setcookie: {args}"
             );
         }
     }
@@ -530,6 +590,57 @@ mod tests {
         assert!(
             sh.contains("required_otp") || sh.contains("check_otp_window"),
             "{sh}"
+        );
+    }
+
+    /// BT-5134: a cookie starting with `-`/`+` is rejected, and a symlinked
+    /// `bin/<name>` still finds its release root.
+    #[test]
+    #[cfg(unix)]
+    fn launcher_sh_rejects_dash_cookie_and_follows_symlinked_bin() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = TempDir::new().unwrap();
+        let base = Utf8PathBuf::from_path_buf(temp.path().join("rel")).unwrap();
+        write_launcher_scripts(&base, "orders", "1.0.0", "14.0", false).unwrap();
+        std::fs::create_dir_all(base.join("lib/dep/ebin").as_std_path()).unwrap();
+        let fake = temp.path().join("fakebin");
+        std::fs::create_dir_all(&fake).unwrap();
+        let erl = fake.join("erl");
+        std::fs::write(&erl, "#!/bin/sh\nfor a; do echo \"ARG[$a]\"; done\n").unwrap();
+        std::fs::set_permissions(&erl, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = format!("{}:{}", fake.display(), std::env::var("PATH").unwrap());
+
+        for bad in ["-sname", "+x"] {
+            let out = std::process::Command::new("sh")
+                .arg(base.join("bin/orders").as_std_path())
+                .arg("ping")
+                .env("PATH", &path)
+                .env("RELEASE_COOKIE", bad)
+                .output()
+                .unwrap();
+            assert_eq!(out.status.code(), Some(2), "{bad}");
+            assert!(String::from_utf8_lossy(&out.stderr).contains("must not start with"));
+        }
+
+        let links = temp.path().join("links");
+        std::fs::create_dir_all(&links).unwrap();
+        let link = links.join("orders");
+        std::os::unix::fs::symlink(base.join("bin/orders").as_std_path(), &link).unwrap();
+        let out = std::process::Command::new("sh")
+            .arg(&link)
+            .arg("ping")
+            .env("PATH", &path)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "{stdout}{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            stdout.contains("/rel/"),
+            "root must resolve through the symlink: {stdout}"
         );
     }
 }

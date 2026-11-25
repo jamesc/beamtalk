@@ -353,7 +353,8 @@ defmodule BtAttachWeb.Live.Inspector do
   # root reports it can't send.
   def handle_event("window_poke", %{"id" => id, "message" => message}, socket)
       when is_binary(message) do
-    {:noreply, update_window(socket, id, fn w -> poke_window(socket, w, message) end)}
+    window = Enum.find(socket.assigns.windows, &(&1.id == id))
+    {:noreply, if(window, do: poke_window(socket, window, message), else: socket)}
   end
 
   def handle_event("window_poke", _params, socket), do: {:noreply, socket}
@@ -1054,17 +1055,17 @@ defmodule BtAttachWeb.Live.Inspector do
 
     cond do
       not is_pid(pid) ->
-        %{w | poke_result: nil, poke_error: "not attached to workspace"}
+        put_window(socket, %{w | poke_result: nil, poke_error: "not attached to workspace"})
 
       message == "" ->
-        %{w | poke_result: nil, poke_error: "Enter a message to send."}
+        put_window(socket, %{w | poke_result: nil, poke_error: "Enter a message to send."})
 
       is_nil(label) ->
-        %{
+        put_window(socket, %{
           w
           | poke_result: nil,
             poke_error: "Can only send to a bound object — inspect a binding to poke it."
-        }
+        })
 
       true ->
         send_window_poke(socket, w, pid, label, message)
@@ -1074,7 +1075,13 @@ defmodule BtAttachWeb.Live.Inspector do
   defp send_window_poke(socket, w, pid, label, message) do
     code = "#{label} #{message}"
 
-    case Facade.dispatch(:eval, %{session_pid: pid, code: code}, RequestContext.build(socket)) do
+    BtAttachWeb.Live.Dock.eval_async(socket, pid, code, fn socket, result ->
+      update_window(socket, w.id, fn w -> fold_window_poke(socket, w, result) end)
+    end)
+  end
+
+  defp fold_window_poke(socket, w, result) do
+    case result do
       {:ok, term, _output, _warnings} ->
         w = %{w | poke_result: "→ #{Workspace.render_term(term)}", poke_error: nil}
 
@@ -1136,6 +1143,8 @@ defmodule BtAttachWeb.Live.Inspector do
   # so the DOM order) stable — z-order is carried by each window's `:z`, not
   # list position, so an update never reshuffles the windows and resets
   # their drag positions.
+  defp put_window(socket, w), do: update_window(socket, w.id, fn _ -> w end)
+
   defp update_window(socket, id, fun) do
     windows =
       Enum.map(socket.assigns.windows, fn w ->
@@ -1301,24 +1310,26 @@ defmodule BtAttachWeb.Live.Inspector do
   defp send_poke(socket, pid, label, message) do
     code = "#{label} #{message}"
 
-    case Facade.dispatch(:eval, %{session_pid: pid, code: code}, RequestContext.build(socket)) do
-      {:ok, term, _output, _warnings} ->
-        socket
-        |> assign(poke_result: "→ #{Workspace.render_term(term)}", poke_error: nil)
-        # A poke is a user-initiated mutation — re-read the inspected object
-        # now so its fields reflect the write immediately, rather than
-        # waiting on the async `{:object_changed, …}` change-stream push
-        # (which is coalesced/delayed, and is the live-tracking path tracked
-        # separately by BT-2524). No-op when the pane is frozen or nothing is
-        # watched.
-        |> refresh_poked_inspector()
+    BtAttachWeb.Live.Dock.eval_async(socket, pid, code, fn socket, result ->
+      case result do
+        {:ok, term, _output, _warnings} ->
+          socket
+          |> assign(poke_result: "→ #{Workspace.render_term(term)}", poke_error: nil)
+          # A poke is a user-initiated mutation — re-read the inspected object
+          # now so its fields reflect the write immediately, rather than
+          # waiting on the async `{:object_changed, …}` change-stream push
+          # (which is coalesced/delayed, and is the live-tracking path tracked
+          # separately by BT-2524). No-op when the pane is frozen or nothing is
+          # watched.
+          |> refresh_poked_inspector()
 
-      {:error, _, _, _} = err ->
-        assign(socket, poke_result: nil, poke_error: FacadeError.render_eval_error(err))
+        {:error, _, _, _} = err ->
+          assign(socket, poke_result: nil, poke_error: FacadeError.render_eval_error(err))
 
-      {:error, _} = err ->
-        assign(socket, poke_result: nil, poke_error: FacadeError.render_eval_error(err))
-    end
+        {:error, _} = err ->
+          assign(socket, poke_result: nil, poke_error: FacadeError.render_eval_error(err))
+      end
+    end)
   end
 
   # Re-read the inspected object after a successful poke so the pane

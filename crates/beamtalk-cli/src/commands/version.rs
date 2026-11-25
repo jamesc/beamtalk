@@ -76,6 +76,19 @@ fn parse_bump_part(s: &str) -> Result<BumpPart> {
     }
 }
 
+/// Take the project build lock before a read-modify-write of the manifest, so
+/// it cannot interleave with a build or `deps add` editing the same file
+/// (BT-5133).
+fn lock_manifest_edit(
+    manifest_path: &Utf8Path,
+) -> Result<crate::commands::dir_lock::ProjectBuildLock> {
+    let root = manifest_path
+        .parent()
+        .filter(|p| !p.as_str().is_empty())
+        .unwrap_or_else(|| Utf8Path::new("."));
+    crate::commands::dir_lock::lock_project_build(root)
+}
+
 /// Print the package's current version.
 fn run_show(manifest_path: &Utf8Path) -> Result<()> {
     let manifest = manifest::parse_manifest(manifest_path)?;
@@ -86,6 +99,7 @@ fn run_show(manifest_path: &Utf8Path) -> Result<()> {
 /// Set the version to an exact value, validated and required to be greater
 /// than the current version.
 fn run_set(manifest_path: &Utf8Path, new_version: &str) -> Result<()> {
+    let _lock = lock_manifest_edit(manifest_path)?;
     let manifest = manifest::parse_manifest(manifest_path)?;
     let current = &manifest.version;
 
@@ -111,6 +125,7 @@ fn run_set(manifest_path: &Utf8Path, new_version: &str) -> Result<()> {
 /// Bump the given segment of the current version, resetting lower segments
 /// to zero (standard semver bump semantics).
 fn run_bump(manifest_path: &Utf8Path, part: BumpPart) -> Result<()> {
+    let _lock = lock_manifest_edit(manifest_path)?;
     let manifest = manifest::parse_manifest(manifest_path)?;
     let current = &manifest.version;
     let (major, minor, patch) = parse_semver(current, manifest_path)?;

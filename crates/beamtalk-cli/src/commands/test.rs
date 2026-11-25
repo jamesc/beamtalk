@@ -1773,6 +1773,10 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
         // servers, mocks). They go into the same native ebin directory.
         let native_test_dir = pkg_root.join("native").join("test");
         if native_test_dir.exists() && native_test_dir.is_dir() {
+            // `build()` has released the project lock; writing `_build/` here
+            // unlocked let a concurrent build's native-beam pruning delete
+            // these helpers (BT-5133). Re-take it for the write.
+            let _project_lock = super::dir_lock::lock_project_build(pkg_root)?;
             compile_native_test_erlang(pkg_root, &native_test_dir, &pipeline.package_ebin_dirs)?;
 
             // Discover native EUnit test modules (_test or _tests suffix)

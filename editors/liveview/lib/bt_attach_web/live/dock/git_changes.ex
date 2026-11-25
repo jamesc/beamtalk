@@ -372,27 +372,29 @@ defmodule BtAttachWeb.Live.Dock.GitChanges do
   defp rename_flush_message(_kind, class), do: "Flushed the pending removal for #{class}"
 
   defp flush_destructive_eval(socket, class, kind, expr, pid) do
-    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, RequestContext.build(socket)) do
-      {:ok, _term, _output, _warnings} ->
-        socket
-        |> assign(
-          save_result: nil,
-          save_error: nil,
-          flush_result: rename_flush_message(kind, class),
-          flush_error: nil
-        )
-        |> WorkspaceLive.assign_changes()
-        # BT-2586: a successful destructive flush can delete a tracked file,
-        # so the git panel must reflect it immediately, same as an ordinary
-        # "Save All to Disk" flush.
-        |> WorkspaceLive.maybe_refresh_git()
+    BtAttachWeb.Live.Dock.eval_async(socket, pid, expr, fn socket, result ->
+      case result do
+        {:ok, _term, _output, _warnings} ->
+          socket
+          |> assign(
+            save_result: nil,
+            save_error: nil,
+            flush_result: rename_flush_message(kind, class),
+            flush_error: nil
+          )
+          |> WorkspaceLive.assign_changes()
+          # BT-2586: a successful destructive flush can delete a tracked file,
+          # so the git panel must reflect it immediately, same as an ordinary
+          # "Save All to Disk" flush.
+          |> WorkspaceLive.maybe_refresh_git()
 
-      {:error, _, _, _} = err ->
-        WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
+        {:error, _, _, _} = err ->
+          WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
 
-      {:error, _} = err ->
-        WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
-    end
+        {:error, _} = err ->
+          WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
+      end
+    end)
   end
 
   # After a flush, clear the `unflushed` badge on the `:method` tabs this

@@ -1,0 +1,185 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Demo — the coordinator scenario. Run it on the coordinator node with
+/// `bin/cluster rpc "Demo main: workerA@localhost workerB@localhost"` (see
+/// README.md). `Demo run` does the same with the default node names.
+///
+/// It farms jobs out to two worker nodes, kills one of them mid-call,
+/// notices through `NodeDown`, reassigns the lost job, and prints one
+/// `PASS` / `FAIL` line per check. Every ADR 0126 surface it touches is
+/// exercised here, in user code.
+Object subclass: Demo
+
+  class worker1Name -> Symbol => #'worker1@localhost'
+
+  class worker2Name -> Symbol => #'worker2@localhost'
+
+  /// Poll `cond` every 50 ms, up to `tries` times.
+  class waitUntil: cond :: Block tries: tries :: Integer -> Boolean =>
+    cond value
+      ifTrue: [true]
+      ifFalse: [
+        tries =:= 0
+          ifTrue: [false]
+          ifFalse: [
+            Timer sleep: 50
+            self waitUntil: cond tries: tries - 1
+          ]
+      ]
+
+  /// Entry point with the default node names (`worker1@localhost`,
+  /// `worker2@localhost`).
+  class run => self runOn: self worker1Name and: self worker2Name
+
+  /// Entry point with explicit node names, as `bin/cluster rpc "Demo main:
+  /// nameA@localhost nameB@localhost"` passes them (ADR 0099 `main:` entry).
+  /// Exits the rpc with status 1 when any check failed.
+  class main: args =>
+    failed := self runOn: (self symbolFrom: (args at: 1)) and: (self symbolFrom: (args at: 2))
+    failed > 0 ifTrue: [Program exit: 1]
+    failed
+
+  // Node names are atoms, so this turns a trusted CLI argument into one. Do not
+  // copy it for untrusted input: atoms are never garbage collected.
+  class symbolFrom: text :: String -> Symbol =>
+    (Erlang erlang) binary_to_atom: text
+
+  /// Run every phase against the two worker nodes and answer the number of
+  /// failed checks. Every check line is printed as it happens.
+  class runOn: worker1 and: worker2 =>
+    report := Report spawn
+    monitor := ClusterMonitor spawn
+    w1 := (Node named: worker1) unwrap
+    w2 := (Node named: worker2) unwrap
+
+    // ---- Phase 1: membership (Node, NodeUp/NodeDown announcements) ----
+    upSub := SystemAnnouncer current when: NodeUp do: [:e |
+      monitor nodeUp: e node name
+    ]
+    downSub := SystemAnnouncer current when: NodeDown do: [:e |
+      monitor nodeDown: e node name
+    ]
+    report check: "Node named: touches no network" is: w1 isConnected not
+    report check: "connect to worker1" is: w1 connect isOk
+    report check: "connect to worker2" is: w2 connect isOk
+    report check: "isConnected after connect" is: (w1 isConnected and: [
+      w2 isConnected
+    ])
+    report check: "Node connected lists both workers" is: ((Node connected includes: w1) and: [
+      Node connected includes: w2
+    ])
+    report
+      check: "NodeUp announced for both"
+      is: (self waitUntil: [
+        (monitor hasSeenUp: w1 name) and: [monitor hasSeenUp: w2 name]
+      ] tries: 40)
+
+    // ---- Phase 2: remote spawn and lookup ----
+    a1 := (Worker spawnOn: w1) unwrap
+    a2 := (Worker spawnWith: #{#label => "second"} on: w2) unwrap
+    n1 := (Worker spawnAs: #crunch on: w1) unwrap
+    n2 := (Worker spawnAs: #crunch on: w2) unwrap
+    report check: "spawnOn: answers a remote actor on worker1" is: (a1 isRemote and: [
+      a1 node =:= w1
+    ])
+    report check: "spawnWith:on: delivers the init state" is: a2 label =:= "second"
+    report check: "spawnAs:on: names are per node" is: (n1 where =:= w1 name and: [
+      n2 where =:= w2 name
+    ])
+    report check: "named:on: finds the registered actor" is: ((Worker named: #crunch on: w1) unwrap where =:= w1 name)
+    report check: "named:on: unknown name is an error" is: (Worker named: #nope on: w1) isError
+    report check: "spawnAs:on: twice is name_registered" is: (Worker spawnAs: #crunch on: w1) isError
+    report check: "allRegisteredOn: lists the named worker" is: ((Actor allRegisteredOn: w1) unwrap size >= 1)
+
+    // ---- Phase 3: sends (sync, cast, value objects) ----
+    r1 := a1 process: (Job id: 1 n: 6)
+    report check: "sync send returns a JobResult value" is: (r1 value =:= 36 and: [
+      r1 node =:= w1 name
+    ])
+    a2 note: "hello"!
+    a2 note: "world"!
+    report check: "casts arrive in order" is: a2 notes =:= #("hello", "world")
+    report
+      check: "a Value that crossed the wire equals a locally built one"
+      is: r1 =:= (JobResult
+        jobId: 1
+        value: 36
+        node: w1 name)
+    report check: "work ran on the worker that was asked" is: ((a2 process: (Job id: 2 n: 5)) node =:= w2 name)
+    report check: "remote node counts the job" is: a2 done =:= 1
+
+    // ---- Phase 4: remote async sends are unsupported (ADR 0126 BT-4989) ----
+    asyncOutcome := self tryRemoteAsync: a1
+    report check: "remote async send fails loudly instead of hanging" is: asyncOutcome =:= #unsupported_operation
+
+    // ---- Phase 5: cluster-wide registration ----
+    ledger := (Ledger spawnAs: #ledger scope: #global) unwrap
+    report check: "global name registers on the coordinator" is: (Ledger named: #ledger scope: #global) isOk
+    report check: "worker1 reaches the global Ledger from its own node" is: (a1 reportToLedger: r1)
+    report check: "ledger holds the worker's report" is: ledger size =:= 1
+    report check: "second global registration is refused" is: (Ledger spawnAs: #ledger scope: #global) isError
+
+    // ---- Phase 6: shape skew ----
+    report check: "shapeSkew is 0 between identical builds" is: (w1 shapeSkew unwrap =:= 0 and: [
+      w2 shapeSkew unwrap =:= 0
+    ])
+
+    // ---- Phase 7: farm out, lose a node mid-call, reassign ----
+    jobs := (1 to: 6) collect: [:i | Job id: i n: i]
+    farm := Farm spawn
+    farm useWorkers: #(a1, a2)
+    results := farm runAll: jobs killAt: 4
+    report check: "all six jobs finished despite the node loss" is: results size =:= 6
+    report check: "NodeDown announced for worker2" is: (self waitUntil: [
+      monitor hasSeenDown: w2 name
+    ] tries: 60)
+    report check: "worker2 is no longer connected" is: w2 isConnected not
+    report check: "every result is right" is: (results inject: true into: [:ok :r |
+      ok and: [r value =:= r jobId * r jobId]
+    ])
+    report check: "no job at or after the kill point ran on the dead node" is: ((results select: [:r |
+      r node =:= w2 name and: [r jobId >= 4]
+    ]) isEmpty)
+    report check: "survivor stayed connected" is: w1 isConnected
+    report check: "the failed call surfaced as node_down" is: (farm lostKinds =:= #(#node_down))
+    report check: "one live worker left" is: farm liveCount =:= 1
+
+    // ---- Phase 8: no links — a remote actor is not supervised ----
+    report info: "remote actors are not linked: worker2's actors died with their node and were not restarted"
+
+    upSub unsubscribe
+    downSub unsubscribe
+    w1 disconnect
+    summary := self summarise: report
+    summary
+
+  /// Try an async (Future) send to a remote actor through the runtime's
+  /// entry point. ADR 0126 (BT-4989) says it must raise `unsupported_operation`
+  /// at once. If that regresses, the send is accepted (`#accepted`) and the
+  /// check fails. This is a test-only probe: it calls runtime-internal
+  /// `beamtalk_actor` / `beamtalk_future` through FFI because no Beamtalk
+  /// syntax reaches a remote async send. Do not copy it into application code.
+  class tryRemoteAsync: remote =>
+    future := (Erlang beamtalk_future) new
+    futurePid := (Erlang beamtalk_future) pid: future
+    outcome := [
+      (Erlang beamtalk_actor)
+        async_send: remote pid
+        with: #process:
+        with: #((Job id: 1 n: 1))
+        with: futurePid
+      #accepted
+    ] on: Error do: [:e | e kind]
+    outcome
+
+  class summarise: report =>
+    lines := report lines
+    failed := report failed
+    Console
+      printLine: "RESULT "
+        ++ (lines size - failed) printString
+        ++ " ok, "
+        ++ failed printString
+        ++ " failed"
+    failed

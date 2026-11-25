@@ -43,6 +43,8 @@ export class InspectorPanel {
   private _target: InspectTarget;
   private _client: WorkspaceClient | null;
   private _disposed = false;
+  private _clientChanged = false;
+  private _stopWaiting: (() => void) | undefined;
   /** Monotonic counter — incremented on each _refetch() call to discard stale responses. */
   private _refreshGeneration = 0;
 
@@ -85,6 +87,7 @@ export class InspectorPanel {
 
     if (existing) {
       existing._client = client;
+      existing._clientChanged = false;
       existing._target = target;
       existing._panel.reveal(vscode.ViewColumn.Two);
       // Re-fetch live state so the panel is always up to date on reveal.
@@ -139,8 +142,40 @@ export class InspectorPanel {
         inspector.dispose();
         continue;
       }
-      inspector._client = client;
-      if (client) void inspector._refetch();
+      inspector._setBindingClient(client);
+    }
+  }
+
+  /**
+   * Switch a binding panel to a new client (BT-5130). The client is usually
+   * still connecting here, so a fetch would fail with "Not connected"; wait
+   * for `connected` instead. The session id belongs to the old node, so a
+   * failure after a client change is reported as "session ended".
+   */
+  private _setBindingClient(client: WorkspaceClient | null): void {
+    this._stopWaiting?.();
+    this._stopWaiting = undefined;
+    this._client = client;
+    this._clientChanged = true;
+    if (!client) return;
+    if (client.state === "connected") {
+      void this._refetch();
+      return;
+    }
+    this._postContent(renderLoading());
+    const stop = client.onConnectionChange((state) => {
+      if (state !== "connected" || this._disposed) return;
+      stop();
+      this._stopWaiting = undefined;
+      void this._refetch();
+    });
+    this._stopWaiting = stop;
+  }
+
+  /** Close every actor panel (the node they were opened against may be gone). */
+  static closeActorPanels(): void {
+    for (const inspector of [...InspectorPanel._panels.values()]) {
+      if (inspector._target.kind === "actor") inspector.dispose();
     }
   }
 
@@ -155,6 +190,7 @@ export class InspectorPanel {
   dispose(): void {
     if (this._disposed) return;
     this._disposed = true;
+    this._stopWaiting?.();
     InspectorPanel._panels.delete(InspectorPanel._targetKey(this._target));
     this._panel.dispose();
   }
@@ -164,6 +200,7 @@ export class InspectorPanel {
   private _onPanelDispose(): void {
     if (this._disposed) return;
     this._disposed = true;
+    this._stopWaiting?.();
     InspectorPanel._panels.delete(InspectorPanel._targetKey(this._target));
   }
 
@@ -200,6 +237,10 @@ export class InspectorPanel {
       }
     } catch (err) {
       if (!this._disposed && generation === this._refreshGeneration) {
+        if (this._target.kind === "binding" && this._clientChanged) {
+          this._postContent(renderSessionEnded());
+          return;
+        }
         const message = err instanceof Error ? err.message : String(err);
         this._postContent(renderError(message));
       }
@@ -313,6 +354,10 @@ export function renderValue(value: unknown, depth = 0): string {
 
 function renderLoading(): string {
   return `<p class="bt-loading">Loading…</p>`;
+}
+
+function renderSessionEnded(): string {
+  return `<p class="bt-error">Session ended — this binding belonged to a REPL session that no longer exists.</p>`;
 }
 
 function renderError(message: string): string {

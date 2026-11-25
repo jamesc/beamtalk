@@ -540,7 +540,84 @@ pub fn parse_manifest(path: &Utf8Path) -> Result<PackageManifest> {
 /// `[native.dependencies]`, or `[diagnostics]` section.
 pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
     let manifest = parse_manifest_raw(path)?;
+    parsed_from_raw(manifest, path)
+}
 
+/// Parse a *dependency's* `beamtalk.toml` leniently (BT-5133).
+///
+/// A dependency may be published with a newer toolchain that knows keys this
+/// one does not. Unknown keys are dropped with a warning instead of failing
+/// the dependent's build; every other problem (invalid TOML, bad package name,
+/// malformed dependency tables) is still an error, reported with the path.
+///
+/// # Errors
+///
+/// As [`parse_manifest_full`], except that unknown keys are not an error.
+pub fn parse_dependency_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
+    let content = fs::read_to_string(path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read manifest '{path}'"))?;
+    let (manifest, ignored) = deserialize_ignoring_unknown_keys(&content)
+        .wrap_err_with(|| format!("Failed to parse manifest '{path}'"))?;
+    for key in ignored {
+        tracing::warn!("Ignoring unknown key `{key}` in dependency manifest '{path}'");
+    }
+    parsed_from_raw(manifest, path)
+}
+
+/// Deserialize `content`, removing each unknown key the strict parse rejects
+/// and retrying, so only the unknown keys are tolerated. Returns the manifest
+/// and the names of the dropped keys. A rejection that is not an unknown key
+/// (or whose key cannot be located on a single line) is returned as is.
+fn deserialize_ignoring_unknown_keys(content: &str) -> Result<(Manifest, Vec<String>)> {
+    const MAX_DROPPED: usize = 32;
+    let mut text = content.to_string();
+    let mut dropped = Vec::new();
+    loop {
+        let err = match toml::from_str::<Manifest>(&text) {
+            Ok(manifest) => return Ok((manifest, dropped)),
+            Err(err) => err,
+        };
+        let Some(span) = err
+            .span()
+            .filter(|_| err.message().starts_with("unknown field") && dropped.len() < MAX_DROPPED)
+        else {
+            return Err(miette::miette!("{err}"));
+        };
+        let line_start = text[..span.start].rfind('\n').map_or(0, |i| i + 1);
+        let line_end = text[span.start..]
+            .find('\n')
+            .map_or(text.len(), |i| span.start + i + 1);
+        let line = &text[line_start..line_end];
+        let remove_end = if line.trim_start().starts_with('[') {
+            // An unknown table: drop its header and body, up to the next header.
+            let mut end = line_end;
+            while end < text.len() {
+                let next = text[end..].find('\n').map_or(text.len(), |i| end + i + 1);
+                if text[end..next].trim_start().starts_with('[') {
+                    break;
+                }
+                end = next;
+            }
+            end
+        } else {
+            // Only a plain single-line `key = value` can be dropped safely.
+            let single_line_value = line.split_once('=').is_some_and(|(_, v)| {
+                let v = v.trim();
+                !v.is_empty() && !v.ends_with('[') && !v.ends_with('{') && !v.contains("\"\"\"")
+            });
+            if !single_line_value {
+                return Err(miette::miette!("{err}"));
+            }
+            line_end
+        };
+        dropped.push(text[span.start..span.end].to_string());
+        text.replace_range(line_start..remove_end, "");
+    }
+}
+
+/// Validate a deserialized [`Manifest`] into a [`ParsedManifest`].
+fn parsed_from_raw(manifest: Manifest, path: &Utf8Path) -> Result<ParsedManifest> {
     validate_package_identity(&manifest.package)?;
 
     let dependencies = parse_dependencies(manifest.dependencies.as_ref())

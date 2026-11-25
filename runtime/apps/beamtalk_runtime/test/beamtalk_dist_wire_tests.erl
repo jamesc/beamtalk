@@ -117,9 +117,9 @@ values_in_array_and_dictionary_round_trip(PeerNode) ->
     {ok, RemotePid} = rpc:call(PeerNode, test_wire_actor, start, [0]),
     try
         Point = #{'$beamtalk_class' => 'ShapePoint', x => 1, y => 2},
-        ExpectedPoint = #{
-            '$beamtalk_class' => 'ShapePoint', '__shape_version__' => 1, x => 1, y => 2
-        },
+        %% A Value that crossed the wire equals the one that was sent (BT-5143):
+        %% decoding adds no `'__shape_version__'` key.
+        ExpectedPoint = Point,
 
         Array = beamtalk_array:from_list([Point]),
         EchoedArray = beamtalk_actor:sync_send(RemotePid, 'echo:', [Array]),
@@ -286,7 +286,6 @@ migrate_forward_through_wire(PeerNode) ->
         ?assertMatch(
             #{
                 '$beamtalk_class' := 'ShapeChainCart',
-                '__shape_version__' := 3,
                 itemCount := 4,
                 total := 40,
                 tag := <<"migrated">>

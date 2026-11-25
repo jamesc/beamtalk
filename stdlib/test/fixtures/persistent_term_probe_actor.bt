@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5146: a minimal actor used by persistent_term_test.bt to check that
+// PersistentTerm refuses an actor value.
+
+Actor subclass: PersistentTermProbeActor
+
+  ping => 1

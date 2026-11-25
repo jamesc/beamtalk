@@ -76,7 +76,7 @@ pub fn ensure_deps_resolved(
         return Ok(Vec::new());
     }
 
-    let resolved = if deps_are_fresh(project_root, &parsed) {
+    let resolved = if deps_are_fresh(project_root, &parsed, &dep_stamp_flags(options)) {
         info!("Dependencies are fresh, skipping compilation");
         collect_fresh_deps(project_root, &parsed)?
     } else {
@@ -93,6 +93,13 @@ pub fn ensure_deps_resolved(
     clean_stale_deps(project_root, &resolved)?;
 
     Ok(resolved)
+}
+
+/// The build-mode flags that reach dependency compiles
+/// (`dependency_compile_options` clones them from the downstream build), and so
+/// belong in each dependency's provenance stamp (BT-5133).
+pub(crate) fn dep_stamp_flags(options: &beamtalk_core::CompilerOptions) -> String {
+    crate::commands::build_stamp::build_flags(options.stdlib_mode, options.allow_primitives)
 }
 
 /// Remove stale dependency directories from `_build/deps/`.
@@ -240,7 +247,15 @@ fn discover_all_dep_roots(
             name: &str,
             root: &Utf8Path,
         ) -> Option<beamtalk_core::compilation::DependencyMap> {
-            let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).ok()?;
+            let parsed = match manifest::parse_dependency_manifest_full(&root.join("beamtalk.toml"))
+            {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    // Not silent (BT-5133): its transitive edges are lost.
+                    tracing::warn!(dep = %name, error = %e, "Dependency manifest unreadable; its dependencies are unknown");
+                    return None;
+                }
+            };
             let deps = parsed.dependencies.clone();
             self.parsed.insert(name.to_string(), parsed);
             Some(deps)
@@ -494,7 +509,11 @@ fn locked_deps_match(
 /// 4. The transitive graph's shape (names, declaring chains, declared
 ///    sources) still matches the snapshot recorded by the last successful
 ///    resolve — see [`snapshot`]
-fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) -> bool {
+fn deps_are_fresh(
+    project_root: &Utf8Path,
+    manifest: &manifest::ParsedManifest,
+    flags: &str,
+) -> bool {
     use beamtalk_core::compilation::DependencySource;
 
     // Discover the full transitive graph up front: both the lockfile
@@ -595,9 +614,10 @@ fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) 
         // this ships. mtime cannot detect a toolchain change.
         let stamp_path = layout.dep_stamp_path(&dep.name);
         if let crate::commands::build_stamp::StampStatus::Stale(reason) =
-            crate::commands::build_stamp::read_stamp_status(
+            crate::commands::build_stamp::read_stamp_status_with_flags(
                 &stamp_path,
                 crate::commands::build_stamp::current_otp_version(),
+                flags,
             )
         {
             debug!(dep = %dep.name, %reason, "Dependency provenance miss — deps are stale");
@@ -812,7 +832,7 @@ mod tests {
         parsed: &manifest::ParsedManifest,
     ) -> bool {
         record_dep_graph_snapshot(root, parsed);
-        deps_are_fresh(root, parsed)
+        deps_are_fresh(root, parsed, "")
     }
 
     fn create_dep_ebin_with_beam(project_root: &std::path::Path, dep_name: &str) {
@@ -919,6 +939,33 @@ mod tests {
 
         // Path deps with compiled ebin should be fresh
         assert!(deps_are_fresh_with_snapshot(&root, &parsed));
+    }
+
+    #[test]
+    fn test_deps_stale_when_build_flags_differ_from_dep_stamp() {
+        // BT-5133: flags reach dependency compiles, so a dependency built
+        // without `--allow-primitives` is stale for a build that passes it.
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let dep_dir = temp.path().join("utils");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "utils", "0.1.0", "");
+        write_source(
+            &dep_dir,
+            "helper.bt",
+            "Object subclass: Helper\n  greet => \"hi\"\n",
+        );
+        create_dep_ebin_with_beam(temp.path(), "utils");
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            "[dependencies]\nutils = { path = \"utils\" }",
+        );
+        let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
+        record_dep_graph_snapshot(&root, &parsed);
+        assert!(deps_are_fresh(&root, &parsed, ""));
+        assert!(!deps_are_fresh(&root, &parsed, "allow-primitives"));
     }
 
     #[test]
@@ -1418,7 +1465,7 @@ mod tests {
 
         write_lock("0123456789abcdef0123456789abcdef01234567");
         assert!(
-            !deps_are_fresh(&root, &parsed),
+            !deps_are_fresh(&root, &parsed, ""),
             "a new locked sha with unchanged url/reference must be stale"
         );
     }
@@ -2111,7 +2158,7 @@ mod tests {
 
         // Baseline: the graph as it stands is what the last resolve produced.
         record_dep_graph_snapshot(&root, &parsed);
-        assert!(deps_are_fresh(&root, &parsed), "should start fresh");
+        assert!(deps_are_fresh(&root, &parsed, ""), "should start fresh");
 
         // The swap: leaf becomes a local path dependency of middle. Its stale
         // `_build/deps/leaf/ebin/` from the git checkout stays exactly where
@@ -2129,7 +2176,7 @@ mod tests {
         recompile_dep(&temp, "leaf");
 
         assert!(
-            !deps_are_fresh(&root, &parsed),
+            !deps_are_fresh(&root, &parsed, ""),
             "A git-to-path swap in an intermediate manifest must be detected as stale"
         );
 
@@ -2174,7 +2221,7 @@ mod tests {
 
         let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
         record_dep_graph_snapshot(&root, &parsed);
-        assert!(deps_are_fresh(&root, &parsed), "should start fresh");
+        assert!(deps_are_fresh(&root, &parsed, ""), "should start fresh");
 
         // The swap. A git dep with no lock entry is already caught by
         // `locked_deps_match`, so this asserts the structural check agrees
@@ -2188,7 +2235,7 @@ mod tests {
         recompile_dep(&temp, "middle");
 
         assert!(
-            !deps_are_fresh(&root, &parsed),
+            !deps_are_fresh(&root, &parsed, ""),
             "A path-to-git swap in an intermediate manifest must be detected as stale"
         );
     }
@@ -2216,7 +2263,7 @@ mod tests {
         );
         let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
         record_dep_graph_snapshot(&root, &parsed);
-        assert!(deps_are_fresh(&root, &parsed), "should start fresh");
+        assert!(deps_are_fresh(&root, &parsed, ""), "should start fresh");
 
         write_manifest(
             temp.path(),
@@ -2227,7 +2274,7 @@ mod tests {
         let moved = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
 
         assert!(
-            !deps_are_fresh(&root, &moved),
+            !deps_are_fresh(&root, &moved, ""),
             "A path dependency pointed at a different directory must be stale"
         );
     }
@@ -2253,13 +2300,13 @@ mod tests {
 
         let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
         assert!(
-            !deps_are_fresh(&root, &parsed),
+            !deps_are_fresh(&root, &parsed, ""),
             "An otherwise-fresh project with no graph snapshot must re-resolve once"
         );
 
         record_dep_graph_snapshot(&root, &parsed);
         assert!(
-            deps_are_fresh(&root, &parsed),
+            deps_are_fresh(&root, &parsed, ""),
             "and be fresh once the snapshot has been recorded"
         );
     }
@@ -2288,7 +2335,7 @@ mod tests {
 
         fs::write(BuildLayout::new(&root).dep_graph_path(), "{not json").unwrap();
         assert!(
-            !deps_are_fresh(&root, &parsed),
+            !deps_are_fresh(&root, &parsed, ""),
             "A corrupt graph snapshot must force re-resolution"
         );
     }
@@ -2324,7 +2371,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            !deps_are_fresh(&root, &parsed),
+            !deps_are_fresh(&root, &parsed, ""),
             "An old-schema graph snapshot must force re-resolution"
         );
     }
@@ -2408,7 +2455,7 @@ mod tests {
 
         let parsed = manifest::parse_manifest_full(&root.join("beamtalk.toml")).unwrap();
         assert!(
-            deps_are_fresh(&root, &parsed),
+            deps_are_fresh(&root, &parsed, ""),
             "the recorded snapshot must read back as fresh — otherwise every \
              build re-resolves"
         );

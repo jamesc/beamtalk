@@ -8,7 +8,7 @@
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::time::Duration;
 
 use miette::{Result, miette};
@@ -17,6 +17,7 @@ use tracing::{debug, info, warn};
 use beamtalk_cli::repl_startup;
 
 use super::{MAX_CONNECT_RETRIES, RETRY_DELAY_MS, ReplClient};
+use crate::commands::cookie_env;
 
 /// Start the BEAM node with REPL backend.
 ///
@@ -44,14 +45,17 @@ pub(crate) fn start_beam_node(
     // Auto-build runtime if not compiled (dev mode only)
     if layout == repl_startup::RuntimeLayout::Dev && !paths.runtime_ebin.exists() {
         info!("Building Beamtalk runtime...");
-        let status = Command::new("rebar3")
+        let status = crate::commands::build::native::rebar3_tool_command()?
             .arg("compile")
             .current_dir(&runtime_dir)
             .status()
             .map_err(|e| miette!("Failed to build runtime: {e}"))?;
 
         if !status.success() {
-            return Err(miette!("Failed to build Beamtalk runtime"));
+            return Err(miette!(
+                "Failed to build Beamtalk runtime{}",
+                crate::commands::build::native::rebar3_restricted_env_hint()
+            ));
         }
     }
 
@@ -104,27 +108,19 @@ pub(crate) fn start_beam_node(
     // BT-5066: the console authenticates against `erlang:get_cookie()`, which
     // is the constant `nocookie` on a non-distributed node regardless of
     // `-setcookie`. So the foreground node always runs distributed (with a
-    // generated name when none was given) under a per-process random cookie,
-    // handed over via a private `-args_file` rather than argv.
+    // generated name when none was given) under a per-process random cookie.
+    // BT-5126: the cookie is handed over in the child's environment, never in
+    // argv (`-setcookie`, `ERL_AFLAGS` and `-args_file` all land in `ps`); see
+    // `cookie_env`.
     let cookie = crate::commands::workspace::storage::generate_cookie();
-    let cookie_dir = tempfile::Builder::new()
-        .prefix("beamtalk-fg-")
-        .tempdir()
-        .map_err(|e| miette!("Failed to create private cookie directory: {e}"))?;
-    let cookie_args_file = cookie_dir.path().join("vm.args");
-    crate::commands::util::write_atomic_file(
-        &cookie_args_file,
-        format!("-setcookie {cookie}\n").as_bytes(),
-        ".beamtalk-fg.",
-        true,
-    )
-    .map_err(|e| miette!("Failed to write cookie args file: {e}"))?;
-    args.extend(foreground_dist_args(node_name, &cookie_args_file)?);
+    args.extend(foreground_dist_args(node_name)?);
+    args.extend(cookie_env::placeholder_args());
 
     args.push(OsString::from("-eval"));
-    args.push(OsString::from(eval_cmd));
+    args.push(OsString::from(cookie_env::adopt_then(&eval_cmd)));
 
     let mut cmd = beamtalk_workspace::erl_command();
+    cookie_env::hand_over(&mut cmd, &cookie);
     cmd.arg("-noshell")
         .args(&args)
         // Redirect OTP default logger to stderr from boot. The startup
@@ -153,11 +149,7 @@ pub(crate) fn start_beam_node(
         .spawn()
         .map_err(|e| miette!("Failed to start BEAM node: {e}\nIs Erlang/OTP installed?"))?;
 
-    Ok(ForegroundNode {
-        child,
-        cookie,
-        cookie_dir,
-    })
+    Ok(ForegroundNode { child, cookie })
 }
 
 /// A started foreground BEAM node plus the private cookie it was given.
@@ -165,13 +157,11 @@ pub(crate) struct ForegroundNode {
     pub(crate) child: Child,
     /// Per-process random cookie; never `nocookie`.
     pub(crate) cookie: String,
-    /// Holds the 0600 args file until the node is torn down.
-    pub(crate) cookie_dir: tempfile::TempDir,
 }
 
 /// VM flags that make the foreground node distributed under a private cookie:
-/// the node name (generated when the user gave none) and `-args_file`.
-fn foreground_dist_args(node_name: Option<&String>, args_file: &Path) -> Result<Vec<OsString>> {
+/// the node name (generated when the user gave none) and loopback pin.
+fn foreground_dist_args(node_name: Option<&String>) -> Result<Vec<OsString>> {
     // Distribution must be alive for the cookie to take effect, so an
     // unnamed node gets a generated name. Naming (and the loopback pin on the
     // distribution listener, BT-5067) is `node_name_args`'s single rule.
@@ -186,10 +176,7 @@ fn foreground_dist_args(node_name: Option<&String>, args_file: &Path) -> Result<
         );
         generated.as_str()
     };
-    let mut args = node_name_args(name)?;
-    args.push(OsString::from("-args_file"));
-    args.push(args_file.as_os_str().to_owned());
-    Ok(args)
+    node_name_args(name)
 }
 
 /// `erl` flags naming the foreground REPL node, plus the loopback pin on its
@@ -254,8 +241,6 @@ fn connect_with_retries_and_delay(
 pub(crate) struct BeamChildGuard {
     /// The managed BEAM child process.
     pub(crate) child: Child,
-    /// Keeps the foreground cookie args file alive (removed on drop).
-    pub(crate) _cookie_dir: Option<tempfile::TempDir>,
 }
 
 impl Drop for BeamChildGuard {
@@ -611,24 +596,49 @@ mod tests {
     }
 
     #[test]
-    fn foreground_dist_args_generates_name_and_uses_args_file() {
-        let file = Path::new("/p/vm.args");
-        let args = foreground_dist_args(None, file).unwrap();
+    fn foreground_dist_args_generates_name() {
+        let args = foreground_dist_args(None).unwrap();
         assert_eq!(args[0], OsString::from("-sname"));
         assert!(args[1].to_string_lossy().starts_with("beamtalk_fg_"));
-        // `-args_file <path>` always closes the list (the loopback pin from
-        // `node_name_args` sits between the name and it).
-        let n = args.len();
-        assert_eq!(args[n - 2], OsString::from("-args_file"));
-        assert_eq!(args[n - 1], file.as_os_str());
-        // The cookie itself never appears in argv.
-        assert!(!args.iter().any(|a| a == "-setcookie"));
+        // The cookie never travels in these args (BT-5126).
+        assert!(!args.iter().any(|a| a == "-setcookie" || a == "-args_file"));
+    }
+
+    /// BT-5126, real node: the foreground REPL node boots (it can only serve
+    /// the console after adopting its cookie), and neither `ps` nor
+    /// `/proc/<pid>/cmdline` shows that cookie.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    fn foreground_node_cookie_not_visible_in_ps() {
+        let project = crate::commands::test_support::stable_project_dir();
+        let config = crate::commands::workspace::WorkspaceConfig {
+            port: 0,
+            bind_addr: Some(std::net::Ipv4Addr::LOCALHOST),
+            auto_cleanup: false,
+            max_idle_seconds: None,
+            log_level: "error",
+            otp_app_name: None,
+            root_package: None,
+            hex_dep_names: &[],
+        };
+        let ForegroundNode { mut child, cookie } =
+            start_beam_node(None, &project, &[], &config).unwrap();
+        let port = read_port_from_child(&mut child);
+        let pid = child.id();
+        let checked = std::panic::catch_unwind(|| {
+            beamtalk_workspace::test_argv::assert_not_in_argv(pid, &cookie);
+        });
+        let _ = child.kill();
+        let _ = child.wait();
+        port.expect("foreground node must report its port");
+        checked.unwrap();
     }
 
     #[test]
     fn foreground_dist_args_keeps_explicit_node_name() {
         let n = "ws@host.example.com".to_string();
-        let args = foreground_dist_args(Some(&n), Path::new("/p/vm.args")).unwrap();
+        let args = foreground_dist_args(Some(&n)).unwrap();
         assert_eq!(args[0], OsString::from("-name"));
         assert_eq!(args[1], OsString::from("ws@host.example.com"));
     }

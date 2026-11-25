@@ -13,7 +13,7 @@ defmodule BtAttachWeb.Live.SessionLifecycle do
 
   use BtAttachWeb, :html
 
-  import Phoenix.LiveView, only: [start_async: 3, stream: 3]
+  import Phoenix.LiveView, only: [start_async: 3, stream: 4]
   require Logger
 
   alias BtAttach.Facade
@@ -494,8 +494,8 @@ defmodule BtAttachWeb.Live.SessionLifecycle do
       |> assign(:git_error, nil)
       |> assign(:git_diff, nil)
       |> assign(:git_diff_path, nil)
-      |> stream(:transcript, [])
-      |> stream(:repl, [])
+      |> stream(:transcript, [], reset: true)
+      |> stream(:repl, [], reset: true)
     else
       other ->
         Logger.error("subscribe failed: #{inspect(other)}")
@@ -534,6 +534,30 @@ defmodule BtAttachWeb.Live.SessionLifecycle do
 
         :ok
     end
+  end
+
+  # BT-5129: the session this tab's UI state belongs to is gone. Clear every
+  # surface tied to it (REPL + transcript streams, the `repl-N` dom ids the new
+  # session would reuse, the Inspect terms that point at dead objects) and the
+  # eval state (a stale `eval_running` hides Stop and wedges the queue; a queued
+  # eval would drain into dead-pid errors). Called on `DOWN`; `bind_session`
+  # does the same via its fresh assigns on Reconnect.
+  @doc false
+  def reset_session_ui(socket) do
+    # Cancel the in-flight eval task too: its late completion would otherwise
+    # clear `eval_running` while a post-Reconnect eval runs and start a second
+    # concurrent one.
+    socket
+    |> Phoenix.LiveView.cancel_async(:eval)
+    |> Phoenix.LiveView.stream(:transcript, [], reset: true)
+    |> Phoenix.LiveView.stream(:repl, [], reset: true)
+    |> assign(
+      repl_seq: 0,
+      repl_terms: %{},
+      repl_history_pos: nil,
+      eval_running: false,
+      eval_queue: []
+    )
   end
 
   # The single place the "workspace lost" state is resolved. The banner's
