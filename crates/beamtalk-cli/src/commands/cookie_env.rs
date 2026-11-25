@@ -48,6 +48,13 @@ pub(crate) const COOKIE_HOME_ENV: &str = "BEAMTALK_COOKIE_HOME";
 /// `set:<value>` or `unset` (Erlang: `beamtalk_cookie_home:orig_prefix/0`).
 pub(crate) const ORIG_PREFIX: &str = "BEAMTALK_ORIG_";
 
+/// Name prefix of every private cookie home, from the CLI and both release
+/// launchers. `beamtalk_cookie_home:restore/0` deletes nothing in a directory
+/// without it (Erlang: `beamtalk_cookie_home:cookie_dir_prefix/0`; the
+/// real-node tests here and in `cli_release.rs` fail if the two disagree,
+/// because the private home is then left behind).
+pub(crate) const COOKIE_DIR_PREFIX: &str = "beamtalk-cookie-";
+
 /// Erlang expression, first in a node's `-eval`, that undoes the private home.
 pub(crate) const RESTORE_HOME_EVAL: &str = "beamtalk_cookie_home:restore()";
 
@@ -72,7 +79,7 @@ impl CookieHome {
         // mode); on Windows it sits in the per-user temp directory, whose ACL
         // admits only its owner.
         let dir = tempfile::Builder::new()
-            .prefix("beamtalk-cookie-")
+            .prefix(COOKIE_DIR_PREFIX)
             .tempdir()?;
         #[cfg(unix)]
         {
@@ -188,11 +195,16 @@ pub(crate) fn erl_program() -> OsString {
 /// (its canonical path is `<root>/bin/erl` with a `<root>/releases`
 /// directory): no shim, so no probe is needed.
 fn installed_erl_on_path() -> Option<OsString> {
+    installed_erl_in(&std::env::var_os("PATH")?)
+}
+
+/// [`installed_erl_on_path`] for an explicit `PATH` value.
+fn installed_erl_in(path: &OsStr) -> Option<OsString> {
     let name = if cfg!(windows) { "erl.exe" } else { "erl" };
-    let path = std::env::var_os("PATH")?;
-    let found = std::env::split_paths(&path)
+    // The first entry the OS itself would run: it skips non-executables.
+    let found = std::env::split_paths(path)
         .map(|dir| dir.join(name))
-        .find(|candidate| candidate.is_file())?;
+        .find(|candidate| is_executable(candidate))?;
     let real = std::fs::canonicalize(&found).ok()?;
     // A shim symlinked to another binary (mise's are links to `mise`) is not
     // the launcher, whatever directory it lands in.
@@ -209,6 +221,19 @@ fn installed_erl_on_path() -> Option<OsString> {
     root.join("releases")
         .is_dir()
         .then(|| program.into_os_string())
+}
+
+/// A regular file the OS would run (on Unix: with an execute bit set).
+fn is_executable(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        path.is_file()
+    }
 }
 
 /// Ask `erl` (through any shim, with this process's environment) where its
@@ -246,6 +271,30 @@ pub(crate) fn restore_then(eval: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A non-executable `erl` earlier on `PATH` is skipped, as the OS skips
+    /// it when running a bare `erl`, so both pick the same installation.
+    #[cfg(unix)]
+    #[test]
+    fn installed_erl_skips_a_non_executable_erl() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let install = |mode: u32| {
+            let root = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(root.path().join("bin")).unwrap();
+            std::fs::create_dir_all(root.path().join("releases")).unwrap();
+            let erl = root.path().join("bin").join("erl");
+            std::fs::write(&erl, "").unwrap();
+            std::fs::set_permissions(&erl, std::fs::Permissions::from_mode(mode)).unwrap();
+            root
+        };
+        let not_runnable = install(0o644);
+        let runnable = install(0o755);
+        let path =
+            std::env::join_paths([not_runnable.path().join("bin"), runnable.path().join("bin")])
+                .unwrap();
+        let expected = std::fs::canonicalize(runnable.path().join("bin").join("erl")).unwrap();
+        assert_eq!(installed_erl_in(&path), Some(expected.into_os_string()));
+    }
 
     #[cfg(unix)]
     #[test]

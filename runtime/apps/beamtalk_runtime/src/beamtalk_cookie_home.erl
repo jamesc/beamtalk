@@ -38,10 +38,13 @@ should read `HOME` instead; and a
 started before `restore/0` inherit the private `HOME`.
 """.
 
--export([restore/0, booted_with_cookie/0, home_env/0, orig_prefix/0, home_vars/0]).
+-export([
+    restore/0, booted_with_cookie/0, home_env/0, orig_prefix/0, cookie_dir_prefix/0, home_vars/0
+]).
 
 -define(HOME_ENV, "BEAMTALK_COOKIE_HOME").
 -define(ORIG_PREFIX, "BEAMTALK_ORIG_").
+-define(COOKIE_DIR_PREFIX, "beamtalk-cookie-").
 
 -doc "The variable naming the private home (the Rust side checks the name).".
 -spec home_env() -> string().
@@ -50,6 +53,14 @@ home_env() -> ?HOME_ENV.
 -doc "Prefix of the variables recording each replaced home variable.".
 -spec orig_prefix() -> string().
 orig_prefix() -> ?ORIG_PREFIX.
+
+-doc """
+Name prefix of every private cookie home (Rust: `cookie_env::COOKIE_DIR_PREFIX`,
+which also names the launchers' directories). `restore/0` deletes nothing in a
+directory without it.
+""".
+-spec cookie_dir_prefix() -> string().
+cookie_dir_prefix() -> ?COOKIE_DIR_PREFIX.
 
 -doc "Every variable `erlexec` derives `-home` from, on any platform.".
 -spec home_vars() -> [string()].
@@ -64,10 +75,7 @@ restore() ->
     case os:getenv(?HOME_ENV) of
         Dir when is_list(Dir), Dir =/= "" ->
             lists:foreach(fun restore_var/1, home_vars()),
-            %% Only the one file we wrote, and a non-recursive rmdir: nothing
-            %% else can be removed even if the variable was tampered with.
-            Removed = file:delete(filename:join(Dir, ".erlang.cookie")),
-            _ = file:del_dir(Dir),
+            Removed = remove_cookie_home(Dir),
             true = os:unsetenv(?HOME_ENV),
             %% Only a cookie file the launcher actually wrote counts as a
             %% configured cookie; a stale variable alone does not.
@@ -85,6 +93,19 @@ the operator supplied one (`RELEASE_COOKIE`) rather than OTP falling back to
 -spec booted_with_cookie() -> boolean().
 booted_with_cookie() ->
     persistent_term:get({?MODULE, booted_with_cookie}, false).
+
+%% Only a directory named like one we create, only the one file we wrote, and
+%% a non-recursive rmdir: a stale or hand-set variable naming some other
+%% directory (say the real home) never costs its `.erlang.cookie`.
+remove_cookie_home(Dir) ->
+    case lists:prefix(?COOKIE_DIR_PREFIX, filename:basename(Dir)) of
+        true ->
+            Removed = file:delete(filename:join(Dir, ".erlang.cookie")),
+            _ = file:del_dir(Dir),
+            Removed;
+        false ->
+            {error, not_a_cookie_home}
+    end.
 
 restore_var(Var) ->
     Key = ?ORIG_PREFIX ++ Var,

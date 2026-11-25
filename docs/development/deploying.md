@@ -123,7 +123,7 @@ The launcher never puts the cookie on `erl`'s command line. It writes it to a
 private directory under `$TMPDIR` (`%TEMP%` on Windows), starts `erl` with that
 directory as its home, and clears `RELEASE_COOKIE` so processes the node starts
 do not inherit it. The node removes the directory as it boots; if it crashes
-before then, a `beamtalk-cookie.*` (Windows: `beamtalk-cookie-*`) directory
+before then, a `beamtalk-cookie-*` directory
 readable only by the service user is left in the temp directory (also when a
 Windows `launcher.cmd` verb is interrupted with Ctrl-C and "Terminate batch
 job" is answered yes). Every verb that uses the cookie therefore needs a

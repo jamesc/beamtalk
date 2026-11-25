@@ -92,9 +92,14 @@ if not "!CK_CHECK!"=="!RELEASE_COOKIE!" (
 )
 if "!RELEASE_COOKIE:~0,1!"=="-" goto :cookie_dash
 if "!RELEASE_COOKIE:~0,1!"=="+" goto :cookie_dash
+rem `set /p "=..."` (export_cookie) cannot write a value starting with `=`.
+if "!RELEASE_COOKIE:~0,1!"=="=" goto :cookie_equals
 goto :cookie_ok
 :cookie_dash
 echo error: RELEASE_COOKIE must not start with '-' or '+' 1>&2
+exit /b 2
+:cookie_equals
+echo error: RELEASE_COOKIE must not start with '=' on Windows 1>&2
 exit /b 2
 :cookie_ok
 
@@ -211,7 +216,7 @@ rem %RANDOM% is clock-seeded, so two launchers started together draw the same
 rem name; retry with a fresh delayed !RANDOM! draw (as check_otp_window does).
 rem mkdir fails on an existing path, so a directory is never reused.
 for /l %%N in (1,1,50) do if not defined COOKIE_HOME (
-    set "COOKIE_TRY=%TEMP%\beamtalk-cookie-!RANDOM!!RANDOM!!RANDOM!!RANDOM!"
+    set "COOKIE_TRY=%TEMP%\__COOKIE_DIR_PREFIX__!RANDOM!!RANDOM!!RANDOM!!RANDOM!"
     mkdir "!COOKIE_TRY!" >nul 2>&1 && set "COOKIE_HOME=!COOKIE_TRY!"
 )
 set "COOKIE_TRY="

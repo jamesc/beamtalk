@@ -98,7 +98,7 @@ fn render_template(
     // spell another placeholder verbatim (e.g. `[release] name =
     // "__RELEASE_VSN__"`) would otherwise have its own already-substituted
     // occurrence corrupted by a later `.replace()` in the chain.
-    let placeholders: [(&str, &str); 8] = [
+    let placeholders: [(&str, &str); 9] = [
         // A literal TAB for `launcher.cmd`'s `RELEASE_COOKIE` check (BT-5107).
         ("__TAB__", "\t"),
         // The cookie handoff names come from `cookie_env`, the one source
@@ -106,6 +106,7 @@ fn render_template(
         ("__COOKIE_HOME_ENV__", cookie_env::COOKIE_HOME_ENV),
         ("__ORIG_PREFIX__", cookie_env::ORIG_PREFIX),
         ("__RESTORE_HOME_EVAL__", cookie_env::RESTORE_HOME_EVAL),
+        ("__COOKIE_DIR_PREFIX__", cookie_env::COOKIE_DIR_PREFIX),
         ("__RELEASE_NAME__", release_name),
         ("__RELEASE_VSN__", release_vsn),
         ("__ERTS_VERSION__", erts_version),
@@ -427,6 +428,12 @@ mod tests {
         ] {
             assert!(cmd.contains(stripped), "launcher.cmd must strip {stripped}");
         }
+        // `export_cookie` writes it with `set /p "=..."`, which writes nothing
+        // for a leading `=`: reject that up front with a clear message.
+        assert!(
+            cmd.contains(r#"if "!RELEASE_COOKIE:~0,1!"=="=" goto :cookie_equals"#),
+            "launcher.cmd must reject a leading '='"
+        );
         let reject = cmd
             .find("RELEASE_COOKIE must not contain whitespace, quotes or backslashes")
             .expect("launcher.cmd must print a cookie rejection");
@@ -463,6 +470,7 @@ mod tests {
                 cookie_env::COOKIE_HOME_ENV,
                 cookie_env::ORIG_PREFIX,
                 cookie_env::RESTORE_HOME_EVAL,
+                cookie_env::COOKIE_DIR_PREFIX,
             ] {
                 assert!(script.contains(needed), "{name} must use {needed}");
             }
@@ -470,6 +478,7 @@ mod tests {
                 "__COOKIE_HOME_ENV__",
                 "__ORIG_PREFIX__",
                 "__RESTORE_HOME_EVAL__",
+                "__COOKIE_DIR_PREFIX__",
             ] {
                 assert!(!script.contains(placeholder), "{name}: {placeholder}");
             }

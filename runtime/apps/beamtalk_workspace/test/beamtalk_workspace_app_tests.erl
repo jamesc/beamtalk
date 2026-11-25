@@ -63,7 +63,9 @@ ensure_console_cookie_release_console_matches_setcookie_argument_test() ->
 %% from a private cookie home (RELEASE_COOKIE set) has a configured cookie
 %% and must start its console.
 ensure_console_cookie_accepts_a_cookie_home_boot_test() ->
-    Dir = beamtalk_test_fs:tmp_dir("console_cookie_home"),
+    Parent = beamtalk_test_fs:tmp_dir("console_cookie_home"),
+    Dir = filename:join(Parent, beamtalk_cookie_home:cookie_dir_prefix() ++ "console"),
+    ok = file:make_dir(Dir),
     ok = file:write_file(filename:join(Dir, ".erlang.cookie"), <<"c">>),
     true = os:putenv("BEAMTALK_COOKIE_HOME", Dir),
     try
@@ -74,7 +76,7 @@ ensure_console_cookie_accepts_a_cookie_home_boot_test() ->
     after
         os:unsetenv("BEAMTALK_COOKIE_HOME"),
         _ = persistent_term:erase({beamtalk_cookie_home, booted_with_cookie}),
-        beamtalk_test_fs:rm_rf(Dir)
+        beamtalk_test_fs:rm_rf(Parent)
     end.
 
 %%====================================================================

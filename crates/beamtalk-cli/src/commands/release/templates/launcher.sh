@@ -189,7 +189,7 @@ export_cookie() {
             exit 2
             ;;
     esac
-    cookie_home=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/beamtalk-cookie.XXXXXX") || {
+    cookie_home=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/__COOKIE_DIR_PREFIX__XXXXXX") || {
         echo "error: could not create a private directory for the cookie" >&2
         exit 1
     }
@@ -250,7 +250,7 @@ run_client() {
 
 cleanup_cookie_home() {
     case "$COOKIE_HOME_DIR" in
-        */beamtalk-cookie.*) rm -rf "$COOKIE_HOME_DIR" ;;
+        */__COOKIE_DIR_PREFIX__*) rm -rf "$COOKIE_HOME_DIR" ;;
     esac
 }
 
