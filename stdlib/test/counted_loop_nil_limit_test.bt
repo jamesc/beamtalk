@@ -31,3 +31,26 @@ TestCase subclass: CountedLoopNilLimitTest
 
   testWritingTimesRepeatStillRuns =>
     self assert: (self writingTimesRepeat: 3) equals: 3
+
+  // BT-5167: the inlined (writing) and stdlib (pure) `to:by:do:` raise the same
+  // error shape: class, selector and message.
+  pureToByDo: limit =>
+    1
+      to: limit
+      by: 1
+      do: [:i | i]
+
+  writingToByDo: limit =>
+    s := 0
+    1
+      to: limit
+      by: 1
+      do: [:i | s := s + i]
+    s
+
+  testInlinedAndStdlibLimitErrorsHaveTheSameShape =>
+    pure := [self pureToByDo: nil] on: Exception do: [:e | e]
+    writing := [self writingToByDo: nil] on: Exception do: [:e | e]
+    self assert: writing class equals: pure class
+    self assert: writing selector equals: pure selector
+    self assert: writing message equals: pure message

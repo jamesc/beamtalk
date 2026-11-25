@@ -353,13 +353,21 @@ sealed typed Number subclass: Integer
       ^TypeError signal: "Interval limit must be a number"
     ]
     step == 0 ifTrue: [self error: "Interval step cannot be zero"]
+    self
+      runToBy: end
+      step: step
+      do: block
+
+  /// The recursive loop of `to:by:do:`. The arguments are validated once by
+  /// `to:by:do:`, so each step only compares and recurses (BT-5167).
+  internal runToBy: end :: Number step: step :: Number do: block :: Block(Integer, Object) -> Nil =>
     cond := (step > 0 and: [self <= end]) or: [step < 0 and: [self >= end]]
     cond
       ifTrue: [
         block value: self
         (self + step)
-          to: end
-          by: step
+          runToBy: end
+          step: step
           do: block
       ]
       ifFalse: [nil]

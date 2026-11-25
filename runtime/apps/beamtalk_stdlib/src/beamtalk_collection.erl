@@ -211,6 +211,7 @@ the receiver's representation:
   be `{K, V}` pairs, as a keyed fold answers (BT-5097). A `.beam` compiled
   before BT-5097 answers bare elements here, so running it on this runtime
   raises `badarg`
+- a `Tuple` receiver (per `beamtalk_primitive:class_of/1`) → a tuple (`list_to_tuple/1`; BT-5167)
 - anything else (already an Erlang list, or another collection) → the list as-is
 
 Called from compiler-generated Core Erlang (`list_ops`).
@@ -223,6 +224,13 @@ from_list_like({beamtalk_string, _}, List) ->
     beamtalk_primitive:string_from_binary(
         erlang:iolist_to_binary([beamtalk_primitive:string_to_binary(E) || E <- List])
     );
+from_list_like(Recv, List) when is_tuple(Recv) ->
+    case beamtalk_primitive:class_of(Recv) of
+        %% BT-5167: a writing `collect:`/`select:`/`reject:` over a `Tuple`
+        %% answers a `Tuple`, as the pure path does (`Tuple withAll:`).
+        'Tuple' -> list_to_tuple(List);
+        _ -> List
+    end;
 from_list_like(Recv, List) when is_binary(Recv) ->
     %% BT-4170: elements may be byte integers or `String`s (a `collect:`
     %% block answering text); unwrap the tags, then assemble bytes —
