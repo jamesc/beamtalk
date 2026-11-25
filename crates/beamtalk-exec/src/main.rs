@@ -386,18 +386,17 @@ fn spawn_child(request: &SpawnRequest, port: &Port) -> Result<(), String> {
     // After setsid(), the child's pgid equals its own pid.
     #[cfg(unix)]
     let pgid = libc::pid_t::try_from(child.id()).map_err(|e| format!("child pid: {e}"))?;
-    #[cfg(unix)]
-    if let Some(watchdog) = &port.watchdog {
-        watchdog.register(pgid);
-    }
-
-    let stdin = child.stdin.take().map(|s| spawn_stdin_writer(child_id, s));
     let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
         // Unreachable with `Stdio::piped()`; do not leave the child running.
         let _ = child.kill();
         let _ = child.wait();
         return Err("stdout/stderr not captured".to_string());
     };
+    let stdin = child.stdin.take().map(|s| spawn_stdin_writer(child_id, s));
+    #[cfg(unix)]
+    if let Some(watchdog) = &port.watchdog {
+        watchdog.register(pgid);
+    }
 
     let gate = Arc::new(EventGate::default());
     if let Ok(mut map) = port.children.lock() {
@@ -443,8 +442,13 @@ fn spawn_child(request: &SpawnRequest, port: &Port) -> Result<(), String> {
         // Keep the entry, so whatever the child left behind stays killable
         // (and dies with the port), for as long as there is anything left.
         #[cfg(unix)]
-        while watchdog::group_exists(pgid) {
-            thread::sleep(GROUP_POLL);
+        {
+            // Nothing reads reader events any more; let the readers' sends
+            // fail rather than pile up while a chatty grandchild lives.
+            drop(reader_rx);
+            while watchdog::group_exists(pgid) {
+                thread::sleep(GROUP_POLL);
+            }
         }
         #[cfg(not(unix))]
         drain_readers(&reader_rx, &mut open_pipes, Duration::MAX, Duration::MAX);
@@ -498,6 +502,9 @@ struct StdinQueue {
     tx: mpsc::Sender<Vec<u8>>,
     /// Bytes accepted but not yet written to the pipe.
     pending: Arc<AtomicUsize>,
+    /// Set once a write has been dropped: the child's input stream has a
+    /// hole in it, so no later write may reach it either.
+    broken: bool,
 }
 
 impl StdinQueue {
@@ -505,11 +512,21 @@ impl StdinQueue {
     ///
     /// Refused when the bytes already waiting plus `data` would exceed
     /// [`STDIN_QUEUE_BYTES`]. A write into an empty queue is always accepted,
-    /// whatever its size, so a single large write still goes through.
-    fn push(&self, child_id: u32, data: Vec<u8>) -> Result<(), String> {
+    /// whatever its size, so a single large write still goes through. Once a
+    /// write has been refused, every later write is refused too, even after
+    /// the child catches up: otherwise it would read a stream with a line
+    /// missing from the middle.
+    fn push(&mut self, child_id: u32, data: Vec<u8>) -> Result<(), String> {
+        if self.broken {
+            return Err(format!(
+                "stdin input for child {child_id} was dropped earlier; \
+                 refusing later writes"
+            ));
+        }
         let len = data.len();
         let pending = self.pending.load(Ordering::Acquire);
         if pending > 0 && pending.saturating_add(len) > STDIN_QUEUE_BYTES {
+            self.broken = true;
             return Err(format!(
                 "stdin queue full for child {child_id}: {pending} bytes pending, \
                  the child is not reading its input"
@@ -544,7 +561,11 @@ fn spawn_stdin_writer(child_id: u32, stdin: impl Write + Send + 'static) -> Stdi
             }
         }
     });
-    StdinQueue { tx, pending }
+    StdinQueue {
+        tx,
+        pending,
+        broken: false,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -712,16 +733,16 @@ fn handle_write_stdin(request: &Map, port: &Port) -> Result<(), String> {
         .and_then(term_to_bytes)
         .ok_or("missing or invalid data")?;
 
-    let map = port
+    let mut map = port
         .children
         .lock()
         .map_err(|e| format!("children lock poisoned: {e}"))?;
     let entry = map
-        .get(&child_id)
+        .get_mut(&child_id)
         .ok_or_else(|| format!("child {child_id} not found"))?;
     let queue = entry
         .stdin
-        .as_ref()
+        .as_mut()
         .ok_or("stdin already closed for this child")?;
     // Never blocks: the writer thread does the (possibly blocking) I/O.
     queue.push(child_id, data)
@@ -1538,6 +1559,43 @@ mod tests {
         .expect("kill");
         let events = capture.wait_for_exit(60);
         assert_eq!(exit_code_of(&events, 60), int_term(128 + libc::SIGTERM));
+    }
+
+    /// A writer that blocks each write until the test releases it.
+    struct GatedWriter(Receiver<()>);
+
+    impl Write for GatedWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.recv().map_err(|_| io::Error::other("gate closed"))?;
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Once a write is dropped, later writes are refused even after the
+    /// child has caught up, so the child never reads `A C` without `B`.
+    #[test]
+    fn a_dropped_write_breaks_the_stdin_stream_for_good() {
+        let (release, gate) = mpsc::channel();
+        let mut queue = spawn_stdin_writer(1, GatedWriter(gate));
+        queue
+            .push(1, vec![b'A'; STDIN_QUEUE_BYTES])
+            .expect("A fits");
+        let err = queue.push(1, b"B".to_vec()).expect_err("B overflows");
+        assert!(err.contains("queue full"), "{err}");
+        // The child catches up: A is written and nothing is pending.
+        release.send(()).unwrap();
+        let deadline = Instant::now() + HANG_GUARD;
+        while queue.pending.load(Ordering::Acquire) > 0 {
+            assert!(Instant::now() < deadline, "A never written");
+            thread::sleep(Duration::from_millis(1)); // sleep: poll for the writer thread
+        }
+        let err = queue
+            .push(1, b"C".to_vec())
+            .expect_err("C must not follow a dropped B");
+        assert!(err.contains("dropped earlier"), "{err}");
     }
 
     /// A large write reaches a child that reads, and `close_stdin` delivers
