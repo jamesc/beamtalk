@@ -192,7 +192,8 @@ fn validate_single_constraint(s: &str) -> Result<(), String> {
 
 /// Validate a bare version string like `"2.1.0"`, `"2.1"`, or `"2"`.
 ///
-/// Segments must be non-negative integers, 1–3 segments allowed.
+/// Segments must be non-negative integers, 1–4 segments allowed (hex.pm publishes four-segment
+/// versions such as `1.2.3.4`; BT-5073 matches them).
 fn validate_version_string(version: &str) -> Result<(), String> {
     let trimmed = version.trim();
     if trimmed.is_empty() {
@@ -200,9 +201,9 @@ fn validate_version_string(version: &str) -> Result<(), String> {
     }
 
     let segments: Vec<&str> = trimmed.split('.').collect();
-    if segments.len() > 3 {
+    if segments.len() > 4 {
         return Err(format!(
-            "version '{trimmed}' has too many segments (max 3: major.minor.patch)"
+            "version '{trimmed}' has too many segments (max 4: major.minor.patch.build)"
         ));
     }
 
