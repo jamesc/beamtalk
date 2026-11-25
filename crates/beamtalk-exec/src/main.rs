@@ -433,6 +433,15 @@ fn spawn_child(request: &SpawnRequest, port: &Port) -> Result<(), String> {
     #[cfg(unix)]
     configure_unix_child(&mut cmd);
 
+    // Held from before the fork until the entry is in the map: the child's
+    // group exists as soon as its `setsid` runs, and until a stale entry with
+    // the same (recycled) number is retired below, no reaper or delayed-kill
+    // thread may look at the map.
+    let mut map = port
+        .children
+        .lock()
+        .map_err(|e| format!("children lock poisoned: {e}"))?;
+
     // Windows: start suspended, join a kill-on-close job, then resume, so
     // nothing the child starts can escape the job (BT-5195). No console window.
     #[cfg(windows)]
@@ -462,32 +471,27 @@ fn spawn_child(request: &SpawnRequest, port: &Port) -> Result<(), String> {
     let stdin = child.stdin.take().map(|s| spawn_stdin_writer(child_id, s));
 
     let gate = Arc::new(EventGate::default());
-    if let Ok(mut map) = port.children.lock() {
-        // Under the children lock, like the reaper's unregister, so a group
-        // number's `-` and `+` cannot interleave. A reaped entry with the same
-        // number belongs to a group that has emptied and been recycled into
-        // this child's: forget it first, so it is never signalled again.
-        #[cfg(unix)]
-        {
-            for stale in map.values().filter(|e| e.pgid == pgid && e.gate.reaped()) {
-                port.forget_pgid(pgid, &stale.gate);
-            }
-            if let Some(watchdog) = watchdog {
-                watchdog.register(pgid);
-            }
+    // Under the children lock, like the reaper's unregister, so a group
+    // number's `-` and `+` cannot interleave.
+    #[cfg(unix)]
+    {
+        forget_recycled(&map, pgid, port);
+        if let Some(watchdog) = watchdog {
+            watchdog.register(pgid);
         }
-        map.insert(
-            child_id,
-            ChildEntry {
-                stdin,
-                gate: Arc::clone(&gate),
-                #[cfg(unix)]
-                pgid,
-                #[cfg(windows)]
-                job,
-            },
-        );
     }
+    map.insert(
+        child_id,
+        ChildEntry {
+            stdin,
+            gate: Arc::clone(&gate),
+            #[cfg(unix)]
+            pgid,
+            #[cfg(windows)]
+            job,
+        },
+    );
+    drop(map);
 
     let (reader_tx, reader_rx) = mpsc::channel();
     spawn_reader_thread(
@@ -779,6 +783,16 @@ fn configure_unix_child(cmd: &mut Command) {
     }
 }
 
+/// Retire every reaped entry holding `pgid`: its group emptied and the number
+/// has been recycled into a new child's group, so the entry must never
+/// signal it. Called with the children lock held.
+#[cfg(unix)]
+fn forget_recycled(map: &HashMap<u32, ChildEntry>, pgid: libc::pid_t, port: &Port) {
+    for stale in map.values().filter(|e| e.pgid == pgid && e.gate.reaped()) {
+        port.forget_pgid(pgid, &stale.gate);
+    }
+}
+
 /// Whether `child_id` is still registered as the incarnation behind `gate`.
 #[cfg(unix)]
 fn still_registered(children: &ChildMap, child_id: u32, gate: &Arc<EventGate>) -> bool {
@@ -822,8 +836,8 @@ fn handle_kill_with(
             return Ok(()); // Exited, and nothing it left behind remains.
         };
         // SIGTERM to the whole process group, still under the lock (so a
-        // spawn cannot recycle the number in between). The group outlives the child while a grandchild
-        // holds the pipes, so this reaches it too.
+        // spawn cannot recycle the number in between). The group outlives
+        // the child while a grandchild holds the pipes, so this reaches it too.
         // SAFETY: kill(2) to a process group this port created.
         let rc = unsafe { libc::kill(-pgid, libc::SIGTERM) };
         drop(map);
@@ -1875,15 +1889,27 @@ mod tests {
             .spawn()
             .unwrap();
         let pgid = libc::pid_t::try_from(live.id()).unwrap();
-        let stale = ChildEntry {
-            stdin: None,
-            gate: Arc::default(),
-            pgid,
+        let entry = |reaped: bool, pgid: libc::pid_t| {
+            let e = ChildEntry {
+                stdin: None,
+                gate: Arc::default(),
+                pgid,
+            };
+            if reaped {
+                e.gate.mark_reaped();
+            }
+            e
         };
-        stale.gate.mark_reaped();
-        assert_eq!(stale.signallable_pgid(), Some(pgid), "group exists");
-        port.forget_pgid(pgid, &stale.gate);
-        assert_eq!(stale.signallable_pgid(), None, "forgotten: not ours");
+        let mut map = HashMap::new();
+        map.insert(1, entry(true, pgid)); // stale: reaped, number recycled
+        map.insert(2, entry(false, pgid)); // not reaped: still its own
+        map.insert(3, entry(true, pgid + 1)); // a different group
+        assert_eq!(map[&1].signallable_pgid(), Some(pgid), "group exists");
+        forget_recycled(&map, pgid, &port);
+        assert_eq!(map[&1].signallable_pgid(), None, "retired: not ours");
+        assert!(map[&1].gate.forgotten.load(Ordering::Acquire));
+        assert!(!map[&2].gate.forgotten.load(Ordering::Acquire));
+        assert!(!map[&3].gate.forgotten.load(Ordering::Acquire));
         live.kill().unwrap();
         live.wait().unwrap();
     }
