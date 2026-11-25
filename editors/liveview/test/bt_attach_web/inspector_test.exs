@@ -371,6 +371,25 @@ defmodule BtAttachWeb.Live.InspectorTest do
                "Survivor <0.5.0>"
     end
 
+    test "a kill also closes floating windows on the killed actor, and only those" do
+      killed = object_term()
+      other = object_term(spawn(fn -> Process.sleep(:infinity) end))
+
+      socket =
+        base_socket(%{
+          inspect_target: %{label: "counter", pid: "<0.1.0>"},
+          inspect_crumbs: [%{label: "counter", term: killed}],
+          windows: [
+            window(%{id: "win-1", crumbs: [%{label: "counter", term: killed}]}),
+            window(%{id: "win-2", crumbs: [%{label: "other", term: other}]})
+          ]
+        })
+
+      {:noreply, socket} = Inspector.handle_event("kill_actor", %{}, socket)
+
+      assert Enum.map(socket.assigns.windows, & &1.id) == ["win-2"]
+    end
+
     test "an Observer's kill is refused by the facade (kill is :admin) and nothing is sent" do
       socket =
         base_socket(%{

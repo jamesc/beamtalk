@@ -230,7 +230,8 @@ defmodule BtAttachWeb.Live.Inspector do
   # prompt, so this runs only after the user confirmed. Sends the `kill` facade
   # op (the wire `kill` operation, `:admin` capability — an Observer is refused
   # server-side even with a crafted event), then closes the pane, which would
-  # otherwise show a dead actor, and reads the actor list again so the user
+  # otherwise show a dead actor (and any floating window on it), and reads the
+  # actor list again so the user
   # sees the actor gone. A refusal (a system actor, an actor that already
   # stopped) is shown in the pane, which stays open.
   def handle_event("kill_actor", _params, socket) do
@@ -1328,8 +1329,10 @@ defmodule BtAttachWeb.Live.Inspector do
       case Facade.dispatch(:kill, %{term: term}, RequestContext.build(socket)) do
         :ok ->
           {:noreply, socket} = handle_event("close_inspector", %{}, socket)
+          {:beamtalk_object, _, _, killed_pid} = term
 
           socket
+          |> close_windows_on(killed_pid)
           |> assign(kill_notice: "Killed #{label}.")
           |> refresh_actor_list()
 
@@ -1339,6 +1342,16 @@ defmodule BtAttachWeb.Live.Inspector do
     else
       assign(socket, inspect_error: "Only a live actor can be killed.")
     end
+  end
+
+  # Close every floating window whose head is the killed actor: like the
+  # docked pane, it would otherwise keep showing a dead actor.
+  defp close_windows_on(socket, pid) do
+    socket.assigns.windows
+    |> Enum.filter(fn w ->
+      match?(%{term: {:beamtalk_object, _, _, ^pid}}, List.last(w.crumbs))
+    end)
+    |> Enum.reduce(socket, fn w, acc -> close_window(acc, w.id) end)
   end
 
   # Read the running actors (the `actors` facade op) after a kill, so the
