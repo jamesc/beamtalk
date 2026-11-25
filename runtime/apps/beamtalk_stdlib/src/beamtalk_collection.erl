@@ -405,7 +405,7 @@ when the in-place fold may stand in for `Selector` on `Recv`, otherwise the
 `stateful_block_dispatch` / `does_not_understand` it raises. `keyed_foldl/5` runs
 it once per call for a `Dictionary`, which is folded over its pairs instead of
 its `to_list/1`. An inlined writing `to:do:` / `to:by:do:` counted loop calls it
-on a start that is not a number (BT-5215), so it raises what the pure send of
+on a start that is not an Integer (BT-5215), so it raises what the pure send of
 that selector to the start raises.
 """.
 -spec guard_writing_fold(term(), atom()) -> ok.

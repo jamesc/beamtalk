@@ -20,7 +20,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::{Block, Expression};
+use beamtalk_core::ast::{Block, Expression, Literal};
 
 // ─── CountedLoopFrame ─────────────────────────────────────────────────────────
 
@@ -172,10 +172,11 @@ impl CoreErlangGenerator {
 
         // Bind the block parameter name (e.g. "i" in [:i | ...])
         let body_param = body.parameters.first().map(|p| p.name.to_string());
+        // BT-5215: a non-Integer start raises what the pure send raises.
+        let start_guard = Self::start_guard_doc(receiver, &start_var, "to:do:");
         // BT-5167: a nil/non-number limit would be term-ordered by `=<` and a
         // writing block would loop forever; raise the same `type_error` as
         // the stdlib `Integer>>to:by:do:`.
-        let start_guard = self.start_guard_doc(receiver, &start_var, "to:do:");
         let number_guard =
             self.number_guard_doc(&start_var, &[(&end_var, "Interval limit must be a number")]);
 
@@ -237,25 +238,24 @@ impl CoreErlangGenerator {
         Document::Vec(guards)
     }
 
-    /// BT-5215: `do case is_number(Start) of 'false' -> <receiver guard>`.
+    /// BT-5215: `do case is_integer(Start) of 'false' -> <receiver guard>`.
     /// The start is the receiver of the `to:do:` / `to:by:do:` the loop stands
-    /// in for; a non-number would otherwise be term-ordered by `=<` (a `nil`
-    /// start silently ran zero iterations). The pure path sends the selector to
-    /// the start, so the non-number branch raises what that send raises:
-    /// `beamtalk_collection:guard_writing_fold/2`, the receiver guard every
-    /// inlined writing fold already uses, answers `does_not_understand` when the
-    /// start's class does not respond to `selector` and `stateful_block_dispatch`
-    /// when it answers it with its own method, which the inlined loop would
-    /// bypass. Checked before the limit and step, as the pure send fails on its
-    /// receiver first. Elided when the start is statically numeric (the common
-    /// `1 to: n do:` compiles exactly as before).
-    fn start_guard_doc(
-        &mut self,
-        start: &Expression,
-        start_var: &str,
-        selector: &str,
-    ) -> Document<'static> {
-        if self.receiver_is_statically_numeric(start) {
+    /// in for, and only `Integer` defines those; any other start would be
+    /// term-ordered by `=<` (a `nil` start silently ran zero iterations). The
+    /// pure path sends the selector to the start, so the non-Integer branch
+    /// runs the receiver guard every inlined writing fold already uses,
+    /// `beamtalk_collection:guard_writing_fold/2`: `does_not_understand` when the
+    /// start's class does not respond to `selector` (a `Float` start included),
+    /// `stateful_block_dispatch` when it answers it with its own method, which
+    /// the inlined loop would bypass, and `ok` only when a stdlib method answers
+    /// it, which the loop stands in for. Checked before the limit and step, as
+    /// the pure send fails on its receiver first.
+    ///
+    /// Elided only for an Integer literal start (the common `1 to: n do:`
+    /// compiles exactly as before). A declared `:: Integer` is not proof:
+    /// annotations are not enforced, and `=<` would order a `nil` silently.
+    fn start_guard_doc(start: &Expression, start_var: &str, selector: &str) -> Document<'static> {
+        if matches!(start, Expression::Literal(Literal::Integer(_), _)) {
             return Document::Nil;
         }
         let refuse = form::call(
@@ -263,9 +263,9 @@ impl CoreErlangGenerator {
             "guard_writing_fold",
             [leaf::var(start_var.to_string()), leaf::atom(selector)],
         );
-        let is_number = form::call("erlang", "is_number", [leaf::var(start_var.to_string())]);
+        let is_integer = form::call("erlang", "is_integer", [leaf::var(start_var.to_string())]);
         form::do_prefix(form::case_of(
-            is_number,
+            is_integer,
             [
                 form::clause([leaf::atom("true")], None, leaf::atom("ok"), Layout::Flat),
                 form::clause([leaf::atom("false")], None, refuse, Layout::Flat),
@@ -318,9 +318,10 @@ impl CoreErlangGenerator {
         let limit_code = self.expression_doc(limit)?;
         let step_var = self.fresh_temp_var("temp");
         let step_code = self.expression_doc(step)?;
+        // BT-5215: a non-Integer start raises what the pure send raises.
+        let start_guard = Self::start_guard_doc(receiver, &start_var, "to:by:do:");
         // BT-5098: a step of 0 raises, as `Integer>>to:by:do:` does. Checked
         // once here in the preamble (not per iteration).
-        let start_guard = self.start_guard_doc(receiver, &start_var, "to:by:do:");
         let number_guard = self.number_guard_doc(
             &start_var,
             &[
@@ -911,13 +912,14 @@ mod tests {
         );
     }
 
-    /// BT-5215: a numeric-literal start is proven numeric, so the common
-    /// `1 to: n do:` shape emits no start check.
+    /// BT-5215: an Integer literal start (positive or negative) is proven, so
+    /// the common `1 to: n do:` shape emits no start check.
     #[test]
     fn test_to_do_literal_start_emits_no_start_guard() {
         for loop_src in [
             "1 to: n do: [:i | sum := sum + i]",
             "1 to: n by: 2 do: [:i | sum := sum + i]",
+            "-3 to: n do: [:i | sum := sum + i]",
         ] {
             let src = format!(
                 "Actor subclass: Ctr\n  state: n = 0\n\n  run: n =>\n    sum := 0\n    {loop_src}\n    self.n := sum\n"
@@ -942,6 +944,8 @@ mod tests {
         for (loop_src, selector) in [
             ("s to: 10 do: [:i | sum := sum + i]", "'to:do:'"),
             ("s to: 10 by: 2 do: [:i | sum := sum + i]", "'to:by:do:'"),
+            // A Float is not an Integer: the pure send raises DNU.
+            ("1.5 to: 10 do: [:i | sum := sum + i]", "'to:do:'"),
         ] {
             let src = format!(
                 "Actor subclass: Ctr\n  state: n = 0\n\n  run: s =>\n    sum := 0\n    {loop_src}\n    self.n := sum\n"

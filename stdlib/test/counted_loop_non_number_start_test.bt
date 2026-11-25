@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-5215: an inlined (writing-block) `to:do:` / `to:by:do:` with a start that
-// is not a number raises what the pure (read-only block) send raises:
-// `does_not_understand` for the selector on the start's class. It used to
-// compare the start against the limit by term order and silently run zero
-// iterations.
+// is not an Integer raises what the pure (read-only block) send raises:
+// `does_not_understand` for the selector on the start's class (only Integer
+// defines them). It used to compare the start against the limit by term order
+// and silently run zero iterations (nil, Symbol, String) or count from a
+// Float.
 
 TestCase subclass: CountedLoopNonNumberStartTest
 
@@ -111,3 +112,10 @@ TestCase subclass: CountedLoopNonNumberStartTest
 
   testWritingToByDoIntegerStartStillRuns =>
     self assert: (self writingToByDo: 1) equals: 6
+
+  // --- Float start: only Integer defines to:do: / to:by:do: ---
+  testToDoFloatStartPathsAgree =>
+    self assertSameError: [self pureToDo: 1.5] as: [self writingToDo: 1.5]
+
+  testToByDoFloatStartPathsAgree =>
+    self assertSameError: [self pureToByDo: 1.5] as: [self writingToByDo: 1.5]
