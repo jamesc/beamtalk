@@ -679,9 +679,8 @@ that sends `super peek:` runs the superclass's method instead of recursing
 into itself.
 
 `ClassSelf` is the live receiver (the calling method's own `ClassSelf`), so
-the found method runs with the receiver's real reference, and nothing is looked up to rebuild it (BT-4301).
-Returns the
-plain result (ADR 0130 §3). When no ancestor defines `Selector`, the
+the found method runs with the receiver's real reference, and nothing is
+looked up to rebuild it (BT-4301). Returns the plain result (ADR 0130 §3). When no ancestor defines `Selector`, the
 class-object protocol answers (`class_self_protocol_fallthrough/4`, BT-4252),
 else a structured `does_not_understand` is raised.
 """.

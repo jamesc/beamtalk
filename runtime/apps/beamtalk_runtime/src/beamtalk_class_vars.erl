@@ -88,7 +88,7 @@ tag fully (once per block-literal creation or region, not a hot path).
 This module is a leaf of the object system: it never calls
 `beamtalk_object_class` or `beamtalk_behaviour_intrinsics`. Declared kinds
 come from `beamtalk_class_metadata:class_var_kinds/1` (own-only), the error values from
-`beamtalk_class_var_errors` (shared with the class gen_server), and the
+`beamtalk_class_var_errors`, and the
 `class_var_abi` load gate lives in `beamtalk_class_var_abi`.
 """.
 
@@ -676,8 +676,8 @@ check_declared(Class, Name) ->
 -doc """
 `check_declared/2` against a declared-kinds value the caller already read with
 `beamtalk_class_metadata:class_var_kinds_or_unknown/1`, so a caller that needs
-the kinds for something else too (the class gen_server's declared-`late`
-branch) reads the metadata once.
+the kinds for something else too (`read_in/4`'s declared-`late` branch) reads
+the metadata once.
 """.
 -spec check_declared(atom(), atom(), unknown | #{atom() => eager | late}) ->
     ok | {error, #beamtalk_error{}}.
