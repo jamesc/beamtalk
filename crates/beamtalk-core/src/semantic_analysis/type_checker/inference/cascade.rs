@@ -349,9 +349,10 @@ fn receiver_display(receiver: &Expression) -> String {
         Expression::Identifier(_)
         | Expression::Super(_)
         | Expression::ClassReference { .. }
-        | Expression::Literal(Literal::Integer(_) | Literal::Symbol(_) | Literal::String(_), _) => {
-            crate::unparse::unparse_expression(receiver).to_pretty_string()
-        }
+        | Expression::Literal(
+            Literal::Integer(_) | Literal::BigInteger(_) | Literal::Symbol(_) | Literal::String(_),
+            _,
+        ) => crate::unparse::unparse_expression(receiver).to_pretty_string(),
         _ => "…".to_string(),
     }
 }

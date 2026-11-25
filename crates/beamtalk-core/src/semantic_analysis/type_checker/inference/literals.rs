@@ -127,7 +127,7 @@ impl TypeChecker {
     /// Infer the type of a literal value.
     pub(in crate::semantic_analysis::type_checker) fn infer_literal(lit: &Literal) -> InferredType {
         match lit {
-            Literal::Integer(_) => InferredType::known("Integer"),
+            Literal::Integer(_) | Literal::BigInteger(_) => InferredType::known("Integer"),
             Literal::Float(_) => InferredType::known("Float"),
             Literal::String(_) => InferredType::known("String"),
             Literal::Symbol(name) => InferredType::known(eco_format!("#{name}")),
