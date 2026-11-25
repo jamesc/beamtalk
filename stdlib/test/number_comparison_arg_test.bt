@@ -207,21 +207,13 @@ TestCase subclass: NumberComparisonArgTest
 
   testHooksAnswerForEveryOperator =>
     m := self money: 500
-    @expect type
     self assert: (100 < m)
-    @expect type
     self deny: (500 < m)
-    @expect type
     self assert: (500 <= m)
-    @expect type
     self deny: (501 <= m)
-    @expect type
     self assert: (900 > m)
-    @expect type
     self deny: (500 > m)
-    @expect type
     self assert: (500 >= m)
-    @expect type
     self deny: (499 >= m)
 
   testHooksAnswerThroughEveryReceiverShape =>
@@ -251,7 +243,6 @@ TestCase subclass: NumberComparisonArgTest
   /// `does_not_understand` for the hook.
   testRaisingHookIsNotRelabelled =>
     r := BrokenRank new
-    @expect type
     e := self errorOf: [5 < r]
     self assert: e kind equals: #user_error
     self assert: (e message includesSubstring: "BrokenRank cannot be ordered against 5")

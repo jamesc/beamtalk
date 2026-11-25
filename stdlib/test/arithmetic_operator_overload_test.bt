@@ -58,19 +58,15 @@ TestCase subclass: ArithmeticOperatorOverloadTest
 
   /// `5 + aMoney` dispatches to `Money>>plusFromNumber:`, not `Money>>+`
   /// (which would need `aMoney` on the left). `check_binary_operand_types`
-  /// (type checker) doesn't know about `plusFromNumber:` and still flags this
-  /// as a numeric-argument mismatch (ADR 0116 § Consequences, Negative) even
-  /// though it now dispatches correctly at runtime — `@expect type`
-  /// acknowledges that known false positive.
+  /// (type checker) finds `Money>>plusFromNumber:` (BT-5212), so this send
+  /// type-checks cleanly with no `@expect type`.
   testNumberPlusUserTypeDispatches =>
     a := (Money new) withCents: 150
-    @expect type
     self assert: (5 + a) cents equals: 155
 
   /// `5 * aMoney` dispatches to `Money>>timesFromNumber:`.
   testNumberTimesUserTypeDispatches =>
     a := (Money new) withCents: 100
-    @expect type
     self assert: (5 * a) cents equals: 500
 
   /// A type with no `plusFromNumber:` hook at all (`Widget`) raises
@@ -106,10 +102,8 @@ TestCase subclass: ArithmeticOperatorOverloadTest
   /// `self error:` (which isn't a DNU at all).
   testNumberDivUserTypeRejectsWithIntent =>
     a := (Money new) withCents: 100
-    @expect type
     message := [5 / a] on: Exception do: [:e | e message]
     self assert: (message includesSubstring: "Cannot divide a number by Money")
-    @expect type
     kind := [5 / a] on: Exception do: [:e | e kind]
     self assert: kind equals: #user_error
 
