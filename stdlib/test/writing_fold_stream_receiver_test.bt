@@ -62,6 +62,42 @@ TestCase subclass: WritingFoldStreamReceiverTest
         e > 2
       ]
 
+  // BT-5263: `inject:into:` consumes the whole stream to answer one value, on
+  // the pure path as on the fold, so a writing block is allowed on a finite
+  // stream and answers what the pure block does.
+  writingInject: s =>
+    n := 0
+    s
+      inject: 0
+      into: [:acc :e |
+        n := n + 1
+        acc + e
+      ]
+
+  writingInjectCount: s =>
+    n := 0
+    s
+      inject: 0
+      into: [:acc :e |
+        n := n + 1
+        acc + e
+      ]
+    n
+
+  testInjectOnFiniteStreamFolds =>
+    self assert: (self writingInject: (Stream on: #(1, 2, 3))) equals: 6
+    self assert: (self writingInjectCount: (Stream on: #(1, 2, 3))) equals: 3
+    self assert: ((Stream on: #(1, 2, 3)) inject: 0 into: [:acc :e | acc + e]) equals: 6
+
+  // `do:` on a Stream is eager too and was never guarded.
+  testDoOnFiniteStreamFolds =>
+    n := 0
+    (Stream on: #(1, 2, 3)) do: [:e | n := n + e]
+    self assert: n equals: 6
+
+  testInjectOnTakenStreamFolds =>
+    self assert: (self writingInject: (Stream on: (self infinite take: 4))) equals: 10
+
   testCollectOnInfiniteStreamRefuses =>
     self should: [
       self writingCollect: self infinite

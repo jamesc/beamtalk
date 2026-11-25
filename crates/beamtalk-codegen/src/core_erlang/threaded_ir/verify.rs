@@ -165,8 +165,9 @@ pub(in crate::core_erlang) enum VerifyError {
     /// BT-5117: one leaf arm of a result-list fold's accumulator conses into
     /// the result-list slot the wrong number of times, or into another slot.
     /// `slot_conses` is the conses stacked on the result-list slot,
-    /// `stray_slots` the other (1-based) slots that cons. `AtMostOne` allows
-    /// 0 or 1 into the slot, `ExactlyOne` requires 1; no other slot may cons.
+    /// `stray_slots` the other (1-based) slots that cons. `Filter` requires
+    /// 1 on the arm taken when the block's answer is `keep_when` and 0 on the
+    /// other, `ExactlyOne` requires 1; no other slot may cons.
     FoldResultListConsMismatch {
         expected: ConsPerCall,
         slot_conses: usize,
