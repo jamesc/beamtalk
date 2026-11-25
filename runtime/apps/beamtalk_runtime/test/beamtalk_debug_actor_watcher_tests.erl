@@ -36,8 +36,15 @@ process is absent, so the table is owned by the calling test process).
 %% exits with `{noproc, {gen_server, call, _}}`.  `watch/1` catches it (line 43)
 %% and returns `ok`.
 watch_when_not_running_returns_ok_test() ->
-    beamtalk_test_proc:stop_registered(beamtalk_debug_actor_watcher),
-    ?assertEqual(ok, beamtalk_debug_actor_watcher:watch(self())).
+    %% Only run when no supervisor is present — stopping a supervised watcher
+    %% triggers an async restart that races with the fixture below.
+    case whereis(beamtalk_runtime_sup) of
+        undefined ->
+            beamtalk_test_proc:stop_registered(beamtalk_debug_actor_watcher),
+            ?assertEqual(ok, beamtalk_debug_actor_watcher:watch(self()));
+        _ ->
+            ok
+    end.
 
 %%====================================================================
 %% Test: line 55 \x{2014} init/1 fold over pre-existing debug-target rows
@@ -69,12 +76,9 @@ debug_actor_watcher_running_test_() ->
     {setup,
         fun() ->
             beamtalk_logging_config:ensure_table(),
-            case whereis(beamtalk_debug_actor_watcher) of
-                undefined ->
-                    {ok, Pid} = beamtalk_debug_actor_watcher:start_link(),
-                    {started, Pid};
-                Pid ->
-                    {already_running, Pid}
+            case beamtalk_debug_actor_watcher:start_link() of
+                {ok, Pid} -> {started, Pid};
+                {error, {already_started, Pid}} -> {already_running, Pid}
             end
         end,
         fun
