@@ -60,8 +60,15 @@ fn is_global_config_dir(candidate: &Path) -> bool {
 /// project marker, or `start_dir` if no marker is found.
 #[must_use]
 pub fn discover_project_root(start_dir: &Path) -> PathBuf {
+    find_project_root(start_dir).unwrap_or_else(|| start_dir.to_path_buf())
+}
+
+/// [`discover_project_root`] without the fallback: `None` when no ancestor
+/// of `start_dir` carries a project marker.
+#[must_use]
+pub fn find_project_root(start_dir: &Path) -> Option<PathBuf> {
     let Ok(meta) = fs::metadata(start_dir) else {
-        return start_dir.to_path_buf();
+        return None;
     };
 
     let mut current = if meta.is_dir() {
@@ -79,7 +86,7 @@ pub fn discover_project_root(start_dir: &Path) -> PathBuf {
                 if *marker == ".beamtalk" && is_global_config_dir(&candidate) {
                     continue;
                 }
-                return current;
+                return Some(current);
             }
         }
 
@@ -87,15 +94,13 @@ pub fn discover_project_root(start_dir: &Path) -> PathBuf {
         if let Some(marker) = PROJECT_MARKERS.last()
             && current.join(marker).exists()
         {
-            return current;
+            return Some(current);
         }
 
         if !current.pop() {
-            break;
+            return None;
         }
     }
-
-    start_dir.to_path_buf()
 }
 
 #[cfg(test)]
