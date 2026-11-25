@@ -536,7 +536,7 @@ const FFI_ARG_MAP_CLASSES: &[&str] = &["Dictionary"];
 /// passes one of these `erlang` guard BIFs is a number, atom, pid or binary, so
 /// it is never a tagged `String`, a charlist or a fun. (A binary is unchanged by
 /// the stock-mode unwrap; the `badarg` charlist retry still applies to it and
-/// runs in `ffi_call_raised/9`.) Static types are not enforced at
+/// runs in `ffi_call_raised/8`.) Static types are not enforced at
 /// run time (gradual typing), so a direct call also checks each argument with
 /// these and falls back to the proxy when one fails.
 pub const FFI_ARG_RUNTIME_GUARDS: &[&str] = &["is_number", "is_atom", "is_pid"];
@@ -675,7 +675,7 @@ pub fn ffi_annotation_type(annotation: &crate::ast::TypeAnnotation) -> Option<In
 /// rejects a tagged `String` (the proxy's stock-mode unwrap would change it) and
 /// any fun or container that may hold one (a block run by the callee would
 /// change how a raised error is classified). A binary argument may still
-/// `badarg`; the retry with charlist-coerced arguments is `ffi_call_raised/9`'s.
+/// `badarg`; the retry with charlist-coerced arguments is `ffi_call_raised/8`'s.
 #[must_use]
 pub fn ffi_arg_passes_unchanged(ty: &InferredType) -> bool {
     all_members(ty, &|name| {

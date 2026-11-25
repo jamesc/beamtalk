@@ -1073,7 +1073,7 @@ native_call_throw_passes_through_test() ->
     end.
 
 %%% exit/throw raised on the charlist-coercion RETRY (the inner try in
-%%% maybe_retry/9, not the first apply) must still
+%%% maybe_retry/8, not the first apply) must still
 %%% propagate unchanged. The retry routes through the same classify_ffi_exception/9
 %%% catch-all as the first pass, so these guard the shared classifier's retry arm.
 native_call_retry_exit_propagates_test() ->
@@ -1895,7 +1895,7 @@ bt4485_runtime_guards_reject_what_the_proxy_changes_test() ->
 %% Argument types codegen passes without the proxy: the proxy hands every
 %% sample to the callee unchanged, and it passes one of the runtime guards (a
 %% scalar or a raw binary, so no tagged String and no fun that could run
-%% Beamtalk code; a binary's `badarg` retry runs in `ffi_call_raised/9`).
+%% Beamtalk code; a binary's `badarg` retry runs in `ffi_call_raised/8`).
 bt4485_arg_passthrough_matches_shared_fixture_test() ->
     #{
         <<"arg_passthrough">> := Cases,
@@ -2512,4 +2512,50 @@ function_clause_in_recursive_call_to_target_is_reported_at_head_test() ->
     ?assertBtError(
         type_error,
         beamtalk_erlang_proxy:direct_call(?MODULE, fc_sizes, [[<<"a">>, 1]], stock)
+    ).
+
+%% ADR 0153 (BT-5159): a module built by an older compiler passes a class-variable
+%% snapshot in the ninth slot of `ffi_call_raised/9,10`. The slot is ignored, so
+%% such a call (here a binary `badarg` that retries with a charlist) answers
+%% exactly what `/8` does, whatever term the old module passes there.
+ffi_call_raised_ignores_legacy_snapshot_slot_test() ->
+    Raise = fun(Call) ->
+        try
+            erlang:list_to_atom(<<"bt5159_legacy">>)
+        catch
+            C:E:S -> Call(C, E, S, erlang:process_info(self(), current_stacktrace))
+        end
+    end,
+    Args = [<<"bt5159_legacy">>],
+    Expected = Raise(fun(C, E, S, Site) ->
+        beamtalk_erlang_proxy:ffi_call_raised(C, E, S, erlang, list_to_atom, Args, stock, Site)
+    end),
+    ?assertEqual(bt5159_legacy, Expected),
+    [
+        ?assertEqual(
+            Expected,
+            Raise(fun(C, E, S, Site) ->
+                beamtalk_erlang_proxy:ffi_call_raised(
+                    C, E, S, erlang, list_to_atom, Args, stock, Site, Snap
+                )
+            end)
+        )
+     || Snap <- [none, {{'$bt_class_vars', 'Legacy class'}, #{n => 1}}]
+    ],
+    ?assertEqual(
+        Expected,
+        Raise(fun(C, E, S, Site) ->
+            beamtalk_erlang_proxy:ffi_call_raised(
+                C,
+                E,
+                S,
+                erlang,
+                list_to_atom,
+                Args,
+                stock,
+                Site,
+                {legacy, snapshot},
+                {'Probe', 'go:'}
+            )
+        end)
     ).

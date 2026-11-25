@@ -469,8 +469,7 @@ fn dynamic_value_result_is_built_inline() {
 
 /// BT-4770: a `Dictionary` argument is proved (the stock-mode unwrap is shallow
 /// and a map is never a tagged String), guarded at run time by `is_map`. The
-/// `badarg` retry deep-unwraps a map, so the call site keeps the class-variable
-/// snapshot for it (`ffi_call_raised/9`), as for a binary.
+/// `badarg` retry deep-unwraps a map, in `ffi_call_raised/8`, as for a binary.
 #[test]
 fn dictionary_arg_is_direct_behind_is_map_guard() {
     let code = compile_run_body("Erlang erlang map_size: d");
