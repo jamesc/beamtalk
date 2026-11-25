@@ -2461,7 +2461,9 @@ defmodule BtAttach.Workspace do
   The loopback address to pin the distribution listener to, given this VM's
   `:init.get_argument(:proto_dist)`: IPv6 loopback for an IPv6 distribution
   (`inet6_tcp`/`inet6_tls`, whose listener an IPv4 interface cannot bind),
-  else IPv4 loopback. Same rule as Rust `beamtalk_workspace::loopback_dist_args/0`.
+  else IPv4 loopback. Same rule as Rust `beamtalk_workspace::loopback_interface_for`;
+  both are pinned to the `interface_cases` of
+  `tests/conformance/loopback_dist_conformance.json`.
   """
   def loopback_interface({:ok, protos}) do
     if Enum.any?(for(args <- protos, arg <- args, do: to_string(arg)), &(&1 =~ "inet6_")),

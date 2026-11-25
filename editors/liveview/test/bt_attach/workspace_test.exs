@@ -664,10 +664,24 @@ defmodule BtAttach.WorkspaceTest do
   end
 
   describe "loopback_dist?/1 — shared ERL_EPMD_ADDRESS rule (BT-5127, BT-5185)" do
-    test "an IPv6 distribution is pinned to IPv6 loopback" do
-      assert Workspace.loopback_interface({:ok, [[~c"inet6_tcp"]]}) == {0, 0, 0, 0, 0, 0, 0, 1}
-      assert Workspace.loopback_interface({:ok, [[~c"inet_tcp"]]}) == {127, 0, 0, 1}
+    test "with no -proto_dist the listener is pinned to IPv4 loopback" do
       assert Workspace.loopback_interface(:error) == {127, 0, 0, 1}
+    end
+
+    for %{"name" => name, "proto_dist" => protos, "interface" => family} <-
+          @loopback_fixture["interface_cases"] do
+      test "conformance (interface): #{name}" do
+        arg =
+          case unquote(protos) do
+            [] -> :error
+            ps -> {:ok, Enum.map(ps, &[String.to_charlist(&1)])}
+          end
+
+        expected =
+          if unquote(family) == "ipv6", do: {0, 0, 0, 0, 0, 0, 0, 1}, else: {127, 0, 0, 1}
+
+        assert Workspace.loopback_interface(arg) == expected
+      end
     end
 
     # Shared with Rust `beamtalk_workspace::loopback_dist_for`: both read

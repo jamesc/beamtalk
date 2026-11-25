@@ -338,18 +338,42 @@ pub fn pin_epmd_loopback(cmd: &mut std::process::Command) {
 #[must_use]
 pub fn loopback_dist_args() -> Vec<&'static str> {
     if loopback_dist_for(std::env::var(EPMD_ADDRESS_VAR).ok().as_deref()) {
-        let ipv6 = ["ERL_FLAGS", "ERL_AFLAGS", "ERL_ZFLAGS"]
+        let flags: Vec<String> = ["ERL_FLAGS", "ERL_AFLAGS", "ERL_ZFLAGS"]
             .iter()
             .filter_map(|var| std::env::var(var).ok())
-            .any(|flags| flags.contains("inet6_"));
-        let interface = if ipv6 {
-            "{0,0,0,0,0,0,0,1}"
-        } else {
-            "{127,0,0,1}"
-        };
-        vec!["-kernel", "inet_dist_use_interface", interface]
+            .collect();
+        let protos: Vec<&str> = flags
+            .iter()
+            .flat_map(|f| {
+                let words: Vec<&str> = f.split_whitespace().collect();
+                words
+                    .windows(2)
+                    .filter(|w| w[0] == "-proto_dist")
+                    .map(|w| w[1])
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        vec![
+            "-kernel",
+            "inet_dist_use_interface",
+            loopback_interface_for(&protos),
+        ]
     } else {
         Vec::new()
+    }
+}
+
+/// The `inet_dist_use_interface` tuple for a pinned listener, given the node's
+/// `-proto_dist` values: IPv6 loopback for an IPv6 distribution (`inet6_*`),
+/// else IPv4 loopback. Pinned to the `interface_cases` of
+/// `tests/conformance/loopback_dist_conformance.json`, which the Elixir
+/// front's `BtAttach.Workspace.loopback_interface/1` reads too.
+#[must_use]
+pub fn loopback_interface_for(proto_dist: &[&str]) -> &'static str {
+    if proto_dist.iter().any(|p| p.starts_with("inet6_")) {
+        "{0,0,0,0,0,0,0,1}"
+    } else {
+        "{127,0,0,1}"
     }
 }
 
@@ -602,6 +626,34 @@ mod tests {
         assert_eq!(parse_port_file("  4040  \n  abc \n"), None);
         assert_eq!(parse_port_file("not-a-port\nabc\n"), None);
         assert_eq!(parse_port_file(""), None);
+    }
+
+    #[test]
+    fn loopback_interface_matches_the_shared_conformance_fixture() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/conformance/loopback_dist_conformance.json");
+        let fixture: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        let cases = fixture["interface_cases"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let protos: Vec<&str> = case["proto_dist"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| p.as_str().unwrap())
+                .collect();
+            let expected = match case["interface"].as_str().unwrap() {
+                "ipv6" => "{0,0,0,0,0,0,0,1}",
+                _ => "{127,0,0,1}",
+            };
+            assert_eq!(
+                loopback_interface_for(&protos),
+                expected,
+                "{}",
+                case["name"]
+            );
+        }
     }
 
     /// BT-5185: an IPv6 distribution is pinned to IPv6 loopback; an IPv4
