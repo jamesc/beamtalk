@@ -193,6 +193,37 @@ fn a_child_that_never_reads_does_not_stall_the_port() {
     port.wait_for_exit(1);
 }
 
+/// BT-5248: every `write_stdin` gets one answer, in order, so the BEAM can
+/// tell which write was dropped: `stdin_queued` for the ones accepted, `error`
+/// for the one that overflowed the queue (and every one after it).
+#[test]
+fn every_write_is_answered_and_the_overflowing_one_gets_the_error() {
+    let mut port = PortProcess::start();
+    let (exe, args) = never_reads();
+    port.send(&spawn(1, exe, args));
+    let chunk = vec![b'x'; 1 << 20];
+    let writes = 12;
+    for _ in 0..writes {
+        port.send(&write_stdin(1, &chunk));
+    }
+    let mut answers = Vec::new();
+    for _ in 0..writes {
+        let answer = port.wait_for("answer to a write", |e| {
+            is_event(e, "stdin_queued", 1) || is_event(e, "error", 1)
+        });
+        answers.push(is_event(&answer, "stdin_queued", 1));
+    }
+    // An accepted write is acked first; once one is refused, all later ones are.
+    assert!(answers[0], "the first write is accepted: {answers:?}");
+    let first_refused = answers.iter().position(|ok| !ok).expect("one overflows");
+    assert!(
+        answers[first_refused..].iter().all(|ok| !ok),
+        "no write is accepted after one was dropped: {answers:?}"
+    );
+    port.send(&command("kill", 1, vec![]));
+    port.wait_for_exit(1);
+}
+
 // ── BT-5195 item 1: a grandchild holding the pipes ──────────────
 
 /// Before BT-5195 `exit` waited for the pipes to close, which a background
