@@ -60,7 +60,6 @@
 | `class` | intrinsic | ✅ | Type introspection |
 | `doesNotUnderstand:args:` | intrinsic | ✅ | Fallback for unknown messages |
 | `perform:withArguments:` | intrinsic | ✅ | Dynamic dispatch |
-| `performLocally:withArguments:` | intrinsic | ✅ | Execute a class method in the caller's process, bypassing gen_server dispatch |
 | `perform:withArguments:timeout:` | intrinsic | ✅ | Dynamic dispatch with explicit timeout |
 
 ### Object (`stdlib/src/object.bt`)

@@ -4,6 +4,8 @@
 Implemented (2026-09-19) — via Epic BT-3533 (Phases 0–5,
 BT-3531…BT-3540).
 
+> **Amended by [ADR 0153](0153-remove-class-variables.md) (2026-11-25), the migration-hook rule on class variables.** The rule that `migrateFromVN:` may not access class variables is moot: a class has no class variables, and class-side `self.x` is a compile error everywhere.
+
 > **Amended by [ADR 0150](0150-actor-registry-off-the-start-path.md) (2026-11-16, BT-4953).** Hot-reload migration enumerates a class's actors with one process scan (`beamtalk_runtime_api:all_instances/1`, by marker) instead of `beamtalk_object_instances:all/1`, so supervised and named actors are included. A migration that fails leaves a supervised actor suspended, and a supervisor shutdown waits out its timeout.
 
 ## Context

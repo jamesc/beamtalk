@@ -286,6 +286,41 @@ TestCase subclass: Ch11MultipleActors
     self assert: c2 getValue equals: 1
 ```
 
+## Shared state: one counter, one registry
+
+A class holds no state of its own, so state that the whole program shares
+lives in an actor or a stdlib helper. For a shared counter, use
+`AtomicCounter`: create it once by name, then look it up from any process.
+
+```beamtalk
+Actor subclass: Ch11Registry
+  state: entries = #{}
+
+  // A singleton is a named actor; `current` asks the runtime each time.
+  class current -> Ch11Registry => (self named: #ch11_registry) unwrap
+
+  register: key as: value => self.entries := self.entries at: key put: value
+  lookup: key => self.entries at: key ifAbsent: [nil]
+
+TestCase subclass: Ch11SharedState
+
+  testSharedCounter =>
+    AtomicCounter new: #ch11_orders_created
+    (AtomicCounter named: #ch11_orders_created) increment
+    counter := AtomicCounter named: #ch11_orders_created
+    self assert: counter increment equals: 2
+    counter delete
+
+  testNamedActorSingleton =>
+    Ch11Registry spawnAs: #ch11_registry
+    Ch11Registry current register: #a as: 1
+    self assert: (Ch11Registry current lookup: #a) equals: 1
+```
+
+Use an actor when the state is more than a number or needs behaviour, `Ets`
+for a cache, and a class method for a constant. See
+[Class-Side Methods](../beamtalk-language-features.md#class-side-methods-adr-0048).
+
 ## Actor vs Server
 
 Most actors use `Actor subclass:`. If you need to receive raw Erlang messages

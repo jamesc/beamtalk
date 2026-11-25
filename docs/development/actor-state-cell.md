@@ -236,8 +236,7 @@ message (BT-3998); ADR 0137 keeps that.
 
 A closure has no threaded `State`. Its field reads and writes go through
 `beamtalk_actor_state` (`get`, `put`, and the reflective `fieldAt:`,
-`fieldAt:put:`, `clearField:`, `hasField:`), as `beamtalk_class_vars` does for
-class variables. A self-send in a closure reads the cell, calls the method
+`fieldAt:put:`, `clearField:`, `hasField:`). A self-send in a closure reads the cell, calls the method
 with it and stores the answer back, as `self_dispatch/2` does. A closure only
 runs at home inside a bracketed call, so the cell is current when it starts
 and the method that emitted the bracket loads its writes when it returns.
@@ -570,8 +569,7 @@ passed as arguments. Here a method body still passes `State` as a value; the
 cell carries it only across calls into code that cannot take it as an
 argument, and the `gen_server` contract of state in, state out holds exactly.
 OTP keeps process-scoped context in the dictionary (`'$ancestors'`,
-`'$initial_call'`, logger metadata), and so does Beamtalk (`'$bt_call_stack'`,
-ADR 0130's class variables).
+`'$initial_call'`, logger metadata), and so does Beamtalk (`'$bt_call_stack'`).
 
 ## 7. Cost and gates
 
@@ -688,7 +686,7 @@ BT-3993); `reject_last_statement_block_value` (BT-3971) and
 `reject_loop_rebind_of_body_local` (BT-3939); the Tier 2
 `stateful_block_dispatch` sites in `intrinsics.rs`, `while_loops.rs` and
 `exception_handling.rs`; the locals half of
-`beamtalk_collection:refuse_writing_fold/3`; `ClassStateAbroad`; and the
+`beamtalk_collection:refuse_writing_fold/3`; and the
 `Local` and `SelfVt` families. (`ALLOW_SET`, the other `DENY_SET` rows,
 `RIGHT_STATEMENTS` and `MatchArmWrite` were here too until BT-3913 retired
 the position check with the rest of ADR 0133 Phase 3.)
