@@ -1408,6 +1408,18 @@ fn collect_beam_stems(ebin_dir: &std::path::Path, out: &mut std::collections::Ha
     }
 }
 
+/// The compiled `native/test/` helper ebin of the package at `project_root`
+/// (`_build/dev/native_test/ebin`, BT-5186), when the package still has a
+/// `native/test/` directory and the ebin exists — the one rule for which
+/// helper modules a package's tests may call and be typed against. A package
+/// that dropped `native/test/` gets `None`, so stale helper beams are never
+/// treated as known.
+#[must_use]
+pub fn project_test_helper_ebin_dir(project_root: &Utf8Path) -> Option<Utf8PathBuf> {
+    let helpers = BuildLayout::new(project_root).native_test_ebin_dir();
+    (project_root.join("native").join("test").is_dir() && helpers.is_dir()).then_some(helpers)
+}
+
 /// Collect the ebin directories for a project's native and path dependencies.
 ///
 /// Not the package's `native/test/` helpers: those are visible only to its
@@ -1425,22 +1437,6 @@ fn collect_beam_stems(ebin_dir: &std::path::Path, out: &mut std::collections::Ha
 /// `beamtalk-cli` (via `BuildLayout`) and `beamtalk-lsp` call this function —
 /// it is the single source of truth for project-dependency ebin discovery.
 pub fn collect_project_dependency_ebin_dirs(project_root: &Utf8Path) -> Vec<Utf8PathBuf> {
-    collect_project_dependency_ebin_dirs_impl(project_root)
-}
-
-/// The compiled `native/test/` helper ebin of the package at `project_root`
-/// (`_build/dev/native_test/ebin`, BT-5186), when the package still has a
-/// `native/test/` directory and the ebin exists — the one rule for which
-/// helper modules a package's tests may call and be typed against. A package
-/// that dropped `native/test/` gets `None`, so stale helper beams are never
-/// treated as known.
-#[must_use]
-pub fn project_test_helper_ebin_dir(project_root: &Utf8Path) -> Option<Utf8PathBuf> {
-    let helpers = BuildLayout::new(project_root).native_test_ebin_dir();
-    (project_root.join("native").join("test").is_dir() && helpers.is_dir()).then_some(helpers)
-}
-
-fn collect_project_dependency_ebin_dirs_impl(project_root: &Utf8Path) -> Vec<Utf8PathBuf> {
     let layout = BuildLayout::new(project_root);
     let mut dirs = Vec::new();
 
@@ -1641,8 +1637,10 @@ pub fn collect_installed_erlang_modules() -> KnownErlangModules {
     }
 }
 
-/// Whether `dir` is the package's own compiled `native/` ebin
-/// (`_build/dev/native/ebin`), as opposed to a path/git dependency
+/// Whether `dir` is the package's own compiled native output — its `native/`
+/// ebin (`_build/dev/native/ebin`) or, under `beamtalk test`, its
+/// `native/test/` helper ebin (`_build/dev/native_test/ebin`, BT-5186) — as
+/// opposed to a path/git dependency
 /// (`_build/deps/*/ebin`) or a hex/rebar3 dependency
 /// (`_build/dev/native/default/lib/*/ebin`). Only the former may prove
 /// result-coercion-free FFI calls (BT-4507).

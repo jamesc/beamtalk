@@ -284,7 +284,15 @@ fn open_and_lock(
         // agree (some FUSE/overlay mounts), the check cannot succeed, and the
         // lock we hold is then the best there is.
         replaced += 1;
-        if replaced > MAX_REPLACED || still_names_locked_file(lock_path, &file) {
+        if still_names_locked_file(lock_path, &file) {
+            return Ok(file);
+        }
+        if replaced > MAX_REPLACED {
+            warn!(
+                "{what} lock '{}' kept changing under us; proceeding with a lock that \
+                 may not exclude other beamtalk processes",
+                lock_path.display()
+            );
             return Ok(file);
         }
     }
