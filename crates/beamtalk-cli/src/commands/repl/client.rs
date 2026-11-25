@@ -384,9 +384,11 @@ impl ReplClient {
     /// (BT-5199). Without it the session stays resumable until the idle bound
     /// (4 h by default) after the REPL has gone. Best effort and bounded: sent
     /// on the current connection only (a dead connection is not reconnected
-    /// just to close a session the node reaps anyway), and the reply is waited
-    /// for at most [`CLOSE_REPLY_TIMEOUT`], so a wedged node or a half-open
-    /// socket cannot keep the REPL from exiting.
+    /// just to close a session the node reaps anyway), and each read of the
+    /// reply is bounded by [`CLOSE_REPLY_TIMEOUT`], so a wedged node or a
+    /// half-open socket cannot keep the REPL from exiting. (Push frames that
+    /// arrive first each start a fresh read; the node sends none while it runs
+    /// the `close` op.)
     pub(crate) fn close_session(&mut self) {
         if self
             .inner

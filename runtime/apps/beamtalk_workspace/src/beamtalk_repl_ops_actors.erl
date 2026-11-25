@@ -104,7 +104,16 @@ handle_term(<<"kill">>, Params, _Msg, _SessionPid) ->
                             ]),
                             <<"System actors are started by the runtime; use :actors to find user actors.">>
                         )};
-                _ ->
+                {error, not_found} ->
+                    %% BT-5199: it stopped between the client's view and the
+                    %% kill — say so rather than report a kill that never ran.
+                    {error,
+                        beamtalk_repl_errors:make(
+                            actor_not_alive,
+                            'Actor',
+                            iolist_to_binary([<<"Actor is not alive: ">>, PidBin])
+                        )};
+                {ok, _} ->
                     kill_and_wait(Pid),
                     {status, ok}
             end

@@ -100,6 +100,9 @@ defmodule BtAttach.Workspace do
   #     not keep the session busy.
   @rpc_timeout 10_000
   @rpc_interactive_timeout 5_000
+  # BT-5199: `close`'s decode/get_params prelude builds a no-param request; a
+  # workspace that cannot do that within a second is not going to close it.
+  @rpc_close_prelude_timeout 1_000
   @rpc_long_timeout 60_000
   @rpc_eval_timeout 35_000
   # BT-5129: a whole test run is bounded by the suite, not by a lookup; the old
@@ -1178,9 +1181,9 @@ defmodule BtAttach.Workspace do
   defp simple_op_timeout("close"), do: @rpc_interactive_timeout
   defp simple_op_timeout(_op), do: @rpc_long_timeout
 
-  # The decode/get_params prelude is a lookup; `close` bounds it as tightly as
-  # its dispatch, every other op keeps the default lookup bound.
-  defp simple_prelude_timeout("close"), do: @rpc_interactive_timeout
+  # The decode/get_params prelude is a lookup; `close` bounds it tighter still
+  # (so a close takes at most 1 + 1 + 5 s), every other op keeps the default.
+  defp simple_prelude_timeout("close"), do: @rpc_close_prelude_timeout
   defp simple_prelude_timeout(_op), do: @rpc_timeout
 
   # `session_pid` is `dispatch/4`'s SessionPid: `self()` for the workspace-global

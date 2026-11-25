@@ -226,3 +226,18 @@ kill_user_native_actor_works_test() ->
             end,
         ?assertEqual([], [A || #{pid := P} = A <- Listed, P =:= Pid])
     end).
+
+%% BT-5199: killing an actor that has already stopped is refused, never
+%% reported as a kill (the clients say "Killed X." only on `{status, ok}`).
+kill_stopped_actor_is_refused_test() ->
+    beamtalk_test_fake_native:with_native(['Bt5199KillTwice'], fun(Pid) ->
+        Msg = beamtalk_test_repl:make_msg(<<"kill">>, <<"s-5">>, undefined),
+        Params = #{<<"actor">> => list_to_binary(pid_to_list(Pid))},
+        ?assertEqual(
+            {status, ok}, beamtalk_repl_ops_actors:handle_term(<<"kill">>, Params, Msg, self())
+        ),
+        ?assertMatch(
+            {error, #beamtalk_error{}},
+            beamtalk_repl_ops_actors:handle_term(<<"kill">>, Params, Msg, self())
+        )
+    end).
