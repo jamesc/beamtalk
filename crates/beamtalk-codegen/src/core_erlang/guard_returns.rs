@@ -281,7 +281,7 @@ struct Rewriter {
     /// ([`trusted_param_types`] with a [`ComparisonKinds`] kind). A comparison
     /// on one carries a kind guard that dispatches a wrong-kind receiver
     /// (BT-4823), so it is a Boolean only while the declaration holds.
-    declared_params: HashSet<EcoString>,
+    declared_params: HashMap<EcoString, ComparisonKinds>,
     /// How many times the method assigns each local, nested blocks included.
     assignments: HashMap<EcoString, usize>,
     /// The method's and its blocks' parameter names.
@@ -299,8 +299,9 @@ impl Rewriter {
             two_branch: HashSet::new(),
             declared_params: trusted_param_types(method)
                 .into_iter()
-                .filter(|(_, ty)| ComparisonKinds::of_type_name(ty).is_some())
-                .map(|(name, _)| EcoString::from(name))
+                .filter_map(|(name, ty)| {
+                    ComparisonKinds::of_type_name(ty).map(|kinds| (EcoString::from(name), kinds))
+                })
                 .collect(),
             assignments: HashMap::new(),
             parameters: method
@@ -358,16 +359,27 @@ impl Rewriter {
         } = expr
             && is_ordering_comparison(op)
         {
-            let declared = |e: &Expression| matches!(e, Expression::Identifier(id) if self.declared_params.contains(&id.name));
-            // The right operand must be proven numeric or itself declared:
-            // an untyped one makes a hook answer ordinary code (ADR 0116
-            // § Addendum, BT-5176), not a broken declaration.
-            let right_ok = arguments.first().is_some_and(|right| {
-                declared(right) || proven_comparison_kind(right, None) == Some(ProvenKind::Number)
+            let declared = |e: &Expression| match e {
+                Expression::Identifier(id) => self.declared_params.get(&id.name).copied(),
+                _ => None,
+            };
+            // A receiver with a number kind (a number literal, or a declared
+            // number or `Character`) tests its right operand and sends a
+            // non-number its hook (ADR 0116 § Addendum, BT-5176). That hook
+            // answer is a broken declaration only when the right operand is
+            // proven numeric or declared with a number kind; an untyped or
+            // `String`-declared one makes it ordinary code. A declared
+            // `String`-only receiver never tests its right operand.
+            let number_receiver = match declared(receiver) {
+                Some(kinds) if !kinds.has_number_kind() => return true,
+                Some(_) => true,
+                None => proven_comparison_kind(receiver, None) == Some(ProvenKind::Number),
+            };
+            let right_numeric = arguments.first().is_some_and(|right| {
+                declared(right).is_some_and(ComparisonKinds::has_number_kind)
+                    || proven_comparison_kind(right, None) == Some(ProvenKind::Number)
             });
-            return right_ok
-                && (declared(receiver)
-                    || proven_comparison_kind(receiver, None) == Some(ProvenKind::Number));
+            return number_receiver && right_numeric;
         }
         self.short_circuit_declared_operands(expr).is_some()
     }
@@ -1295,6 +1307,23 @@ mod tests {
         let (_, helpers) = rewritten_with_conditions(&mixed("    x < y ifTrue: [^1]\n    2"))
             .expect("an effect-free guard is rewritten");
         assert_eq!(helpers, 1);
+        // Kinds matter: a declared `String` receiver never tests its right
+        // operand, so it stays lenient; a `String`-declared right operand of
+        // a number receiver is not numeric, so it is not.
+        let kinds = |sig: &str, body: &str| format!("Object subclass: C\n  {sig} =>\n{body}\n");
+        let (_, helpers) = rewritten_with_conditions(&kinds(
+            "m: s :: String with: y",
+            "    s < y ifTrue: [self foo. ^1]\n    2",
+        ))
+        .expect("a declared String receiver keeps the leniency");
+        assert_eq!(helpers, 1);
+        assert_eq!(
+            rewritten(&kinds(
+                "m: x :: Integer with: s :: String",
+                "    x < s ifTrue: [self foo. ^1]\n    2"
+            )),
+            None
+        );
         // A two-branch guard on it keeps its frame, as on a declared one.
         assert_eq!(
             rewritten(&typed_class(
