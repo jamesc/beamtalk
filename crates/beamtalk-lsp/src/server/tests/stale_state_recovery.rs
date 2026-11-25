@@ -114,7 +114,7 @@ async fn startup_preload_panic_republishes_and_retries() {
         .panic_next_preload
         .store(true, std::sync::atomic::Ordering::SeqCst);
     backend.initialized(InitializedParams {}).await;
-    let after = collect(&mut feed, Duration::from_millis(1000)).await;
+    let after = collect(&mut feed, Duration::from_secs(1)).await;
     assert!(
         publishes_for(&after, &a_uri) > 0,
         "open files are republished after a caught preload panic"
@@ -170,7 +170,7 @@ async fn package_root_preload_panic_republishes_and_retries() {
         "Object subclass: User\n\n  make => Helper new\n",
     )
     .await;
-    let after = collect(&mut feed, Duration::from_millis(1000)).await;
+    let after = collect(&mut feed, Duration::from_secs(1)).await;
     assert!(
         publishes_for(&after, &a_uri) > 0,
         "the open file is published after a caught package-root panic"
@@ -328,7 +328,7 @@ async fn parse_error_edit_does_not_republish_other_files() {
     let backend: &Backend = service.inner();
     real_did_open(backend, a_uri.clone(), a_src).await;
     real_did_open(backend, b_uri.clone(), b_src).await;
-    let _ = collect(&mut feed, Duration::from_millis(1000)).await;
+    let _ = collect(&mut feed, Duration::from_secs(1)).await;
 
     // Half-typed: the parser recovers by dropping a method. Two pauses on
     // broken code.
@@ -346,7 +346,7 @@ async fn parse_error_edit_does_not_republish_other_files() {
                 .has_parse_errors(&Utf8PathBuf::from_path_buf(a.clone()).expect("utf8")),
             "the edit must really be a parse error"
         );
-        let after_broken = collect(&mut feed, Duration::from_millis(1000)).await;
+        let after_broken = collect(&mut feed, Duration::from_secs(1)).await;
         assert_eq!(
             publishes_for(&after_broken, &b_uri),
             0,
@@ -356,7 +356,7 @@ async fn parse_error_edit_does_not_republish_other_files() {
 
     // Fixed back to the original interface: one re-check of b.bt.
     backend.did_change(replace_text(&a_uri, 4, a_src)).await;
-    let after_fix = collect(&mut feed, Duration::from_millis(1000)).await;
+    let after_fix = collect(&mut feed, Duration::from_secs(1)).await;
     assert_eq!(
         publishes_for(&after_fix, &b_uri),
         1,
@@ -371,14 +371,14 @@ async fn parse_error_edit_does_not_republish_other_files() {
             "Object subclass: Foo\n  go => 7\n  stop => 2\n",
         ))
         .await;
-    let after_body = collect(&mut feed, Duration::from_millis(1000)).await;
+    let after_body = collect(&mut feed, Duration::from_secs(1)).await;
     assert_eq!(publishes_for(&after_body, &b_uri), 0);
 
     // A real interface change still re-checks.
     backend
         .did_change(replace_text(&a_uri, 6, "Object subclass: Foo\n  go => 1\n"))
         .await;
-    let after_change = collect(&mut feed, Duration::from_millis(1000)).await;
+    let after_change = collect(&mut feed, Duration::from_secs(1)).await;
     assert!(
         publishes_for(&after_change, &b_uri) > 0,
         "removing a method still re-checks b.bt"
@@ -409,11 +409,11 @@ async fn edit_without_a_baseline_does_not_republish_other_files() {
         &Utf8PathBuf::from_path_buf(a.clone()).expect("utf8"),
         a_src,
     );
-    let _ = collect(&mut feed, Duration::from_millis(1000)).await;
+    let _ = collect(&mut feed, Duration::from_secs(1)).await;
     backend
         .did_change(replace_text(&a_uri, 2, "Object subclass: Foo\n  go => 2\n"))
         .await;
-    let after = collect(&mut feed, Duration::from_millis(1000)).await;
+    let after = collect(&mut feed, Duration::from_secs(1)).await;
     assert_eq!(publishes_for(&after, &b_uri), 0);
 }
 
@@ -433,7 +433,7 @@ async fn opening_many_files_republishes_linearly() {
         fs::write(&path, &src).expect("write");
         real_did_open(backend, Url::from_file_path(&path).expect("uri"), &src).await;
     }
-    let messages = collect(&mut feed, Duration::from_millis(1000)).await;
+    let messages = collect(&mut feed, Duration::from_secs(1)).await;
     let total = messages.iter().filter(|n| published(n).is_some()).count();
     assert!(
         total <= 2 * N,
