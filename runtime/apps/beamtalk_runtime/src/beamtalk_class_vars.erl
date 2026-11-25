@@ -480,8 +480,6 @@ restore the pre-call snapshot and re-raise.
 -spec protect(fun(() -> T)) -> T when T :: term().
 protect(Fun) ->
     Snap = snapshot(),
-    %% bt-catcher-audit: converted - this is protect/1 itself: restores the snapshot, then
-    %% re-raises
     try
         Fun()
     catch

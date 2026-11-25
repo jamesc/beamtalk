@@ -163,8 +163,6 @@ this same function as the module's `on_load`, so a failure here is a real one.
 register_class_module(ModuleName) ->
     case erlang:function_exported(ModuleName, register_class, 0) of
         true ->
-            %% bt-catcher-audit: not-applicable-no-block - compiled register_class/0, registration
-            %% only
             try ModuleName:register_class() of
                 {error, RegReason} ->
                     registration_failed(ModuleName, RegReason, undefined);

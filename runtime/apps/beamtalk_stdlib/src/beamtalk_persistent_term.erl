@@ -119,7 +119,6 @@ build_locked(Key, Block, Miss) ->
     PtKey = pt_key(Key),
     LockKey = lock_key(Key),
     Timeout = beamtalk_fifo_lock:configured_timeout(persistent_term, ?BUILD_WAIT_MS),
-    %% bt-catcher-audit: not-applicable-reraises - the only clause turns this call's own recursive_lock into a raised beamtalk_error; block errors propagate untouched
     try
         beamtalk_fifo_lock:with_lock_or_raise(
             LockKey, Key, Timeout, {'PersistentTerm', 'at:ifAbsentPut:'}, fun() ->

@@ -91,9 +91,6 @@ user instead of silent.
 """.
 -spec append_entry(string(), map(), fun(() -> map())) -> emit_result().
 append_entry(Label, Meta, BuildFun) ->
-    %% bt-catcher-audit: not-applicable-no-block - BuildFun is an Erlang closure
-    %% from this module's emit_* functions that builds the entry map; it never
-    %% runs a Beamtalk block.
     %% The append stays in the try body (not an `of` clause): a `noproc` exit
     %% while the ChangeLog server restarts must be caught too.
     try

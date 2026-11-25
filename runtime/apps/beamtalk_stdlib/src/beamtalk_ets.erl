@@ -656,8 +656,6 @@ guarded(TableName, Selector, Fun) ->
 -doc "As `guarded/3`, with the message used for a `type_error` when the table is not stale.".
 -spec guarded(table(), atom(), fun(() -> term()), binary()) -> term().
 guarded(TableName, Selector, Fun, BadArgMessage) ->
-    %% bt-catcher-audit: not-applicable-no-block - Fun is always an internal ETS operation
-    %% closure built in this module, never a Beamtalk block.
     try
         Fun()
     catch
@@ -678,8 +676,6 @@ that keeps the original reason and stacktrace in its details.
 """.
 -spec call_block(function(), [term()], atom()) -> term().
 call_block(Block, Args, Selector) ->
-    %% bt-catcher-audit: not-applicable-reraises - the only catch clause (error:badarg) re-raises
-    %% a structured #beamtalk_error{}; the next boundary restores class variables.
     try
         apply(Block, Args)
     catch

@@ -18,7 +18,7 @@ error wrapping, and printString formatting.
 %% Exported so the proxy can `erlang:apply/3` them (external call). Fixtures for
 %% the charlist-retry exit/throw tests: raise `badarg` on a binary arg (to
 %% trigger the retry) then `exit`/`throw` on the charlist-coerced retry arg.
--export([retry_then_exit/1, retry_then_throw/1, write_then_badarg/1, retry_class/0]).
+-export([retry_then_exit/1, retry_then_throw/1]).
 -export([bt4770_call_map_fun/1]).
 %% BT-4021 fixtures: a target that raises `undef` itself, and one whose charlist
 %% retry hits a nested `undef`.
@@ -27,15 +27,7 @@ error wrapping, and printString formatting.
 -export([bt4153_ok_stub/0, bt4153_charlist_stub/0]).
 %% BT-4866 fixtures: callees that pattern-match on binaries and so raise
 %% `function_clause` for a tagged String, at their own head or further down.
--export([fc_sizes/1, fc_wrap/1, fc_counted/1, fc_counted_inner/1, write_then_fc/1]).
-
-%% The first attempt writes class variable `a`, then fails one call down; the
-%% unwrapped retry reports the value of `a` it sees.
-write_then_fc([{beamtalk_string, _}]) ->
-    beamtalk_class_vars:put(retry_self_obj(), a, 99),
-    fc_sizes([not_a_binary]);
-write_then_fc([Bin]) when is_binary(Bin) ->
-    beamtalk_class_vars:get(retry_self_obj(), a).
+-export([fc_sizes/1, fc_wrap/1, fc_counted/1, fc_counted_inner/1]).
 
 %% Pattern-matches on a list of binaries: its own head fails on a tagged String.
 fc_sizes([]) -> [];
@@ -73,30 +65,8 @@ retry_then_exit(Arg) when is_list(Arg) -> exit(retry_exit_reason).
 retry_then_throw(Arg) when is_binary(Arg) -> erlang:error(badarg);
 retry_then_throw(Arg) when is_list(Arg) -> throw(retry_throw_value).
 
-%% BT-3728: a failed first attempt writes class variable `a` then raises `badarg`
-%% (what a block run inside the FFI call could do); the charlist retry reports the
-%% value of `a` it sees.
-write_then_badarg(Arg) when is_binary(Arg) ->
-    beamtalk_class_vars:put(retry_self_obj(), a, 99),
-    erlang:error(badarg);
-write_then_badarg(Arg) when is_list(Arg) ->
-    beamtalk_class_vars:get(retry_self_obj(), a);
-%% BT-4770: a map argument with a nested tagged String; the retry deep-unwraps it.
-write_then_badarg(#{k := {beamtalk_string, _}}) ->
-    beamtalk_class_vars:put(retry_self_obj(), a, 99),
-    erlang:error(badarg);
-write_then_badarg(#{k := Bin}) when is_binary(Bin) ->
-    beamtalk_class_vars:get(retry_self_obj(), a).
-
 %% BT-4770: a callee that runs a Beamtalk block held inside a map argument.
 bt4770_call_map_fun(#{f := F}) -> F().
-
-%% The base class atom must exist (beamtalk_class_vars resolves a class tag to its
-%% name with an existing-atom lookup); this function keeps it in the atom table.
-retry_class() -> 'ProxyRetryTestClass'.
-
-retry_self_obj() ->
-    #beamtalk_object{class = 'ProxyRetryTestClass class', class_mod = prtc, pid = self()}.
 
 %%% ===================================================================
 %%% Proxy construction
@@ -1129,19 +1099,6 @@ native_call_retry_throw_passes_through_test() ->
         throw:retry_throw_value -> ok
     end.
 
-native_call_badarg_retry_discards_first_attempt_class_var_writes_test() ->
-    %% BT-3728: the retry is a fresh attempt; writes the failed first attempt made
-    %% (here `a := 99`) must not be visible to it, nor survive the call.
-    beamtalk_class_vars_test_support:with_home('ProxyRetryTestClass', #{a => 1}, fun() ->
-        ?assertEqual(
-            1,
-            beamtalk_erlang_proxy:native_call(
-                ?MODULE, write_then_badarg, [<<"x">>], {'Stream', 'take:'}
-            )
-        ),
-        ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a))
-    end).
-
 native_call_beamtalk_error_passthrough_test() ->
     %% An already-#beamtalk_error{} re-raises unchanged (innermost wins)
     OrigError = beamtalk_error:new(does_not_understand, 'TestClass'),
@@ -2034,32 +1991,6 @@ bt4759_guarded_binary_args_match_proxy_test_() ->
      || {M, F, A} <- Cases, Mode <- [stock, beamtalk]
     ].
 
-%% BT-4759: the `badarg` charlist retry on the direct path is a fresh attempt.
-%% A binary-argument call site reads `beamtalk_class_vars:snapshot()` before the
-%% call and hands it to `ffi_call_raised/9`; the retry restores it, so writes a
-%% failed first attempt made do not survive into the retry (ADR 0130 §4,
-%% BT-3728), exactly as on the proxy path.
-bt4759_direct_binary_retry_discards_first_attempt_class_var_writes_test() ->
-    Direct = fun() ->
-        Snap = beamtalk_class_vars:snapshot(),
-        try
-            ?MODULE:write_then_badarg(<<"x">>)
-        catch
-            C:E:S ->
-                Site = erlang:process_info(self(), current_stacktrace),
-                beamtalk_erlang_proxy:ffi_call_raised(
-                    C, E, S, ?MODULE, write_then_badarg, [<<"x">>], stock, Site, Snap
-                )
-        end
-    end,
-    beamtalk_class_vars_test_support:with_home('ProxyRetryTestClass', #{a => 1}, fun() ->
-        Proxied = beamtalk_erlang_proxy:direct_call(?MODULE, write_then_badarg, [<<"x">>], stock),
-        ?assertEqual(1, Proxied),
-        ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a)),
-        ?assertEqual(Proxied, Direct()),
-        ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a))
-    end).
-
 %% BT-4759: a tagged String never reaches a stock callee tagged. The guard
 %% rejects it, so the call takes the proxy, which unwraps it.
 bt4759_tagged_string_falls_back_and_is_unwrapped_test() ->
@@ -2222,8 +2153,8 @@ bt4485_direct_matches_proxy_test_() ->
 %%% ============================================================================
 
 %% The shape codegen emits for a proved delegate: every argument is checked
-%% with the fixture's runtime guards; a pass goes direct (a snapshot read first
-%% when an argument is a binary, `ffi_call_raised/10` on a raise), anything
+%% with the fixture's runtime guards; a pass goes direct (`ffi_call_raised/10`
+%% with `none` in its unused ninth slot on a raise), anything
 %% else takes `native_call/5`, the call the delegate made before.
 bt4765_delegate(M, F, Args, {_, _} = Ctx, Mode) ->
     bt4770_delegate(M, F, Args, Ctx, Mode, fun(Raw) -> Raw end).
@@ -2242,18 +2173,13 @@ bt4770_delegate(M, F, Args, {_, _} = Ctx, Mode, Wrap) ->
         false ->
             beamtalk_erlang_proxy:native_call(M, F, Args, Ctx, Mode);
         true ->
-            Snap =
-                case lists:any(fun(A) -> is_binary(A) orelse is_map(A) end, Args) of
-                    true -> beamtalk_class_vars:snapshot();
-                    false -> none
-                end,
             try
                 Wrap(erlang:apply(M, F, Args))
             catch
                 C:E:S ->
                     Site = erlang:process_info(self(), current_stacktrace),
                     beamtalk_erlang_proxy:ffi_call_raised(
-                        C, E, S, M, F, Args, Mode, Site, Snap, Ctx
+                        C, E, S, M, F, Args, Mode, Site, none, Ctx
                     )
             end
     end.
@@ -2302,20 +2228,6 @@ bt4765_delegate_error_carries_class_and_selector_test() ->
         bt4765_delegate(no_such_module_bt4765, f, [1], {'Probe', 'go:'}, beamtalk)
     end),
     ?assertMatch({beamtalk_error, #beamtalk_error{class = 'Probe', selector = 'go:'}}, Outcome).
-
-%% As BT-4759: the charlist retry of a direct delegate call is a fresh attempt,
-%% so class-variable writes a failed first attempt made are discarded.
-bt4765_delegate_binary_retry_discards_first_attempt_class_var_writes_test() ->
-    Ctx = {'Probe', 'go:'},
-    beamtalk_class_vars_test_support:with_home('ProxyRetryTestClass', #{a => 1}, fun() ->
-        Proxied = beamtalk_erlang_proxy:native_call(
-            ?MODULE, write_then_badarg, [<<"x">>], Ctx, stock
-        ),
-        ?assertEqual(1, Proxied),
-        ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a)),
-        ?assertEqual(Proxied, bt4765_delegate(?MODULE, write_then_badarg, [<<"x">>], Ctx, stock)),
-        ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a))
-    end).
 
 %% Only the frames above the call site decide whether compiled Beamtalk code
 %% raised the error. Below it, the calling Beamtalk function's own frame (there
@@ -2419,8 +2331,8 @@ bt4770_inline_result_map_args_match_proxy_test_() ->
     ].
 
 %% The shape codegen emits for a proved, inline-`Result`, guarded call whose
-%% arguments may be maps: a snapshot read first, the build inside the `try`,
-%% `ffi_call_raised/9` on a raise, `direct_call/4` when a guard fails.
+%% arguments may be maps: the build inside the `try`, `ffi_call_raised/8` on a
+%% raise, `direct_call/4` when a guard fails.
 bt4770_inline_guarded(M, F, Args) ->
     #{
         <<"arg_runtime_guards">> := Scalar,
@@ -2433,41 +2345,14 @@ bt4770_inline_guarded(M, F, Args) ->
         false ->
             beamtalk_erlang_proxy:direct_call(M, F, Args, stock);
         true ->
-            Snap = beamtalk_class_vars:snapshot(),
             try
                 bt4762_inline(M, erlang:apply(M, F, Args), stock)
             catch
                 C:E:S ->
                     Site = erlang:process_info(self(), current_stacktrace),
-                    beamtalk_erlang_proxy:ffi_call_raised(C, E, S, M, F, Args, stock, Site, Snap)
+                    beamtalk_erlang_proxy:ffi_call_raised(C, E, S, M, F, Args, stock, Site)
             end
     end.
-
-%% The `badarg` charlist retry deep-unwraps a Dictionary argument's nested
-%% tagged Strings and is a fresh attempt: a map call site keeps the pre-call
-%% class-variable snapshot (`ffi_call_raised/9`), so the first attempt's write
-%% does not survive, as on the proxy path.
-bt4770_direct_map_retry_discards_first_attempt_class_var_writes_test() ->
-    Arg = #{k => {beamtalk_string, <<"x">>}},
-    Direct = fun() ->
-        Snap = beamtalk_class_vars:snapshot(),
-        try
-            ?MODULE:write_then_badarg(Arg)
-        catch
-            C:E:S ->
-                Site = erlang:process_info(self(), current_stacktrace),
-                beamtalk_erlang_proxy:ffi_call_raised(
-                    C, E, S, ?MODULE, write_then_badarg, [Arg], stock, Site, Snap
-                )
-        end
-    end,
-    beamtalk_class_vars_test_support:with_home('ProxyRetryTestClass', #{a => 1}, fun() ->
-        Proxied = beamtalk_erlang_proxy:direct_call(?MODULE, write_then_badarg, [Arg], stock),
-        ?assertEqual(1, Proxied),
-        ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a)),
-        ?assertEqual(Proxied, Direct()),
-        ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a))
-    end).
 
 %% A delegate agrees with `native_call/5` the same way, for a map argument
 %% (a plain direct call) and for an inline `Result` (BT-4770).
@@ -2619,23 +2504,6 @@ function_clause_retries_only_when_a_nested_string_exists_test() ->
         2, beamtalk_erlang_proxy:direct_call(?MODULE, fc_counted, [[fc_tagged(<<"ab">>)]], stock)
     ),
     ?assertEqual(2, erlang:get(fc_calls)).
-
-function_clause_retry_discards_first_attempt_class_var_writes_test() ->
-    %% BT-3728 for the BT-4866 retry: a fresh attempt, so `a := 99` from the
-    %% failed first attempt is neither visible to it nor kept.
-    beamtalk_class_vars_test_support:with_home('ProxyRetryTestClass', #{a => 1}, fun() ->
-        ?assertEqual(
-            1,
-            beamtalk_erlang_proxy:native_call(
-                ?MODULE,
-                write_then_fc,
-                [[fc_tagged(<<"x">>)]],
-                {'Stream', 'take:'},
-                stock
-            )
-        ),
-        ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a))
-    end).
 
 function_clause_in_recursive_call_to_target_is_reported_at_head_test() ->
     %% Pins the documented best-effort rule: `fc_sizes([<<"a">>, 1])` fails in the

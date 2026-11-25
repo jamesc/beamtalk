@@ -463,8 +463,6 @@ safe_value_new_defaults(_Class, Module) ->
 
 -spec safe_actor_init_defaults(atom(), atom()) -> map().
 safe_actor_init_defaults(Class, Module) ->
-    %% bt-catcher-audit: not-applicable-other-process - actor init/1 field defaults, not a
-    %% class-method region
     try Module:init(#{?BT_SKIP_INITIALIZE_KEY => true}) of
         {ok, Map} when is_map(Map) ->
             Map;
