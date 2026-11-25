@@ -119,3 +119,24 @@ TestCase subclass: CountedLoopNonNumberStartTest
 
   testToByDoFloatStartPathsAgree =>
     self assertSameError: [self pureToByDo: 1.5] as: [self writingToByDo: 1.5]
+
+  // --- a user class that answers the selector itself ---
+
+  // The pure send reaches the class's own method; the inlined loop would
+  // bypass it, so it refuses with `stateful_block_dispatch` instead of
+  // running the loop.
+  testPureToDoReachesUserMethod =>
+    self assert: (self pureToDo: Bt5215CustomRangeStart new) equals: #custom
+
+  testWritingToDoOnUserMethodRefuses =>
+    self should: [
+      self writingToDo: Bt5215CustomRangeStart new
+    ] raise: #stateful_block_dispatch
+
+  testPureToByDoReachesUserMethod =>
+    self assert: (self pureToByDo: Bt5215CustomRangeStart new) equals: #customBy
+
+  testWritingToByDoOnUserMethodRefuses =>
+    self should: [
+      self writingToByDo: Bt5215CustomRangeStart new
+    ] raise: #stateful_block_dispatch
