@@ -24,9 +24,9 @@
 //! - `{stdout, ChildId, Data}`
 //! - `{stderr, ChildId, Data}`
 //! - `{stdin_queued, ChildId}` — a `write_stdin` for `ChildId` was accepted
-//!   into its stdin queue. Every well-formed `write_stdin` (one naming a `child_id`) gets exactly one answer, this
-//!   or an `error`, in command order, so the BEAM can tell which write was
-//!   dropped (BT-5248).
+//!   into its stdin queue. Every well-formed `write_stdin` (one naming a
+//!   `child_id`) gets exactly one answer, this or an `error`, in command
+//!   order, so the BEAM can tell which write was dropped (BT-5248).
 //! - `{exit, ChildId, ExitCode}` — the last event for a child. A failed
 //!   `spawn` gets `{exit, ChildId, -1}` (unless the id belongs to a live child).
 //! - `{error, ChildId, Command, Reason}` — the `Command` (`spawn`,
