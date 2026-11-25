@@ -473,9 +473,15 @@ interface. Naming `0.0.0.0` makes a freshly started epmd exit, since it binds
 the wildcard and then loopback on the same port.
 """.
 -spec epmd_address(inet:ip_address()) -> string().
-epmd_address({0, 0, 0, 0}) -> "all";
-epmd_address({0, 0, 0, 0, 0, 0, 0, 0}) -> "all";
-epmd_address(Ip) -> inet:ntoa(Ip).
+epmd_address(Ip) ->
+    case is_wildcard(Ip) of
+        true -> "all";
+        false -> inet:ntoa(Ip)
+    end.
+
+%% The every-interface address (`0.0.0.0` or `::`), the one rule the epmd
+%% address and the epmd check share.
+is_wildcard(Ip) -> Ip =:= {0, 0, 0, 0} orelse Ip =:= {0, 0, 0, 0, 0, 0, 0, 0}.
 
 init_words(Flag) ->
     case init:get_argument(Flag) of
@@ -506,7 +512,7 @@ epmd_port(GetEnv) ->
 %% probe cannot tell the cases apart (it always reaches loopback), so a
 %% running epmd only earns a note.
 tls_epmd(Ip, Port, Epmd) ->
-    Wildcard = Ip =:= {0, 0, 0, 0} orelse Ip =:= {0, 0, 0, 0, 0, 0, 0, 0},
+    Wildcard = is_wildcard(Ip),
     case
         beamtalk_dist_address:is_loopback(Ip) orelse not Epmd({127, 0, 0, 1}, Port) orelse
             (not Wildcard andalso Epmd(Ip, Port))

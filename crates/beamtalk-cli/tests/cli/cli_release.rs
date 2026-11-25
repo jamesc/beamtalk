@@ -1274,8 +1274,9 @@ fn write_tls_optfiles(dir: &std::path::Path) {
 }
 
 /// An epmd port for one test, and on drop a kill request to whatever epmd
-/// listens there (epmd honours it once no node is registered), so the epmd a
-/// test's nodes start never outlives the test.
+/// listens there. epmd honours it only once no node is registered, so the
+/// request is retried briefly (a stopped node's registration closes a moment
+/// later), and an epmd that is still there afterwards is reported.
 struct PrivateEpmd(u16);
 impl PrivateEpmd {
     fn new() -> Self {
@@ -1286,12 +1287,21 @@ impl PrivateEpmd {
 impl Drop for PrivateEpmd {
     fn drop(&mut self) {
         use std::io::{Read, Write};
-        if let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", self.0)) {
-            // EPMD_KILL_REQ: a 2-byte length, then 'k'.
-            let _ = stream.write_all(&[0, 1, b'k']);
+        for _ in 0..50 {
+            let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", self.0)) else {
+                return; // nothing listening: no epmd was started, or it is gone
+            };
+            // EPMD_KILL_REQ: a 2-byte length, then 'k'; epmd answers OK or NO.
             let mut reply = [0u8; 2];
-            let _ = stream.read(&mut reply);
+            if stream.write_all(&[0, 1, b'k']).is_ok()
+                && stream.read_exact(&mut reply).is_ok()
+                && &reply == b"OK"
+            {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100)); // sleep: wait for the stopped node to deregister
         }
+        eprintln!("warning: the test's epmd on port {} did not stop", self.0);
     }
 }
 
