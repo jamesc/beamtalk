@@ -192,9 +192,10 @@ impl RequestBuilder {
     // Session state is read and reset via the `Session` API
     // (`Session current bindings keys`, `Session current clear`) over `eval`.
 
-    /// Build a `sessions` request. No client sends it; the REPL-protocol e2e
-    /// harness uses it to prove a release-mode listener answers a
-    /// non-compiling op (`crates/beamtalk-cli/tests/repl_protocol.rs`).
+    /// Build a `sessions` request. No Rust client sends it (VS Code and the
+    /// LiveView facade do); the REPL-protocol e2e harness uses it to prove a
+    /// release-mode listener answers a non-compiling op
+    /// (`crates/beamtalk-cli/tests/repl_protocol.rs`).
     #[must_use]
     pub fn sessions() -> serde_json::Value {
         Self::no_param("sessions")

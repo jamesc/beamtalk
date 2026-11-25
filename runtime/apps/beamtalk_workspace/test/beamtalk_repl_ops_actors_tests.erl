@@ -213,5 +213,16 @@ kill_user_native_actor_works_test() ->
                 <<"kill">>, #{<<"actor">> => PidBin}, Msg, self()
             )
         ),
-        ok = beamtalk_test_wait:until(fun() -> not is_process_alive(Pid) end)
+        %% BT-5199: the reply comes only once the actor is gone, so a client
+        %% reading `actors` straight after it — from another process, as the
+        %% next request does — never lists the killed actor. (Signal order
+        %% only holds per sender, so the scan runs in a fresh process.)
+        Self = self(),
+        spawn(fun() -> Self ! {listed, beamtalk_workspace_actors:list()} end),
+        Listed =
+            receive
+                {listed, L} -> L
+            after 5000 -> error(no_actor_list)
+            end,
+        ?assertEqual([], [A || #{pid := P} = A <- Listed, P =:= Pid])
     end).

@@ -16,6 +16,9 @@ use beamtalk_repl_protocol::RequestBuilder;
 use super::ReplResponse;
 use crate::commands::protocol::ProtocolClient;
 
+/// How long `:exit` / Ctrl-D wait for the node to answer `close` (BT-5199).
+const CLOSE_REPLY_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// REPL client that wraps [`ProtocolClient`] with REPL-specific operations.
 pub(crate) struct ReplClient {
     inner: ProtocolClient,
@@ -379,13 +382,20 @@ impl ReplClient {
 
     /// End this client's session on the node (`close`), for `:exit` and Ctrl-D
     /// (BT-5199). Without it the session stays resumable until the idle bound
-    /// (4 h by default) after the REPL has gone. Best effort and sent on the
-    /// current connection only: a dead connection is not reconnected just to
-    /// close a session the node is already reaping.
+    /// (4 h by default) after the REPL has gone. Best effort and bounded: sent
+    /// on the current connection only (a dead connection is not reconnected
+    /// just to close a session the node reaps anyway), and the reply is waited
+    /// for at most [`CLOSE_REPLY_TIMEOUT`], so a wedged node or a half-open
+    /// socket cannot keep the REPL from exiting.
     pub(crate) fn close_session(&mut self) {
-        let _ = self
+        if self
             .inner
-            .send_request::<ReplResponse>(&RequestBuilder::close());
+            .set_read_timeout(Some(CLOSE_REPLY_TIMEOUT))
+            .is_err()
+        {
+            return;
+        }
+        let _ = self.inner.send_raw(&RequestBuilder::close());
     }
 
     /// List running actors.
@@ -582,6 +592,20 @@ mod tests {
         assert!(
             close_seen.load(Ordering::SeqCst),
             "no `close` request reached the node"
+        );
+    }
+
+    /// A node that never answers `close` must not keep the REPL from exiting.
+    #[test]
+    fn close_session_returns_when_the_node_never_answers() {
+        let port = spawn_auth_ok_server(|_req, _ws| {});
+        let mut client = ReplClient::connect("127.0.0.1", port, "cookie").expect("connect");
+        let started = std::time::Instant::now();
+        client.close_session();
+        assert!(
+            started.elapsed() < CLOSE_REPLY_TIMEOUT + Duration::from_secs(3),
+            "close_session waited {:?}",
+            started.elapsed()
         );
     }
 

@@ -62,13 +62,17 @@ export function closeReplSession(
  * Updates `workspaceTreeProvider` with the captured session ID so bindings
  * from the session are shown in the sidebar.
  */
-async function captureSessionId(
+export async function captureSessionId(
   execution: vscode.TerminalShellExecution,
   terminal: vscode.Terminal
 ): Promise<void> {
   // Buffer the tail of the previous chunk to handle session markers split
   // across arbitrary terminal chunk boundaries.
   let tail = "";
+  // True only when the execution's output ran to its end, i.e. the REPL
+  // process exited. A thrown read (shell integration dropped) says nothing
+  // about the REPL, which may still be running (BT-5199).
+  let executionEnded = false;
   try {
     for await (const chunk of execution.read()) {
       const scanned = scanSessionChunk(tail, chunk);
@@ -87,6 +91,7 @@ async function captureSessionId(
         // session ID (BT-1021); we need to pick up the updated value.
       }
     }
+    executionEnded = true;
   } catch {
     // Stream ended (terminal closed or shell integration disconnected) — no-op.
   }
@@ -95,7 +100,9 @@ async function captureSessionId(
   // Clear the session so bindings disappear and the Start button returns.
   if (state.replTerminal === terminal) {
     setReplRunning(false);
-    closeReplSession(state.workspaceWsClient, (msg) => state.outputChannel?.warn(msg));
+    if (executionEnded) {
+      closeReplSession(state.workspaceWsClient, (msg) => state.outputChannel?.warn(msg));
+    }
     state.workspaceTreeProvider?.setSessionId(null);
     state.outputChannel?.info("REPL session ended; session bindings cleared.");
   }

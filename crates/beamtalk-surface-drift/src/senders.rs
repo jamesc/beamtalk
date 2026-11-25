@@ -81,7 +81,7 @@ fn read(path: &Path) -> Result<String, String> {
 
 /// Map each `RequestBuilder` constructor in `src` to the op it builds.
 pub(crate) fn builder_ops(src: &str) -> BTreeMap<String, String> {
-    let production = src.find("#[cfg(test)]").map_or(src, |i| &src[..i]);
+    let production = crate::production_portion(src);
     // name → (direct op, delegated constructor)
     let mut bodies: BTreeMap<String, (Option<String>, Option<String>)> = BTreeMap::new();
     let mut current: Option<String> = None;

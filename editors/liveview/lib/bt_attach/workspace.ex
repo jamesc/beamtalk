@@ -292,14 +292,30 @@ defmodule BtAttach.Workspace do
   @doc """
   List the running actors through the `actors` operation (BT-5199): one map per
   actor (`pid`, `class`, `module`, `spawned_at`, and `system` for a
-  runtime-started one). Answers `{:ok, actors}` or `{:error, reason}`.
+  runtime-started one), plus `pid_text`, the pid as the workspace node prints
+  it (`<0.123.0>`, the form every other surface shows; formatted there in one
+  round-trip). Answers `{:ok, actors}` or `{:error, reason}`.
   """
   def actors do
     case dispatch_simple("actors", %{}) do
-      {:actors, actors} when is_list(actors) -> {:ok, actors}
+      {:actors, actors} when is_list(actors) -> {:ok, with_pid_text(actors)}
       {:error, reason} -> {:error, reason}
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
       other -> {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  # Add each actor's workspace-local pid text. A failed formatting call leaves
+  # the rows without it; the caller falls back to the pid term.
+  defp with_pid_text([]), do: []
+
+  defp with_pid_text(actors) do
+    case rpc(:lists, :map, [&:erlang.pid_to_list/1, Enum.map(actors, & &1.pid)]) do
+      texts when is_list(texts) and length(texts) == length(actors) ->
+        Enum.zip_with(actors, texts, &Map.put(&1, :pid_text, to_string(&2)))
+
+      _ ->
+        actors
     end
   end
 
@@ -1157,7 +1173,15 @@ defmodule BtAttach.Workspace do
   # A whole test run is bounded by the suite, not a lookup (BT-5129); the other
   # simple ops (list/load) stay on the long tier.
   defp simple_op_timeout(op) when op in ["test", "test-all"], do: @rpc_test_run_timeout
+  # BT-5199: a session close runs from a terminating LiveView; against a hung
+  # workspace it must give up quickly, on every one of its three calls.
+  defp simple_op_timeout("close"), do: @rpc_interactive_timeout
   defp simple_op_timeout(_op), do: @rpc_long_timeout
+
+  # The decode/get_params prelude is a lookup; `close` bounds it as tightly as
+  # its dispatch, every other op keeps the default lookup bound.
+  defp simple_prelude_timeout("close"), do: @rpc_interactive_timeout
+  defp simple_prelude_timeout(_op), do: @rpc_timeout
 
   # `session_pid` is `dispatch/4`'s SessionPid: `self()` for the workspace-global
   # ops, the session to close for `close` (BT-5199).
@@ -1165,9 +1189,11 @@ defmodule BtAttach.Workspace do
        when is_binary(op) and is_map(params) and is_pid(session_pid) do
     request = Map.put(params, "op", op)
 
-    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
+    prelude_timeout = simple_prelude_timeout(op)
+
+    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)], prelude_timeout) do
       {:ok, msg} ->
-        decoded_params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
+        decoded_params = rpc(:beamtalk_repl_protocol, :get_params, [msg], prelude_timeout)
 
         rpc(
           :beamtalk_repl_ops,

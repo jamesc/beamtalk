@@ -105,7 +105,7 @@ handle_term(<<"kill">>, Params, _Msg, _SessionPid) ->
                             <<"System actors are started by the runtime; use :actors to find user actors.">>
                         )};
                 _ ->
-                    exit(Pid, kill),
+                    kill_and_wait(Pid),
                     {status, ok}
             end
     end;
@@ -134,4 +134,21 @@ handle_term(<<"interrupt">>, _Params, Msg, SessionPid) ->
     catch
         exit:{noproc, _} ->
             {status, ok}
+    end.
+
+%% BT-5199: reply only once the actor is gone, so a client that reads `actors`
+%% right after the reply (the VS Code and LiveView "Kill actor" actions do)
+%% never lists it. `exit/2` only sends the signal. Bounded: a process that is
+%% somehow still alive after 5 s is left to die on its own.
+-define(KILL_WAIT_MS, 5000).
+
+-spec kill_and_wait(pid()) -> ok.
+kill_and_wait(Pid) ->
+    MRef = erlang:monitor(process, Pid),
+    exit(Pid, kill),
+    receive
+        {'DOWN', MRef, process, Pid, _Reason} -> ok
+    after ?KILL_WAIT_MS ->
+        erlang:demonitor(MRef, [flush]),
+        ok
     end.

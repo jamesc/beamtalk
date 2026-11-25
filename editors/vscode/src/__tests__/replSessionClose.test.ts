@@ -3,10 +3,10 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("vscode", () => ({}));
+vi.mock("vscode", () => ({ commands: { executeCommand: vi.fn() } }));
 
 import { state } from "../extensionState";
-import { closeReplSession } from "../repl";
+import { captureSessionId, closeReplSession } from "../repl";
 
 describe("closeReplSession (BT-5199)", () => {
   beforeEach(() => {
@@ -45,5 +45,39 @@ describe("closeReplSession (BT-5199)", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("sess-repl"));
+  });
+});
+
+describe("captureSessionId closes the session only when the REPL exited (BT-5199)", () => {
+  type Execution = Parameters<typeof captureSessionId>[0];
+  type Terminal = Parameters<typeof captureSessionId>[1];
+
+  function execution(fail: boolean): Execution {
+    return {
+      read: async function* () {
+        yield "[beamtalk] session: sess-live\n";
+        if (fail) throw new Error("shell integration disconnected");
+      },
+    } as unknown as Execution;
+  }
+
+  function setup() {
+    const terminal = {} as Terminal;
+    const client = { state: "connected", closeSession: vi.fn().mockResolvedValue(undefined) };
+    state.replTerminal = terminal;
+    state.workspaceWsClient = client as unknown as typeof state.workspaceWsClient;
+    return { terminal, client };
+  }
+
+  it("closes the REPL's session when its execution ran to the end", async () => {
+    const { terminal, client } = setup();
+    await captureSessionId(execution(false), terminal);
+    expect(client.closeSession).toHaveBeenCalledWith("sess-live");
+  });
+
+  it("leaves a possibly running REPL alone when reading its output fails", async () => {
+    const { terminal, client } = setup();
+    await captureSessionId(execution(true), terminal);
+    expect(client.closeSession).not.toHaveBeenCalled();
   });
 });

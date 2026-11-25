@@ -1312,7 +1312,11 @@ defmodule BtAttachWeb.Live.Inspector do
     )
   end
 
-  @doc "One row of the post-kill actor list: class and pid, e.g. `Counter <0.123.0>`."
+  @doc """
+  One row of the post-kill actor list: class and pid as the workspace prints
+  it, e.g. `Counter <0.123.0>` (the pid term itself if that text is missing).
+  """
+  def actor_row_label(%{class: class, pid_text: pid_text}), do: "#{class} #{pid_text}"
   def actor_row_label(%{class: class, pid: pid}), do: "#{class} #{inspect(pid)}"
   def actor_row_label(other), do: inspect(other)
 

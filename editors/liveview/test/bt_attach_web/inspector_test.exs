@@ -366,6 +366,9 @@ defmodule BtAttachWeb.Live.InspectorTest do
       assert socket.assigns.kill_notice == "Killed counter."
       assert socket.assigns.actor_list == [survivor]
       assert Inspector.actor_row_label(survivor) == "Survivor #{inspect(self())}"
+
+      assert Inspector.actor_row_label(Map.put(survivor, :pid_text, "<0.5.0>")) ==
+               "Survivor <0.5.0>"
     end
 
     test "an Observer's kill is refused by the facade (kill is :admin) and nothing is sent" do

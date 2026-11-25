@@ -384,7 +384,7 @@ beamtalk repl --port 9090    # Use a specific port
 beamtalk repl --node mynode  # Use a specific node name
 ```
 
-**Session idle period.** A REPL session whose client disconnected stays resumable for 4 hours, then the workspace stops it. A session no client ever attached to (a `clone`, a dist-attached LiveView) is stopped after the same period without an eval. Change the period with the `BEAMTALK_SESSION_IDLE_SECONDS` environment variable of the workspace node, or with `{beamtalk_workspace, [{session_idle_seconds, N}]}` in `sys.config` (which wins). This is separate from `--idle-timeout`, which stops the whole workspace node.
+**Session idle period.** A REPL session whose client disconnected stays resumable for 4 hours, then the workspace stops it. A session no client ever attached to (a dist-attached LiveView) is stopped after the same period without an eval. Change the period with the `BEAMTALK_SESSION_IDLE_SECONDS` environment variable of the workspace node, or with `{beamtalk_workspace, [{session_idle_seconds, N}]}` in `sys.config` (which wins). This is separate from `--idle-timeout`, which stops the whole workspace node.
 
 On startup, the REPL prints the version and a help hint:
 

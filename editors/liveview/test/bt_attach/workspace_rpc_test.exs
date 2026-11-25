@@ -668,9 +668,10 @@ defmodule BtAttach.WorkspaceRpcTest do
           ["actors", _, _, _] -> {:actors, [actor]}
           ["sessions", _, _, _] -> {:sessions, [%{id: "s1"}]}
         end)
+        |> Map.put({:lists, :map}, fn [_fun, [_pid]] -> [~c"<0.77.0>"] end)
       )
 
-      assert Workspace.actors() == {:ok, [actor]}
+      assert Workspace.actors() == {:ok, [Map.put(actor, :pid_text, "<0.77.0>")]}
       assert Workspace.sessions() == {:ok, [%{id: "s1"}]}
     end
   end
@@ -1477,6 +1478,30 @@ defmodule BtAttach.WorkspaceRpcTest do
       assert is_integer(default) and default > 0
       assert eval_timeout == Workspace.rpc_eval_timeout()
       assert eval_timeout > default
+    end
+
+    test "close_session/1 bounds every call by the short interactive timeout (BT-5199)" do
+      test_pid = self()
+
+      :meck.expect(:erpc, :call, fn _node, mod, fun, _args, timeout ->
+        send(test_pid, {:rpc_timeout, mod, fun, timeout})
+
+        case {mod, fun} do
+          {:beamtalk_repl_protocol, :decode} -> {:ok, :fake_msg}
+          {:beamtalk_repl_protocol, :get_params} -> %{}
+          {:beamtalk_repl_ops, :dispatch} -> {:status, :ok}
+        end
+      end)
+
+      assert Workspace.close_session(self()) == :ok
+
+      timeouts =
+        for _ <- 1..3 do
+          assert_received {:rpc_timeout, _mod, _fun, timeout}
+          timeout
+        end
+
+      assert Enum.all?(timeouts, &(&1 <= 5_000)), "close waited up to #{inspect(timeouts)} ms"
     end
 
     test "render_terms/1 renders every term with ONE round-trip, in order" do
