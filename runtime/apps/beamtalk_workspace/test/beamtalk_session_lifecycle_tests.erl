@@ -36,6 +36,8 @@ lifecycle_test_() ->
         fun attach_twice_keeps_one_monitor/1,
         fun idle_period_is_settable_from_environment/1,
         fun close_stops_session_and_removes_row/1,
+        fun close_with_session_stops_that_session/1,
+        fun close_with_unknown_session_stops_nothing/1,
         fun sessions_op_lists_ids_that_resume_accepts/1,
         fun idle_monitor_sees_detached_only_workspace_as_idle/1,
         fun idle_monitor_keeps_attached_session_alive/1,
@@ -216,6 +218,26 @@ close_stops_session_and_removes_row(_) ->
         ?assertEqual({status, ok}, beamtalk_repl_ops:dispatch(<<"close">>, #{}, Msg, Session)),
         beamtalk_test_wait:dead(Session),
         ?assertEqual(error, beamtalk_session_table:lookup(<<"lc-7">>))
+    end}.
+
+close_with_session_stops_that_session(_) ->
+    {"close naming another session stops that one, not the caller (BT-5199)", fun() ->
+        Caller = new_session(<<"lc-7-caller">>),
+        Target = new_session(<<"lc-7-target">>),
+        Msg = beamtalk_test_repl:make_msg(<<"close">>, <<"c-2">>, <<"lc-7-target">>),
+        ?assertEqual({status, ok}, beamtalk_repl_ops:dispatch(<<"close">>, #{}, Msg, Caller)),
+        beamtalk_test_wait:dead(Target),
+        ?assertEqual(error, beamtalk_session_table:lookup(<<"lc-7-target">>)),
+        ?assert(is_process_alive(Caller))
+    end}.
+
+close_with_unknown_session_stops_nothing(_) ->
+    {"close naming an unknown session never falls back to the caller (BT-5199)", fun() ->
+        Caller = new_session(<<"lc-7-alone">>),
+        Msg = beamtalk_test_repl:make_msg(<<"close">>, <<"c-3">>, <<"lc-no-such">>),
+        ?assertEqual({status, ok}, beamtalk_repl_ops:dispatch(<<"close">>, #{}, Msg, Caller)),
+        ok = beamtalk_test_wait:sync(Caller),
+        ?assert(is_process_alive(Caller))
     end}.
 
 close_aborts_running_eval(_) ->

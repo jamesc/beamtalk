@@ -6,7 +6,7 @@
 %%% **DDD Context:** REPL Session Context
 
 -moduledoc """
-Op handlers for sessions, clone, close, health, and shutdown operations.
+Op handlers for sessions, close, health, and shutdown operations.
 
 Extracted from beamtalk_repl_server.
 """.
@@ -16,7 +16,7 @@ Extracted from beamtalk_repl_server.
 -export([handle/4, handle_term/4]).
 
 -doc """
-Handle sessions/clone/close/health/shutdown ops for the WebSocket transport —
+Handle sessions/close/health/shutdown ops for the WebSocket transport —
 encodes the term result to JSON at the edge.
 """.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
@@ -24,9 +24,8 @@ handle(Op, Params, Msg, SessionPid) ->
     beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
 
 -doc """
-Term-returning handler for sessions/clone/close/health/shutdown.
-Returns `{sessions, [Meta]}`, `{ok, NewSessionId, Output, Warnings}` (clone),
-`{status, ok}` (close/shutdown), `{health, WorkspaceId, Nonce}`, or
+Term-returning handler for sessions/close/health/shutdown.
+Returns `{sessions, [Meta]}`, `{status, ok}` (close/shutdown), `{health, WorkspaceId, Nonce}`, or
 `{error, #beamtalk_error{}}` — no JSON in this path.
 """.
 -spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
@@ -54,30 +53,25 @@ handle_term(<<"sessions">>, _Params, _Msg, _SessionPid) ->
             ),
             {sessions, Sessions}
     end;
-handle_term(<<"clone">>, _Params, _Msg, _SessionPid) ->
-    NewSessionId = beamtalk_repl_server:generate_session_id(),
-    %% `clone` is a term-op, i.e. the dist-attached surface — tag the new
-    %% session accordingly so `Workspace sessions` shows where it came from.
-    Meta = #{kind => <<"attach">>, connected_at => erlang:system_time(microsecond)},
-    case beamtalk_session_sup:start_session(NewSessionId, Meta) of
-        {ok, _NewPid} ->
-            {ok, NewSessionId, <<>>, []};
-        {error, Reason} ->
-            {error,
-                beamtalk_repl_errors:make(
-                    session_error,
-                    'REPL',
-                    iolist_to_binary([
-                        <<"Failed to create session: ">>,
-                        io_lib:format("~p", [Reason])
-                    ])
-                )}
-    end;
-handle_term(<<"close">>, _Params, _Msg, SessionPid) ->
+handle_term(<<"close">>, _Params, Msg, SessionPid) ->
     %% Stop the session shell; its terminate removes the table row (BT-5012).
     %% Only children of the session supervisor are stopped, so a caller that is
     %% not a session (e.g. an in-process test) is left alone.
-    _ = stop_session(SessionPid),
+    %%
+    %% BT-5199: a `session` field names another session to close — VS Code
+    %% closes the session of a REPL terminal it started once that terminal
+    %% ends. An unknown id closes nothing (the session is already gone); it
+    %% never falls back to the caller's own session.
+    _ =
+        case beamtalk_repl_protocol:get_session(Msg) of
+            undefined ->
+                stop_session(SessionPid);
+            TargetSession ->
+                case beamtalk_session_table:lookup(TargetSession) of
+                    {ok, TargetPid} -> stop_session(TargetPid);
+                    error -> {error, not_found}
+                end
+        end,
     {status, ok};
 handle_term(<<"health">>, _Params, _Msg, _SessionPid) ->
     {ok, Nonce} = beamtalk_repl_server:get_nonce(),

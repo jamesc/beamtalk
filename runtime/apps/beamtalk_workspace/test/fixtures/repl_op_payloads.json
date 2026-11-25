@@ -683,7 +683,6 @@
     "browse-method-source": "`{value, Map}` of scalars and one text field; no nested rows.",
     "browse-native-modules": "`{value, [NativeModuleRow]}`, the same row convention as `browse-type-aliases`.",
     "browse-native-source": "`{value, Map}` of scalars and one text field; no nested rows.",
-    "clone": "Reaches no wire client (the dist-attached surface calls it). Over the WebSocket the new session id would arrive as the quoted printString of a string, like every `ok` value.",
     "disable-tracing": "Replies `{status, ok}` (`\"value\": \"ok\"`), the wire form pinned by the `close` payload.",
     "enable-tracing": "Replies `{status, ok}` (`\"value\": \"ok\"`), the wire form pinned by the `close` payload.",
     "erlang-complete": "Same `{completions, [binary()]}` encoder as `complete`.",

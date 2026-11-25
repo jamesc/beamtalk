@@ -59,7 +59,7 @@ pub struct ReplResponse {
     pub exit_code: Option<u8>,
 
     // --- Common payload ---
-    /// Result value (eval, clone, and the `{value, _}` ops: nav, browse, tracing).
+    /// Result value (eval and the `{value, _}` ops: nav, browse, tracing).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<serde_json::Value>,
 
