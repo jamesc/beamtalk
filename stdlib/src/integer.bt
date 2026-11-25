@@ -327,6 +327,10 @@ sealed typed Number subclass: Integer
   /// ```beamtalk
   /// 1 to: 3 do: [:i | Transcript show: i]
   /// ```
+  ///
+  /// The start (the receiver) must be an Integer: only `Integer` defines
+  /// `to:do:`, so `1.5 to: 3 do: [...]` raises `does_not_understand` on both
+  /// the pure and the inlined counted-loop path (BT-5235, BT-5215).
   to: end :: Integer do: block :: Block(Integer, Object) -> Nil =>
     (end isKindOf: Number) ifFalse: [
       ^TypeError signal: "Interval limit must be a number"
@@ -353,7 +357,15 @@ sealed typed Number subclass: Integer
   /// A step of 0 (or 0.0) raises, and a step or limit that is not a number raises a
   /// `TypeError`. A literal block that writes an outer local is inlined
   /// by the compiler as a counted loop; that path raises the same error (BT-5098).
-  to: end :: Integer by: step :: Number do: block :: Block(Integer, Object) -> Nil =>
+  ///
+  /// The step may be any Number: `1 to: 2 by: 0.5 do:` passes 1, 1.5 and 2.0,
+  /// so the block's parameter is a `Number`, not an `Integer` (BT-5216).
+  /// `to:by:` (which builds an `Interval`) takes an Integer step only.
+  ///
+  /// The start (the receiver) must be an Integer: only `Integer` defines
+  /// `to:by:do:`, so `1.5 to: 3 by: 0.5 do: [...]` raises `does_not_understand`
+  /// on both the pure and the inlined counted-loop path (BT-5235, BT-5215).
+  to: end :: Integer by: step :: Number do: block :: Block(Number, Object) -> Nil =>
     (step isKindOf: Number) ifFalse: [
       ^TypeError signal: "Interval step must be a number"
     ]
@@ -379,15 +391,17 @@ sealed typed Number subclass: Integer
 
   /// Return an Interval from the receiver to `stop` with the given step.
   ///
-  /// Raises an error if `step` is zero.
+  /// Raises an error if `step` is zero. An `Interval` holds integers only, so
+  /// a step that is not an Integer (`1 to: 2 by: 0.5`) raises a `TypeError`;
+  /// use `to:by:do:` to loop with a Float step (BT-5217).
   ///
   /// ## Examples
   /// ```beamtalk
   /// 1 to: 10 by: 2   // => (1 to: 10 by: 2)
   /// ```
   to: stop :: Integer by: step :: Integer -> Interval =>
-    (step isKindOf: Number) ifFalse: [
-      ^TypeError signal: "Interval step must be a number"
+    (step isKindOf: Integer) ifFalse: [
+      ^TypeError signal: "Interval step must be an Integer"
     ]
     (stop isKindOf: Number) ifFalse: [
       ^TypeError signal: "Interval limit must be a number"
