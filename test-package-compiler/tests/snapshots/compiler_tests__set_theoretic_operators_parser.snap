@@ -787,7 +787,6 @@ Module {
                 },
             ],
             class_methods: [],
-            class_variables: [],
             comments: CommentAttachment {
                 leading: [
                     Comment {

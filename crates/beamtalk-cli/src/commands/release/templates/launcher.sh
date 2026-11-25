@@ -15,8 +15,15 @@ INCLUDE_ERTS="__INCLUDE_ERTS__"
 
 # BT-5134: resolve a symlinked `bin/<name>` (e.g. /usr/local/bin/<name> ->
 # <root>/bin/<name>) to the real script before locating the release root.
+# BT-5187: bounded, so a symlink cycle is an error rather than a hang.
 SELF="$0"
+LINK_HOPS=0
 while [ -h "$SELF" ]; do
+    LINK_HOPS=$((LINK_HOPS + 1))
+    if [ "$LINK_HOPS" -gt 40 ]; then
+        echo "error: too many levels of symbolic links resolving '$0'" >&2
+        exit 1
+    fi
     LINK_TARGET=$(readlink -- "$SELF")
     case "$LINK_TARGET" in
         /*) SELF="$LINK_TARGET" ;;

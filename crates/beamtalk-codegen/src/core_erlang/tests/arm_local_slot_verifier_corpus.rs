@@ -28,7 +28,7 @@ use crate::core_erlang::fault::Fault;
 const CONTEXTS: &[(&str, &str)] = &[
     (
         "class",
-        "Object subclass: ArmCorpus\n  classState: n = 0\n\n  class probe: c =>\n",
+        "Object subclass: ArmCorpus\n\n  class probe: c =>\n",
     ),
     ("value", "Value subclass: ArmCorpus\n\n  probe: c =>\n"),
     (

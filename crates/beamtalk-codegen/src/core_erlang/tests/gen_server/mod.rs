@@ -11,8 +11,6 @@
 //!   classification and value-subclass auto-accessor/writeback metadata
 //! - [`type_aliases`] — type-alias emission for class fields
 //! - [`state_threading_loops`] — state threading through loop constructs
-//! - [`class_var_access`] — ADR 0130 class-variable access lowering (inlined
-//!   reads/writes, helper calls, the no-`ClassVars` class-method convention)
 //! - [`native_facade`] — `native:`-backed class facade codegen
 //! - [`new_spawn_unknown_field`] — BT-4030: `new/1`/`init/1`
 //!   unknown-key validation emission + `spawn` re-raise arm
@@ -21,7 +19,7 @@
 //! - [`actor_init_and_field_validation`] — actor initialize chaining and
 //!   typed-field-without-default validation
 //! - [`late_field_read`] — ADR 0124 §3/B3: the guarded `maps:find` read for
-//!   a `late` slot, instance and class-method branches
+//!   a `late` slot
 //! - [`dispatch_and_lifecycle`] — `gen_server` lifecycle callbacks and
 //!   dispatch-structure codegen
 //! - [`tier2_nested_blocks`] — Tier 2 stateful nested-block bodies
@@ -92,9 +90,6 @@ mod actor_pending_actions;
 mod actor_trap_exit_on_terminate;
 mod class_kind_and_value_accessors;
 mod class_registration;
-mod class_var_access;
-mod class_var_capture_catch;
-mod class_var_not_inherited;
 mod direct_class_self;
 mod dispatch_and_lifecycle;
 mod late_field_read;

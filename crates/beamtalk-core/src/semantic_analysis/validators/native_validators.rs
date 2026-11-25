@@ -448,19 +448,6 @@ mod tests {
         );
     }
 
-    /// classState: is allowed on native actors — no error.
-    #[test]
-    fn native_actor_class_state_ok() {
-        let src = "Actor subclass: MyActor native: my_mod\n  classState: instances = 0\n  get => self delegate";
-        let (module, hierarchy) = parse_and_build(src);
-        let mut diagnostics = Vec::new();
-        check_native_state_fields(&module, &hierarchy, &mut diagnostics);
-        assert!(
-            diagnostics.is_empty(),
-            "classState: should be allowed on native actors, got: {diagnostics:?}"
-        );
-    }
-
     /// self delegate method without return type → warning on native actor.
     #[test]
     fn native_delegate_missing_return_type_warning() {
