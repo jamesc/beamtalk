@@ -5,8 +5,11 @@
 /// dying mid-call.
 ///
 /// A sync send to an actor whose node vanishes raises (`node_down`; ADR 0126
-/// §6). Farm catches it, drops that worker from its live set and retries the
-/// job on a survivor. Remote workers are not linked to anything (ADR 0126
+/// §6). Farm catches only that kind, drops that worker from its live set and
+/// retries the job on a survivor. Any other error (a bug in the job, or a
+/// `timeout` from a worker that may still be running it) is passed on:
+/// dropping a healthy worker, or running the job twice, would hide the real
+/// problem. Remote workers are not linked to anything (ADR 0126
 /// §3), so this retry loop *is* the supervision of remote work.
 Actor subclass: Farm
   state: live = #()
@@ -31,7 +34,7 @@ Actor subclass: Farm
       job id =:= killId ifTrue: [
         worker dieMidCall: job
       ] ifFalse: [worker process: job]
-    ] on: Error do: [:e | e]
+    ] on: Error do: [:e | e kind =:= #node_down ifTrue: [e] ifFalse: [e pass]]
     (outcome isKindOf: JobResult)
       ifTrue: [outcome]
       ifFalse: [

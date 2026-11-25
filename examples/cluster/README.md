@@ -101,9 +101,9 @@ These cover the classes on one node. The multi-node behaviour is `e2e.sh`'s.
 
 Everything here uses `localhost` node names and loopback-bound distribution.
 Release nodes pin distribution to `127.0.0.1` in their generated `vm.args`
-(`inet_dist_use_interface`), and the launcher's `stop` / `ping` / `rpc` client
-nodes are pinned to loopback too. Do not set `ERL_EPMD_ADDRESS` to a
-non-loopback address for this example: it lifts the pin for the CLI.
+(`inet_dist_use_interface`), and the launcher's `stop` / `ping` / `rpc` /
+`remote_console` client nodes are pinned to loopback too. The launcher also
+forces `ERL_EPMD_ADDRESS=127.0.0.1`, so an exported value has no effect here.
 Connecting to a node on another host is refused with `kind =
 insecure_distribution` unless the node runs TLS distribution
 (`-proto_dist inet_tls`, ADR 0091). That setup is not built here: it needs

@@ -40,6 +40,8 @@ Object subclass: Demo
     failed > 0 ifTrue: [Program exit: 1]
     failed
 
+  // Node names are atoms, so this turns a trusted CLI argument into one. Do not
+  // copy it for untrusted input: atoms are never garbage collected.
   class symbolFrom: text :: String -> Symbol =>
     (Erlang erlang) binary_to_atom: text
 
