@@ -447,6 +447,9 @@ runtime fun is purged and the gate reset. With incoming funs (a `ClassBuilder`
 re-register) they are seeded first and only then are the stale ones dropped, so
 the gate never closes and a selector defined before and after the reload never
 reads as missing to an in-caller send that resolved it (ADR 0153 §5, BT-5161).
+A selector that was a fun and becomes a compiled method answers with the old
+fun until its row is dropped: the same lock-free window as any reload, with
+disk winning once the drop lands (ADR 0082).
 """.
 -spec replace_runtime_class_methods(class_name(), map()) -> ok.
 replace_runtime_class_methods(ClassName, ClassMethods) ->

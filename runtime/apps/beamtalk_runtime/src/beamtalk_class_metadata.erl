@@ -146,6 +146,8 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% BT-4363: certified literal class-side bodies (BT-4504: every scalar
     %% literal kind).
     put_constant_class_methods/2,
+    put_field_defaults/2,
+    lookup_field_defaults/1,
     lookup_constant_class_methods/1,
     %% BT-4493: certified caller-safe signal primitives (the raise key's row).
     put_caller_safe_primitives/2,
@@ -308,7 +310,14 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% dead (`delete_if_owner/2`) deletes the row only while it still names that
     %% dead pid, so a class rebuilt under the same name in the meantime (its
     %% `insert/5` replaces the row, owner included) is never deleted.
-    owner :: pid() | undefined
+    owner :: pid() | undefined,
+    %% BT-5161: a module-less (`ClassBuilder`) class's own field defaults
+    %% (`field_defaults` from its `ClassInfo`), mirrored from the class process
+    %% so a `self new` in one of its class methods, which runs in the caller
+    %% (ADR 0153 §5), builds with them without a `gen_server:call` into the
+    %% class. Written only by `put_field_defaults/2`; `#{}` for a compiled
+    %% class (its defaults are baked into its module's `new/0`).
+    field_defaults = #{} :: map()
 }).
 
 -type side() :: instance | class.
@@ -1466,6 +1475,24 @@ lookup_caller_safe_primitives(Name) ->
 lookup_constant_class_methods(Name) ->
     case field(Name, #class_metadata.constant_class_methods) of
         Constants when is_map(Constants) -> Constants;
+        _ -> #{}
+    end.
+
+-doc """
+Store a class's own field defaults (BT-5161), the module-less instantiation
+path's input (`beamtalk_class_instantiation:generic_field_defaults/1`). Written
+by the class process on `init/1`, reload and rename. A no-op if the row is
+absent.
+""".
+-spec put_field_defaults(class_name(), map()) -> ok.
+put_field_defaults(Name, Defaults) when is_map(Defaults) ->
+    put_if_changed(Name, #class_metadata.field_defaults, Defaults, fun() -> ok end).
+
+-doc "Read a class's own field defaults (BT-5161); `#{}` when none are published.".
+-spec lookup_field_defaults(class_name()) -> map().
+lookup_field_defaults(Name) ->
+    case field(Name, #class_metadata.field_defaults) of
+        Defaults when is_map(Defaults) -> Defaults;
         _ -> #{}
     end.
 

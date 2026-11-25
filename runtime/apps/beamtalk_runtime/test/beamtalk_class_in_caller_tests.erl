@@ -241,8 +241,8 @@ runtime_fun_test_() ->
         end},
         {"self new in a ClassBuilder fun builds with the class's field defaults", fun() ->
             %% The fun runs in the caller, which has none of the class
-            %% process's dictionary: the class's own defaults are asked of
-            %% the class process. What codegen emits for `self new`.
+            %% process's dictionary: the class's own defaults come from its
+            %% metadata row. `Make` is what codegen emits for `self new`.
             Make = fun(#beamtalk_object{class = Tag}) ->
                 ClassName = beamtalk_primitive:class_name_from_tag(Tag),
                 Module = beamtalk_class_instantiation:resolve_module_or_raise(ClassName, 'new'),
@@ -257,8 +257,18 @@ runtime_fun_test_() ->
             }),
             try
                 Me = self(),
-                {Me, Instance} = send(Pid, make, []),
-                ?assertEqual(7, maps:get(a, Instance))
+                %% Warm the owner memo, then suspend the class process: the
+                %% in-caller `self new` must not need it (the defaults come
+                %% from the metadata row, not a call that a busy class would
+                %% time out into an instance without them).
+                {Me, _} = send(Pid, make, []),
+                ok = sys:suspend(Pid),
+                try
+                    {Me, Instance} = send(Pid, make, []),
+                    ?assertEqual(7, maps:get(a, Instance))
+                after
+                    sys:resume(Pid)
+                end
             after
                 beamtalk_test_class:stop(Pid)
             end

@@ -515,9 +515,10 @@ Collect field defaults for a module-less class, including inherited fields.
 
 The current class's own defaults come from the process dictionary cache set in
 `beamtalk_object_class:init/1` when this runs inside the class's own gen_server
-(the external `X new` handler: a local, deadlock-free read). Anywhere else (a
-`self new` in a class method running in the caller, ADR 0153 §5, BT-5161) they
-are asked of the class process, as for a module-less ancestor. Inherited fields
+(the external `X new` handler). Anywhere else (a `self new` in a class method
+running in the caller, ADR 0153 §5, BT-5161) they are read from the class's
+metadata row, which the class process mirrors them into: no process hop, and
+never a silently empty answer from a busy class. Inherited fields
 are gathered by walking the superclass chain via the registry: a compiled
 ancestor with `new/0` contributes its instance map's user fields; a module-less
 ancestor contributes its own cached field defaults. Own fields shadow inherited
@@ -526,14 +527,9 @@ ones, mirroring the compiled value-type `maps:merge(ParentState, Own)` order.
 -spec generic_field_defaults(class_name()) -> map().
 generic_field_defaults(ClassName) ->
     Own =
-        case get(beamtalk_class_name) of
-            ClassName ->
-                case get(beamtalk_class_field_defaults) of
-                    M when is_map(M) -> M;
-                    _ -> #{}
-                end;
-            _ ->
-                ancestor_builder_defaults(ClassName)
+        case {get(beamtalk_class_name), get(beamtalk_class_field_defaults)} of
+            {ClassName, M} when is_map(M) -> M;
+            _ -> beamtalk_class_metadata:lookup_field_defaults(ClassName)
         end,
     Inherited = inherited_field_defaults(ClassName),
     maps:merge(Inherited, Own).

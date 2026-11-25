@@ -941,6 +941,8 @@ publish_init_identity(ClassName, Module, Superclass, IsAbstract, ClassMethods, M
 cache_self_dispatch_state(ClassInfo, InstanceMethods) ->
     FieldDefaults = maps:get(field_defaults, ClassInfo, #{}),
     put(beamtalk_class_field_defaults, FieldDefaults),
+    %% BT-5161: mirrored into the row for a `self new` running in the caller.
+    beamtalk_class_metadata:put_field_defaults(get(beamtalk_class_name), FieldDefaults),
     put(beamtalk_class_instance_methods, InstanceMethods),
     FieldDefaults.
 
@@ -1257,6 +1259,10 @@ call_rename_class(
             beamtalk_class_metadata:put_process_bound_selectors(
                 NewName, maps:get(process_bound_selectors, Facts)
             ),
+            %% BT-5161: and the field defaults a `self new` in the caller reads.
+            beamtalk_class_metadata:put_field_defaults(
+                NewName, maps:get(field_defaults, Facts)
+            ),
             beamtalk_class_registry:record_class_pid(self(), NewName),
             %% BT-4552: kept dead incarnations follow the rename, so a class
             %% object taken before both recovers to this class, and none is
@@ -1304,7 +1310,8 @@ renamed_class_facts(OldName) ->
             case beamtalk_class_metadata:lookup_process_bound_selectors(OldName) of
                 {ok, ProcessBound} -> ProcessBound;
                 unknown -> undefined
-            end
+            end,
+        field_defaults => beamtalk_class_metadata:lookup_field_defaults(OldName)
     }.
 
 -spec call_put_method(selector(), fun(), binary(), #class_state{}) ->
@@ -2047,6 +2054,7 @@ apply_class_info(State, ClassInfo) ->
     %% and they are re-cached. Keep the process-dict cache in sync for self new.
     NewFieldDefaults = maps:get(field_defaults, ClassInfo, #{}),
     put(beamtalk_class_field_defaults, NewFieldDefaults),
+    beamtalk_class_metadata:put_field_defaults(State#class_state.name, NewFieldDefaults),
 
     %% ADR 0071 Phase 5: Recompute is_internal on reload/redefinition.
     %% Same logic as init/1 — keeps visibility in sync after hot-reload.
