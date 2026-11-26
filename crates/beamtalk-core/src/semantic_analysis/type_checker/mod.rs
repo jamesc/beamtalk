@@ -958,7 +958,14 @@ struct TypeOrigin {
 
 /// BT-5283: one `^expr` collected while checking a method body.
 #[derive(Debug, Clone)]
-pub(super) enum CollectedReturn {
+pub(super) struct CollectedReturn {
+    /// The span of the `^` expression (BT-5292: diagnostics anchor here).
+    pub(super) span: Span,
+    pub(super) kind: CollectedReturnKind,
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum CollectedReturnKind {
     /// An ordinary return of the value's inferred type.
     Value(InferredType),
     /// BT-5290: `^x` where the local `x` is known to be a `Result`'s error

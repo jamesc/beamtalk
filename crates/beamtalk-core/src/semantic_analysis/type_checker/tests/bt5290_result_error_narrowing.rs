@@ -230,7 +230,7 @@ fn mismatched_error_type_still_reported() {
     );
     assert!(
         diags.iter().any(|m| m.contains(
-            "declares return type Result(Tuple, Integer), but body returns Result(Tuple, String)"
+            "`^` returns Result(Tuple, String), but method 'readHead:' in ZzMint declares return type Result(Tuple, Integer)"
         )),
         "a `Result(_, String)` error must not fit `Result(_, Integer)`, and the \
          message must name the error type, not `Never`: {diags:?}"
@@ -417,7 +417,7 @@ fn unguarded_declared_never_success_result_keeps_its_display() {
     assert!(
         diags
             .iter()
-            .any(|m| m.contains("body returns Result(Never, Symbol)")),
+            .any(|m| m.contains("`^` returns Result(Never, Symbol)")),
         "the message must name the value's real type: {diags:?}"
     );
 }

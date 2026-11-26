@@ -341,7 +341,13 @@ pub(super) fn check_return(
     hierarchy: &ClassHierarchy,
 ) -> TypeChecker {
     let mut checker = TypeChecker::new();
-    checker.check_return_type(method, body_type, &class_name.into(), hierarchy);
+    checker.check_return_type(
+        method,
+        body_type,
+        &class_name.into(),
+        hierarchy,
+        crate::semantic_analysis::type_checker::validation::ReturnSite::Tail,
+    );
     checker
 }
 
