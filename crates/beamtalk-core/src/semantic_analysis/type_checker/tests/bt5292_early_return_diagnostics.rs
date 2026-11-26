@@ -109,3 +109,17 @@ fn early_return_inside_a_block_is_reported_once_at_the_caret() {
         "{diags:?}"
     );
 }
+
+#[test]
+fn early_return_is_reported_when_tail_union_has_a_class_object_member() {
+    let source = r#"typed Object subclass: ZzMixed
+  class foo: c :: Boolean -> Integer =>
+    c ifTrue: [^"y"]
+    c ifTrue: [Object] ifFalse: ["x"]
+"#;
+    let diags = return_diags(source);
+    assert!(
+        diags.iter().any(|d| text(source, d) == "^\"y\""),
+        "the tail reports only the class-object member, so the early `^` String must still be reported: {diags:?}"
+    );
+}

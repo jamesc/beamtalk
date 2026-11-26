@@ -465,7 +465,12 @@ impl TypeChecker {
             // diagnostic names every member of the union, so an early `^` of
             // one of those types is not reported a second time. (A silent tail check — untyped class
             // — leaves them to the early-`^` check.)
-            if let (true, InferredType::Union { members, .. }) = (tail_reported, &body_type) {
+            // A union with a class-object member reports that member and
+            // stops before judging the instance members, so only a union of
+            // instance members counts as fully judged by the tail check.
+            if let (true, InferredType::Union { members, .. }) = (tail_reported, &body_type)
+                && Self::non_class_object_members(members).len() == members.len()
+            {
                 seen.extend(members.iter().cloned());
             }
             let mut seen_spans = Vec::new();
