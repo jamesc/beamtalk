@@ -1673,7 +1673,23 @@ defmodule BtAttach.WorkspaceRpcTest do
       )
 
       assert Workspace.inspect_value({:beamtalk_supervisor, "Sup", Sup, pid}) ==
-               {:ok, {:supervisor_children, [row]}}
+               {:ok, {:supervisor_children, [row], false}}
+    end
+
+    test "supervisor_children/1 carries the runtime's truncated flag" do
+      row = %{"label" => "worker", "handle" => nil}
+
+      mock_rpc(
+        decode_ok(
+          {:beamtalk_repl_ops, :request},
+          {:children, %{"children" => [row], "truncated" => true}}
+        )
+      )
+
+      assert Workspace.supervisor_children(self()) == {:ok, [row], true}
+
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:children, %{"children" => [row]}}))
+      assert Workspace.supervisor_children(self()) == {:ok, [row], false}
     end
 
     test "a supervisor handle propagates a children error" do

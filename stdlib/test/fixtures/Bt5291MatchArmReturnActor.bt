@@ -1,0 +1,63 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5291: a `^` out of a conditional nested in a `match:` arm (and in a
+// conditional arm over a self-send receiver), whose `^` block holds a guarded
+// operator (`k * 10`), so the conditional runs it as a closure. Before the
+// fix nothing stored the method's `State` before that call, so the `^`
+// committed the actor's last stored state: a field written ahead of it was
+// lost. Used by stdlib/test/bt5291match_arm_return_test.bt.
+
+Actor subclass: Bt5291MatchArmReturnActor
+  state: f = 0
+
+  f => self.f
+
+  bump =>
+    self.f := self.f + 1
+    self.f
+
+  // The issue's repro: a loop body, a self-send scrutinee.
+  loopBump =>
+    1 to: 5 do: [:i | self bump match: [k -> k > 2 ifTrue: [^k * 10]]]
+    self.f
+
+  // The method-root form.
+  rootBump =>
+    self bump match: [k -> k > 0 ifTrue: [^k * 10]]
+    self.f
+
+  // The conditional-arm form.
+  armBump: x =>
+    x isNil ifTrue: [
+      nil
+    ] ifFalse: [self bump match: [k -> k > 0 ifTrue: [^k * 10]]]
+    self.f
+
+  // The conditional-receiver form: the nested `^` reads the loop's `i`.
+  receiverBump =>
+    1 to: 5 do: [:i | (self bump) > 0 ifTrue: [i > 2 ifTrue: [^i * 10]]]
+    self.f
+
+  // A field write the `^` must commit, then a scrutinee that advances
+  // nothing (the self-send scrutinee's own store hid the bug above).
+  writeThenMatch: x =>
+    self.f := 50
+    x match: [k -> k > 0 ifTrue: [^k * 10]]
+    self.f
+
+  // The same in a loop body, with the two-armed conditional.
+  loopWriteThenMatch: x =>
+    1
+      to: 3
+      do: [:i |
+        self.f := self.f + 100
+        x match: [k -> (k > i) ifTrue: [^k * 10] ifFalse: [nil]]
+      ]
+    self.f
+
+  // The conditional's own receiver binds the name its `^` block reads.
+  receiverBindsThenReturns: x =>
+    self.f := 7
+    (y := x) > 0 ifTrue: [^y * 10]
+    self.f

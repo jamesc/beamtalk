@@ -180,6 +180,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0151](0151-elixir-interop-and-mix-backed-packages.md) | Elixir Interop and Mix-Backed Packages | Proposed (2026-11-16) | 2026-11-16 |
 | [0152](0152-remove-cross-file-extension-methods.md) | Remove Cross-File Extension Methods (Supersedes ADR 0066 in Part) | Accepted | 2026-11-24 |
 | [0153](0153-remove-class-variables.md) | Remove Class Variables (`classState:`) | Accepted | 2026-11-24 |
+| [0154](0154-uat-external-acceptance-gate-for-full-environments.md) | beamtalk-uat as the External Acceptance Gate for Full Environments | Accepted (2026-11-26) | 2026-11-26 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

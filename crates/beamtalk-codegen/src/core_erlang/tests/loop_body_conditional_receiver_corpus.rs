@@ -123,8 +123,28 @@ pub(super) fn passes(src: &str) -> bool {
 fn loop_body_conditional_receiver_corpus_compiles() {
     let rows = rows();
     assert!(rows.len() >= 600, "the corpus has thinned out");
-    for (_, body) in &rows {
-        assert_parses(&format!("{HEADER}{HELPERS}{}", method("", 0, body)));
+    assert_rows_pass(
+        "loop-body conditional-receiver",
+        &rows,
+        method,
+        probe_source,
+    );
+}
+
+/// Every `(name, method body)` row of `rows` passes the debug verifier and
+/// compiles through `erlc` in every actor context of [`PRELUDES`]: one run
+/// per context over all rows, bisected to the failing rows on failure.
+/// `method(prelude, i, body)` renders row `i` as a method, and `source` wraps
+/// methods in their class. Shared by this corpus and BT-5289's
+/// `match_scrutinee_frame_corpus`.
+pub(super) fn assert_rows_pass(
+    what: &str,
+    rows: &[(String, String)],
+    method: impl Fn(&str, usize, &str) -> String,
+    source: impl Fn(&str) -> String,
+) {
+    for (_, body) in rows {
+        assert_parses(&source(&method("", 0, body)));
     }
     let mut failures = Vec::new();
     for (ctx, prelude) in PRELUDES {
@@ -133,20 +153,25 @@ fn loop_body_conditional_receiver_corpus_compiles() {
             .enumerate()
             .map(|(i, (_, body))| method(prelude, i, body))
             .collect();
-        if passes(&format!("{HEADER}{HELPERS}{}", methods.concat())) {
+        if passes(&source(&methods.concat())) {
             continue;
         }
         failures.extend(rows.iter().zip(&methods).filter_map(|((name, _), method)| {
-            let single = format!("{HEADER}{HELPERS}{method}");
+            let single = source(method);
             (!passes(&single)).then(|| format!("{ctx} / {name}:\n{single}"))
         }));
     }
     assert!(
         failures.is_empty(),
-        "{} loop-body conditional-receiver row(s) fail verified codegen:\n\n{}",
+        "{} {what} row(s) fail verified codegen:\n\n{}",
         failures.len(),
         failures.join("\n\n")
     );
+}
+
+/// The source of a probe class holding `methods`.
+fn probe_source(methods: &str) -> String {
+    format!("{HEADER}{HELPERS}{methods}")
 }
 
 /// Whether the ADR 0131/0133 Phase 0 check rejects `src` before codegen (an
@@ -280,6 +305,100 @@ fn bt4000_repros_compile() {
         let src = format!("{HEADER}{HELPERS}{}", method("", 0, body));
         assert_eq!(super::verifier_report(&src, None), None, "{src}");
         assert!(passes(&src), "{src}");
+    }
+}
+
+// ─── BT-5291: a `^` from a nested conditional in the arm ─────────────────────
+//
+// `1 to: 5 do: [:i | (self done) ifTrue: [i > 2 ifTrue: [^ i * 10]]]` left the
+// inner conditional's `^` block an `UnbracketedNlrClosure`. The inner
+// conditional's class (`classify_inlined`) was first decided by a probe run
+// before the loop bound `i`, which read `i` as a possible field read, and was
+// cached under the conditional's span: in the arm, where `i` is bound and the
+// conditional is a dynamic send running its `^` block as a closure, the
+// bracket window read that stale class and stored nothing. The cache key now
+// holds the scope's view of the send's names (`InlinedClassScope`).
+
+/// The frames of the conditional statement `{S}`, each with the name `{V}` the
+/// nested `^` conditional reads: a name the frame binds itself (a loop's or
+/// fold's block parameter), or the method's local where the frame binds none.
+const NAME_BINDING_FRAMES: &[(&str, &str)] = &[
+    ("1 to: 3 do: [:i | {S}]", "i"),
+    ("1 to: 5 by: 2 do: [:i | {S}]", "i"),
+    ("#(1, 2) do: [:e | {S}]", "e"),
+    ("(n > 0) ifTrue: [1 to: 3 do: [:i | {S}]]", "i"),
+    ("3 timesRepeat: [{S}]", "n"),
+    ("[n > 0] whileTrue: [{S}. n := n - 1]", "n"),
+    ("{S}", "n"),
+    ("(n > 0) ifTrue: [{S}]", "n"),
+    ("[{S}] on: Error do: [:err | 0]", "n"),
+    ("[{S}] ensure: [nil]", "n"),
+];
+
+/// Arm bodies `{B}` returning from a nested conditional over `{V}`. The `^`
+/// block holds a guarded operator, so the conditional is never inlined pure.
+const NESTED_RETURNS: &[&str] = &[
+    "{V} > 2 ifTrue: [^ {V} * 10]",
+    "({V} > 2) ifTrue: [^ {V} * 10] ifFalse: [nil]",
+    // The nested conditional's own receiver binds the name its `^` reads.
+    "(y := {V}) > 2 ifTrue: [^ y * 10]",
+];
+
+/// Every `(name, method body)` row: frame x receiver x conditional x nested
+/// return, those the Phase 0 check accepts.
+fn nested_return_rows() -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for (l, (frame, var)) in NAME_BINDING_FRAMES.iter().enumerate() {
+        for (r, receiver) in RECEIVERS.iter().enumerate() {
+            for (c, cond) in CONDITIONALS.iter().enumerate() {
+                for (a, ret) in NESTED_RETURNS.iter().enumerate() {
+                    let arm = ret.replace("{V}", var);
+                    let stmt = cond.replace("{R}", receiver).replace("{B}", &arm);
+                    let body = frame.replace("{S}", &stmt);
+                    if phase0_rejects(&format!("{HEADER}{HELPERS}{}", method("", 0, &body))) {
+                        continue;
+                    }
+                    out.push((format!("frame{l} recv{r} cond{c} ret{a}"), body));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// BT-5291: every nested-return row passes the debug verifier and compiles
+/// through `erlc`, in every actor context.
+#[test]
+fn loop_body_conditional_receiver_nested_return_corpus_compiles() {
+    let rows = nested_return_rows();
+    assert!(
+        rows.len() >= 500,
+        "only {} rows; the corpus has thinned out",
+        rows.len()
+    );
+    assert_rows_pass("nested-return", &rows, method, probe_source);
+}
+
+/// BT-5291: with the class cached under the span alone again
+/// ([`Fault::InlinedClassScopeBlind`]), the verifier reports
+/// `UnbracketedNlrClosure` for the issue's shape: a `Letrec` loop whose block
+/// parameter the nested `^` conditional reads.
+#[cfg(debug_assertions)]
+#[test]
+fn loop_body_conditional_receiver_nested_return_reports_the_pre_fix_lowering() {
+    for body in [
+        "1 to: 5 do: [:i | (self done) ifTrue: [i > 2 ifTrue: [^ i * 10]]]",
+        "1 to: 5 do: [:i | (self isAlive: n) ifTrue: [i > 2 ifTrue: [^ i * 10]]]",
+    ] {
+        let src = format!("{HEADER}{HELPERS}{}", method("", 0, body));
+        let report = super::verifier_report(&src, Some(Fault::InlinedClassScopeBlind));
+        assert!(
+            report
+                .as_deref()
+                .is_some_and(|r| r.contains("UnbracketedNlrClosure")),
+            "{body}: {report:?}"
+        );
+        assert_eq!(super::verifier_report(&src, None), None, "{body}");
     }
 }
 
