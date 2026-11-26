@@ -138,8 +138,8 @@ impl Backend {
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 // ADR 0082 Phase 3: workspace/executeCommand for
                 // `beamtalk.flush` and `beamtalk.saveClass` — the LSP-surface
-                // wrappers that dispatch to `Workspace flush` /
-                // `Workspace newClass:at:` on the attached runtime. Keep the
+                // wrappers that dispatch to `Workspace flush` (an eval) and
+                // the `save-class` op on the attached runtime. Keep the
                 // command identifiers stable; the surface-parity drift checker
                 // hashes them.
                 execute_command_provider: Some(ExecuteCommandOptions {
