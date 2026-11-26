@@ -317,7 +317,15 @@ examples() ->
                         'end' => 15
                     })
                 ]
-            }}}
+            }}},
+        %% BT-5203: the editing writes, each `{value, Map}` of scalars.
+        {<<"save-method">>, <<"save-method">>,
+            {value, #{<<"class">> => <<"Counter">>, <<"selector">> => <<"increment">>}}},
+        {<<"save-class">>, <<"save-class">>, {value, #{<<"path">> => <<"src/Greeter.bt">>}}},
+        {<<"revert-method">>, <<"revert-method">>,
+            {value, #{<<"class">> => <<"Counter">>, <<"selector">> => <<"increment">>}}},
+        {<<"reload-file">>, <<"reload-file">>,
+            {value, #{<<"classes">> => [<<"Counter">>, <<"Greeter">>]}}}
     ].
 
 -doc "The wire JSON (a binary) of one example.".

@@ -579,6 +579,22 @@
         }
       }
     },
+    "reload-file": {
+      "op": "reload-file",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "classes": [
+            "Counter",
+            "Greeter"
+          ]
+        }
+      }
+    },
     "reload-findings": {
       "op": "reload-findings",
       "response": {
@@ -608,6 +624,47 @@
               "start": 10
             }
           ]
+        }
+      }
+    },
+    "revert-method": {
+      "op": "revert-method",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "class": "Counter",
+          "selector": "increment"
+        }
+      }
+    },
+    "save-class": {
+      "op": "save-class",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "path": "src/Greeter.bt"
+        }
+      }
+    },
+    "save-method": {
+      "op": "save-method",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "class": "Counter",
+          "selector": "increment"
         }
       }
     },

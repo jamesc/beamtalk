@@ -5,17 +5,18 @@
 //! `save_class`, `remove_method`, `remove_class`, `rename_class`,
 //! `rename_method`, and `precheck_method`.
 //!
-//! Per ADR 0082 there are no dedicated workspace-side REPL ops for these —
-//! each tool is a typed front-end that compiles to a plain Beamtalk
-//! expression (`aClass compile: #selector source: body`, `aClass
-//! removeSelector: #selector`, …) and runs it through the same `evaluate`
-//! pathway every other tool uses. Most of these tools mutate memory only
+//! `save_method` and `save_class` send the `save-method` / `save-class`
+//! operations with structured params (BT-5203), the same operations the
+//! LiveView editor dispatches. The other tools are typed front-ends that
+//! compile to a plain Beamtalk expression (`aClass removeSelector: #selector`,
+//! …) and run it through the `evaluate` pathway every other tool uses.
+//! Most of these tools mutate memory only
 //! and log a `ChangeLog` entry; writing to disk is a separate, explicit
 //! `server::tools::flush` call.
 
 use beamtalk_core::tool_expr::{
     precheck_method_expr, remove_class_expr, remove_method_expr, remove_method_if_absent_expr,
-    rename_class_expr, rename_method_expr, save_class_expr,
+    rename_class_expr, rename_method_expr,
 };
 use beamtalk_core::unparse::escape_string_literal;
 use rmcp::{handler::server::wrapper::Parameters, model::CallToolResult, tool, tool_router};
@@ -27,17 +28,6 @@ use crate::server::params::{
 use crate::server::{
     BeamtalkMcp, InternalErr, ToolTimer, check_response, validate_class_name, validate_selector,
 };
-
-/// Build the Beamtalk expression for the `save_method` MCP tool — durable
-/// patch path (ADR 0082 Phase 3). Selector is the bare form (no leading `#`).
-pub(crate) fn save_method_expr(class: &str, selector: &str, body: &str) -> String {
-    format!(
-        "{} compile: #{} source: \"{}\"",
-        class,
-        selector,
-        escape_string_literal(body),
-    )
-}
 
 /// Build the Beamtalk expression for the `try_method` MCP tool — ephemeral
 /// patch path (ADR 0082 Phase 3). Selector is the bare form (no leading `#`).
@@ -88,7 +78,7 @@ impl BeamtalkMcp {
 
     /// Durably install a method on a Beamtalk class (ADR 0082 Phase 3).
     ///
-    /// Compiles to `aClass compile: #selector source: body`. The patch installs
+    /// Sends the `save-method` operation. The patch installs
     /// in memory and appends a durable `ChangeLog` entry that can be written to
     /// disk by a subsequent `flush`.
     #[tool(
@@ -114,26 +104,27 @@ impl BeamtalkMcp {
             "tool invoked"
         );
 
-        // `aClass compile: #selector source: "body"`. The body is passed as a
-        // String value through eval; the runtime primitive (classCompileSource)
-        // takes the body as a value, so we never re-parse it as Beamtalk source.
-        let expr = save_method_expr(&params.class, selector, &params.body);
+        // The `save-method` operation: class, selector and body travel as
+        // structured params (never spliced into a Beamtalk expression), and it
+        // is the same implementation the LiveView method editor dispatches.
         let response = self
             .client
-            .evaluate_with_options(&expr, false)
+            .save_method(&params.class, selector, &params.body)
             .await
             .internal_err()?;
 
         check_response!(response, "Failed to save method");
 
-        let text = {
-            let v = response.value_string();
-            if v.is_empty() {
-                format!("Method {}>>#{} saved", params.class, selector)
-            } else {
-                v
-            }
-        };
+        let text = response
+            .value
+            .as_ref()
+            .and_then(|v| v.get("class"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|class| !class.is_empty())
+            .map_or_else(
+                || format!("Method {}>>#{} saved", params.class, selector),
+                str::to_string,
+            );
 
         timer.ok_text(text)
     }
@@ -225,23 +216,33 @@ impl BeamtalkMcp {
             "tool invoked"
         );
 
-        let expr = save_class_expr(&params.source, &params.path);
+        // The `save-class` operation: source and path travel as structured
+        // params, the same implementation the LiveView New Class action uses.
         let response = self
             .client
-            .evaluate_with_options(&expr, false)
+            .save_class(&params.source, &params.path)
             .await
             .internal_err()?;
 
         check_response!(response, "Failed to save class");
 
-        let text = {
-            let v = response.value_string();
-            if v.is_empty() {
-                format!("New class queued for {}", params.path)
-            } else {
-                v
+        let value = response.value.as_ref();
+        let path = value
+            .and_then(|v| v.get("path"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(&params.path);
+        let mut text = format!("New class queued for {path}");
+        // A ChangeLog entry that could not be recorded means `flush` will not
+        // write the file; say so rather than reporting a clean "queued".
+        if let Some(warnings) = value
+            .and_then(|v| v.get("warnings"))
+            .and_then(serde_json::Value::as_array)
+        {
+            for warning in warnings.iter().filter_map(serde_json::Value::as_str) {
+                text.push_str("\nWarning: ");
+                text.push_str(warning);
             }
-        };
+        }
 
         timer.ok_text(text)
     }
