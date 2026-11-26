@@ -32,8 +32,16 @@ hash_of() {
 
 dir="$(mktemp -d)"
 trap 'rm -rf "${dir}"' EXIT
-# No match is not an error here: the count check below reports it with context.
-gh release download "${TAG}" --pattern "${PREFIX}*" --dir "${dir}" >&2 || true
+# gh fails when nothing matches; the count check below reports that with
+# context. Any other failure (auth, network) is shown too, not swallowed.
+if ! gh release download "${TAG}" --pattern "${PREFIX}*" --dir "${dir}" 2>"${dir}.err" >&2; then
+    if ! grep -q "no assets match" "${dir}.err"; then
+        echo "::error::gh release download ${TAG} failed: $(cat "${dir}.err")"
+        rm -f "${dir}.err"
+        exit 1
+    fi
+fi
+rm -f "${dir}.err"
 
 shopt -s nullglob
 archives=0

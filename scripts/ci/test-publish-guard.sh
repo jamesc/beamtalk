@@ -45,6 +45,7 @@ cat > "${tmp}/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 # release download <tag> --pattern <glob> --dir <dir>
 [ "$1 $2" = "release download" ] || exit 2
+[ -z "${STUB_AUTH_FAIL:-}" ] || { echo "HTTP 401: Bad credentials" >&2; exit 1; }
 shopt -s nullglob
 n=0
 for f in "${STUB_RELEASE}"/$5; do cp "$f" "$7/"; n=$((n + 1)); done
@@ -84,6 +85,11 @@ mk orphan beamtalk-ide-0.6.0-linux-x86_64.tar.gz a
 mk orphan beamtalk-ide-0.6.0-macos-arm64.tar.gz b
 rm "${tmp}/release/orphan/beamtalk-ide-0.6.0-macos-arm64.tar.gz"
 verify orphan 1 && fail "an orphan sidecar was accepted" || pass "an orphan sidecar is refused"
+
+STUB_AUTH_FAIL=1 verify good 1 && fail "a gh auth failure was accepted" || pass "a gh auth failure is refused"
+out="$(STUB_AUTH_FAIL=1 STUB_RELEASE="${tmp}/release/good" PATH="${tmp}/bin:${PATH}" \
+    "${here}/verify-release-assets.sh" v0.6.0 beamtalk-ide-0.6.0- 1 2>&1 || true)"
+grep -q "Bad credentials" <<<"${out}" && pass "a gh failure is reported" || fail "a gh failure was not reported: ${out}"
 
 mkdir -p "${tmp}/release/empty"
 verify empty 1 && fail "no assets accepted" || pass "no assets are refused"

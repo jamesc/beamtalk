@@ -106,8 +106,9 @@ on:
 
 concurrency:
   # Keyed by what is built or published, not only the caller's ref: two
-  # release.yml runs from one branch must not cancel each other's image.
-  group: liveview-docker-${{ inputs.ref || inputs.image || github.ref }}-${{ inputs.publish && 'publish' || 'build' }}
+  # release.yml runs from one branch, or a dry run and a real tag at one
+  # commit (tag_prefix), must not cancel each other's image.
+  group: liveview-docker-${{ inputs.ref || inputs.image || github.ref }}-${{ inputs.tag_prefix || 'rc' }}-${{ inputs.publish && 'publish' || 'build' }}
   cancel-in-progress: true
 
 permissions:
