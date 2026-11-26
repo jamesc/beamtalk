@@ -220,6 +220,13 @@ peer_only_class_is_class_not_found(PeerNode) ->
             Name,
             ffi(erpc, call, [PeerNode, beamtalk_class_registry, resolve_class_object, [Name]])
         ),
+        %% A supervisor child: the error names the `supervisionSpec` send.
+        ?assertBtError(
+            class_not_found,
+            Name,
+            supervisionSpec,
+            beamtalk_supervisor_spec:build_child_spec(peer_class_object(Name, PeerPid), static)
+        ),
         %% A DynamicSupervisor `childClass` keeps its init-config contract: an
         %% exit with the structured error, which `supervisor_start_failed` reports.
         ?assertExit(
