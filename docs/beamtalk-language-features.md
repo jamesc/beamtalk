@@ -7815,8 +7815,8 @@ SystemAnnouncer current when: NodeVersionSkew do: [:e |
   above is the real safety net). `aNode shapeSkew` (below) surfaces the same
   information as a point-in-time, queryable snapshot rather than only a
   live event stream. The count is kept on both sides: when one node reloads
-  a class, both it and the peer announce `NodeShapeSkew` and update their
-  counts. A peer that disconnects drops out of the count.
+  a class, both it and the peer update their counts, and each announces
+  `NodeShapeSkew` if the class's skew is new to it. A peer that disconnects drops out of the count.
 - **`NodeVersionSkew`** is announced once per connect (best-effort) when
   the peer runs a different wire-format version (`localWireVersion` /
   `remoteWireVersion`) or Beamtalk version (`localBeamtalkVersion` /

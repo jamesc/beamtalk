@@ -72,7 +72,7 @@ unknown_call_returns_error_test_() ->
     ]}.
 
 %%====================================================================
-%% handle_cast — {skew_detected, Node, Gen, Stamp, ClassName, Versions, Announce}
+%% handle_cast — {skew_detected, Node, Gen, Stamp, ClassName, Versions}
 %%====================================================================
 
 skew_detected_increments_count_test_() ->
@@ -235,10 +235,9 @@ cast_result(Kind, Peer, ClassName) ->
         end,
     gen_server:cast(beamtalk_node_monitor, Msg).
 
-%% A `skew_detected` cast (versions 1 here, 2 on the peer) that never
-%% announces.
+%% A `skew_detected` cast: version 1 here, 2 on the peer.
 detected(Peer, Gen, Stamp, ClassName) ->
-    {skew_detected, Peer, Gen, Stamp, ClassName, {1, 2}, never}.
+    {skew_detected, Peer, Gen, Stamp, ClassName, {1, 2}}.
 
 next_stamp() ->
     N =
@@ -699,13 +698,13 @@ collect_peer_casts(Pid) ->
 should_announce_test_() ->
     Skewed = {skewed, 1, 2},
     [
-        ?_assert(beamtalk_node_monitor:should_announce(changed, none, Skewed)),
-        ?_assert(beamtalk_node_monitor:should_announce(changed, clear, Skewed)),
-        ?_assert(beamtalk_node_monitor:should_announce(changed, {skewed, 1, 3}, Skewed)),
-        ?_assertNot(beamtalk_node_monitor:should_announce(changed, Skewed, Skewed)),
-        ?_assertNot(beamtalk_node_monitor:should_announce(baseline, none, Skewed)),
-        ?_assertNot(beamtalk_node_monitor:should_announce(baseline, Skewed, Skewed)),
-        ?_assert(beamtalk_node_monitor:should_announce(baseline, clear, Skewed))
+        ?_assert(beamtalk_node_monitor:should_announce(done, none, Skewed)),
+        ?_assert(beamtalk_node_monitor:should_announce(done, clear, Skewed)),
+        ?_assert(beamtalk_node_monitor:should_announce(done, {skewed, 1, 3}, Skewed)),
+        ?_assertNot(beamtalk_node_monitor:should_announce(done, Skewed, Skewed)),
+        ?_assertNot(beamtalk_node_monitor:should_announce(pending, none, Skewed)),
+        ?_assertNot(beamtalk_node_monitor:should_announce(pending, Skewed, Skewed)),
+        ?_assert(beamtalk_node_monitor:should_announce(pending, clear, Skewed))
     ].
 
 %%--------------------------------------------------------------------
@@ -770,19 +769,35 @@ connect_checks_test_() ->
             end},
             {"after a restart, the skew a connection already had is not announced; a change is",
                 fun() ->
+                    Gen = make_ref(),
                     sys:replace_state(beamtalk_node_monitor, fun(S) ->
-                        Entry = beamtalk_node_monitor:peer_entry(make_ref(), existing),
+                        Entry = beamtalk_node_monitor:peer_entry(Gen, existing),
                         setelement(4, S, maps:put(?PEER5265, Entry, element(4, S)))
                     end),
+                    %% A reload check lands before any connect check: its
+                    %% class's first result is not announced either.
+                    gen_server:cast(
+                        beamtalk_node_monitor,
+                        {skew_detected, ?PEER5265, Gen, 1, 'Bt5265Reloaded', {1, 2}}
+                    ),
                     First = say_hello(true),
                     finish_check(First, 2),
-                    ?assertEqual(1, beamtalk_node_monitor:skew_count(?PEER5265)),
+                    ?assertEqual(2, beamtalk_node_monitor:skew_count(?PEER5265)),
                     ?assertEqual([], shape_skews_announced()),
-                    %% The peer reloaded, and its notification was dropped
-                    %% before its `hello`: the next `hello` check finds it.
+                    %% The baseline is in: a class seen for the first time
+                    %% now is announced...
+                    gen_server:cast(
+                        beamtalk_node_monitor,
+                        {skew_detected, ?PEER5265, Gen, 2, 'Bt5265New', {1, 2}}
+                    ),
+                    _ = sys:get_state(beamtalk_node_monitor),
+                    ?assertEqual([{1, 2}], shape_skews_announced()),
+                    %% ...and so is a change the next `hello` check finds (the
+                    %% peer's notification of it was dropped before its
+                    %% `hello`).
                     Second = say_hello(false),
                     finish_check(Second, 3),
-                    ?assertEqual([{1, 3}], shape_skews_announced())
+                    ?assertEqual([{1, 2}, {1, 3}], shape_skews_announced())
                 end}
         ]}.
 

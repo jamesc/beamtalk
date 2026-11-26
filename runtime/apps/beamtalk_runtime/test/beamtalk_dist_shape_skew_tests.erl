@@ -322,13 +322,21 @@ peer_reload_updates_both_tallies(Peer, PeerNode) ->
 
 -doc """
 Wait until no connect-time check process is running on this node or the
-peer. The monitor spawns them while handling `nodeup`, so a `sys:get_state/1`
-on each monitor first makes sure they have been spawned; afterwards a second
-one flushes the casts they sent.
+peer. The monitor spawns them while handling `nodeup`, and again on the
+other side's `hello` (BT-5265), so first wait until each side holds the
+other's current generation: both `hello`s have then been handled and their
+checks spawned. Afterwards a `sys:get_state/1` on each monitor flushes the
+casts the checks sent.
 """.
 await_connect_checks_done(Peer) ->
-    _ = sys:get_state(beamtalk_node_monitor),
-    _ = peer:call(Peer, sys, get_state, [beamtalk_node_monitor]),
+    PeerNode = peer:call(Peer, erlang, node, []),
+    beamtalk_test_wait:until(
+        fun() ->
+            peer_gen_of(PeerNode) =:= peer_call(Peer, local_gen, [node()]) andalso
+                peer_call(Peer, peer_gen_of, [node()]) =:= local_gen(PeerNode)
+        end,
+        10000
+    ),
     beamtalk_test_wait:until(
         fun() ->
             not connect_checks_running() andalso
@@ -449,13 +457,15 @@ earlier_connection_notification_dropped(Peer, PeerNode) ->
     Before = peer_count(Peer),
     Real = beamtalk_release:project_class_shape_entry(Class),
     OldGen = local_gen(PeerNode),
+    %% Stamps after each generation's `hello`, so the sender lets them out.
+    StaleSeq = local_hello_at(PeerNode) + 1,
     Forwarder = peer_call(Peer, forward_events, ['NodeShapeSkew', self()]),
     try
         ok = sys:suspend(beamtalk_node_monitor),
         try
             gen_server:cast(
                 beamtalk_node_monitor,
-                {send_peer_class_checked, PeerNode, OldGen, Class, Real#{version => 99}, 1}
+                {send_peer_class_checked, PeerNode, OldGen, Class, Real#{version => 99}, StaleSeq}
             ),
             force_disconnect(PeerNode),
             reconnect(PeerNode)
@@ -465,9 +475,7 @@ earlier_connection_notification_dropped(Peer, PeerNode) ->
         _ = sys:get_state(beamtalk_node_monitor),
         NewGen = local_gen(PeerNode),
         ?assertNotEqual(OldGen, NewGen),
-        %% Reload stamps are per connection here: the new entry has none,
-        %% so any value is accepted.
-        MarkerSeq = 2,
+        MarkerSeq = local_hello_at(PeerNode) + 1,
         gen_server:cast(
             beamtalk_node_monitor,
             {send_peer_class_checked, PeerNode, NewGen, 'Bt5265Marker', Real, MarkerSeq}
@@ -611,6 +619,11 @@ peer_without_hello_announced_once(Peer, PeerNode) ->
 local_gen(Node) ->
     #{gen := Gen} = maps:get(Node, element(4, sys:get_state(beamtalk_node_monitor))),
     Gen.
+
+%% The stamp of this node's monitor's last `hello` to `Node`.
+local_hello_at(Node) ->
+    #{hello_at := HelloAt} = maps:get(Node, element(4, sys:get_state(beamtalk_node_monitor))),
+    HelloAt.
 
 %% The generation `Node`'s monitor sent this node's monitor in its `hello`.
 peer_gen_of(Node) ->
