@@ -113,13 +113,12 @@ fn define_pattern_vars_in_scope(pattern: &beamtalk_core::ast::Pattern, scope: &m
                 define_pattern_vars_in_scope(binding, scope);
             }
         }
-        // Pattern::Type's binding is not wired into lint scope tracking yet
-        // (bindings/scope land with narrowing and codegen).
+        // `x :: T` element of a destructuring pattern (BT-5284).
+        Pattern::Type { binding, .. } => scope.define(binding.name.as_str()),
         Pattern::Binary { .. }
         | Pattern::Wildcard(_)
         | Pattern::Literal(_, _)
-        | Pattern::Nil(_)
-        | Pattern::Type { .. } => {}
+        | Pattern::Nil(_) => {}
     }
 }
 
@@ -509,6 +508,14 @@ mod tests {
         let diags = lint("#{#key => v} := map.\nitems do: [:v | v + 1]");
         assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
         assert!(diags[0].message.contains("`v`"));
+    }
+
+    /// A block parameter shadows a variable bound by an annotated element (BT-5284).
+    #[test]
+    fn typed_destructure_var_shadowed_by_block_param() {
+        let diags = lint("{_, sid :: Integer} := frame.\nitems do: [:sid | sid + 1]");
+        assert_eq!(diags.len(), 1, "Expected 1 lint, got: {diags:?}");
+        assert!(diags[0].message.contains("`sid`"));
     }
 
     /// A block inside the RHS of a destructure assignment can shadow an outer variable.

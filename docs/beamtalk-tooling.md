@@ -1018,7 +1018,7 @@ Path arguments of `lint`, `diagnostic_summary`, `load_file`, `load_project`, `te
 | `nodes` | List connected BEAM nodes with their shape-skew counts |
 | `save_method` | Durable live patch (ADR 0082): wraps `aClass compile: #sel source: body`; logs a durable ChangeEntry |
 | `try_method` | Ephemeral spike (ADR 0082): wraps `aClass tryCompile: #sel source: body`; logs an ephemeral ChangeEntry (not flushable — pruned on workspace restart or via `Workspace changes clear`) |
-| `save_class` | Create a new class file (ADR 0082): wraps `Workspace newClass: source at: path`; logs a `kind: #'new-class'` ChangeEntry (flush writes the file to disk) |
+| `save_class` | Create a new class file (ADR 0082): sends the `save-class` op (`Workspace newClass: source at: path` semantics); logs a `kind: #'new-class'` ChangeEntry (flush writes the file to disk) |
 | `remove_method` | Remove a method from a class (ADR 0112): wraps `Behaviour>>removeSelector:` with optional `if_absent` fallback |
 | `remove_class` | Remove a class entirely (ADR 0113): wraps `removeFromSystem`, returns the resulting `remove-class` ChangeEntry |
 | `rename_class` | Rename a class in the running system (ADR 0114): wraps `renameTo:`, auto-rewriting in-project cross-file references |

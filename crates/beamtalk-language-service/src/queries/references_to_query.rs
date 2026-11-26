@@ -412,6 +412,13 @@ mod tests {
             "Counter",
             &[3],
         ),
+        // BT-5284: an annotated destructuring element names a class too.
+        (
+            "finds_reference_in_destructure_type_pattern",
+            "classify: x =>\n  {_, v :: Counter} := x\n  v",
+            "Counter",
+            &[2],
+        ),
         (
             "finds_reference_in_union_type_annotation",
             "use: x :: Counter | Integer -> Boolean =>\n  true",

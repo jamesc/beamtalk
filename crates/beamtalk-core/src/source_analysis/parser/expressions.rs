@@ -189,6 +189,18 @@ impl Parser {
             return self.parse_tuple_destructure();
         }
 
+        // Annotated array/map destructure: `#[a :: Integer, b] := expr`,
+        // `#{#k => v :: Integer} := expr` (BT-5284). The expression-then-
+        // convert path below cannot carry `x :: T`, so a collection literal
+        // that holds a `::` before its `:=` goes through the pattern parser.
+        if matches!(
+            self.current_kind(),
+            TokenKind::ArrayOpen | TokenKind::MapOpen
+        ) && self.leading_collection_is_typed_destructure()
+        {
+            return self.parse_pattern_destructure();
+        }
+
         let expr = self.parse_cascade();
 
         // Check for type-annotated assignment: `identifier :: Type := expr`
@@ -222,6 +234,26 @@ impl Parser {
         }
 
         expr
+    }
+
+    /// Parses a destructuring assignment whose pattern opens with `{`, `#[`
+    /// or `#{`, through the pattern grammar (so elements may be `x :: T`).
+    fn parse_pattern_destructure(&mut self) -> Expression {
+        let start = self.current_token().span();
+        let pattern = self.parse_pattern();
+        self.expect(
+            &TokenKind::Assign,
+            "Expected ':=' after destructuring pattern",
+        );
+        let value = Box::new(self.parse_after_gap(GapSlot::BeforeValue, |p| {
+            p.with_expression_nesting(start, Self::parse_assignment)
+        }));
+        let span = start.merge(value.span());
+        Expression::DestructureAssignment {
+            pattern,
+            value,
+            span,
+        }
     }
 
     /// Parses a tuple destructuring assignment (`{a, b} := expr`).

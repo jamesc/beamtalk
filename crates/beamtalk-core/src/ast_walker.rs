@@ -649,10 +649,15 @@ where
 {
     walk_expression(expr, &mut |e| {
         f(WalkNode::Expr(e));
-        if let Expression::Match { arms, .. } = e {
-            for arm in arms {
-                walk_pattern_nodes(&arm.pattern, f);
+        match e {
+            Expression::Match { arms, .. } => {
+                for arm in arms {
+                    walk_pattern_nodes(&arm.pattern, f);
+                }
             }
+            // `{a :: Integer, _} := t` names a class in its pattern (BT-5284).
+            Expression::DestructureAssignment { pattern, .. } => walk_pattern_nodes(pattern, f),
+            _ => {}
         }
     });
 }
@@ -1353,6 +1358,22 @@ mod tests {
         });
         assert_eq!(classes, ["Result", "Wrapper"]);
         assert!(exprs > 0, "expression nodes are still reported");
+    }
+
+    #[test]
+    fn walk_expression_and_patterns_reports_type_patterns_in_a_destructure() {
+        let module = parse_bt("Object subclass: C\n  f: x =>\n    {_, n :: Integer} := x\n    n\n");
+        let mut classes = Vec::new();
+        for_each_expr_seq(&module, |seq| {
+            for stmt in seq {
+                walk_expression_and_patterns(&stmt.expression, &mut |node| {
+                    if let WalkNode::Pattern(Pattern::Type { class, .. }) = node {
+                        classes.push(class.name.to_string());
+                    }
+                });
+            }
+        });
+        assert_eq!(classes, ["Integer"]);
     }
 
     // ── children_in_source_order / CursorBound ────────────────────────────

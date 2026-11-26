@@ -130,67 +130,7 @@ impl Parser {
                 let name = name.clone();
                 let token = self.advance();
                 let span = token.span();
-                let binding = Identifier::new(name, span);
-
-                if matches!(self.current_kind(), TokenKind::DoubleColon) {
-                    self.advance(); // consume '::'
-                    if let TokenKind::Identifier(class_name) = self.current_kind() {
-                        let class_name = class_name.clone();
-                        let class_span = self.advance().span();
-
-                        // Generic type arguments in a type pattern, e.g.
-                        // `items :: List(Printable)`, are rejected with a
-                        // single explicit diagnostic (ADR 0107
-                        // Decision, 2026-07-13) rather than silently checking
-                        // only the base class. `Pattern::Type` intentionally
-                        // scopes `class` to a bare identifier, and
-                        // per ADR 0068 type erasure there is no reified
-                        // generic tag to verify at runtime regardless — so
-                        // silently discarding `(Printable)` would be the one
-                        // place in the language where a generic-looking
-                        // annotation silently means less than it appears to.
-                        if matches!(self.current_kind(), TokenKind::LeftParen) {
-                            let args_span = self.skip_parenthesized_for_recovery();
-                            let full_span = span.merge(args_span);
-                            self.diagnostics.push(Diagnostic::error(
-                                "generic type arguments are not supported in a type pattern yet",
-                                full_span,
-                            ));
-                            Pattern::Wildcard(full_span)
-                        } else {
-                            let full_span = span.merge(class_span);
-                            Pattern::Type {
-                                binding,
-                                class: Identifier::new(class_name, class_span),
-                                span: full_span,
-                            }
-                        }
-                    } else {
-                        let bad_span = self.current_token().span();
-                        self.diagnostics.push(Diagnostic::error(
-                            "Expected a class name after '::' in a type pattern",
-                            bad_span,
-                        ));
-                        // Consume the offending token so this single
-                        // diagnostic doesn't cascade into a second "Expected
-                        // '->' after pattern in match arm" error —
-                        // but only when it plausibly stands alone as a
-                        // mistyped type name (a literal, e.g. `x :: 5`).
-                        // A type pattern can nest inside a tuple/array/map
-                        // pattern (`{x :: 5, y}`), so anything else — a `,`
-                        // element separator, a closing delimiter, `when:`,
-                        // the arrow itself, ... — is deliberately left alone
-                        // for the *enclosing* pattern parser to consume
-                        // correctly, even at the cost of a second cascaded
-                        // diagnostic.
-                        if Self::looks_like_malformed_type_pattern_token(self.current_kind()) {
-                            self.advance();
-                        }
-                        Pattern::Wildcard(span.merge(bad_span))
-                    }
-                } else {
-                    Pattern::Variable(binding)
-                }
+                self.finish_variable_or_type_pattern(Identifier::new(name, span), span)
             }
 
             // Literal patterns: integer, float, string, character
@@ -354,6 +294,72 @@ impl Parser {
         )
     }
 
+    /// Finishes a pattern that began with the identifier `binding`: a plain
+    /// variable, or a type pattern `binding :: ClassName` (ADR 0107 Phase A).
+    /// Shared by [`Self::parse_pattern`] and map-pattern values (BT-5284) so
+    /// every position gives the same diagnostics.
+    fn finish_variable_or_type_pattern(&mut self, binding: Identifier, span: Span) -> Pattern {
+        if matches!(self.current_kind(), TokenKind::DoubleColon) {
+            self.advance(); // consume '::'
+            if let TokenKind::Identifier(class_name) = self.current_kind() {
+                let class_name = class_name.clone();
+                let class_span = self.advance().span();
+
+                // Generic type arguments in a type pattern, e.g.
+                // `items :: List(Printable)`, are rejected with a
+                // single explicit diagnostic (ADR 0107
+                // Decision, 2026-07-13) rather than silently checking
+                // only the base class. `Pattern::Type` intentionally
+                // scopes `class` to a bare identifier, and
+                // per ADR 0068 type erasure there is no reified
+                // generic tag to verify at runtime regardless — so
+                // silently discarding `(Printable)` would be the one
+                // place in the language where a generic-looking
+                // annotation silently means less than it appears to.
+                if matches!(self.current_kind(), TokenKind::LeftParen) {
+                    let args_span = self.skip_parenthesized_for_recovery();
+                    let full_span = span.merge(args_span);
+                    self.diagnostics.push(Diagnostic::error(
+                        "generic type arguments are not supported in a type pattern yet",
+                        full_span,
+                    ));
+                    Pattern::Wildcard(full_span)
+                } else {
+                    let full_span = span.merge(class_span);
+                    Pattern::Type {
+                        binding,
+                        class: Identifier::new(class_name, class_span),
+                        span: full_span,
+                    }
+                }
+            } else {
+                let bad_span = self.current_token().span();
+                self.diagnostics.push(Diagnostic::error(
+                    "Expected a class name after '::' in a type pattern",
+                    bad_span,
+                ));
+                // Consume the offending token so this single
+                // diagnostic doesn't cascade into a second "Expected
+                // '->' after pattern in match arm" error —
+                // but only when it plausibly stands alone as a
+                // mistyped type name (a literal, e.g. `x :: 5`).
+                // A type pattern can nest inside a tuple/array/map
+                // pattern (`{x :: 5, y}`), so anything else — a `,`
+                // element separator, a closing delimiter, `when:`,
+                // the arrow itself, ... — is deliberately left alone
+                // for the *enclosing* pattern parser to consume
+                // correctly, even at the cost of a second cascaded
+                // diagnostic.
+                if Self::looks_like_malformed_type_pattern_token(self.current_kind()) {
+                    self.advance();
+                }
+                Pattern::Wildcard(span.merge(bad_span))
+            }
+        } else {
+            Pattern::Variable(binding)
+        }
+    }
+
     /// Parses a tuple pattern: `{p1, p2, ...}`
     ///
     /// Note: each element goes through [`Self::parse_pattern`],
@@ -511,7 +517,7 @@ impl Parser {
                 let TokenKind::Identifier(name) = token.into_kind() else {
                     unreachable!()
                 };
-                Pattern::Variable(Identifier::new(name, span))
+                self.finish_variable_or_type_pattern(Identifier::new(name, span), span)
             }
             TokenKind::String(_)
             | TokenKind::Integer(_)

@@ -183,7 +183,9 @@ impl CoreErlangGenerator {
                 for (idx, elem) in elements.iter().enumerate() {
                     let one_based = index_lit(idx + 1);
                     match elem {
-                        Pattern::Variable(id) => {
+                        // `x :: T` binds like `x`: the annotation is a trusted declared type
+                        // for the type checker, not a runtime test (BT-5284).
+                        Pattern::Variable(id) | Pattern::Type { binding: id, .. } => {
                             let core_var = Self::to_core_erlang_var(&id.name);
                             self.bind_var(&id.name, &core_var);
                             docs.push(docvec![
@@ -297,7 +299,9 @@ impl CoreErlangGenerator {
                 for (idx, elem) in elements.iter().enumerate() {
                     let one_based = index_lit(idx + 1);
                     match elem {
-                        Pattern::Variable(id) => {
+                        // `x :: T` binds like `x`: the annotation is a trusted declared type
+                        // for the type checker, not a runtime test (BT-5284).
+                        Pattern::Variable(id) | Pattern::Type { binding: id, .. } => {
                             let core_var = Self::to_core_erlang_var(&id.name);
                             self.bind_var(&id.name, &core_var);
                             docs.push(docvec![
@@ -363,7 +367,9 @@ impl CoreErlangGenerator {
             Pattern::Map { pairs, .. } => {
                 for pair in pairs {
                     match &pair.value {
-                        Pattern::Variable(id) => {
+                        // `x :: T` binds like `x`: the annotation is a trusted declared type
+                        // for the type checker, not a runtime test (BT-5284).
+                        Pattern::Variable(id) | Pattern::Type { binding: id, .. } => {
                             let core_var = Self::to_core_erlang_var(&id.name);
                             self.bind_var(&id.name, &core_var);
                             let key_doc = super::map_pattern_key_doc(&pair.key);
