@@ -53,7 +53,7 @@ impl BeamtalkMcp {
             params.kind.as_deref(),
         ]
         .into_iter()
-        .filter(|v| v.is_some())
+        .flatten()
         .count();
         if provided > 1 {
             return Err(rmcp::ErrorData::invalid_params(

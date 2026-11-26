@@ -47,7 +47,7 @@ pub fn remove_method_expr_for(arg: &str) -> Option<String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplFlushScope {
     /// A class name (`Counter`, or `#Counter` for a class `:remove-class`
-    /// already unbound: the ChangeLog matches it by name).
+    /// already unbound: the `ChangeLog` matches it by name).
     Class(String),
     /// An entry kind from [`beamtalk_repl_protocol::FLUSH_KINDS`]
     /// (`#'new-class'`, `#remove-class`).

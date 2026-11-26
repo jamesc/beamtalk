@@ -363,7 +363,7 @@ fn handle_flush_destructive(client: &mut ReplClient) {
 /// `:flush-destructive <scope>` (ADR 0113 Phase 4): prompts `y/N` before
 /// sending the scoped `flush` with `confirm_destructive`. After
 /// `:remove-class Gone` scope it by `#Gone`: the name no longer resolves, and
-/// the ChangeLog matches the class by name.
+/// the `ChangeLog` matches the class by name.
 fn handle_flush_destructive_arg(selector: &str, client: &mut ReplClient) {
     match beamtalk_cli::repl_meta_exprs::flush_scope_for(selector) {
         Some(scope) => {
