@@ -222,10 +222,10 @@ The human counterpart to the agent ChangeLog `revert:`. Returns `{ok, nil}`.
 git_revert_file(Path) when is_binary(Path) ->
     %% `git restore -- <dir>` discards every change under the directory; this op
     %% reverts one file (BT-5205).
-    case names_directory(git_revert_file, Path) of
-        {ok, false} ->
-            mutate(git_revert_file, [<<"restore">>, <<"--">>, Path], <<"git restore failed">>);
+    case is_one_tracked_file(git_revert_file, Path) of
         {ok, true} ->
+            mutate(git_revert_file, [<<"restore">>, <<"--">>, Path], <<"git restore failed">>);
+        {ok, false} ->
             {error,
                 arg_error(
                     git_revert_file, <<"path is not one tracked file; revert one file at a time">>
@@ -236,18 +236,18 @@ git_revert_file(Path) when is_binary(Path) ->
 git_revert_file(_Path) ->
     {error, arg_error(git_revert_file, <<"path must be a String">>)}.
 
-%% Whether `Path` names a directory rather than one tracked file. Git answers,
-%% not the file system: `git ls-files -z -- Path` lists the index entries under
-%% the path, which is exactly `Path` for one tracked file (deleted or not, a
-%% symlink included) and every file for a directory, whatever its spelling
-%% (`src`, `src/.`, `./src`), present or deleted. Nothing is listed for a path
-%% that is not tracked; that is not a file to revert either, so it counts as a
-%% directory here and `git restore` is never run on it.
--spec names_directory(atom(), binary()) -> {ok, boolean()} | {error, #beamtalk_error{}}.
-names_directory(Selector, Path) ->
+%% Whether `Path` is exactly one tracked file. Git answers, not the file system:
+%% `git ls-files -z -- Path` lists the index entries under the path, which is
+%% `Path` itself for one tracked file (deleted or not, a symlink included) and
+%% every file for a directory, whatever its spelling (`src`, `src/.`, `./src`),
+%% present or deleted. A conflicted file is listed once per stage, so the
+%% entries are de-duplicated. Nothing is listed for an untracked path; that is
+%% not a file to revert either, so `git restore` is never run on it.
+-spec is_one_tracked_file(atom(), binary()) -> {ok, boolean()} | {error, #beamtalk_error{}}.
+is_one_tracked_file(Selector, Path) ->
     case run_git(Selector, [<<"ls-files">>, <<"-z">>, <<"--">>, Path]) of
         {ok, Stdout, 0} ->
-            {ok, binary:split(Stdout, <<0>>, [global, trim_all]) =/= [Path]};
+            {ok, lists:usort(binary:split(Stdout, <<0>>, [global, trim_all])) =:= [Path]};
         {ok, Stdout, Code} ->
             {error, exit_error(Selector, Code, with_stderr(<<"git ls-files failed">>, Stdout))};
         {error, _} = Err ->

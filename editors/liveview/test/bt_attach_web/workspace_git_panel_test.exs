@@ -118,7 +118,7 @@ defmodule BtAttachWeb.WorkspaceGitPanelTest do
       {:ok, view, _html} = live(owner_conn(conn), "/")
       render_click(view, "dock_tab", %{"tab" => "git"})
 
-      assert eventually(fn -> render(view) =~ "Showing the first 5000 changed files" end)
+      assert eventually(fn -> render(view) =~ "Showing the first 1 changed files" end)
     end
 
     test "a status that was not cut shows no notice (BT-5205)", %{conn: conn} do
@@ -130,7 +130,7 @@ defmodule BtAttachWeb.WorkspaceGitPanelTest do
       render_click(view, "dock_tab", %{"tab" => "git"})
 
       assert eventually(fn -> render(view) =~ "feature" end)
-      refute render(view) =~ "Showing the first 5000"
+      refute render(view) =~ "Showing the first"
     end
 
     test "a cut diff says so, an uncut one does not (BT-5205)", %{conn: conn} do
@@ -159,7 +159,7 @@ defmodule BtAttachWeb.WorkspaceGitPanelTest do
         |> element(~s(button[phx-click="git_diff"][phx-value-path="src/a.bt"]))
         |> render_click()
 
-      assert cut =~ "Diff cut at 1 MiB per side"
+      assert cut =~ "Diff cut; do not act on it"
 
       StubWorkspaceClient.set_git_diff({:ok, %{worktree: "+y", staged: "", truncated: false}})
 
@@ -169,7 +169,7 @@ defmodule BtAttachWeb.WorkspaceGitPanelTest do
         |> render_click()
 
       assert whole =~ "src/b.bt"
-      refute whole =~ "Diff cut at 1 MiB"
+      refute whole =~ "Diff cut"
     end
 
     test "an independently-failed log surfaces an error beside a good status", %{conn: conn} do
