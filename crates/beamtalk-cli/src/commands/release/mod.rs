@@ -31,6 +31,7 @@ use tracing::info;
 
 use super::build_stamp;
 use beamtalk_core::build_layout::BuildLayout;
+use beamtalk_core::paths::canonicalize_lenient;
 use beamtalk_package::manifest;
 
 /// Build a release for the project at `project_root`.
@@ -736,41 +737,6 @@ fn is_protected_output_with(
         .filter_map(|root| canonicalize_lenient(root))
         .chain(source_dirs.iter().cloned())
         .any(|root| root.starts_with(&target))
-}
-
-/// `canonicalize`, extended to paths that do not exist yet: the longest
-/// existing prefix is canonicalized and the missing tail applied to it one
-/// component at a time, re-resolving every component that exists (a `..` can
-/// lead back into existing directories and their symlinks). `None` when no
-/// prefix resolves.
-fn canonicalize_lenient(path: &std::path::Path) -> Option<std::path::PathBuf> {
-    use std::path::Component;
-    let components: Vec<Component<'_>> = path.components().collect();
-    for split in (1..=components.len()).rev() {
-        let prefix: std::path::PathBuf = components[..split].iter().collect();
-        let Ok(mut resolved) = std::fs::canonicalize(&prefix) else {
-            continue;
-        };
-        for component in &components[split..] {
-            match component {
-                Component::Normal(name) => {
-                    resolved.push(name);
-                    // A `..` can lead the tail back into existing directories,
-                    // whose symlinks must be resolved too.
-                    if let Ok(real) = std::fs::canonicalize(&resolved) {
-                        resolved = real;
-                    }
-                }
-                Component::ParentDir => {
-                    resolved.pop();
-                }
-                Component::CurDir => {}
-                Component::Prefix(_) | Component::RootDir => return None,
-            }
-        }
-        return Some(resolved);
-    }
-    None
 }
 
 /// Top-level entries a release directory holds: `bin/`, `lib/`,
@@ -1818,7 +1784,7 @@ mod tests {
     #[test]
     fn canonicalize_lenient_handles_missing_paths() {
         let temp = TempDir::new().unwrap();
-        let base = std::fs::canonicalize(temp.path()).unwrap();
+        let base = beamtalk_core::paths::canonicalize(temp.path()).unwrap();
         assert_eq!(
             canonicalize_lenient(&temp.path().join("a/b")),
             Some(base.join("a/b"))
