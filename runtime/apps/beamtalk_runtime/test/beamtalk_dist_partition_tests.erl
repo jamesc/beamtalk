@@ -98,14 +98,13 @@ assert_node_down(PeerNode, Selector, Fun) ->
             ?assertMatch(#{node := PeerNode}, Details)
     end.
 
-%% `{error, Error}` returned or raised, or what else happened.
+%% `{error, Error}` returned (a raising op converts its own error with
+%% `?assertBtErrorWith`), or what else happened.
 run_op(F) ->
     try F() of
         {error, #beamtalk_error{} = E} -> {error, E};
         Value -> {returned, Value}
     catch
-        error:#beamtalk_error{} = E -> {error, E};
-        error:#{error := #beamtalk_error{} = E} -> {error, E};
         Class:Reason -> {raised, Class, Reason}
     end.
 
@@ -252,7 +251,15 @@ unexpected_remote_results_are_errors(PeerNode) ->
             end},
             {shape_manifest, fun() -> beamtalk_node:remote_shape_manifest(PeerNode) end},
             {process_navigation_on, fun() -> beamtalk_process_navigation:on(NodeObj, 10) end},
-            {unregister, fun() -> beamtalk_actor_ffi:unregister(Proxy) end}
+            {unregister, fun() ->
+                ?assertBtErrorWith(
+                    _,
+                    _,
+                    unregister,
+                    fun(E) -> {error, E} end,
+                    beamtalk_actor_ffi:unregister(Proxy)
+                )
+            end}
         ],
         Results = [{Op, run_op(F)} || {Op, F} <- Ops],
         ?assertEqual([], [R || {_Op, Res} = R <- Results, not is_unexpected_result_error(Res)])
