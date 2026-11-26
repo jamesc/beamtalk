@@ -252,3 +252,95 @@ fn extending_parent_stays_visible_to_selector_narrowing() {
     assert!(registry.is_seeded_only("Enumerable"));
     assert_eq!(registry.find_unique_protocol_for_selector("<"), None);
 }
+
+// --- BT-5338: stdlib protocols without provisions ---------------------------
+
+#[test]
+fn printable_bound_is_enforced_on_field() {
+    // `ProtoObject` has no `asString` / `printString`, so it is not `Printable`.
+    let source = r"
+Value subclass: Boxed(T :: Printable)
+  field: item :: T = 0
+
+ProtoObject subclass: Bare
+  ping => 1
+
+Object subclass: H
+  state: h :: Boxed(Bare) = nil
+";
+    assert_eq!(
+        violations(source),
+        vec!["Type argument Bare for T in Boxed does not conform to Printable"]
+    );
+}
+
+#[test]
+fn printable_bound_accepts_printable_arg() {
+    let source = r"
+Value subclass: Boxed(T :: Printable)
+  field: item :: T = 0
+
+Object subclass: H
+  state: h :: Boxed(Integer) = nil
+  take: b :: Boxed(String) => b
+";
+    assert!(violations(source).is_empty(), "{:?}", violations(source));
+}
+
+#[test]
+fn printable_annotation_is_enforced() {
+    let source = r"
+ProtoObject subclass: Bare
+  ping => 1
+
+Object subclass: H
+  show: a :: Printable => a
+  go => self show: Bare new
+";
+    let msgs = messages(source);
+    assert!(
+        msgs.iter()
+            .any(|m| m.contains("Bare") && m.contains("Printable")),
+        "{msgs:?}"
+    );
+}
+
+#[test]
+fn json_representable_bound_is_enforced() {
+    let source = r"
+Value subclass: Boxed(T :: JsonRepresentable)
+  field: item :: T = 0
+
+Value subclass: Plain
+  field: n :: Integer = 0
+
+Value subclass: Good
+  asJson => 1
+
+Object subclass: H
+  state: bad :: Boxed(Plain) = nil
+  state: ok :: Boxed(Good) = nil
+";
+    assert_eq!(
+        violations(source),
+        vec!["Type argument Plain for T in Boxed does not conform to JsonRepresentable"]
+    );
+}
+
+#[test]
+fn package_declared_printable_shadows_stdlib_one() {
+    let source = r"
+Protocol define: Printable
+  frob -> Object
+
+Value subclass: Boxed(T :: Printable)
+  field: item :: T = 0
+
+Value subclass: Good
+  frob -> Object => self
+
+Object subclass: H
+  state: h :: Boxed(Good) = nil
+";
+    assert!(violations(source).is_empty(), "{:?}", violations(source));
+}
