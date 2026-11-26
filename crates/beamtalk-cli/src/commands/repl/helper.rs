@@ -347,7 +347,7 @@ fn highlight_line(line: &str) -> String {
         for trivia in token.leading_trivia() {
             let trivia_text = trivia.as_str();
             match trivia {
-                Trivia::LineComment(_) | Trivia::BlockComment(_) | Trivia::DocComment(_) => {
+                Trivia::LineComment(_) | Trivia::DocComment(_) => {
                     result.push_str(color::GRAY);
                     result.push_str(trivia_text);
                     result.push_str(color::RESET);
@@ -413,7 +413,7 @@ fn highlight_line(line: &str) -> String {
         for trivia in token.trailing_trivia() {
             let trivia_text = trivia.as_str();
             match trivia {
-                Trivia::LineComment(_) | Trivia::BlockComment(_) | Trivia::DocComment(_) => {
+                Trivia::LineComment(_) | Trivia::DocComment(_) => {
                     result.push_str(color::GRAY);
                     result.push_str(trivia_text);
                     result.push_str(color::RESET);

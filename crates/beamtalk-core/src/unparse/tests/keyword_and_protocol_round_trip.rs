@@ -249,7 +249,7 @@ fn protocol_instance_method_doc_comment_round_trip() {
     assert_identity(source);
 }
 
-// --- Regression: leading `//`/`/* */` comments on protocol
+// --- Regression: leading `//` comments on protocol
 // method signatures must survive a `beamtalk fmt` round-trip. ---
 
 #[test]
@@ -261,16 +261,6 @@ fn protocol_instance_method_leading_comment_round_trip() {
     let source = concat!(
         "Protocol define: Displayable\n",
         "  // A leading comment.\n",
-        "  asString -> String\n",
-    );
-    assert_identity(source);
-}
-
-#[test]
-fn protocol_instance_method_leading_block_comment_round_trip() {
-    let source = concat!(
-        "Protocol define: Displayable\n",
-        "  /* A leading block comment. */\n",
         "  asString -> String\n",
     );
     assert_identity(source);

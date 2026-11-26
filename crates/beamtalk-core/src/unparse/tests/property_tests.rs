@@ -81,8 +81,6 @@ const FIDELITY_FRAGMENTS: &[&str] = &[
     "x := $é",
     "// leading comment\nx := 1",
     "x := 1  // trailing comment",
-    "/* block */ x := 1",
-    "/* multi\n   line */\nx := 1",
     "/// doc\nObject subclass: Foo\n  bar => 1",
     "x foo: 1 // between keywords\n  bar: 2",
     "Transcript show: 1; // after cascade\n  show: 2",

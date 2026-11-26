@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! A typo that leaves a string or block comment open must not drop the
+//! A typo that leaves a string open or types a stray `/*` must not drop the
 //! classes after it from the editor (BT-5182): they stay in the document
 //! outline and the project index, and the one diagnostic names the construct
 //! and where it starts instead of echoing the rest of the file.
@@ -59,7 +59,7 @@ fn classes_after_an_unterminated_string_are_still_indexed() {
 }
 
 #[test]
-fn classes_after_an_unterminated_block_comment_are_still_indexed() {
+fn classes_after_a_stray_block_comment_opener_are_still_indexed() {
     let (outline, b_declarations, diagnostics) = open(
         "Object subclass: A\n  /* never closed\n  greet => 1\n\n\
          Object subclass: B\n  size => 1\n",
@@ -72,7 +72,7 @@ fn classes_after_an_unterminated_block_comment_are_still_indexed() {
     assert!(
         diagnostics
             .iter()
-            .any(|m| m.starts_with("unterminated block comment starting at line 2, column 3")),
+            .any(|m| m == "block comments are not supported; use `//` on each line"),
         "{diagnostics:?}"
     );
 }

@@ -539,7 +539,7 @@ fn split_keyword_parts(selector: &str) -> Vec<String> {
 /// `pos`, translated back into `source`'s own absolute coordinates.
 ///
 /// Re-lexes `source[pos..]` rather than scanning bytes for whitespace: a
-/// `BeamTalk` `//`/`/* */` comment is lexer TRIVIA attached to the token that
+/// `BeamTalk` `//` comment is lexer TRIVIA attached to the token that
 /// follows it, not a token of its own (`Token::span()` excludes trivia by
 /// construction — see `token.rs`), so this is exact regardless of how much
 /// whitespace *or* how many comments sit between `pos` and the real next
@@ -802,7 +802,7 @@ fn selector_send_spans_for_match(
             // Neither shape carries its own selector span from the parser
             // (unlike `Keyword`'s per-part spans) — re-lex from just after
             // the receiver and take the first real token. This is exact
-            // even when a `//`/`/* */` comment sits between the receiver
+            // even when a `//` comment sits between the receiver
             // and the selector (review finding on PR #3529: a prior
             // whitespace-only byte scan swallowed such a comment into the
             // splice span, silently deleting it on rewrite) — see
@@ -1402,44 +1402,6 @@ mod tests {
         let hit = &occurrences[0][0];
         assert_eq!(slice(src, hit.span), "bump");
         assert_eq!(hit.new_text, "increase");
-    }
-
-    #[test]
-    fn block_comment_between_receiver_and_unary_selector_is_not_swallowed() {
-        // Review finding on PR #3529: a whitespace-only byte scan for the
-        // unary/binary selector's start treated a `/* ... */` block comment
-        // (legal BeamTalk lexer trivia between any two tokens on the same
-        // line) as part of the splice span, so a rewrite would silently
-        // delete the comment along with the old selector text.
-        // `first_token_span_after` fixes this by re-lexing rather than
-        // scanning bytes. (A `//` line comment can't occur in this position
-        // in the first place — verified independently: a bare newline
-        // between receiver and selector already splits them into two
-        // separate statements before any comment is involved, since
-        // BeamTalk newlines are significant statement terminators — so
-        // there is no reachable "line comment mid-send" case to cover.)
-        let src = "increment => self /* why */ bump";
-        let occurrences = find_selector_send_spans(src, "bump", "increase");
-        assert_eq!(occurrences.len(), 1, "got {occurrences:?}");
-        let hit = &occurrences[0][0];
-        assert_eq!(
-            slice(src, hit.span),
-            "bump",
-            "span should be JUST the selector token"
-        );
-    }
-
-    #[test]
-    fn comment_between_receiver_and_binary_selector_is_not_swallowed() {
-        let src = "combine: n => self /* why */ + n";
-        let occurrences = find_selector_send_spans(src, "+", "plus");
-        assert_eq!(occurrences.len(), 1, "got {occurrences:?}");
-        let hit = &occurrences[0][0];
-        assert_eq!(
-            slice(src, hit.span),
-            "+",
-            "span should be JUST the operator token"
-        );
     }
 
     #[test]

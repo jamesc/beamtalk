@@ -51,13 +51,6 @@ impl LexError {
     pub fn unterminated_string(span: Span) -> Self {
         Self::new(LexErrorKind::UnterminatedString, span)
     }
-
-    #[cfg(test)]
-    /// Creates an "unterminated comment" error.
-    #[must_use]
-    pub fn unterminated_comment(span: Span) -> Self {
-        Self::new(LexErrorKind::UnterminatedComment, span)
-    }
 }
 
 /// The kind of lexical error.
@@ -70,10 +63,6 @@ pub enum LexErrorKind {
     /// A string literal was not terminated.
     #[error("unterminated string literal")]
     UnterminatedString,
-
-    /// A block comment was not terminated.
-    #[error("unterminated block comment")]
-    UnterminatedComment,
 }
 
 #[cfg(test)]
@@ -87,14 +76,11 @@ mod tests {
 
         let err = LexError::unterminated_string(Span::new(0, 10));
         assert_eq!(err.to_string(), "unterminated string literal");
-
-        let err = LexError::unterminated_comment(Span::new(0, 4));
-        assert_eq!(err.to_string(), "unterminated block comment");
     }
 
     #[test]
     fn lex_error_span() {
-        let err = LexError::new(LexErrorKind::UnterminatedComment, Span::new(5, 15));
+        let err = LexError::new(LexErrorKind::UnterminatedString, Span::new(5, 15));
         assert_eq!(err.span.start(), 5);
         assert_eq!(err.span.end(), 15);
     }

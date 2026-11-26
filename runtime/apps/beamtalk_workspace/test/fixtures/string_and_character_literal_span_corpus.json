@@ -99,7 +99,7 @@
     "kind": "string",
     "source": "\"{x /* } */ y}\" rest",
     "expected_end": 15,
-    "why": "a block comment inside an interpolation hides its brace"
+    "why": "a `/*` inside an interpolation is not a comment, so its brace closes the interpolation (BT-5229)"
   },
   {
     "kind": "string",
@@ -183,7 +183,7 @@
     "kind": "unterminated_string",
     "source": "\"a {x /* c\nObject subclass: B\n */ }\"",
     "expected_end": 10,
-    "why": "a block comment inside an interpolation never runs over a definition header"
+    "why": "an interpolation containing `/*` never runs over a definition header"
   },
   {
     "kind": "unterminated_string",

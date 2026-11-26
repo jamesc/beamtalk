@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-5182: an unterminated block comment stops at the next class header.
+// BT-5229: a stray block-comment opener skips only its own line.
 Object subclass: A
   /* never closed
   greet => 1

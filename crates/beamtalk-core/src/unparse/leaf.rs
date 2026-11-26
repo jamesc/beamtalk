@@ -190,9 +190,8 @@ pub(super) fn class_ref(package: Option<&str>, name: &str) -> Document<'static> 
 /// Raw, unescaped text such as comment bodies, doc-comment lines, and error
 /// messages.
 ///
-/// The caller is responsible for any surrounding syntax (e.g. `// `, `/* */`)
-/// and for any content sanitisation it requires (such as neutralising `*/`
-/// inside a block comment).
+/// The caller is responsible for any surrounding syntax (e.g. `// `)
+/// and for any content sanitisation it requires.
 #[must_use]
 pub(super) fn raw_text(s: impl AsRef<str>) -> Document<'static> {
     Document::Owned(s.as_ref().to_string())
