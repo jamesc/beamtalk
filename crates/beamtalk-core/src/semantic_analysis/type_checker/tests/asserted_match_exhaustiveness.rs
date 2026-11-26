@@ -285,3 +285,62 @@ fn advisory_match_still_silent_on_dynamic_scrutinee() {
         "Dynamic scrutinee under plain match: must stay silent, got: {warnings:?}"
     );
 }
+
+// ── `Result` as a closed `ok:` / `error:` pair (BT-5278) ────────────────
+
+fn result_type() -> InferredType {
+    InferredType::known_with_args(
+        "Result",
+        vec![
+            InferredType::known("Integer"),
+            InferredType::known("String"),
+        ],
+    )
+}
+
+fn result_arm(selector: &str, binding: Pattern, body: Expression) -> MatchArm {
+    MatchArm::new(
+        Pattern::Constructor {
+            class: Identifier::new("Result", span()),
+            keywords: vec![(Identifier::new(selector, span()), binding)],
+            span: span(),
+        },
+        body,
+        span(),
+    )
+}
+
+#[test]
+fn result_scrutinee_with_ok_and_error_arms_is_accepted() {
+    let diags = asserted_diagnostics(
+        result_type(),
+        vec![
+            result_arm(
+                "ok:",
+                Pattern::Variable(Identifier::new("v", span())),
+                str_lit("a"),
+            ),
+            result_arm("error:", Pattern::Wildcard(span()), str_lit("b")),
+        ],
+    );
+    assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
+}
+
+#[test]
+fn result_scrutinee_with_redundant_wildcard_warns_unreachable() {
+    let diags = asserted_diagnostics(
+        result_type(),
+        vec![
+            result_arm(
+                "ok:",
+                Pattern::Variable(Identifier::new("v", span())),
+                str_lit("a"),
+            ),
+            result_arm("error:", Pattern::Wildcard(span()), str_lit("b")),
+            wildcard_arm(str_lit("c")),
+        ],
+    );
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+    assert_eq!(diags[0].severity, Severity::Warning);
+    assert!(diags[0].message.contains("unreachable"), "{diags:?}");
+}

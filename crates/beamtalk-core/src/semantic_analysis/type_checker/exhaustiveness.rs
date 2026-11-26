@@ -392,6 +392,14 @@ impl TypeChecker {
             && Self::arms_use_nil_or_type_pattern(arms)
         {
             Self::nil_or_type_match_residual(scrutinee_ty, arms, hierarchy)
+        } else if Self::is_result_constructor_match(scrutinee_ty, arms) {
+            // BT-5278: `Result(T, E)` is a closed pair (`ok:` / `error:`).
+            // Missing variants are reported by the pattern-based
+            // `check_match_exhaustiveness` validator, which keys on the same
+            // `sealed_type_all_constructors` table; here we only accept the
+            // scrutinee as provable and flag a redundant wildcard.
+            self.warn_unreachable_result_wildcard(arms);
+            return;
         } else {
             let ty_display = scrutinee_ty.display_for_diagnostic().unwrap_or_default();
             self.diagnostics.push(
@@ -437,6 +445,51 @@ impl TypeChecker {
             )
             .with_category(DiagnosticCategory::Type),
         );
+    }
+
+    /// BT-5278: scrutinee is a `Result` and every arm is a `Result`
+    /// constructor pattern, a wildcard, or a variable binding.
+    fn is_result_constructor_match(scrutinee_ty: &InferredType, arms: &[MatchArm]) -> bool {
+        matches!(scrutinee_ty, InferredType::Known { class_name, .. }
+            if class_name.as_str() == WellKnownClass::Result.as_str())
+            && arms
+                .iter()
+                .any(|a| matches!(a.pattern, Pattern::Constructor { .. }))
+            && arms.iter().all(|a| match &a.pattern {
+                Pattern::Constructor { class, .. } => {
+                    class.name.as_str() == WellKnownClass::Result.as_str()
+                }
+                Pattern::Wildcard(_) | Pattern::Variable(_) => true,
+                _ => false,
+            })
+    }
+
+    /// BT-5278: an unguarded wildcard/variable arm after unguarded, irrefutable
+    /// `ok:` and `error:` arms can never run.
+    fn warn_unreachable_result_wildcard(&mut self, arms: &[MatchArm]) {
+        let covers = |sel: &str| {
+            arms.iter().any(|a| {
+                a.guard.is_none()
+                    && matches!(&a.pattern, Pattern::Constructor { keywords, .. }
+                        if keywords.len() == 1
+                            && keywords[0].0.name.as_str() == sel
+                            && matches!(keywords[0].1, Pattern::Variable(_) | Pattern::Wildcard(_)))
+            })
+        };
+        if !(covers("ok:") && covers("error:")) {
+            return;
+        }
+        if let Some(arm) = arms.iter().find(|a| {
+            a.guard.is_none() && matches!(a.pattern, Pattern::Wildcard(_) | Pattern::Variable(_))
+        }) {
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    "unreachable arm: `ok:` and `error:` already cover every `Result`",
+                    arm.pattern.span(),
+                )
+                .with_category(DiagnosticCategory::Type),
+            );
+        }
     }
 
     /// Shared residual computation for both the advisory and

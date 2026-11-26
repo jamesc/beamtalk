@@ -5306,6 +5306,15 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 ]
 // => 42
 
+// The sub-pattern after `ok:` / `error:` may be a variable, `_`, a literal,
+// or a nested tuple `{a, b}` / map `#{#k => v}` pattern (BT-5277). Array
+// (`#[...]`) and binary sub-patterns are not supported there.
+(Result ok: {3, 4}) match: [
+  Result ok: {a, b} -> a + b;
+  Result error: _   -> 0
+]
+// => 7
+
 // Binary patterns (BT-663; BT-4096, BT-4097, BT-4143)
 (Binary fromBytes: #(3, 104, 105, 33, 99)) match: [
   <<n:8, payload:n/binary, rest/binary>> -> payload toBytes;
@@ -5566,6 +5575,15 @@ x matchExhaustive: [#ok -> 1; _ -> 0]
 // ⛔ Error: cannot verify `matchExhaustive:` is exhaustive — scrutinee type
 //    `Dynamic` is not a closed union of symbol singletons, `nil`, or
 //    concrete leaf classes
+```
+
+**`Result` is a closed pair (BT-5278).** A `Result(T, E)` scrutinee is accepted when the arms are `Result ok:` / `Result error:` constructor patterns: `ok:` and `error:` are the two variants, exactly as for plain `match:`. A missing variant is the usual compile error (`Non-exhaustive match: on sealed type \`Result\``), and a `_` arm after both variants is flagged as unreachable:
+
+```beamtalk
+r matchExhaustive: [
+  Result ok: v    -> v;
+  Result error: _ -> 0
+]
 ```
 
 Plain `match:`'s advisory warning behaviour is unchanged by `matchExhaustive:` — the two checks are independent, and only the keyword you write selects between them.

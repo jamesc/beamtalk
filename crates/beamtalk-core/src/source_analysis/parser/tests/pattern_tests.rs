@@ -816,3 +816,44 @@ fn parse_type_pattern_unterminated_generic_args_does_not_swallow_rest_of_match()
         source.len()
     );
 }
+
+// ── Nested destructuring patterns after a constructor keyword (BT-5277) ──
+
+#[test]
+fn parse_constructor_binding_nested_tuple_pattern() {
+    let (module, diags) =
+        parse_source("r match: [Result ok: {a, b} -> a + b; Result error: _ -> 0]");
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!("expected Expression::Match");
+    };
+    assert_eq!(arms.len(), 2);
+    let Pattern::Constructor { keywords, .. } = &arms[0].pattern else {
+        panic!("expected Pattern::Constructor, got: {:?}", arms[0].pattern);
+    };
+    assert!(
+        matches!(&keywords[0].1, Pattern::Tuple { elements, .. } if elements.len() == 2),
+        "expected nested tuple, got: {:?}",
+        keywords[0].1
+    );
+}
+
+#[test]
+fn parse_constructor_binding_nested_map_and_guard() {
+    for src in [
+        "r match: [Result ok: #{#k => v} -> v; _ -> 0]",
+        "r match: [Result ok: {a, {b, c}} when: [a > 0] -> b; _ -> 0]",
+    ] {
+        let (_module, diags) = parse_source(src);
+        assert!(diags.is_empty(), "{src}: unexpected diagnostics: {diags:?}");
+    }
+}
+
+#[test]
+fn parse_constructor_binding_nested_array_still_rejected() {
+    let (_module, diags) = parse_source("r match: [Result ok: #[x, y] -> x; _ -> 0]");
+    assert!(
+        !diags.is_empty(),
+        "array sub-pattern has no codegen; must be a parse error"
+    );
+}
