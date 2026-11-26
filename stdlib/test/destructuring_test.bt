@@ -493,3 +493,20 @@ TestCase subclass: DestructuringTest
     #(1, 2) do: [:x | #[w, ...rest] := #[w + x, x, x]]
     self assert: w equals: 3
     self assert: rest equals: #[2, 2]
+
+  // === Annotated destructuring elements (BT-5284) ===
+  testTupleDestructuringTypedElements =>
+    {_, sid :: Integer, es :: Boolean} := {#headers, 7, true}
+    self assert: sid + 1 equals: 8
+    self assert: es equals: true
+
+  testArrayDestructuringTypedElements =>
+    #[a :: Integer, b, c :: String] := #[1, 2, "x"]
+    self assert: a equals: 1
+    self assert: b equals: 2
+    self assert: c equals: "x"
+
+  testMapDestructuringTypedValues =>
+    #{#id => i :: Integer, #name => n} := #{#id => 5, #name => "bob"}
+    self assert: i equals: 5
+    self assert: n equals: "bob"

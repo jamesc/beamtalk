@@ -84,6 +84,7 @@ mod bt5175_counted_loop_literal_limit;
 mod bt5212_reflected_hook_lookup;
 mod bt5216_to_by_do_block_param;
 mod bt5241_class_field_reflection_dnu;
+mod bt5284_typed_destructure;
 mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;
