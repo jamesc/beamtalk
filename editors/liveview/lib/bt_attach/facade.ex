@@ -236,6 +236,28 @@ defmodule BtAttach.Facade do
     rotate_cookie: :admin
   }
 
+  # Ops declared in `@ops` with no `invoke/3` clause: vocabulary reserved for the
+  # RBAC catalog that answers `{:error, {:unsupported_op, op}}` once authorized
+  # (BT-5201). This list is visible on purpose and can only shrink:
+  # `facade_parity_test.exs` fails when an op without a clause is not listed here,
+  # when a listed op gains a clause, and when this list grows past its pinned
+  # ceiling. Each entry is implemented by dispatch, or removed from `@ops`, by the
+  # issue named beside it; `rotate_cookie` is decided in BT-5206.
+  @reserved_ops [
+    # BT-5203: implemented by dispatch (the load-source operation) or removed.
+    :load_source,
+    # BT-5204: answers version, node, workspace id and settings through `info`.
+    :info,
+    # BT-5205: the actor-list push stream; implemented by dispatch or removed.
+    :subscribe_actors,
+    # BT-5206 decides explicitly: implemented, or removed from the vocabulary.
+    :rotate_cookie
+  ]
+
+  @doc "Ops in the vocabulary that have no implementation yet (see `@reserved_ops`)."
+  @spec reserved_ops() :: [atom()]
+  def reserved_ops, do: @reserved_ops
+
   @doc "The full authorized op vocabulary (catalog keys)."
   @spec ops() :: [atom()]
   def ops, do: Map.keys(@ops)

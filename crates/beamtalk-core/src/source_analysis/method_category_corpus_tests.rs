@@ -9,7 +9,7 @@
 //! diagnostic anywhere in the pipeline:
 //!
 //! 1. **A near-miss divider is not diagnosed.** `=== Name ====` (mismatched
-//!    run lengths), `== Name ==` (too short), or a `///`/`/* */` divider-
+//!    run lengths), `== Name ==` (too short), or a `///` divider-
 //!    shaped comment all silently fail to parse and fall back to an ordinary
 //!    leading comment — the methods below are silently absorbed into
 //!    whichever category was already open. `fmt-check-beamtalk` and the

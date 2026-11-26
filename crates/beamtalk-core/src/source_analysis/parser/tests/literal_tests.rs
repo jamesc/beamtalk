@@ -797,13 +797,11 @@ fn incomplete_trailing_keyword() {
 }
 
 #[test]
-fn incomplete_unterminated_block_comment() {
-    assert!(!is_input_complete("/* unterminated comment"));
-    assert!(!is_input_complete("x := 1 /* still going"));
-}
-
-#[test]
-fn complete_block_comment() {
+fn stray_block_comment_opener_is_complete_but_invalid() {
+    // BT-5229: no later input can fix a `/*`, so the REPL reports it
+    // instead of showing a continuation prompt.
+    assert!(is_input_complete("/* unterminated comment"));
+    assert!(is_input_complete("x := 1 /* still going"));
     assert!(is_input_complete("/* comment */ x := 1"));
 }
 

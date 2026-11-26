@@ -45,11 +45,6 @@
         {
           "name": "comment.line.double-slash.beamtalk",
           "match": "//.*$"
-        },
-        {
-          "name": "comment.block.beamtalk",
-          "begin": "/\\*",
-          "end": "\\*/"
         }
       ]
     },

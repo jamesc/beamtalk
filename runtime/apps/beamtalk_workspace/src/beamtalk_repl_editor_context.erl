@@ -31,7 +31,7 @@ Contents:
     `walk_mixed_chain_class/2` — follow a chain's declared return types
   * `is_identifier_char/1` — the completion word-boundary rule
   * `skip_string_literal/1`, `skip_character_literal/1`, `skip_line_comment/1`,
-    `skip_block_comment/1` — lexeme skippers for the hover scanner
+    `skip_block_comment_opener/1` — lexeme skippers for the hover scanner
 
 These deliberately live beside, not on top of, the Rust compiler's lexer: the
 live REPL resolves against the running image, not an AST
@@ -58,7 +58,7 @@ Extracted from beamtalk_repl_ops_dev (BT-4706).
     skip_string_literal/1,
     skip_character_literal/1,
     skip_line_comment/1,
-    skip_block_comment/1,
+    skip_block_comment_opener/1,
     is_definition_header/1
 ]).
 
@@ -243,7 +243,7 @@ hover_tokens([C | Rest], Len, Total, Acc) when C =:= $\s; C =:= $\t; C =:= $\r -
 hover_tokens([$/, $/ | _] = Cs, _Len, Total, Acc) ->
     hover_skip(skip_line_comment(Cs), Total, Acc);
 hover_tokens([$/, $* | _] = Cs, _Len, Total, Acc) ->
-    hover_skip(skip_block_comment(Cs), Total, Acc);
+    hover_skip(skip_block_comment_opener(Cs), Total, Acc);
 hover_tokens([$" | _] = Cs, Len, Total, Acc) ->
     case skip_string_literal(Cs) of
         {ok, Rest} -> hover_push(word, Cs, Len - length(Rest), Len, Total, Acc);
@@ -915,7 +915,7 @@ Whether `Line` (text from column 1 of a line) starts a top-level class or
 protocol definition: optional `abstract` / `sealed` / `typed` / `internal`
 modifiers, a superclass name (optionally package-qualified, `json@Parser`,
 and with type arguments, `Collection(E)`), then `subclass:`; or
-`Protocol define:`. An unterminated string or block comment stops before
+`Protocol define:`. An unterminated string stops before
 such a line (BT-5182).
 
 Mirrors `is_definition_header` (`source_analysis/lexer.rs`); both run the
@@ -1042,11 +1042,6 @@ skip_interpolation_chars([${ | Rest], Depth) ->
     skip_interpolation_chars(Rest, Depth + 1);
 skip_interpolation_chars([$/, $/ | _] = Chars, Depth) ->
     skip_interpolation_chars(skip_line_comment(Chars), Depth);
-skip_interpolation_chars([$/, $* | _] = Chars, Depth) ->
-    case skip_block_comment_terminated(Chars) of
-        {ok, After} -> skip_interpolation_chars(After, Depth);
-        unterminated -> unterminated
-    end;
 skip_interpolation_chars([$$ | _] = Chars, Depth) ->
     skip_interpolation_chars(skip_character_literal(Chars), Depth);
 skip_interpolation_chars([$} | Rest], 1) ->
@@ -1082,25 +1077,6 @@ skip_nested_string([$\\, _ | Rest]) ->
     skip_nested_string(Rest);
 skip_nested_string([_ | Rest]) ->
     skip_nested_string(Rest).
-
-%% A `/* ... */` comment that must be terminated (inside an interpolation the
-%% lexer treats EOF, or a definition-header line, there as an unterminated
-%% string).
--spec skip_block_comment_terminated(string()) -> {ok, string()} | unterminated.
-skip_block_comment_terminated([$/, $* | Rest]) -> block_comment_end(Rest).
-
--spec block_comment_end(string()) -> {ok, string()} | unterminated.
-block_comment_end([]) ->
-    unterminated;
-block_comment_end([$\n | Next]) ->
-    case is_definition_header(Next) of
-        true -> unterminated;
-        false -> block_comment_end(Next)
-    end;
-block_comment_end([$*, $/ | Rest]) ->
-    {ok, Rest};
-block_comment_end([_ | Rest]) ->
-    block_comment_end(Rest).
 
 -doc """
 Skips one character literal starting at `$`, returning the characters
@@ -1154,56 +1130,17 @@ skip_line_comment_body([_ | Rest]) ->
     skip_line_comment_body(Rest).
 
 -doc """
-Skips one `/* ... */` block comment starting at the opening `/*`, returning
-the characters immediately after its closing `*/`. An unterminated comment
-ends before the next line that starts a definition
-(`is_definition_header/1`), less the whitespace in front of that line, or
-runs to end of input when there is none, as the lexer recovers (BT-5182).
+Skips a stray `/*` block-comment opener, returning the characters from the end
+of its line on. Block comments are not part of the language (BT-5229): the
+lexer reports one diagnostic and skips the rest of the opener's line, so a
+`.`, bracket, or `"` after the `/*` on that line is never read as real code.
 
-Mirrors `lex_block_comment/0` (`source_analysis/lexer.rs`): the whole span,
-delimiters included, is consumed atomically, so a `.`, bracket, or `"`
-inside it is never read as real code. An unterminated block comment is a
-lex-time error in the real compiler (this caller never reaches a
-comment that would fail to compile in practice) but is still consumed
-harmlessly to end of input here, following the module's policy of never
-raising on malformed input.
-
+Mirrors `lex_block_comment_opener/0` (`source_analysis/lexer.rs`).
 Conformance-tested against the real Rust lexer via the shared corpus
 `runtime/apps/beamtalk_workspace/test/fixtures/comment_span_corpus.json` —
 see `beamtalk_repl_editor_context_tests:comment_span_matches_shared_corpus_test/0` and
 `source_analysis::lexer::tests::comment_span_matches_shared_corpus`.
 """.
--spec skip_block_comment(string()) -> string().
-skip_block_comment([$/, $* | Rest]) ->
-    case skip_block_comment_body(Rest) of
-        {ok, After} -> After;
-        unterminated -> unterminated_comment_end(Rest, [])
-    end.
-
--spec skip_block_comment_body(string()) -> {ok, string()} | unterminated.
-skip_block_comment_body([]) ->
-    unterminated;
-skip_block_comment_body([$*, $/ | Rest]) ->
-    {ok, Rest};
-skip_block_comment_body([_ | Rest]) ->
-    skip_block_comment_body(Rest).
-
-%% The rest after an unterminated comment's body: from the whitespace in front
-%% of the first definition-header line on, or `[]`. `Seen` is the body so far,
-%% reversed.
--spec unterminated_comment_end(string(), string()) -> string().
-unterminated_comment_end([], _Seen) ->
-    [];
-unterminated_comment_end([$\n | Next] = Chars, Seen) ->
-    case is_definition_header(Next) of
-        true ->
-            {Blanks, _} = lists:splitwith(fun is_trailing_blank/1, Seen),
-            lists:reverse(Blanks) ++ Chars;
-        false ->
-            unterminated_comment_end(Next, [$\n | Seen])
-    end;
-unterminated_comment_end([C | Rest], Seen) ->
-    unterminated_comment_end(Rest, [C | Seen]).
-
--spec is_trailing_blank(char()) -> boolean().
-is_trailing_blank(C) -> C =:= $\s orelse C =:= $\t orelse C =:= $\r orelse C =:= $\n.
+-spec skip_block_comment_opener(string()) -> string().
+skip_block_comment_opener([$/, $* | Rest]) ->
+    drop_to_line_end(Rest).

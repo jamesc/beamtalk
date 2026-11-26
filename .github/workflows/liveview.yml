@@ -13,6 +13,8 @@ on:
       - 'editors/liveview/**'
       - 'tests/conformance/**'
       - 'runtime/apps/beamtalk_runtime/test/fixtures/beamtalk_root_dir_conformance.json'
+      # BT-5201: the allowlist test pins this inventory table to its allowlist.
+      - 'docs/development/surface-parity.md'
       - '.github/workflows/liveview.yml'
   pull_request:
     branches: [main]
@@ -21,6 +23,8 @@ on:
       - 'editors/liveview/**'
       - 'tests/conformance/**'
       - 'runtime/apps/beamtalk_runtime/test/fixtures/beamtalk_root_dir_conformance.json'
+      # BT-5201: the allowlist test pins this inventory table to its allowlist.
+      - 'docs/development/surface-parity.md'
       - '.github/workflows/liveview.yml'
 
 concurrency:

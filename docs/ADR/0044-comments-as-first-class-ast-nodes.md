@@ -85,7 +85,7 @@ This rule is unambiguous and eliminates the dual-storage anti-pattern.
 `MethodDefinition` as established by ADR 0008. They are **not** duplicated into
 `CommentAttachment.leading`. The parser handles them in separate passes:
 `collect_doc_comment()` extracts `///` trivia into `doc_comment`;
-`collect_comment_attachment()` extracts `//` and `/* */` trivia into `CommentAttachment`.
+`collect_comment_attachment()` extracts `//` trivia into `CommentAttachment`.
 
 This avoids Go's dual-storage anti-pattern: each comment type has exactly one home.
 
@@ -93,12 +93,12 @@ This avoids Go's dual-storage anti-pattern: each comment type has exactly one ho
 |---------------|-------------|-----------------|----------------|
 | `///` doc comment | `doc_comment: Option<String>` | `CompiledMethod.doc` (object state) | ADR 0008 (AST field), ADR 0033 (runtime path) |
 | `//` line comment | `CommentAttachment.leading` or `.trailing` | Not compiled — formatter only | This ADR |
-| `/* */` block comment | `CommentAttachment.leading` or `.trailing` | Not compiled — formatter only | This ADR |
+| ~~`/* */` block comment~~ | Removed (BT-5229): `/*` is a lexer diagnostic, never trivia | — | Amendment below |
 
 Note: ADR 0033 superseded ADR 0008's EEP-48 doc chunk generation. `///` comments now
 compile to `doc:` message sends that populate `CompiledMethod.doc` at class load time,
 rather than being embedded as BEAM file chunks. The `doc_comment` AST field remains the
-correct vehicle for carrying this data through compilation. Regular `//` and `/* */`
+correct vehicle for carrying this data through compilation. Regular `//`
 comments have no runtime representation — they exist in the AST solely for the
 formatter/unparser.
 
@@ -668,3 +668,7 @@ compiled to runtime objects.
   - [Go issue #20744: Free-floating comments](https://github.com/golang/go/issues/20744)
   - [Elixir `Code.string_to_quoted_with_comments/2`](https://hexdocs.pm/elixir/Code.html)
   - [Newspeak Language Specification](https://newspeaklanguage.org/spec/newspeak-spec.pdf)
+
+## Amendment (2026-11-26): block comments removed (BT-5229)
+
+The comment model table above listed `/* */` block comments as a second kind of regular comment. Block comments were removed from the language (see the amendment to [ADR 0039](0039-syntax-pragmatism-vs-smalltalk.md), decision 1). `Trivia::BlockComment`, `CommentKind::Block` and `Comment::block` no longer exist, and every mention of `/* */` in this ADR describes the original design only. The comment kinds are now `//` (`CommentKind::Line`), and `///` (a declaration's `doc_comment`, or `CommentKind::Doc` when it could not attach). A `/*` in source is a lexer error token covering the `/*` to the end of its line, so there is no block-comment position for the formatter to preserve.

@@ -138,10 +138,10 @@ test("self and nil are constants", () => {
   assert.ok(pairs.some(([t, c]) => t === "nil" && c === "constant"));
 });
 
-test("continuous mode carries block comments across lines", () => {
-  const lines = ["/* start", "still comment */ x"];
+test("continuous mode carries strings across lines", () => {
+  const lines = ['"start', 'still string" x'];
   const [, second] = tokenizer.tokenizeLines(lines, true);
-  assert.deepEqual(second[0], [0, "still comment */".length, "comment"]);
+  assert.deepEqual(second[0], [0, 'still string"'.length, "string"]);
   const [, fresh] = tokenizer.tokenizeLines(lines, false);
   assert.notDeepEqual(fresh[0], second[0]);
 });
