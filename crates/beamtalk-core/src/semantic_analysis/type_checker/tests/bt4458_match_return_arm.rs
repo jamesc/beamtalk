@@ -322,3 +322,18 @@ fn tail_return_expression_is_reported_once() {
         .count();
     assert_eq!(n, 1, "expected exactly one warning: {diags:?}");
 }
+
+#[test]
+fn all_branches_return_tail_is_reported_once() {
+    let diags = type_messages(
+        r#"typed Object subclass: ZzOnce
+  class foo: x :: Boolean -> Integer =>
+    x ifTrue: [^"a"] ifFalse: [^1]
+"#,
+    );
+    let n = diags
+        .iter()
+        .filter(|m| m.contains("declares return type Integer"))
+        .count();
+    assert_eq!(n, 1, "expected exactly one warning: {diags:?}");
+}

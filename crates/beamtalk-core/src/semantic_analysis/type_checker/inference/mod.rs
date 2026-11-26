@@ -454,7 +454,10 @@ impl TypeChecker {
         if method.return_type.is_some() {
             let mut seen: Vec<InferredType> = tail_returned;
             // A body that ends in `^expr` is already checked as the body type.
-            seen.push(body_type.clone());
+            match &body_type {
+                InferredType::Union { members, .. } => seen.extend(members.iter().cloned()),
+                other => seen.push(other.clone()),
+            }
             for ty in collected_returns {
                 if matches!(ty, InferredType::Dynamic(_) | InferredType::Never)
                     || seen.contains(&ty)
