@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{ConstructorSelectors, Expression};
+use crate::ast::{ConstructorSelectors, Expression, WellKnownSelector};
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::string_utils::is_symbol_singleton_name;
@@ -276,7 +276,13 @@ impl TypeChecker {
         let is_implicit_constructor = matches!(selector, "new" | "new:" | "basicNew")
             && !hierarchy.is_abstract(class_name)
             && !hierarchy.is_actor_subclass(class_name);
-        hierarchy.resolves_selector("Class", selector)
+        // ADR 0153 decision 7 (BT-5241): `Object` declares the instance-field
+        // reflection selectors, but a class has no fields, so the runtime's
+        // class-chain fallthrough refuses them for a class object. A class
+        // method of that name is found by the caller's `find_class_method`.
+        let is_field_reflection = WellKnownSelector::from_name(selector)
+            .is_some_and(WellKnownSelector::is_field_reflection);
+        (!is_field_reflection && hierarchy.resolves_selector("Class", selector))
             || is_implicit_constructor
             || (is_factory_selector && hierarchy.resolves_selector(class_name, selector))
     }
