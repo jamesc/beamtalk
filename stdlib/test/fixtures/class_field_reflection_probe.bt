@@ -9,15 +9,25 @@
 
 Object subclass: ClassFieldReflectionProbe
 
-  class selfFieldAt => self fieldAt: #x
+  class selfFieldAt =>
+    @expect dnu
+    self fieldAt: #x
 
-  class selfFieldAtPut => self fieldAt: #x put: 1
+  class selfFieldAtPut =>
+    @expect dnu
+    self fieldAt: #x put: 1
 
-  class selfHasField => self hasField: #x
+  class selfHasField =>
+    @expect dnu
+    self hasField: #x
 
-  class selfClearField => self clearField: #x
+  class selfClearField =>
+    @expect dnu
+    self clearField: #x
 
-  class selfHasFieldInBlock => [self hasField: #x] value
+  class selfHasFieldInBlock =>
+    @expect dnu
+    [self hasField: #x] value
 
   class fieldAtOf: cls => cls fieldAt: #x
 

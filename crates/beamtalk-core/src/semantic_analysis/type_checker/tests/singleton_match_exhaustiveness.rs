@@ -21,6 +21,7 @@ use super::common::*;
 
 use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::Severity;
+use crate::test_helpers::test_support::wildcard_arm;
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 
@@ -42,11 +43,6 @@ fn guarded_sym_arm(name: &str, guard: Expression, body: Expression) -> MatchArm 
         body,
         span(),
     )
-}
-
-/// An unguarded `_ -> body` wildcard arm — full coverage.
-fn wildcard_arm(body: Expression) -> MatchArm {
-    MatchArm::new(Pattern::Wildcard(span()), body, span())
 }
 
 /// A guarded `_ when: [guard] -> body` wildcard arm — does NOT suppress the

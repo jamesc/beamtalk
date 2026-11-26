@@ -178,14 +178,11 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::EmptyBody => "EmptyBody",
         DiagnosticCategory::Lint => "Lint",
         DiagnosticCategory::DeadAssignment => "DeadAssignment",
-        DiagnosticCategory::ExtensionConflict => "ExtensionConflict",
-        DiagnosticCategory::Deprecation => "Deprecation",
         DiagnosticCategory::ActorNew => "ActorNew",
         DiagnosticCategory::Visibility => "Visibility",
         DiagnosticCategory::UnresolvedClass => "UnresolvedClass",
         DiagnosticCategory::UnresolvedFfi => "UnresolvedFfi",
         DiagnosticCategory::ArityMismatch => "ArityMismatch",
-        DiagnosticCategory::ShadowedClass => "ShadowedClass",
         DiagnosticCategory::TypeAnnotation => "TypeAnnotation",
         DiagnosticCategory::Inheritance => "Inheritance",
         DiagnosticCategory::Sendability => "Sendability",
@@ -265,8 +262,7 @@ impl fmt::Display for DiagnosticSummary {
             // Annotate categories excluded from --warnings-as-errors.
             if matches!(
                 cat,
-                DiagnosticCategory::Deprecation
-                    | DiagnosticCategory::UnresolvedClass
+                DiagnosticCategory::UnresolvedClass
                     | DiagnosticCategory::UnresolvedFfi
                     | DiagnosticCategory::ArityMismatch
             ) {
@@ -409,14 +405,11 @@ mod tests {
             (DiagnosticCategory::EmptyBody, "EmptyBody"),
             (DiagnosticCategory::Lint, "Lint"),
             (DiagnosticCategory::DeadAssignment, "DeadAssignment"),
-            (DiagnosticCategory::ExtensionConflict, "ExtensionConflict"),
-            (DiagnosticCategory::Deprecation, "Deprecation"),
             (DiagnosticCategory::ActorNew, "ActorNew"),
             (DiagnosticCategory::Visibility, "Visibility"),
             (DiagnosticCategory::UnresolvedClass, "UnresolvedClass"),
             (DiagnosticCategory::UnresolvedFfi, "UnresolvedFfi"),
             (DiagnosticCategory::ArityMismatch, "ArityMismatch"),
-            (DiagnosticCategory::ShadowedClass, "ShadowedClass"),
             (DiagnosticCategory::TypeAnnotation, "TypeAnnotation"),
             (DiagnosticCategory::Inheritance, "Inheritance"),
             (DiagnosticCategory::Sendability, "Sendability"),
@@ -510,13 +503,13 @@ mod tests {
     fn display_annotates_categories_excluded_from_warnings_as_errors() {
         let diags = vec![make_diag(
             Severity::Warning,
-            Some(DiagnosticCategory::Deprecation),
+            Some(DiagnosticCategory::UnresolvedClass),
         )];
         let summary = DiagnosticSummary::from_diagnostics(&diags, 1);
         let text = summary.to_string();
         assert!(
             text.contains("(excluded from --warnings-as-errors)"),
-            "Expected exclusion annotation for Deprecation, got: {text}"
+            "Expected exclusion annotation for UnresolvedClass, got: {text}"
         );
     }
 

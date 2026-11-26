@@ -61,14 +61,11 @@ unused = "warn"
 empty-body = "error"
 lint = "off"
 dead-assignment = "warn"
-extension-conflict = "error"
-deprecation = "warn"
 actor-new = "error"
 visibility = "error"
 unresolved-class = "warn"
 unresolved-ffi = "warn"
 arity-mismatch = "warn"
-shadowed-class = "warn"
 type-annotation = "hint"
 inheritance = "error"
 sendability = "hint"
@@ -76,7 +73,7 @@ sendability = "hint"
     );
 
     let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
-    assert_eq!(manifest.diagnostics.len(), 17);
+    assert_eq!(manifest.diagnostics.len(), 14);
     assert_eq!(
         manifest.diagnostics[&DiagnosticCategory::Dnu],
         DiagnosticSeverityOverride::Hint
