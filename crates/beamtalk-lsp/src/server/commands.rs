@@ -47,6 +47,7 @@ pub(crate) const BEAMTALK_LSP_COMMANDS: &[&str] = &[
     CMD_RECHECK_IMAGE,
     CMD_REMOVE_METHOD,
 ];
+
 /// What an `executeCommand` invocation sends to the workspace: a Beamtalk
 /// expression for the `eval` op, or a dedicated structured operation whose
 /// parameters travel as values rather than as text spliced into source.
@@ -54,7 +55,7 @@ pub(crate) const BEAMTALK_LSP_COMMANDS: &[&str] = &[
 pub(crate) enum CommandCall {
     /// Evaluate this Beamtalk expression.
     Eval(String),
-    /// The `save-class` op (BT-5203): `beamtalk.saveClass`.
+    /// The `save-class` op (BT-5203, wired to the LSP by BT-5276): `beamtalk.saveClass`.
     SaveClass { source: String, path: String },
 }
 

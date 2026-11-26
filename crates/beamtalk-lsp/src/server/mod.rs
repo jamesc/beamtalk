@@ -903,7 +903,10 @@ impl LanguageServer for Backend {
                     }
                     let pretty = response.value_string();
                     let value = response.value.unwrap_or(serde_json::Value::Null);
-                    if !pretty.is_empty() {
+                    // The INFO line would repeat warnings already logged above.
+                    let has_warnings = matches!(call, CommandCall::SaveClass { .. })
+                        && !save_class_warnings(Some(&value)).is_empty();
+                    if !pretty.is_empty() && !has_warnings {
                         self.client
                             .log_message(
                                 MessageType::INFO,

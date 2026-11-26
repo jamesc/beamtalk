@@ -37,7 +37,7 @@ use beamtalk_language_service::{
 use beamtalk_repl_protocol::{ReplResponse, RequestBuilder, handshake, ws_client};
 
 /// How long to wait for individual WebSocket reads / writes during the auth
-/// handshake and per `evaluate` call. Generous enough that a slow local
+/// handshake and per `send_call`. Generous enough that a slow local
 /// workspace startup doesn't time out, tight enough that LSP commands return
 /// in a reasonable time when the workspace has gone away.
 const IO_TIMEOUT: Duration = Duration::from_secs(30);
@@ -299,7 +299,7 @@ pub struct RuntimeClient {
 
 struct RuntimeInner {
     /// Sender half of the writer task channel. The LSP side calls
-    /// `evaluate(...)` which sends a request + correlation oneshot here; the
+    /// `send_call(...)` which sends a request + correlation oneshot here; the
     /// writer task serialises to the socket and the reader task fulfills the
     /// oneshot when the reply arrives.
     sender: mpsc::Sender<EvalRequest>,
@@ -1746,7 +1746,7 @@ mod tests {
     // --- request/response ops -----------------------------------------
 
     #[tokio::test]
-    async fn evaluate_round_trips_a_value() {
+    async fn send_call_eval_round_trips_a_value() {
         let ws = spawn_workspace(Handshake::Ok, reply_with(json!("42"))).await;
         let sinks = Sinks::new();
         let client = connect_client(&ws, &sinks).await;
@@ -1789,8 +1789,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn evaluate_surfaces_a_structured_error_reply_as_ok() {
-        // `evaluate` does not decode — a `#beamtalk_error{}` reply comes back
+    async fn send_call_surfaces_a_structured_error_reply_as_ok() {
+        // `send_call` does not decode — a `#beamtalk_error{}` reply comes back
         // as a successful transport result the caller inspects with
         // `is_error()`. Only transport failures are `Err`.
         let ws = spawn_workspace(
