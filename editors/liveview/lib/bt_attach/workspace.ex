@@ -2257,15 +2257,27 @@ defmodule BtAttach.Workspace do
     }
   end
 
-  # A status word is an atom the cockpit already names (`git_state_label/1`);
-  # one this node has never seen stays text, so remote text never makes an atom.
-  defp git_state(word) when is_binary(word) do
-    String.to_existing_atom(word)
-  rescue
-    ArgumentError -> word
-  end
+  # The status words `beamtalk_git` produces, as literals: remote text never
+  # makes an atom, and a word this node does not know stays text. A test
+  # (`workspace_git_states_test.exs`) reads `beamtalk_git.erl` and fails when it
+  # names a word that is not here.
+  @git_states %{
+    "unmodified" => :unmodified,
+    "modified" => :modified,
+    "added" => :added,
+    "deleted" => :deleted,
+    "renamed" => :renamed,
+    "copied" => :copied,
+    "unmerged" => :unmerged,
+    "type_changed" => :type_changed,
+    "untracked" => :untracked,
+    "ignored" => :ignored
+  }
 
-  defp git_state(word), do: word
+  @doc false
+  def git_state_words, do: Map.keys(@git_states)
+
+  defp git_state(word), do: Map.get(@git_states, word, word)
 
   # A refusal or failure from a git operation (`dispatch_browse/2` has already
   # turned a badrpc into `{:error, {:unreachable, _}}`), or a reply of the wrong
