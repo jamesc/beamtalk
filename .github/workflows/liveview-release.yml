@@ -60,9 +60,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-latest
+          # Pinned, not floating (ADR 0154 § 3).
+          - runner: ubuntu-24.04
             platform: linux-x86_64
-          - runner: macos-latest
+          # Pinned, not floating (ADR 0154 § 3).
+          - runner: macos-15
             platform: macos-arm64
           - runner: macos-15-intel
             platform: macos-x86_64

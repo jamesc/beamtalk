@@ -44,7 +44,8 @@ env:
 jobs:
   # ─── Full distribution (Linux x86_64) ─────────────────────────────────
   linux-x86_64:
-    runs-on: ubuntu-latest
+    # Pinned, not floating: uat tests each target on the image that built it (ADR 0154 § 3).
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -184,7 +185,8 @@ jobs:
 
   # ─── Full distribution (macOS ARM64) ──────────────────────────────────
   macos-arm64:
-    runs-on: macos-latest
+    # Pinned, not floating: uat tests each target on the image that built it (ADR 0154 § 3).
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -376,7 +378,8 @@ jobs:
   notify-uat:
     needs: [linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64]
     if: github.event_name == 'release'
-    runs-on: ubuntu-latest
+    # Pinned, not floating: uat tests each target on the image that built it (ADR 0154 § 3).
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -410,6 +413,50 @@ jobs:
               "version": "${{ steps.version.outputs.version }}",
               "tag": "${{ steps.version.outputs.tag }}"
             }
+
+  # ─── beamtalk-artifact dispatch (ADR 0154 § 3, BT-5306) ──────────────────
+  # The payload uat verifies: every asset's sha256 and the OTP window. It waits
+  # for the lanes that attach assets to the release (VS Code .vsix, LiveView IDE
+  # archives) so `assets` is complete. The `beamtalk-release` dispatch above stays
+  # until uat accepts both event types; a follow-up removes it.
+  notify-uat-artifact:
+    needs: [linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, vscode-extension, liveview-ide]
+    if: github.event_name == 'release'
+    # Pinned, not floating: ADR 0154 § 3.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: scripts/ci/determine-version.sh "$EVENT_NAME" "$RELEASE_TAG" "$INPUT_TAG"
+
+      - name: Build uat dispatch payload
+        id: uat
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          payload="$(scripts/ci/uat-dispatch-payload.sh release "${VERSION}" "${TAG}" "${GITHUB_SHA}")"
+          echo "payload=${payload}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch beamtalk-artifact to uat
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
+        with:
+          token: ${{ secrets.UAT_DISPATCH_TOKEN }}
+          repository: jamesc/beamtalk-uat
+          event-type: beamtalk-artifact
+          client-payload: ${{ steps.uat.outputs.payload }}
 
   # ─── VS Code extension (delegated to release-vscode.yml) ────────────────
   vscode-extension:

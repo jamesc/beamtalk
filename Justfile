@@ -1016,6 +1016,7 @@ lint-repo: \
     test-publish-rolling-release \
     test-refresh-edge \
     test-sign-macos-nested-binaries \
+    test-uat-dispatch-payload \
     test-vs-elixir-nightly \
     test-workflow-paths
 
@@ -1106,6 +1107,15 @@ test-publish-rolling-release:
 [windows]
 test-publish-rolling-release:
     @echo "test-publish-rolling-release: skipped on Windows (covered by Linux CI)"
+
+# Test (BT-5306): uat-dispatch-payload.sh builds the beamtalk-artifact payload.
+[unix]
+test-uat-dispatch-payload:
+    @bash scripts/ci/test-uat-dispatch-payload.sh
+
+[windows]
+test-uat-dispatch-payload:
+    @echo "test-uat-dispatch-payload: skipped on Windows (covered by Linux CI)"
 
 # Test (BT-5087): scripts/install.sh needs a verified checksum unless
 # --insecure-skip-checksum, replaces rather than overlays, and --uninstall works.
