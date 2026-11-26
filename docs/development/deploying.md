@@ -208,6 +208,34 @@ local node over TLS. Each of them first runs the TLS check in a short-lived VM,
 so a `ping` takes about twice as long as on loopback: allow for that in health
 check timeouts.
 
+**Unauthenticated clients and the distribution port.** A client that does
+not speak TLS (for example a plain `erl -sname` node) is turned away in a few
+milliseconds and does not hold up the next peer. A client that opens TCP
+connections and then sends nothing does. OTP's TLS distribution listener runs
+at most one pending handshake per scheduler (`erlang:system_info(schedulers_online)`),
+and each one waits up to `net_setuptime` (7 s by default) for the peer's TLS
+hello. A host that holds that many idle connections open stops this node from
+accepting new peers until they time out, and can keep doing so. Established
+connections are not affected. So:
+
+- Firewall epmd and the distribution ports to your cluster's own hosts. This is
+  the real mitigation: only hosts you trust can reach the listener at all.
+- Optionally shorten the window with `-kernel net_setuptime 2` (seconds) in a
+  `[release] vm-args` overlay. Keep it above the slowest TLS handshake between
+  your hosts.
+
+**macOS and a wildcard interface.** On macOS, an epmd that listens on every
+interface (`RELEASE_DIST_INTERFACE=0.0.0.0`) does not stop a second,
+loopback-only epmd from starting on the same port; Linux refuses the second
+one. Any non-TLS Erlang node started later on that host (a loopback release,
+a `bin/<name> ping` without the TLS variables, a beamtalk REPL) starts that
+loopback epmd, which then answers every loopback lookup and does not know this
+node. The node keeps running and other hosts still reach it, but the local
+`ping`, `stop`, `rpc` and `remote_console` report it as down until that epmd
+is stopped (`epmd -kill`, with its nodes stopped). On macOS, name a specific
+interface address instead of `0.0.0.0`: epmd then holds loopback on that port
+itself, and a second epmd cannot start there.
+
 ## Docker
 
 ```dockerfile
