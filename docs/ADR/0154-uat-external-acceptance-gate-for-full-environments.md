@@ -456,7 +456,7 @@ are discarded, then **5 measured** iterations. It reports **p50, p75 and p95** a
 **gates on p75**:
 
 ```text
-p75 ≤ threshold[benchmark][target] × BEAMTALK_UAT_BENCH_MULTIPLIER
+p75 ≤ threshold[benchmark][target] × multiplier[runner_class]
 ```
 
 The multipliers live in `bench/thresholds.toml` beside the thresholds, as a
