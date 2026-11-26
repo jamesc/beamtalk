@@ -42,8 +42,8 @@ Events (binary → BEAM) — ETF tuples on the port:
 
 `exit` is the last event for a child. It is sent once the child has exited
 and its output pipes have closed. If a grandchild still holds them, it is
-sent once they have been quiet for 2 s (at most 30 s after the exit), and
-later output is dropped. A failed `spawn` is answered with
+sent once they have been quiet for 2 s (at most 30 s after the exit, plus
+up to 2 s waiting for stdin reports, below), and later output is dropped. A failed `spawn` is answered with
 `{exit, ChildId, -1}`.
 
 `stdin_queued` answers a `write_stdin` the binary accepted. Every

@@ -37,8 +37,10 @@
 //!   A queued write gets at most one of these two, in queue order, and
 //!   always after its `stdin_queued`. Neither is sent after `exit`. Before
 //!   `exit` the port waits up to [`DRAIN_GRACE`] for every queued write to be
-//!   reported; one still unreported then (its pipe is full and held open by
-//!   a process that does not read it) gets none: `exit` ends it.
+//!   reported (after the output drain, so `exit` can come up to
+//!   [`DRAIN_MAX`] + [`DRAIN_GRACE`] after the child exits); one still
+//!   unreported then (its pipe is full and held open by a process that does
+//!   not read it) gets none: `exit` ends it.
 //! - `{exit, ChildId, ExitCode}` — the last event for a child. A failed
 //!   `spawn` gets `{exit, ChildId, -1}` (unless the id belongs to a live child).
 //! - `{error, ChildId, Command, Reason}` — the `Command` (`spawn`,
@@ -50,8 +52,9 @@
 //! - **Exit.** `exit` is sent once the child has exited and its stdout and
 //!   stderr have reached EOF. If they have not, because a grandchild holds
 //!   them, it is sent once no output has arrived for [`DRAIN_GRACE`] (and at
-//!   most [`DRAIN_MAX`] after the exit). Output arriving later is dropped, so
-//!   `exit` stays last.
+//!   most [`DRAIN_MAX`] after the exit, plus up to [`DRAIN_GRACE`] more for
+//!   stdin reports, see Events). Output arriving later is dropped, so `exit`
+//!   stays last.
 //! - **What stays registered.** On Unix the child's entry, and so its process
 //!   group, stays registered (killable by `kill`, and killed when the port
 //!   stops) until the group is empty, so a background grandchild dies with the
@@ -280,7 +283,7 @@ impl EventGate {
         let state = self.stdin_state();
         let _ = self
             .stdin_settled
-            .wait_timeout_while(state, max, |s| s.pending > 0 && !s.failed);
+            .wait_timeout_while(state, max, |s| s.unreported > 0 && !s.failed);
     }
 }
 
@@ -759,6 +762,7 @@ impl StdinQueue {
             ));
         }
         stdin.pending += len;
+        stdin.unreported += 1;
         send_event(&self.events, &stdin_queued_event(child_id));
         Ok(())
     }
@@ -767,8 +771,12 @@ impl StdinQueue {
 /// What a child's stdin queue and its writer thread share (in [`EventGate`]).
 #[derive(Default)]
 struct StdinState {
-    /// Bytes accepted (`stdin_queued`) but not yet reported written.
+    /// Bytes accepted (`stdin_queued`) but not yet reported written; bounds
+    /// the queue.
     pending: usize,
+    /// Writes accepted but not yet reported, counted apart from `pending` so
+    /// a zero-length write is waited for too.
+    unreported: usize,
     /// Set once the writer thread has failed: no write is queued after its
     /// `stdin_failed`.
     failed: bool,
@@ -804,6 +812,7 @@ fn spawn_stdin_writer(
                 Ok(()) => {
                     gate.send(&report_to, &stdin_written_event(child_id));
                     state.pending = state.pending.saturating_sub(data.len());
+                    state.unreported = state.unreported.saturating_sub(1);
                 }
                 Err(e) => {
                     debug!("stdin write failed for child {child_id}: {e}");
@@ -814,6 +823,7 @@ fn spawn_stdin_writer(
                     // Every write still queued is covered by this report.
                     state.failed = true;
                     state.pending = 0;
+                    state.unreported = 0;
                 }
             }
             drop(state);
