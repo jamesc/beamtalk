@@ -29,7 +29,7 @@ the count is exact without any sleep.
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
--export([whereis_counter/2]).
+-export([whereis_counter/2, forward_dispatch_stop/4]).
 
 setup() ->
     {ok, Peer, PeerNode} = beamtalk_dist_test_helper:start_peer("bt5271_registered"),
@@ -209,20 +209,39 @@ dispatch_events_on_resolves_the_pid(PeerNode) ->
     {Name, Pid} = start_named_counter(PeerNode, 4),
     Ref = {registered, Name, PeerNode},
     ok = beamtalk_telemetry:enable_dispatch_events(),
+    HandlerId = {?MODULE, make_ref()},
+    Self = self(),
+    ok = telemetry:attach(
+        HandlerId,
+        [beamtalk, actor, dispatch, stop],
+        fun ?MODULE:forward_dispatch_stop/4,
+        #{dest => Self}
+    ),
     try
         {Result, Whereis} = with_whereis_count(PeerNode, Name, fun() ->
             beamtalk_actor:sync_send(Ref, getValue, [])
         end),
         ?assertEqual(4, Result),
         ?assertEqual(1, Whereis),
+        %% The send's dispatch event names the remote actor's pid.
+        ?awaitMessage({dispatch_stop, #{selector := getValue} = StopMeta}),
+        ?assertEqual(Pid, maps:get(pid, StopMeta)),
+        ?assertEqual(PeerNode, node(maps:get(pid, StopMeta))),
         {ok, CastWhereis} = with_whereis_count(PeerNode, Name, fun() ->
             beamtalk_actor:cast_send(Ref, 'setValue:', [4])
         end),
         ?assertEqual(1, CastWhereis)
     after
+        ok = telemetry:detach(HandlerId),
         ok = beamtalk_telemetry:disable_dispatch_events(),
         stop_remote(PeerNode, Pid)
     end.
+
+-doc "Telemetry handler: forwards a dispatch stop event's metadata to `dest`.".
+-spec forward_dispatch_stop(list(), map(), map(), map()) -> ok.
+forward_dispatch_stop(_Event, _Measurements, Metadata, #{dest := Dest}) ->
+    Dest ! {dispatch_stop, Metadata},
+    ok.
 
 %%====================================================================
 %% 2. Errors unchanged
