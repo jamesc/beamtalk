@@ -203,6 +203,8 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   def subscribe_transcript(_pid), do: :ok
   def unsubscribe_transcript(_pid), do: :ok
+  # BT-5206: every exit path drops the pid from every stream through one call.
+  def unsubscribe_all(pid), do: record({:unsubscribe_all, pid}) && :ok
   def subscribe_bindings(_pid), do: :ok
   def unsubscribe_bindings(_pid), do: :ok
   def subscribe_actors(_pid), do: :ok

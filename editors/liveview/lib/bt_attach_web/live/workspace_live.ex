@@ -825,7 +825,7 @@ defmodule BtAttachWeb.WorkspaceLive do
     # LiveView process), so it does NOT go away just because we exit — the
     # registry's reap is what actually reclaims it.
     if socket.assigns[:connected] do
-      Workspace.unsubscribe_all(self())
+      Application.get_env(:bt_attach, :workspace_client, Workspace).unsubscribe_all(self())
 
       # Also drop any live per-object change subscription (BT-2492) so the watch
       # server stops pushing to this dead pid. Belt-and-braces: the watch server

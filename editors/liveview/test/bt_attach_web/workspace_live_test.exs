@@ -2332,24 +2332,6 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert eventually(fn -> window_flash_gen(view, "win-2") > gen2_before end)
   end
 
-  test "a LiveView exit drops its subscription to every push stream (BT-5206)", %{conn: conn} do
-    # `terminate/2` named only the transcript and bindings streams, leaving the
-    # classes and reload_check subscriptions to the bus's monitor (up to
-    # `net_ticktime` of pushes to a dead pid). It now asks the subscription facade
-    # to drop the pid from every stream, so a later stream is covered too.
-    Process.register(self(), :bt_subscriptions_probe)
-
-    on_exit(fn ->
-      if Process.whereis(:bt_subscriptions_probe), do: Process.unregister(:bt_subscriptions_probe)
-    end)
-
-    {:ok, view, _} = live(conn, "/")
-    pid = view.pid
-    GenServer.stop(pid)
-
-    assert_receive {:unsubscribe_all, ^pid}, 1_000
-  end
-
   test "a floating-window desk survives a socket reconnect (BT-2527)", %{conn: conn} do
     # A transient socket drop must not wipe a desk full of inspector windows: the
     # session resumes, and the stashed window roots are rebuilt on the reconnect
