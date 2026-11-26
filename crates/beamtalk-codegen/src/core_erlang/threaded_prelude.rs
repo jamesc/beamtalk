@@ -834,8 +834,9 @@ impl CoreErlangGenerator {
         Ok(None)
     }
 
-    /// Whether a conditional's `receiver` is sequenced ahead of the
-    /// conditional by [`Self::conditional_receiver_operand`], its prelude
+    /// Whether a conditional's `receiver` (or a `match:`'s scrutinee,
+    /// BT-5289: [`Self::sequenced_construct_operand`]) is sequenced ahead of
+    /// the construct by [`Self::conditional_receiver_operand`], its prelude
     /// spliced into the caller's frame: it holds a value-position local
     /// assignment (BT-3910), or, in an actor instance method, its evaluation
     /// advances the `State` family (an actor self-send anywhere in its
@@ -1020,9 +1021,10 @@ impl CoreErlangGenerator {
     /// already unwrapped (paren-unwrapped `expr`), restricted to those `probe`
     /// counts: an inline-threaded conditional or `match:` (ADR 0118 phase 4;
     /// not a field-write producer), an `on:do:`/`ensure:` producer (ADR 0131
-    /// Phase 3b), an evaluated literal block (BT-3841), or a conditional whose
-    /// receiver's prelude is spliced into the caller's frame (BT-3910 /
-    /// BT-4000, `conditional_receiver_operand`).
+    /// Phase 3b), an evaluated literal block (BT-3841), or a conditional or
+    /// `match:` whose receiver's (scrutinee's) prelude is spliced into the
+    /// caller's frame (BT-3910 / BT-4000 / BT-5289,
+    /// `conditional_receiver_operand`).
     ///
     /// Both [`Self::thread_ahead_unwraps`] (at [`PreludeProbe::Sequencing`])
     /// and [`Self::subexpr_needs_prelude_with`] read this one function, so

@@ -29,6 +29,23 @@ Actor subclass: Bt5281MatchPrivateScratchActor
   classify: items =>
     items isNil ifTrue: [^#none]
     items isEmpty ifTrue: [^#empty]
+    head := items first
+    head match: [
+      Result ok: v -> v > 0
+        ifTrue: [
+          doubled := v * 2
+          self.total := doubled
+        ];
+      Result error: _ -> nil
+    ]
+    self.total
+
+  // `classify:` with the scrutinee sent in place (BT-5289): the sent
+  // scrutinee's `SyncedCall` is sequenced into the arm frame ahead of the
+  // `match:`.
+  classifySent: items =>
+    items isNil ifTrue: [^#none]
+    items isEmpty ifTrue: [^#empty]
     items first match: [
       Result ok: v -> v > 0
         ifTrue: [

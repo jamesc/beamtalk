@@ -25,7 +25,7 @@
 //! `on:do:`/`ensure:` arm alike.
 //!
 //! [`match_scrutinee_frame_corpus_compiles`] proves it over scrutinee x arms x
-//! arm write x frame x actor context: every row passes the debug verifier and
+//! arm write x position x frame x actor context: every row passes the debug verifier and
 //! compiles through `erlc`.
 //! [`match_scrutinee_frame_corpus_reports_the_pre_fix_lowering`] shows the
 //! verifier catches the pre-fix lowering ([`Fault::ReceiverPreludeInTuple`])
@@ -33,7 +33,7 @@
 
 use super::assert_parses;
 use super::loop_body_conditional_receiver_corpus::{
-    ARMS, HELPERS, LOOPS, PRELUDES, RECEIVERS, passes,
+    ARMS, HELPERS, LOOPS, PRELUDES, RECEIVERS, passes, phase0_rejects,
 };
 #[cfg(debug_assertions)]
 use crate::core_erlang::fault::Fault;
@@ -48,28 +48,53 @@ fn scrutinees() -> Vec<&'static str> {
 }
 
 /// The `match:` over a scrutinee `{R}` and an arm body `{B}`: a lone wildcard
-/// arm, a type arm before a wildcard (a chain-lowered `match:`), and the issue's nested `ifTrue:` in
-/// the arm.
+/// arm, a type arm before a wildcard (a chain-lowered `match:`), and the
+/// issue's nested `ifTrue:` in the arm.
 const MATCHES: &[&str] = &[
     "{R} match: [_ -> {B}]",
     "{R} match: [b :: True -> {B}; _ -> nil]",
     "{R} match: [_ -> n > 0 ifTrue: [{B}]]",
 ];
 
+/// The `match:` `{M}` in each position of the frame's statement `{S}`: a bare
+/// statement, an assigned local, a field write's right-hand side (the arm's C6
+/// -> C1 reroute) and a destructuring statement's (`{P}`, a `match:`
+/// answering a two-element array). The last two mirror BT-4000's
+/// `VALUE_POSITIONS` for conditionals.
+const POSITIONS: &[&str] = &[
+    "{M}",
+    "r := {M}",
+    "self.f := ({M}) printString size",
+    "#(a, b) := {P}. self.f := a + b",
+];
+
+/// The arm writes of BT-4000's `ARMS` a `match:` arm may make: nothing
+/// (`ARMS[0]`) and a field (`ARMS[2]`). `ARMS[1]` writes an outer local, which
+/// a `match:` arm may not (BT-3875, rejected before codegen).
+const ARM_WRITES: &[usize] = &[0, 2];
+
 const HEADER: &str = "Actor subclass: MatchScrutineeFrameProbe\n  state: f = 0\n";
 
-/// Every `(name, method body)` row.
+/// Every `(name, method body)` row the Phase 0 check accepts.
 fn rows() -> Vec<(String, String)> {
     let mut out = Vec::new();
     for (l, lp) in LOOPS.iter().enumerate() {
         for (r, scrutinee) in scrutinees().iter().enumerate() {
             for (m, shape) in MATCHES.iter().enumerate() {
-                for (a, arm) in ARMS.iter().enumerate() {
-                    let stmt = shape.replace("{R}", scrutinee).replace("{B}", arm);
-                    out.push((
-                        format!("loop{l} scrut{r} match{m} arm{a}"),
-                        lp.replace("{S}", &stmt),
-                    ));
+                for &a in ARM_WRITES {
+                    let arm = ARMS[a];
+                    let matched = shape.replace("{R}", scrutinee).replace("{B}", arm);
+                    let pair = format!(
+                        "{scrutinee} match: [_ -> n > 0 ifTrue: [{arm}. #(1, 2)] ifFalse: [#(3, 4)]]"
+                    );
+                    for (p, position) in POSITIONS.iter().enumerate() {
+                        let stmt = position.replace("{M}", &matched).replace("{P}", &pair);
+                        let body = lp.replace("{S}", &stmt);
+                        if phase0_rejects(&source(&method("", 0, &body))) {
+                            continue;
+                        }
+                        out.push((format!("loop{l} scrut{r} match{m} pos{p} arm{a}"), body));
+                    }
                 }
             }
         }
@@ -90,7 +115,11 @@ fn source(method: &str) -> String {
 #[test]
 fn match_scrutinee_frame_corpus_compiles() {
     let rows = rows();
-    assert!(rows.len() >= 600, "the corpus has thinned out");
+    assert!(
+        rows.len() >= 1000,
+        "only {} rows; the corpus has thinned out",
+        rows.len()
+    );
     for (_, body) in &rows {
         assert_parses(&source(&method("", 0, body)));
     }

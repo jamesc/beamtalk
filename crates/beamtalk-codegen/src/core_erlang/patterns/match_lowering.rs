@@ -663,7 +663,8 @@ impl CoreErlangGenerator {
         // call's own state via close_tier2_value_subexpr_doc.
         // BT-3982: an evaluated block that is a producer takes the
         // synthetic-block route below, never the raw tuple. BT-4310: so does a
-        // conditional whose receiver is sequenced ahead (a loop or fold
+        // conditional whose receiver (BT-5289: or a `match:` whose scrutinee)
+        // is sequenced ahead (a loop or fold
         // threading only `State` in it, a producer site of the arm): the arm
         // statement's lowering splices the receiver's prelude
         // (`conditional_receiver_operand`); the conditional's own tuple
