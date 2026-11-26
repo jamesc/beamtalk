@@ -64,7 +64,7 @@ fn test_tuple_destructure_binds_vars_in_env() {
     );
     let class = counter_class_with_typed_state(vec![method], state);
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
@@ -94,7 +94,7 @@ fn test_array_destructure_binds_vars_in_env() {
     );
     let class = make_class_with_methods("Thing", vec![method]);
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
@@ -121,7 +121,7 @@ fn test_list_destructure_binds_vars_in_env() {
     );
     let class = make_class_with_methods("Thing", vec![method]);
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),

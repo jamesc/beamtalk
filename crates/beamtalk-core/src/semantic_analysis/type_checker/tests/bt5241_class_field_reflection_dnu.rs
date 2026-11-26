@@ -12,7 +12,7 @@ use super::common::*;
 fn dnus(source: &str) -> Vec<String> {
     let mut module = parse_source(source);
     let _ = crate::compilation::fold_same_file_extensions(&mut module);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     run_with_expect(&module, &hierarchy)
         .into_iter()
         .filter(|d| d.category == Some(DiagnosticCategory::Dnu))

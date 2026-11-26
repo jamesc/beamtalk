@@ -605,7 +605,7 @@ fn infer_method_return_types_collects_instance_methods() {
         vec![method_unannotated("greeting", vec![str_lit("hello")])],
     );
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let result = infer_method_return_types(&module, &hierarchy, None);
     assert_eq!(
         result.get(&("Greeter".into(), "greeting".into(), false)),
@@ -620,7 +620,7 @@ fn infer_method_return_types_collects_class_methods() {
     let mut class = make_class_with_methods("Counter", vec![]);
     class.class_methods = vec![method_unannotated("zero", vec![int_lit(0)])];
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let result = infer_method_return_types(&module, &hierarchy, None);
     assert_eq!(
         result.get(&("Counter".into(), "zero".into(), true)),
@@ -657,7 +657,7 @@ fn infer_method_return_types_excludes_annotated_methods() {
         vec![method_annotated("value", "Integer", vec![int_lit(42)])],
     );
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let result = infer_method_return_types(&module, &hierarchy, None);
     assert!(
         !result.contains_key(&("Foo".into(), "value".into(), false)),
@@ -673,7 +673,7 @@ fn infer_method_return_types_excludes_primitive_methods() {
         vec![method_unannotated("add", vec![primitive_expr()])],
     );
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let result = infer_method_return_types(&module, &hierarchy, None);
     assert!(
         !result.contains_key(&("Bar".into(), "add".into(), false)),
@@ -689,7 +689,7 @@ fn infer_method_return_types_excludes_dynamic_results() {
         vec![method_unannotated("compute", vec![var("unknownVar")])],
     );
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let result = infer_method_return_types(&module, &hierarchy, None);
     assert!(
         !result.contains_key(&("Baz".into(), "compute".into(), false)),
@@ -704,7 +704,7 @@ fn take_method_return_types_leaves_empty_map() {
         vec![method_unannotated("greeting", vec![str_lit("hello")])],
     );
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let mut checker = check(&module, &hierarchy);
     let first = checker.take_method_return_types();
     assert!(
@@ -727,7 +727,7 @@ fn infer_types_and_returns_produces_both_outputs() {
     let class =
         make_class_with_methods("Box", vec![method_unannotated("value", vec![int_lit(42)])]);
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
 
     let (type_map, returns) = infer_types_and_returns(&module, &hierarchy, None);
 

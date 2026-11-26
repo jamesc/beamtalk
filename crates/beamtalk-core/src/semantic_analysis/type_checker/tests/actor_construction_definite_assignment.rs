@@ -291,9 +291,7 @@ fn parent_assigns_in_initialize_across_files_does_not_warn() {
     let mut class = counter_actor(vec![count_slot()], vec![], vec![]);
     class.superclass = Some(ident("ParentActor"));
     let module_ast = make_module_with_classes(vec![bare_spawn()], vec![class]);
-    let (Ok(mut hierarchy), _) = ClassHierarchy::build(&module_ast) else {
-        panic!("build should succeed");
-    };
+    let (mut hierarchy, _) = ClassHierarchy::build(&module_ast);
     let parent_info = ClassInfo {
         is_typed: true,
         initialize_assigns: std::collections::BTreeSet::from(["count".into()]),
@@ -317,9 +315,7 @@ fn ancestor_dynamic_field_writer_downgrades_severity_to_hint() {
     let mut class = counter_actor(vec![count_slot()], vec![], vec![]);
     class.superclass = Some(ident("ParentWithWriter"));
     let module_ast = make_module_with_classes(vec![bare_spawn()], vec![class]);
-    let (Ok(mut hierarchy), _) = ClassHierarchy::build(&module_ast) else {
-        panic!("build should succeed");
-    };
+    let (mut hierarchy, _) = ClassHierarchy::build(&module_ast);
     let parent_info = ClassInfo {
         is_typed: true,
         has_dynamic_field_writer: true,

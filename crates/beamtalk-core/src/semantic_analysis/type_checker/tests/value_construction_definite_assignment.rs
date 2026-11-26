@@ -441,7 +441,7 @@ fn shadowed_field_does_not_duplicate_diagnostic() {
     child.state = vec![count_field()];
 
     let module = make_module_with_classes(vec![bare_new_for("ChildValue")], vec![parent, child]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let diags = definite_assignment_diags(&checker);
     assert_eq!(

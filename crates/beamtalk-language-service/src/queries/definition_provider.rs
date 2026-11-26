@@ -1134,7 +1134,7 @@ mod tests {
     fn cross_file_class_definition() {
         let file_a = Utf8PathBuf::from("a.bt");
         let module_a = parse_source("Object subclass: Foo\n  bar => 1");
-        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
+        let hierarchy_a = ClassHierarchy::build(&module_a).0;
 
         let file_b = Utf8PathBuf::from("b.bt");
         let module_b = parse_source("x := Foo new");
@@ -1169,11 +1169,11 @@ mod tests {
     fn cross_file_stdlib_class_with_source_loaded() {
         let file_collection = Utf8PathBuf::from("stdlib/src/collection.bt");
         let module_collection = parse_source("abstract Object subclass: Collection");
-        let hierarchy_collection = ClassHierarchy::build(&module_collection).0.unwrap();
+        let hierarchy_collection = ClassHierarchy::build(&module_collection).0;
 
         let file_set = Utf8PathBuf::from("stdlib/src/set.bt");
         let module_set = parse_source("sealed Collection subclass: Set");
-        let hierarchy_set = ClassHierarchy::build(&module_set).0.unwrap();
+        let hierarchy_set = ClassHierarchy::build(&module_set).0;
 
         let mut index = ProjectIndex::new();
         index.update_file(file_collection.clone(), &hierarchy_collection);
@@ -1199,7 +1199,7 @@ mod tests {
     fn cross_file_method_definition() {
         let file_a = Utf8PathBuf::from("a.bt");
         let module_a = parse_source("Object subclass: Foo\n  bar => 1\n  baz: x => x + 1");
-        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
+        let hierarchy_a = ClassHierarchy::build(&module_a).0;
 
         let mut index = ProjectIndex::new();
         index.update_file(file_a.clone(), &hierarchy_a);
@@ -1219,7 +1219,7 @@ mod tests {
     fn cross_file_method_definition_not_found() {
         let file_a = Utf8PathBuf::from("a.bt");
         let module_a = parse_source("Object subclass: Foo\n  bar => 1");
-        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
+        let hierarchy_a = ClassHierarchy::build(&module_a).0;
 
         let mut index = ProjectIndex::new();
         index.update_file(file_a.clone(), &hierarchy_a);
@@ -1232,11 +1232,11 @@ mod tests {
     fn cross_file_method_definition_across_files() {
         let file_a = Utf8PathBuf::from("a.bt");
         let module_a = parse_source("Object subclass: Foo\n  bar => 1");
-        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
+        let hierarchy_a = ClassHierarchy::build(&module_a).0;
 
         let file_b = Utf8PathBuf::from("b.bt");
         let module_b = parse_source("x := Foo new\nx bar");
-        let hierarchy_b = ClassHierarchy::build(&module_b).0.unwrap();
+        let hierarchy_b = ClassHierarchy::build(&module_b).0;
 
         let mut index = ProjectIndex::new();
         index.update_file(file_a.clone(), &hierarchy_a);
@@ -1347,7 +1347,7 @@ mod tests {
     /// synthetic class entries (mirrors the `update_file` call sites that
     /// pre-populate hierarchies in `language_service::SimpleLanguageService`).
     fn hierarchy_with_protocols(module: &Module) -> ClassHierarchy {
-        let mut hierarchy = ClassHierarchy::build(module).0.unwrap();
+        let mut hierarchy = ClassHierarchy::build(module).0;
         hierarchy.register_protocol_classes(module);
         hierarchy
     }
@@ -1510,7 +1510,7 @@ mod tests {
 
         let source = "x := Erlang lists reverse: #(1, 2, 3).\nx size";
         let module = parse_source(source);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let mut registry = NativeTypeRegistry::new();
         registry.register_module(
@@ -1587,7 +1587,7 @@ mod tests {
         // file, then merge in an open protocol `Foo` from the user's file.
         let file_real_class = Utf8PathBuf::from("stdlib/src/Foo.bt");
         let module_real_class = parse_source("Object subclass: Foo\n  bar => 1\n");
-        let hierarchy_real_class = ClassHierarchy::build(&module_real_class).0.unwrap();
+        let hierarchy_real_class = ClassHierarchy::build(&module_real_class).0;
 
         let file_protocol = Utf8PathBuf::from("user.bt");
         let module_protocol = parse_source("Protocol define: Foo\n  baz -> Integer\n");
@@ -1646,7 +1646,7 @@ mod tests {
              Object subclass: Sibling\n  greet => 99\n\
              Parent subclass: Child\n  greet => 2",
         );
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let mut index = ProjectIndex::new();
         index.update_file(file.clone(), &hierarchy);
@@ -1674,7 +1674,7 @@ mod tests {
             "Object subclass: Parent\n  class greet => 1\n  greet => 99\n\
              Parent subclass: Child\n  class greet => 2",
         );
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let mut index = ProjectIndex::new();
         index.update_file(file.clone(), &hierarchy);
@@ -1718,7 +1718,7 @@ mod tests {
              Parent >> greet => 1\n\
              Child >> greet => 2",
         );
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let mut index = ProjectIndex::new();
         index.update_file(file.clone(), &hierarchy);
@@ -1754,7 +1754,7 @@ mod tests {
                       Parent subclass: Child\n  greet => 3";
         let file = Utf8PathBuf::from("test.bt");
         let module = parse_source(source);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let mut index = ProjectIndex::new();
         index.update_file(file.clone(), &hierarchy);
@@ -1808,7 +1808,7 @@ mod tests {
         // `superclass_chain("Class99")` knows the full ancestry.
         let mut index = ProjectIndex::new();
         for (path, module) in &files_modules {
-            let hierarchy = ClassHierarchy::build(module).0.unwrap();
+            let hierarchy = ClassHierarchy::build(module).0;
             index.update_file(path.clone(), &hierarchy);
         }
 
@@ -1879,7 +1879,7 @@ mod tests {
 
         let mut index = ProjectIndex::new();
         for (path, module) in &files_modules {
-            let hierarchy = ClassHierarchy::build(module).0.unwrap();
+            let hierarchy = ClassHierarchy::build(module).0;
             index.update_file(path.clone(), &hierarchy);
         }
 

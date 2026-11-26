@@ -409,7 +409,7 @@ fn resolve_narrowing_variable_type_expands_alias_for_self_field() {
     );
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "parse failed: {parse_diags:?}");
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let protocol_registry = ProtocolRegistry::new();
     let mut registry = AliasRegistry::new();
     let diags = registry.register_module(&module, &hierarchy, &protocol_registry);

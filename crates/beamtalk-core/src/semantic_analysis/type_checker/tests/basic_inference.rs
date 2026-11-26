@@ -238,7 +238,7 @@ fn test_class_side_spawn_returns_class_type() {
             ..ClassDefinition::test_at("Counter", Some("Actor"), ClassKind::Actor, span())
         }],
     );
-    let hierarchy = ClassHierarchy::build(&counter_module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&counter_module).0;
 
     let checker = check(&module, &hierarchy);
     assert_eq!(
@@ -584,7 +584,7 @@ fn test_class_method_body_gets_self_type() {
             ..ClassDefinition::test_at("Greeter", Some("Object"), ClassKind::Object, span())
         }],
     );
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     // Should warn about 'nonExistent' on Greeter
     assert_eq!(checker.diagnostics().len(), 1);
@@ -732,7 +732,7 @@ fn test_class_method_self_send_no_false_warning() {
         ],
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
@@ -757,7 +757,7 @@ fn test_class_method_self_send_warns_on_unknown() {
         )],
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     assert_eq!(
         checker.diagnostics().len(),
@@ -790,7 +790,7 @@ fn test_instance_method_self_send_no_regression() {
         vec![],
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
@@ -830,7 +830,7 @@ fn test_cascade_in_class_method_checks_class_side() {
         ],
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
@@ -857,9 +857,7 @@ fn inference_on_a_raw_parse_with_a_unary_loop_in_a_match_arm() {
     ));
     assert!(diags.is_empty(), "{diags:?}");
     assert!(crate::ast::normalize::needs_normalising(&module));
-    let hierarchy = ClassHierarchy::build(&module)
-        .0
-        .unwrap_or_else(|_| ClassHierarchy::with_builtins());
+    let hierarchy = ClassHierarchy::build(&module).0;
     let _ = infer_types(&module, &hierarchy, None);
     let _ = infer_types_and_returns(&module, &hierarchy, None);
     let _ = infer_types_and_returns_with_registries(&module, &hierarchy, None, None, None);
@@ -882,8 +880,6 @@ fn the_match_arm_walk_reaches_the_classifier_on_a_raw_parse() {
         crate::ast::normalize::needs_normalising(&module),
         "the parser no longer produces the raw unary loop"
     );
-    let hierarchy = ClassHierarchy::build(&module)
-        .0
-        .unwrap_or_else(|_| ClassHierarchy::with_builtins());
+    let hierarchy = ClassHierarchy::build(&module).0;
     TypeChecker::new().check_normalised_module(&module, &hierarchy);
 }

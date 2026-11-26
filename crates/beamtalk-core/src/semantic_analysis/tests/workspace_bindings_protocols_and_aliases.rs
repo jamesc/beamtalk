@@ -87,8 +87,7 @@ fn pre_loaded_synthetic_protocol_class_entry_does_not_shadow_protocol() {
         "Protocol define: TimeoutToken\n  cancel -> Boolean\n  isActive -> Boolean\n";
     let (protocol_module, _) =
         crate::source_analysis::parse(crate::source_analysis::lex_with_eof(protocol_src));
-    let (hierarchy, _) = ClassHierarchy::build(&protocol_module);
-    let mut hierarchy = hierarchy.expect("protocol file hierarchy builds");
+    let (mut hierarchy, _) = ClassHierarchy::build(&protocol_module);
     hierarchy.register_protocol_classes(&protocol_module);
     let synthetic_entry = hierarchy
         .get_class("TimeoutToken")

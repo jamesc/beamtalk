@@ -315,7 +315,7 @@ fn type_args_for_non_generic_class_warns() {
     )];
     let class = counter_class_with_typed_state(vec![], state);
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let mut checker = TypeChecker::new();
     checker.check_type_param_bounds_in_module(&module, &hierarchy, &ProtocolRegistry::new());
     let warnings: Vec<_> = checker
@@ -396,7 +396,7 @@ fn type_args_for_non_generic_class_in_method_param_warns() {
     };
     let class = counter_class_with_typed_state(vec![method], vec![]);
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let mut checker = TypeChecker::new();
     checker.check_type_param_bounds_in_module(&module, &hierarchy, &ProtocolRegistry::new());
     let warnings: Vec<_> = checker
@@ -429,7 +429,7 @@ fn type_args_for_non_generic_class_in_return_type_warns() {
     );
     let class = counter_class_with_typed_state(vec![method], vec![]);
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let mut checker = TypeChecker::new();
     checker.check_type_param_bounds_in_module(&module, &hierarchy, &ProtocolRegistry::new());
     let warnings: Vec<_> = checker
@@ -466,7 +466,7 @@ fn type_args_for_block_no_false_positive() {
     };
     let class = counter_class_with_typed_state(vec![method], vec![]);
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let mut checker = TypeChecker::new();
     checker.check_type_param_bounds_in_module(&module, &hierarchy, &ProtocolRegistry::new());
     let warnings: Vec<_> = checker
@@ -774,7 +774,6 @@ fn narrowing_report(source: &str, detail: bool) -> CoverageReport {
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, _diags) = crate::source_analysis::parse(tokens);
     let (hierarchy, _) = ClassHierarchy::build(&module);
-    let hierarchy = hierarchy.expect("hierarchy build failed");
     let type_map = infer_types(&module, &hierarchy, None);
     CoverageReport::from_module(&module, &type_map, &hierarchy, "n.bt", detail)
 }
@@ -840,7 +839,6 @@ fn narrowing_report_with_aliases(source: &str, detail: bool) -> CoverageReport {
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, _diags) = crate::source_analysis::parse(tokens);
     let (hierarchy, _) = ClassHierarchy::build(&module);
-    let hierarchy = hierarchy.expect("hierarchy build failed");
     let aliases = std::sync::Arc::new(
         crate::semantic_analysis::AliasRegistry::from_module_declarations(&module),
     );

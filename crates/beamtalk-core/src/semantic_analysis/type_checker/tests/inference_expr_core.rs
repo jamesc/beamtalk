@@ -268,7 +268,7 @@ TupleSink new take: {#active, false}
 TupleSink new take: {}
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
 }

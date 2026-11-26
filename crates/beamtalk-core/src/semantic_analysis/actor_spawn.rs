@@ -75,7 +75,6 @@ mod tests {
         let mut module = parse_bt(&src);
         crate::ast::normalize::peel_operand_parens(&mut module);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.expect("hierarchy builds");
         let driver = module
             .classes
             .iter()
@@ -142,7 +141,6 @@ mod tests {
     fn only_spawn_and_spawn_with_answer_an_actor() {
         let module = parse_bt("Actor subclass: Worker\n  run => 1\n\nWorker spawn\n");
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.expect("hierarchy builds");
         let Expression::MessageSend { receiver, .. } = &module.expressions[0].expression else {
             panic!("expected a send");
         };

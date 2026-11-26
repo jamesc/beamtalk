@@ -37,7 +37,7 @@ fn test_super_infers_parent_class_type() {
     };
 
     let module = make_module_with_classes(vec![], vec![parent, child]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let type_map = infer_types(&module, &hierarchy, None);
 
     // super should be inferred as Parent (not Dynamic)
@@ -74,7 +74,7 @@ fn test_super_unknown_selector_warns() {
     };
 
     let module = make_module_with_classes(vec![], vec![parent, child]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
 
     let warnings: Vec<_> = checker

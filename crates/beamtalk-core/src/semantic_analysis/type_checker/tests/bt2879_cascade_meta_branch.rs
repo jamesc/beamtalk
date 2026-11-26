@@ -42,7 +42,7 @@ typed Object subclass: Runner
     cls spawn; spawnWith: #{#cuont => 0}
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let diags = key_diags(&diags);
     assert_eq!(
@@ -70,7 +70,7 @@ typed Object subclass: Runner
     cls spawn; spawnWith: #{#count => 0}
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         key_diags(&diags).is_empty(),
@@ -95,7 +95,7 @@ typed Object subclass: Runner
     cls classTakeStr: \"seed\"; classSecond: 1
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let diags = expects_diags(&diags);
     assert_eq!(
@@ -119,7 +119,7 @@ typed Object subclass: Runner
     cls classTakeStr: \"seed\"; classSecond: \"ok\"
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         expects_diags(&diags).is_empty(),
@@ -159,7 +159,7 @@ typed Object subclass: App
       buildMore: [:r2 | r2 get: \"/more\"]
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
 
     // Every `Block(...)` entry recorded in the type map should have its first
