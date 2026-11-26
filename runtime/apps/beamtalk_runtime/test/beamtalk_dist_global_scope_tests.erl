@@ -259,23 +259,31 @@ netsplit_heal_conflict_test_() ->
             ]
         end}}.
 
-%% Sever ordinary distribution and wait until BOTH sides have processed the
-%% nodedown (BT-5252). `disconnect_node/1` returns once this side has dropped
-%% the connection; the peer learns of it asynchronously. If the peer's
-%% `global_name_server` has not yet seen the nodedown when the heal reconnects,
-%% it treats the origin as still synced and runs no conflict resolution, so the
-%% test would hang until its 10 s DOWN timeout. The peer's `nodes()` is
-%% reachable over the `standard_io` control channel, so poll that.
+%% Simulate a netsplit that stays split until `heal/1` (BT-5252). A bare
+%% `disconnect_node/1` is not enough: the peer's `global` (and anything else
+%% that messages this node) auto-reconnects within milliseconds on a busy
+%% runner, so the "partitioned" registrations can land on a re-formed mesh and
+%% no conflict ever arises. Pointing this node's cookie for the peer at a value
+%% the peer does not hold makes every reconnect handshake fail until `heal/1`
+%% restores it. Then wait until the peer has processed the nodedown: `nodes()`
+%% updates when the link drops, `global_name_server` handles its own `nodedown`
+%% later from its mailbox, so a synchronous call to it (queued behind that
+%% message) confirms it. `peer:call/4` uses the separate `standard_io` channel,
+%% so it keeps working while distribution is down.
 sever(Peer, PeerNode) ->
+    PeerCookie = erlang:get_cookie(PeerNode),
+    true = erlang:set_cookie(PeerNode, beamtalk_test_split_cookie),
     true = erlang:disconnect_node(PeerNode),
     ok = beamtalk_test_wait:until(fun() ->
         not lists:member(node(), peer:call(Peer, erlang, nodes, []))
     end),
-    %% `nodes()` updates when the link drops; `global_name_server` handles its
-    %% own `nodedown` message later from its mailbox. A synchronous call to it
-    %% queues behind that message, so once it answers the nodedown is handled.
     _ = peer:call(Peer, sys, get_state, [global_name_server]),
-    ok.
+    PeerCookie.
+
+%% Undo `sever/2`: restore the cookie it returned and reconnect.
+heal(PeerNode, PeerCookie) ->
+    true = erlang:set_cookie(PeerNode, PeerCookie),
+    ok = beamtalk_test_wait:until(fun() -> net_adm:ping(PeerNode) =:= pong end).
 
 %% Subscribe self() to ActorStopped, forwarding matching events back as
 %% plain messages — mirrors beamtalk_system_announcements_tests.erl's
@@ -294,7 +302,7 @@ netsplit_heal_resolves_conflict(Peer, PeerNode) ->
     %% nodes. Each side can now register the SAME global name independently
     %% (neither can see the other's global_name_server), exactly like two
     %% real partitions that both kept taking traffic.
-    ok = sever(Peer, PeerNode),
+    PeerCookie = sever(Peer, PeerNode),
 
     %% Register the OLDER registrant on the peer side first — via
     %% `peer:call/4`'s own control channel (ordinary `rpc:call/4` would fail;
@@ -339,7 +347,7 @@ netsplit_heal_resolves_conflict(Peer, PeerNode) ->
     %% `Name` registered on both (previously partitioned) sides and invokes
     %% the resolver both registrations were bound to,
     %% `beamtalk_actor_registry:resolve_global_conflict/3`.
-    pong = net_adm:ping(PeerNode),
+    ok = heal(PeerNode, PeerCookie),
     %% Blocks until this node's global_name_server has fully synced with
     %% every currently-connected node — the conflict is resolved by the
     %% time this returns.
@@ -422,7 +430,7 @@ supervised_child_loses_heal_conflict(Peer, PeerNode, Mod, Restart) ->
     _Sub = subscribe_self('ActorStopped'),
     Name = beamtalk_test_unique:atom("bt5231_supervised"),
     Args = child_args(Mod),
-    ok = sever(Peer, PeerNode),
+    PeerCookie = sever(Peer, PeerNode),
     %% The older registrant, on the peer (unlinked: see
     %% netsplit_heal_resolves_conflict/2).
     {ok, PeerPid} = peer:call(Peer, erlang, apply, [
@@ -459,7 +467,7 @@ supervised_child_loses_heal_conflict(Peer, PeerNode, Mod, Restart) ->
         LoserMon = erlang:monitor(process, LoserPid),
         beamtalk_test_log:with_capture(warning, fun() ->
             %% Heal. The conflict is resolved when global:sync/0 returns.
-            pong = net_adm:ping(PeerNode),
+            ok = heal(PeerNode, PeerCookie),
             ok = global:sync(),
             ?assertEqual(PeerPid, global:whereis_name(Name)),
             ?awaitMessage(
