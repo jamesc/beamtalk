@@ -102,6 +102,76 @@ defmodule BtAttachWeb.WorkspaceGitPanelTest do
       assert Process.alive?(view.pid)
     end
 
+    test "a cut status list says so (BT-5205)", %{conn: conn} do
+      StubWorkspaceClient.set_git_status(
+        {:ok,
+         %{
+           branch: "feature",
+           upstream: nil,
+           ahead: 0,
+           behind: 0,
+           truncated: true,
+           files: [%{path: "src/a.bt", index: :unmodified, worktree: :modified}]
+         }}
+      )
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "git"})
+
+      assert eventually(fn -> render(view) =~ "Showing the first 1 changed files" end)
+    end
+
+    test "a status that was not cut shows no notice (BT-5205)", %{conn: conn} do
+      StubWorkspaceClient.set_git_status(
+        {:ok, %{branch: "feature", upstream: nil, ahead: 0, behind: 0, files: []}}
+      )
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "git"})
+
+      assert eventually(fn -> render(view) =~ "feature" end)
+      refute render(view) =~ "Showing the first"
+    end
+
+    test "a cut diff says so, an uncut one does not (BT-5205)", %{conn: conn} do
+      StubWorkspaceClient.set_git_status(
+        {:ok,
+         %{
+           branch: "feature",
+           upstream: nil,
+           ahead: 0,
+           behind: 0,
+           files: [
+             %{path: "src/a.bt", index: :unmodified, worktree: :modified},
+             %{path: "src/b.bt", index: :unmodified, worktree: :modified}
+           ]
+         }}
+      )
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "git"})
+      assert eventually(fn -> render(view) =~ "src/a.bt" end)
+
+      StubWorkspaceClient.set_git_diff({:ok, %{worktree: "+x", staged: "", truncated: true}})
+
+      cut =
+        view
+        |> element(~s(button[phx-click="git_diff"][phx-value-path="src/a.bt"]))
+        |> render_click()
+
+      assert cut =~ "Diff cut; do not act on it"
+
+      StubWorkspaceClient.set_git_diff({:ok, %{worktree: "+y", staged: "", truncated: false}})
+
+      whole =
+        view
+        |> element(~s(button[phx-click="git_diff"][phx-value-path="src/b.bt"]))
+        |> render_click()
+
+      assert whole =~ "src/b.bt"
+      refute whole =~ "Diff cut"
+    end
+
     test "an independently-failed log surfaces an error beside a good status", %{conn: conn} do
       # Status succeeds but the log read fails on its own — the panel must not show
       # a valid branch beside a silently-empty commit list. `apply_git_log/2`

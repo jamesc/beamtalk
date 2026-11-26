@@ -1,0 +1,41 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5289: see stdlib/test/fixtures/Bt5289MatchSentScrutineeActor.bt.
+
+TestCase subclass: Bt5289MatchSentScrutineeTest
+
+  testSentScrutineeMatchInConditionalArmWritesField =>
+    a := Bt5289MatchSentScrutineeActor spawn
+    self assert: (a classify: nil) equals: 0
+    self assert: (a classify: #[3, 9]) equals: 3
+    self assert: (a classify: #[-2]) equals: 3
+    self assert: a total equals: 3
+
+  testSentScrutineeMatchAfterGuardsWritesField =>
+    a := Bt5289MatchSentScrutineeActor spawn
+    self assert: (a guarded: nil) equals: #none
+    self assert: (a guarded: #[]) equals: #empty
+    self assert: (a guarded: #[4]) equals: 4
+    self assert: (a guarded: #[5]) equals: 9
+    self assert: (a guarded: #[-1]) equals: 9
+
+  testSelfSendScrutineeMatchInLoopThreadsState =>
+    a := Bt5289MatchSentScrutineeActor spawn
+    self assert: (a loop: 3) equals: {3, 6}
+    self assert: a bumps equals: 3
+    self assert: a total equals: 6
+
+  testLocalAssignmentScrutineeKeepsTheAssignedValue =>
+    a := Bt5289MatchSentScrutineeActor spawn
+    self assert: (a localScrutinee: 1) equals: {3, 10}
+    self assert: (a localScrutinee: 5) equals: {7, 20}
+    self assert: (a localScrutinee: nil) equals: {2, 0}
+
+  testLocalAssignmentScrutineeInValueAndClassMethods =>
+    o := Bt5289LocalScrutineeValue new
+    self assert: (o localScrutinee: 1) equals: {3, 10}
+    self assert: (o localScrutinee: 5) equals: {7, 20}
+    self assert: (o localScrutinee: nil) equals: {2, 0}
+    self assert: (Bt5289LocalScrutineeValue localScrutinee: 1) equals: {3, 10}
+    self assert: (Bt5289LocalScrutineeValue localScrutinee: nil) equals: {2, 0}

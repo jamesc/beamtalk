@@ -110,3 +110,27 @@ validate_actor_pid_invalid_test() ->
 
 is_known_actor_non_actor_test() ->
     ?assertEqual(false, beamtalk_repl_params:is_known_actor(beamtalk_test_proc:spawn_idle())).
+
+%% process_pid/2 (BT-5205): any pid, as text or live, no actor check.
+process_pid_accepts_text_and_live_pid_test() ->
+    Pid = beamtalk_test_proc:spawn_idle(),
+    Text = list_to_binary(pid_to_list(Pid)),
+    ?assertEqual({ok, Pid, Text}, beamtalk_repl_params:process_pid(#{<<"p">> => Text}, <<"p">>)),
+    ?assertEqual({ok, Pid, Text}, beamtalk_repl_params:process_pid(#{<<"p">> => Pid}, <<"p">>)).
+
+process_pid_refuses_anything_else_test_() ->
+    [
+        ?_assertMatch(
+            {error, #beamtalk_error{kind = invalid_pid}},
+            beamtalk_repl_params:process_pid(Params, <<"p">>)
+        )
+     || Params <- [#{}, #{<<"p">> => <<"x">>}, #{<<"p">> => 3}, #{<<"p">> => [<<"<0.1.0>">>]}]
+    ].
+
+%% actor_pid/1 reads a live pid as its own text, then checks it like any other.
+actor_pid_live_non_actor_is_unknown_actor_test() ->
+    Pid = beamtalk_test_proc:spawn_idle(),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = unknown_actor}},
+        beamtalk_repl_params:actor_pid(#{<<"actor">> => Pid})
+    ).

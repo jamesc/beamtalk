@@ -40,6 +40,22 @@ Actor subclass: Bt5281MatchPrivateScratchActor
     ]
     self.total
 
+  // `classify:` with the scrutinee sent in place (BT-5289): the sent
+  // scrutinee's `SyncedCall` is sequenced into the arm frame ahead of the
+  // `match:`.
+  classifySent: items =>
+    items isNil ifTrue: [^#none]
+    items isEmpty ifTrue: [^#empty]
+    items first match: [
+      Result ok: v -> v > 0
+        ifTrue: [
+          doubled := v * 2
+          self.total := doubled
+        ];
+      Result error: _ -> nil
+    ]
+    self.total
+
   // `cond` is a non-Boolean (`NonBooleanCondCalling`): the inner conditional
   // sends `ifTrue:ifFalse:` to it, whose false block (a plain closure, the
   // private-scratch frame) runs the `match:`. Its field write goes through

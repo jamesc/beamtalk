@@ -29,13 +29,13 @@ handle(Op, Params, Msg, SessionPid) ->
 
 -doc """
 Term-returning handler for actors/inspect/kill/interrupt. Returns
-`{actors, [Meta]}`, `{inspect, map() | binary()}`, `{status, ok}`, or
+`{actors, [Meta]}` (each with `pid_text`, the pid as this node prints it), `{inspect, map() | binary()}`, `{status, ok}`, or
 `{error, #beamtalk_error{}}` — no JSON in this path.
 """.
 -spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
     beamtalk_repl_ops:op_result().
 handle_term(<<"actors">>, _Params, _Msg, _SessionPid) ->
-    {actors, beamtalk_workspace_actors:list()};
+    {actors, [with_pid_text(Actor) || Actor <- beamtalk_workspace_actors:list()]};
 handle_term(<<"inspect">>, Params, _Msg, _SessionPid) ->
     case beamtalk_repl_params:actor_pid(Params) of
         {error, _} = Err ->
@@ -150,6 +150,14 @@ handle_term(<<"interrupt">>, _Params, Msg, SessionPid) ->
                     <<"The session is busy; try again.">>
                 )}
     end.
+
+%% BT-5205: `pid_text` is the pid as this node prints it (`<0.123.0>`, the form
+%% every other surface shows). A client attached over distribution holds the
+%% live pid, which it cannot format this way itself. The WebSocket encoder
+%% picks its own fields, so the wire is unchanged.
+-spec with_pid_text(map()) -> map().
+with_pid_text(#{pid := Pid} = Actor) ->
+    Actor#{pid_text => list_to_binary(pid_to_list(Pid))}.
 
 %% BT-5199: reply only once the actor is gone, so a client that reads `actors`
 %% right after the reply (the VS Code and LiveView "Kill actor" actions do)

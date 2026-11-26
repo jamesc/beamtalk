@@ -82,6 +82,11 @@ never crashed.
 -define(FS, 16#1f).
 -define(RS, 16#1e).
 
+%% Every pathspec is a literal path: a name that looks like `:(top)` magic or a
+%% glob is a file name, so a path the op layer vetted cannot name anything else
+%% (BT-5205).
+-define(LITERAL_PATHSPECS, <<"--literal-pathspecs">>).
+
 %% Upper bound on how long a single git invocation may run before we give up
 %% and return a structured timeout error rather than blocking the caller.
 -define(GIT_TIMEOUT_MS, 30000).
@@ -208,14 +213,48 @@ git_commit(_Message) ->
 
 -doc """
 Discard a working-tree change for a single path (`git restore -- <path>`).
+Anything but one tracked file is refused (a directory, an untracked path): one
+call must not discard every change under a directory. The check and the
+restore are two git invocations, so a change to the index in between is not
+seen (best-effort).
 
 The human counterpart to the agent ChangeLog `revert:`. Returns `{ok, nil}`.
 """.
 -spec git_revert_file(binary()) -> {ok, nil} | {error, #beamtalk_error{}}.
 git_revert_file(Path) when is_binary(Path) ->
-    mutate(git_revert_file, [<<"restore">>, <<"--">>, Path], <<"git restore failed">>);
+    %% `git restore -- <dir>` discards every change under the directory; this op
+    %% reverts one file (BT-5205).
+    case is_one_tracked_file(git_revert_file, Path) of
+        {ok, true} ->
+            mutate(git_revert_file, [<<"restore">>, <<"--">>, Path], <<"git restore failed">>);
+        {ok, false} ->
+            {error,
+                arg_error(
+                    git_revert_file, <<"path is not one tracked file; revert one file at a time">>
+                )};
+        {error, _} = Err ->
+            Err
+    end;
 git_revert_file(_Path) ->
     {error, arg_error(git_revert_file, <<"path must be a String">>)}.
+
+%% Whether `Path` is exactly one tracked file. Git answers, not the file system:
+%% `git ls-files -z -- Path` lists the index entries under the path, which is
+%% `Path` itself for one tracked file (deleted or not, a symlink included) and
+%% every file for a directory, whatever its spelling (`src`, `src/.`, `./src`),
+%% present or deleted. A conflicted file is listed once per stage, so the
+%% entries are de-duplicated. Nothing is listed for an untracked path; that is
+%% not a file to revert either, so `git restore` is never run on it.
+-spec is_one_tracked_file(atom(), binary()) -> {ok, boolean()} | {error, #beamtalk_error{}}.
+is_one_tracked_file(Selector, Path) ->
+    case run_git(Selector, [<<"ls-files">>, <<"-z">>, <<"--">>, Path]) of
+        {ok, Stdout, 0} ->
+            {ok, lists:usort(binary:split(Stdout, <<0>>, [global, trim_all])) =:= [Path]};
+        {ok, Stdout, Code} ->
+            {error, exit_error(Selector, Code, with_stderr(<<"git ls-files failed">>, Stdout))};
+        {error, _} = Err ->
+            Err
+    end.
 
 %%% ============================================================================
 %%% Mutating helper
@@ -334,7 +373,9 @@ run_git_in(Selector, Args, Dir) ->
     try beamtalk_exec_port:open() of
         Port ->
             try
-                beamtalk_exec_port:spawn_child(Port, ChildId, <<"git">>, Args, #{dir => Dir}),
+                beamtalk_exec_port:spawn_child(
+                    Port, ChildId, <<"git">>, [?LITERAL_PATHSPECS | Args], #{dir => Dir}
+                ),
                 collect(Selector, Port, ChildId)
             after
                 try

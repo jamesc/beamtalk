@@ -29,6 +29,7 @@ use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{
     Block, Expression, ExpressionStatement, MatchArm, MessageSelector, Pattern, WellKnownSelector,
+    guard_operator_bif,
 };
 use beamtalk_core::source_analysis::Span;
 
@@ -663,14 +664,15 @@ impl CoreErlangGenerator {
         // call's own state via close_tier2_value_subexpr_doc.
         // BT-3982: an evaluated block that is a producer takes the
         // synthetic-block route below, never the raw tuple. BT-4310: so does a
-        // conditional whose receiver is sequenced ahead (a loop or fold
+        // conditional whose receiver (BT-5289: or a `match:` whose scrutinee)
+        // is sequenced ahead (a loop or fold
         // threading only `State` in it, a producer site of the arm): the arm
         // statement's lowering splices the receiver's prelude
         // (`conditional_receiver_operand`); the conditional's own tuple
         // builder would compile the receiver, carrier and all, in place.
         if self.control_flow_has_mutations(body)
             && !self.evaluated_block_is_producer(body)
-            && !self.is_conditional_with_sequenced_receiver(body)
+            && !self.is_construct_with_sequenced_operand(body)
         {
             return self.expression_doc(body);
         }
@@ -1112,24 +1114,11 @@ impl CoreErlangGenerator {
             } => {
                 let left = self.generate_guard_expression(receiver)?;
                 let right = self.generate_guard_expression(&arguments[0])?;
-                let erlang_op = match op.as_str() {
-                    ">" => ">",
-                    "<" => "<",
-                    ">=" => ">=",
-                    "<=" => "=<",
-                    "=:=" => "=:=",
-                    "/=" => "/=",
-                    "=/=" => "=/=",
-                    "+" => "+",
-                    "-" => "-",
-                    "*" => "*",
-                    "/" => "/",
-                    _ => {
-                        return Err(CodeGenError::UnsupportedFeature {
-                            feature: format!("operator '{op}' in guard expression"),
-                            span: Some(expr.span()),
-                        });
-                    }
+                let Some(erlang_op) = guard_operator_bif(op) else {
+                    return Err(CodeGenError::UnsupportedFeature {
+                        feature: format!("operator '{op}' in guard expression"),
+                        span: Some(expr.span()),
+                    });
                 };
                 Ok(docvec![
                     "call 'erlang':",

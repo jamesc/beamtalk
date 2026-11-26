@@ -20,9 +20,22 @@ Request-parameter validation shared by the REPL op modules.
     not-found message).
 * `actor_pid/1`, `validate_actor_pid/1`, `invalid_pid_error/2` — the
   actor-pid param used by `inspect`, `kill` and `pid-stats`.
+* `process_pid/2` — a pid param that need not be an actor (`children`,
+  `process-info`).
+
+A pid param is the node-local pid text (`<0.123.0>`, what a WebSocket client
+sends) or, from a client attached over Erlang distribution, the live pid
+itself. The live form needs no `pid_to_list` on the client, which could not
+format a remote pid in the form this node parses (BT-5205).
 """.
 
--export([nonempty_binary/2, nonempty_or_undefined/1, existing_atom_param/2, actor_pid/1]).
+-export([
+    nonempty_binary/2,
+    nonempty_or_undefined/1,
+    existing_atom_param/2,
+    actor_pid/1,
+    process_pid/2
+]).
 
 %% Exported for white-box tests only (no production caller).
 -ifdef(TEST).
@@ -85,11 +98,36 @@ param is an `invalid_pid` error like any other unparseable pid.
 """.
 -spec actor_pid(map()) -> {ok, pid(), binary()} | {error, beamtalk_error:error()}.
 actor_pid(Params) ->
-    PidStr = pid_param_string(maps:get(<<"actor">>, Params, <<>>)),
+    PidStr = actor_param_string(maps:get(<<"actor">>, Params, <<>>)),
     case validate_actor_pid(PidStr) of
         {ok, Pid} -> {ok, Pid, list_to_binary(PidStr)};
         {error, Reason} -> {error, invalid_pid_error(Reason, PidStr)}
     end.
+
+-doc """
+Read the param `Key` as a pid that need not be an actor: `{ok, Pid, PidBin}`,
+or `{error, #beamtalk_error{}}` (`invalid_pid`) when it is neither a live pid
+nor the text of one. The pid may be dead; the op decides what that means.
+""".
+-spec process_pid(map(), binary()) -> {ok, pid(), binary()} | {error, beamtalk_error:error()}.
+process_pid(Params, Key) ->
+    case maps:get(Key, Params, <<>>) of
+        Pid when is_pid(Pid) ->
+            {ok, Pid, list_to_binary(pid_to_list(Pid))};
+        Other ->
+            PidStr = pid_param_string(Other),
+            try list_to_pid(PidStr) of
+                Pid -> {ok, Pid, list_to_binary(PidStr)}
+            catch
+                _:_ -> {error, invalid_pid_error(invalid_pid, PidStr)}
+            end
+    end.
+
+%% A live pid reads as its own node-local text, then takes the same checks as
+%% the text form.
+-spec actor_param_string(term()) -> string().
+actor_param_string(Pid) when is_pid(Pid) -> pid_to_list(Pid);
+actor_param_string(Other) -> pid_param_string(Other).
 
 %% A wrong-typed `actor` value is never echoed (it can be arbitrarily large and
 %% hold code points `list_to_binary/1` rejects); the error shows a placeholder.

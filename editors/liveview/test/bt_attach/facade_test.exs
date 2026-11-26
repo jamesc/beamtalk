@@ -33,6 +33,7 @@ defmodule BtAttach.FacadeTest do
 
     def subscribe_transcript(pid), do: record({:sub_t, pid}) && :ok
     def subscribe_bindings(pid), do: record({:sub_b, pid}) && :ok
+    def subscribe_actors(pid), do: record({:sub_a, pid}) && :ok
 
     # ADR 0095 §5 (BT-2489): the live-Inspector per-object tracking ops.
     def subscribe_object_changes(term, pid), do: record({:sub_obj, term, pid}) && :ok
@@ -250,11 +251,16 @@ defmodule BtAttach.FacadeTest do
                MapSet.new([:eval, :inspect, :bindings, :changes, :flush, :save, :sub_t, :sub_b])
     end
 
+    test "subscribe_actors registers the pid on the actors stream (BT-5205)" do
+      assert Facade.dispatch(:subscribe_actors, %{pid: self()}) == :ok
+      assert RecordingClient.calls() == [{:sub_a, self()}]
+    end
+
     test "a catalog op with no UI binding is unsupported, not a dist call" do
-      # `subscribe_actors` is in the vocabulary (so RBAC can reason about it) but
+      # `rotate_cookie` is in the vocabulary (so RBAC can reason about it) but
       # has no route yet — it must not silently no-op or hit the client.
-      assert Facade.dispatch(:subscribe_actors, %{}) ==
-               {:error, {:unsupported_op, :subscribe_actors}}
+      assert Facade.dispatch(:rotate_cookie, %{}) ==
+               {:error, {:unsupported_op, :rotate_cookie}}
 
       assert RecordingClient.calls() == []
     end

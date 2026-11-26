@@ -250,33 +250,8 @@ autoflush_setting() ->
 %%====================================================================
 
 -doc false.
-%% Project a runtime term to the wire shape: map keys and atoms become
-%% binaries, `nil` / `undefined` become `null`, booleans, numbers and
-%% binaries pass through, lists recurse. The class tag is internal and is
-%% dropped. Anything else (a pid, a tuple) is shown as its `~p` text so a
-%% reply never crashes the encoder.
 -spec wire(term()) -> term().
-wire(Map) when is_map(Map) ->
-    maps:from_list([
-        {wire_key(K), wire(V)}
-     || {K, V} <- maps:to_list(Map), K =/= ?BT_CLASS_TAG_KEY
-    ]);
-wire(List) when is_list(List) -> [wire(E) || E <- List];
-wire(Bool) when is_boolean(Bool) -> Bool;
-wire(nil) ->
-    null;
-wire(undefined) ->
-    null;
-wire(Atom) when is_atom(Atom) -> atom_to_binary(Atom, utf8);
-wire(Bin) when is_binary(Bin) -> Bin;
-wire(N) when is_number(N) -> N;
-wire(Other) ->
-    iolist_to_binary(io_lib:format("~p", [Other])).
-
--spec wire_key(term()) -> binary().
-wire_key(K) when is_atom(K) -> atom_to_binary(K, utf8);
-wire_key(K) when is_binary(K) -> K;
-wire_key(K) -> iolist_to_binary(io_lib:format("~p", [K])).
+wire(Term) -> beamtalk_repl_wire:project(Term).
 
 %%====================================================================
 %% Op descriptors for dynamic describe
