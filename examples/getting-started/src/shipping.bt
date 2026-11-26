@@ -39,8 +39,7 @@ Value subclass: Shipping
   /// Quote a `{#parcel, speed, grams}` order as a `Result`.
   class quote: order :: Tuple -> Result(Integer, String) =>
     order match: [
-      {#parcel, speed, grams} when: [grams > 0] ->
-        Result ok: (self priceFor: speed weight: grams);
+      {#parcel, speed, grams} when: [grams > 0] -> Result ok: (self priceFor: speed weight: grams);
       {#parcel, _, _} -> Result error: "weight must be positive";
       _ -> Result error: "not a parcel order"
     ]
@@ -55,10 +54,12 @@ Value subclass: Shipping
   /// Total price of the orders that can be quoted, and how many were
   /// rejected, as `{total, rejected}`.
   class totalFor: orders :: List -> Tuple =>
-    orders inject: {0, 0} into: [:acc :order |
-      {total, rejected} := acc
-      (self quote: order) match: [
-        Result ok: cents -> {total + cents, rejected};
-        Result error: _ -> {total, rejected + 1}
+    orders
+      inject: {0, 0}
+      into: [:acc :order |
+        {total, rejected} := acc
+        (self quote: order) match: [
+          Result ok: cents -> {total + cents, rejected};
+          Result error: _ -> {total, rejected + 1}
+        ]
       ]
-    ]

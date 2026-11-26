@@ -122,7 +122,10 @@ sealed typed Collection subclass: Tuple
   /// result unwrapOr: 0   // => 0 when result is {error, _}
   /// ```
   unwrapOr: default :: Object -> Object =>
-    self match: [{#ok, value} -> value; _ -> default]
+    self match: [
+      {#ok, value} -> value;
+      _ -> default
+    ]
 
   /// Extract the value from an `{'ok', Value}` tuple, or evaluate `block` on error.
   ///
@@ -131,7 +134,10 @@ sealed typed Collection subclass: Tuple
   /// result unwrapOrElse: [0]   // => 0 when result is {error, _}
   /// ```
   unwrapOrElse: block :: Block(Object) -> Object =>
-    self match: [{#ok, value} -> value; _ -> block value]
+    self match: [
+      {#ok, value} -> value;
+      _ -> block value
+    ]
 
   // === Converting ===
 

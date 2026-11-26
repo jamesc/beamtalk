@@ -15,20 +15,14 @@ TestCase subclass: ShippingTest
     self assert: (Shipping quote: {#parcel, #standard, 500}) equals: (Result ok: 500)
 
   testQuoteRejectsZeroWeight =>
-    self
-      assert: (Shipping quote: {#parcel, #standard, 0})
-      equals: (Result error: "weight must be positive")
+    self assert: (Shipping quote: {#parcel, #standard, 0}) equals: (Result error: "weight must be positive")
 
   testQuoteRejectsOtherShapes =>
-    self
-      assert: (Shipping quote: {#letter, 1})
-      equals: (Result error: "not a parcel order")
+    self assert: (Shipping quote: {#letter, 1}) equals: (Result error: "not a parcel order")
 
   testDescribe =>
     self assert: (Shipping describe: (Result ok: 700)) equals: "costs 700 cents"
-    self
-      assert: (Shipping describe: (Result error: "nope"))
-      equals: "rejected: nope"
+    self assert: (Shipping describe: (Result error: "nope")) equals: "rejected: nope"
 
   testTotalForCountsRejected =>
     orders := #({#parcel, #standard, 500}, {#parcel, #express, 0}, {#parcel, #express, 1000})
