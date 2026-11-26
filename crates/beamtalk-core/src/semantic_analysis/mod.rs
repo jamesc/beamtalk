@@ -713,10 +713,6 @@ pub fn local_threading_diagnostics(module: &Module, hierarchy: &ClassHierarchy) 
 /// ADR 0075: When `ctx.native_type_registry` is `Some`, FFI calls (`Erlang <module> <function>:`)
 /// get return type inference and keyword mismatch warnings from the registry.
 ///
-/// # Panics
-///
-/// Never panics in practice.
-///
 /// # Examples
 ///
 /// ```

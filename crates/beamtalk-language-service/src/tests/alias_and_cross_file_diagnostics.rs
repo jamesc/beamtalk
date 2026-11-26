@@ -483,9 +483,7 @@ fn diagnostics_skip_stdlib_shadowing_for_stdlib_files() {
     // Pre-index a stdlib file defining `Counter`.
     let stdlib_path = Utf8PathBuf::from("stdlib/src/Counter.bt");
     let stdlib_source = "Object subclass: Counter\n  class zero => 0\n".to_string();
-    let (index_result, _) =
-        ProjectIndex::with_stdlib(&[(stdlib_path.clone(), stdlib_source.clone())]);
-    let index = index_result;
+    let (index, _) = ProjectIndex::with_stdlib(&[(stdlib_path.clone(), stdlib_source.clone())]);
 
     let mut service = SimpleLanguageService::with_project_index(index);
     // Re-register through update_file so `files` has an entry for it.

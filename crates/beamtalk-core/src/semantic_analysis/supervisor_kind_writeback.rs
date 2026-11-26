@@ -48,8 +48,7 @@ mod tests {
         let source = "Actor subclass: Counter";
         let tokens = lex_with_eof(source);
         let (mut module, _) = parse(tokens);
-        let (hierarchy_result, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy_result;
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
         apply_supervisor_kind_writeback(&mut module, &hierarchy);
         assert_eq!(module.classes[0].supervisor_kind, None);
     }
@@ -59,8 +58,7 @@ mod tests {
         let source = "Supervisor subclass: WebApp";
         let tokens = lex_with_eof(source);
         let (mut module, _) = parse(tokens);
-        let (hierarchy_result, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy_result;
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
         apply_supervisor_kind_writeback(&mut module, &hierarchy);
         assert_eq!(
             module.classes[0].supervisor_kind,
@@ -73,8 +71,7 @@ mod tests {
         let source = "DynamicSupervisor subclass: WorkerPool";
         let tokens = lex_with_eof(source);
         let (mut module, _) = parse(tokens);
-        let (hierarchy_result, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy_result;
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
         apply_supervisor_kind_writeback(&mut module, &hierarchy);
         assert_eq!(
             module.classes[0].supervisor_kind,
@@ -88,8 +85,7 @@ mod tests {
         let source = "Supervisor subclass: WebApp";
         let tokens = lex_with_eof(source);
         let (mut module, _) = parse(tokens);
-        let (hierarchy_result, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy_result;
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
         apply_supervisor_kind_writeback(&mut module, &hierarchy);
         apply_supervisor_kind_writeback(&mut module, &hierarchy);
         assert_eq!(
@@ -107,8 +103,7 @@ mod tests {
         let (mut module, _) = parse(tokens);
         // Simulate stale state from a previous pass.
         module.classes[0].supervisor_kind = Some(SupervisorKind::Static);
-        let (hierarchy_result, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy_result;
+        let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
         apply_supervisor_kind_writeback(&mut module, &hierarchy);
         assert_eq!(module.classes[0].supervisor_kind, None);
     }

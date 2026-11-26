@@ -1354,8 +1354,7 @@ mod tests {
             Utf8PathBuf::from("stdlib/src/Counter.bt"),
             "Object subclass: Counter\n  increment => 1".to_string(),
         )];
-        let (index_result, _) = ProjectIndex::with_stdlib(&stdlib);
-        let index = index_result;
+        let (index, _) = ProjectIndex::with_stdlib(&stdlib);
         assert!(index.hierarchy().has_class("Counter"));
         assert!(
             index
@@ -1968,11 +1967,10 @@ mod tests {
     #[test]
     fn update_file_aliases_reopen_preserves_stdlib_package_stamp() {
         let stdlib_file = Utf8PathBuf::from("stdlib/Direction.bt");
-        let (index_result, _) = ProjectIndex::with_stdlib(&[(
+        let (mut index, _) = ProjectIndex::with_stdlib(&[(
             stdlib_file.clone(),
             "internal type Direction = #north | #south".to_string(),
         )]);
-        let mut index = index_result;
         assert!(index.is_stdlib_file(&stdlib_file));
 
         // Simulate the LSP re-indexing the same stdlib file after a

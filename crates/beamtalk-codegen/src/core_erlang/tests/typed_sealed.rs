@@ -1384,8 +1384,7 @@ fn all_builtins_are_classified_for_static_dispatch() {
         Vec::new(),
         beamtalk_core::source_analysis::Span::new(0, 0),
     );
-    let (hierarchy_result, _) = ClassHierarchy::build(&module);
-    let hierarchy = hierarchy_result;
+    let (hierarchy, _) = ClassHierarchy::build(&module);
     let mut unclassified = Vec::new();
     for name in hierarchy.class_names() {
         let info = hierarchy
@@ -1506,8 +1505,7 @@ fn non_tagged_exclusions_are_sealed_builtin_values() {
         Vec::new(),
         beamtalk_core::source_analysis::Span::new(0, 0),
     );
-    let (hierarchy_result, _) = ClassHierarchy::build(&module);
-    let hierarchy = hierarchy_result;
+    let (hierarchy, _) = ClassHierarchy::build(&module);
     for name in crate::core_erlang::routing::non_tagged_map_classes() {
         let info = hierarchy
             .get_class(name)

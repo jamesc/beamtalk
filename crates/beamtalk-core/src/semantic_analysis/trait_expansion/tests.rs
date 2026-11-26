@@ -1137,8 +1137,7 @@ fn analyse(source: &str) -> Vec<Diagnostic> {
     let mut module = parse_source(source);
     let (mut diagnostics, origins) = expand_module(&mut module, &HashMap::new());
 
-    let (hierarchy_result, hierarchy_diags) = ClassHierarchy::build(&module);
-    let mut hierarchy = hierarchy_result;
+    let (mut hierarchy, hierarchy_diags) = ClassHierarchy::build(&module);
     diagnostics.extend(hierarchy_diags);
     apply_origins(&mut hierarchy, &origins);
 

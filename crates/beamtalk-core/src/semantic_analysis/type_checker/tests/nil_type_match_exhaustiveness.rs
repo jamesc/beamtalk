@@ -296,7 +296,6 @@ fn non_leaf_class_type_arm_is_not_closed() {
     let (module, _) =
         crate::source_analysis::parse(crate::source_analysis::lex_with_eof(hierarchy_src));
     let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-    let hierarchy = hierarchy;
 
     let expr = match_expr(
         true,

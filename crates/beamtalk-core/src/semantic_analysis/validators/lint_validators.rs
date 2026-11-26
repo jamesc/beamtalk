@@ -2242,7 +2242,6 @@ mod tests {
             .collect();
         assert!(hard_errs.is_empty(), "Parse failed: {hard_errs:?}");
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy;
         let type_map = crate::semantic_analysis::infer_types(&module, &hierarchy, None);
         let mut diagnostics = Vec::new();
         check_redundant_local_type_annotation(&module, &type_map, &mut diagnostics);
@@ -2417,7 +2416,6 @@ mod tests {
             .collect();
         assert!(hard_errs.is_empty(), "Parse failed: {hard_errs:?}");
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy;
         let type_map = crate::semantic_analysis::infer_types(&module, &hierarchy, None);
         let mut diagnostics = Vec::new();
         check_narrowing_local_type_annotation(&module, &type_map, &hierarchy, &mut diagnostics);
@@ -2471,7 +2469,6 @@ mod tests {
             .collect();
         assert!(hard_errs.is_empty(), "Parse failed: {hard_errs:?}");
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy;
         let aliases = std::sync::Arc::new(
             crate::semantic_analysis::AliasRegistry::from_module_declarations(&module),
         );

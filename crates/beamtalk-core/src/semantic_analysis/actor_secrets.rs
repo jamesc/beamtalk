@@ -300,7 +300,6 @@ mod tests {
     fn check(src: &str) -> (Module, Vec<Diagnostic>) {
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_actor_secret_declarations(&module, &hierarchy, &mut diagnostics);
         (module, diagnostics)

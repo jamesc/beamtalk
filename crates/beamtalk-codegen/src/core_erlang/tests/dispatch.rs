@@ -4948,8 +4948,7 @@ fn test_new1_verdict_agrees_across_files_with_sibling_parent() {
             let codegen_in_caller = !published_bound(&code);
             // A sibling caller's view: its own module, plus the same injection.
             let caller = parse("Object subclass: Caller\n");
-            let (h, _) = ClassHierarchy::build(&caller);
-            let mut h = h;
+            let (mut h, _) = ClassHierarchy::build(&caller);
             let mut infos = ClassHierarchy::extract_class_infos(&fwd);
             if use_infos {
                 infos.extend(ClassHierarchy::extract_class_infos(&base));

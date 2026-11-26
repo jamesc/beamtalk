@@ -1635,7 +1635,6 @@ mod tests {
             ..empty_module()
         };
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy;
         let mut registry = ProtocolRegistry::new();
         registry.register_module(&module, &hierarchy);
 
@@ -1657,7 +1656,6 @@ mod tests {
             ..empty_module()
         };
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy;
         let mut registry = ProtocolRegistry::new();
         registry.register_module(&module, &hierarchy);
 
@@ -1694,7 +1692,6 @@ Value subclass: Version
         assert!(expansion_diags.is_empty(), "{expansion_diags:?}");
 
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy;
         let mut registry = ProtocolRegistry::new();
         registry.register_module(&module, &hierarchy);
 
@@ -1764,7 +1761,6 @@ Value subclass: Version
             ..empty_module()
         };
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy;
         let mut registry = ProtocolRegistry::new();
         registry.register_module(&module, &hierarchy);
 
@@ -1790,7 +1786,6 @@ Value subclass: Version
             ..empty_module()
         };
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy;
         let mut registry = ProtocolRegistry::new();
         registry.register_module(&module, &hierarchy);
 
@@ -2081,7 +2076,6 @@ Value subclass: Version
         };
 
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy;
 
         let mut registry = ProtocolRegistry::new();
         registry.register_module(&module, &hierarchy);

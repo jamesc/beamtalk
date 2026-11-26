@@ -774,7 +774,6 @@ fn narrowing_report(source: &str, detail: bool) -> CoverageReport {
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, _diags) = crate::source_analysis::parse(tokens);
     let (hierarchy, _) = ClassHierarchy::build(&module);
-    let hierarchy = hierarchy;
     let type_map = infer_types(&module, &hierarchy, None);
     CoverageReport::from_module(&module, &type_map, &hierarchy, "n.bt", detail)
 }
@@ -840,7 +839,6 @@ fn narrowing_report_with_aliases(source: &str, detail: bool) -> CoverageReport {
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, _diags) = crate::source_analysis::parse(tokens);
     let (hierarchy, _) = ClassHierarchy::build(&module);
-    let hierarchy = hierarchy;
     let aliases = std::sync::Arc::new(
         crate::semantic_analysis::AliasRegistry::from_module_declarations(&module),
     );

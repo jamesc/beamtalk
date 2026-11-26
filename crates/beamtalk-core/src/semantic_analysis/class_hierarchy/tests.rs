@@ -357,7 +357,6 @@ fn resolves_selector_through_unknown_external_parent_to_object() {
     // subclassResponsibility lives on Object, two hops above CondimentDecorator.
     let module = module_with_classes(vec![make_user_class("CondimentDecorator", "Beverage")]);
     let (h, _diags) = ClassHierarchy::build(&module);
-    let h = h;
     // Object method must be reachable even though Beverage is unknown.
     assert!(
         h.resolves_selector("CondimentDecorator", "subclassResponsibility"),
@@ -392,7 +391,6 @@ fn make_user_class(name: &str, superclass: &str) -> ClassDefinition {
 fn user_defined_class_added_to_hierarchy() {
     let module = module_with_classes(vec![make_user_class("Counter", "Actor")]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h;
     assert!(diags.is_empty());
     assert!(h.has_class("Counter"));
     let counter = h.get_class("Counter").unwrap();
@@ -438,7 +436,6 @@ fn user_class_resolves_inherited_selectors() {
 fn sealed_class_subclassing_rejected() {
     let module = module_with_classes(vec![make_user_class("MyInt", "Integer")]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h;
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed"));
     assert!(diags[0].message.contains("Integer"));
@@ -456,7 +453,6 @@ fn sealed_string_subclassing_rejected() {
 fn non_sealed_subclassing_allowed() {
     let module = module_with_classes(vec![make_user_class("MyActor", "Actor")]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h;
     assert!(diags.is_empty());
     assert!(h.has_class("MyActor"));
 }
@@ -466,7 +462,6 @@ fn stdlib_mode_exempts_builtin_class_from_sealed_check() {
     // In stdlib_mode, a class named "Character" extending sealed "Integer" is allowed.
     let module = module_with_classes(vec![make_user_class("Character", "Integer")]);
     let (h, diags) = ClassHierarchy::build_with_options(&module, true);
-    let h = h;
     assert!(
         diags.is_empty(),
         "stdlib_mode should exempt builtin class: {diags:?}"
@@ -478,7 +473,6 @@ fn user_code_character_subclassing_integer_rejected() {
     // Without stdlib_mode, even a class named "Character" is rejected.
     let module = module_with_classes(vec![make_user_class("Character", "Integer")]);
     let (h, diags) = ClassHierarchy::build_with_options(&module, false);
-    let h = h;
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed"));
     assert!(diags[0].message.contains("Integer"));
@@ -585,7 +579,6 @@ fn sealed_method_override_rejected() {
     let child = make_class_with_sealed_method("Child", "Parent", "doCustomWork", false);
     let module = module_with_classes(vec![parent, child]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h;
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed method"));
     assert!(diags[0].message.contains("`doCustomWork`"));
@@ -610,7 +603,6 @@ fn sealed_method_in_grandparent_enforced() {
     let grandchild = make_class_with_sealed_method("GrandChild", "Parent", "locked", false);
     let module = module_with_classes(vec![grandparent, parent, grandchild]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h;
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed method"));
     assert!(diags[0].message.contains("`locked`"));
@@ -623,7 +615,6 @@ fn builtin_sealed_method_override_rejected() {
     let child = make_class_with_sealed_method("MyObj", "Object", "respondsTo:", false);
     let module = module_with_classes(vec![child]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h;
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed method"));
     assert!(diags[0].message.contains("`respondsTo:`"));
@@ -636,7 +627,6 @@ fn builtin_actor_spawn_override_rejected() {
     let child = make_class_with_sealed_class_method("MyActor", "Actor", "spawn", false);
     let module = module_with_classes(vec![child]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h;
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed method"));
     assert!(diags[0].message.contains("`spawn`"));
@@ -703,7 +693,6 @@ fn multiple_user_classes_in_module() {
     };
     let module = module_with_classes(vec![base, derived]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h;
     assert!(diags.is_empty());
     // Derived should inherit from Base -> Actor -> Object -> ProtoObject
     assert!(h.resolves_selector("Derived", "derivedMethod"));
@@ -721,7 +710,6 @@ fn multiple_user_classes_in_module() {
 fn user_class_with_unknown_superclass() {
     let module = module_with_classes(vec![make_user_class("Orphan", "NonExistent")]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h;
     // No diagnostic for unknown superclass (sealed check passes)
     assert!(diags.is_empty());
     // Class is still added
@@ -935,7 +923,6 @@ fn make_typed_state_class(name: &str, superclass: &str) -> ClassDefinition {
 fn state_field_type_table() {
     let module = module_with_classes(vec![make_typed_state_class("Counter", "Actor")]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h;
     assert!(diags.is_empty());
     let cases = [
         (
@@ -970,7 +957,6 @@ fn state_field_type_inherited_from_parent() {
     };
     let module = module_with_classes(vec![parent, child]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h;
     assert!(diags.is_empty());
     // Child's own typed field
     assert_eq!(
@@ -2993,7 +2979,6 @@ fn runs_class_method_in_caller_follows_published_explicit_new1_verdict() {
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _) = crate::source_analysis::parse(tokens);
     let (h, _) = ClassHierarchy::build(&module);
-    let h = h;
     assert!(h.get_class("Fwd").unwrap().in_caller_new1);
     assert!(h.runs_class_method_in_caller("Fwd", "new:"));
     assert!(!h.get_class("FwdChild").unwrap().in_caller_new1);
@@ -3029,14 +3014,12 @@ fn explicit_new1_verdict_survives_pass1_extraction_across_files() {
     ] {
         let base = parse(base_src);
         // Caller's view: only Pass 1 infos of both sibling files.
-        let (h, _) = ClassHierarchy::build(&caller);
-        let mut h = h;
+        let (mut h, _) = ClassHierarchy::build(&caller);
         let mut injected = ClassHierarchy::extract_class_infos(&base);
         injected.extend(fwd_infos.clone());
         assert!(h.add_from_beam_meta(injected));
         // Defining module's view (codegen).
-        let (hd, _) = ClassHierarchy::build(&fwd);
-        let mut hd = hd;
+        let (mut hd, _) = ClassHierarchy::build(&fwd);
         assert!(hd.add_from_beam_meta(ClassHierarchy::extract_class_infos(&base)));
         assert_eq!(
             hd.explicit_class_new1_runs_in_caller(&fwd.classes[0]),
@@ -3091,7 +3074,6 @@ fn methods_of_sealed_class_are_sealed_with_or_without_keyword() {
     let (module, diags) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
     assert!(diags.is_empty(), "{diags:?}");
     let (h, _) = ClassHierarchy::build(&module);
-    let h = h;
     let flag = |class: &str, sel: &str, class_side: bool| {
         let class_info = h.get_class(class).unwrap();
         let methods = if class_side {
@@ -3127,7 +3109,6 @@ fn abstract_sealed_class_methods_are_sealed_only_with_the_keyword() {
     let (module, diags) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
     assert!(diags.is_empty(), "{diags:?}");
     let (h, _) = ClassHierarchy::build(&module);
-    let h = h;
     let methods = &h.get_class("Gate").unwrap().methods;
     let flag = |sel: &str| {
         methods
