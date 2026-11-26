@@ -38,3 +38,5 @@ typed Actor subclass: LateOperandOrderActor
     flag ifTrue: [#(self.first, self.second)] ifFalse: [nil]
 
   divThenLate -> List => self pair: self.count / 0 with: self.first
+
+  selfSendOfSums -> List => self pair: self.first + 1 with: self.second + 1

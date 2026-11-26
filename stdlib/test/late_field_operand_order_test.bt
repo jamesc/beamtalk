@@ -30,6 +30,10 @@ TestCase subclass: LateFieldOperandOrderTest
       a selfSendOfBoth
     ]) includesSubstring: "'first'")
 
+  testSelfSendCompoundArgumentsRaiseForTheFirstOperand =>
+    a := LateOperandOrderActor spawn
+    self assert: ((self hintOf: [a selfSendOfSums]) includesSubstring: "'first'")
+
   testMapLiteralRaisesForTheFirstOperand =>
     a := LateOperandOrderActor spawn
     self assert: ((self hintOf: [a mapOfBoth]) includesSubstring: "'first'")
