@@ -172,18 +172,19 @@ TestCase subclass: BinaryPatternsTest
   testMatchRaisingSizeExpressionFallsThrough =>
     // Review finding 1: a raising size fails the arm, never crashes the
     // match — including against a non-binary scrutinee. A computed
-    // negative size simply never matches.
-    q := 0
+    // negative size simply never matches. (`q * 4` raises: q is not a
+    // number. `/` is not allowed in a pattern size, BT-5285.)
+    q := nil
     bin := Binary fromBytes: #(1, 2, 3)
     self
       assert: (bin match: [
-        <<a:(4 / q), rest/binary>> -> a;
+        <<a:(q * 4), rest/binary>> -> a;
         _ -> #fallback
       ])
       equals: #fallback
     self
       assert: (42 match: [
-        <<a:(4 / q), rest/binary>> -> a;
+        <<a:(q * 4), rest/binary>> -> a;
         _ -> #fallback
       ])
       equals: #fallback
