@@ -10,7 +10,8 @@
 
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySegmentValue, BinarySignedness,
-    Expression, Identifier, Literal, Pattern, binary_literal_size,
+    Expression, Identifier, Literal, MessageSelector, Pattern, binary_literal_size,
+    binary_size_vars, first_invalid_pattern_size_expr,
 };
 use crate::source_analysis::{Span, Token, TokenKind};
 use ecow::EcoString;
@@ -249,6 +250,7 @@ impl Parser {
     pub(super) fn parse_binary_pattern(&mut self) -> Pattern {
         let start = self.current_token().span();
         let (segments, end) = self.parse_binary_segment_list("pattern", Self::parse_binary_segment);
+        self.check_pattern_sizes(&segments);
         let end = end.unwrap_or_else(|| {
             self.error("Expected '>>' to close binary pattern");
             start
@@ -423,6 +425,67 @@ impl Parser {
         // diagnostics, never silently dead arms or invalid Core Erlang.
         self.check_binary_literal_shapes(&seg, BinaryDirection::Pattern);
         seg
+    }
+
+    /// Rejects every pattern segment size that is not a valid pattern size
+    /// (BT-5285): BEAM evaluates the size during the match, so only
+    /// literals, variables and `+`, `-`, `*` over them are allowed (see
+    /// [`first_invalid_pattern_size_expr`]) — not a message send such as
+    /// `p size`. Reported at the offending sub-expression, here rather than
+    /// as a code generation failure. A construction size has no such limit.
+    ///
+    /// The hint depends on what the size names: a value from outside the
+    /// pattern can be bound to a variable before the match, but a variable
+    /// bound by an earlier segment of this same pattern only exists during
+    /// the match, so that size needs the match split in two.
+    fn check_pattern_sizes(&mut self, segments: &[BinarySegment]) {
+        let mut bound_here: Vec<&str> = Vec::new();
+        for seg in segments {
+            if let Some(bad) = seg
+                .size
+                .as_deref()
+                .and_then(first_invalid_pattern_size_expr)
+            {
+                let what = match bad {
+                    Expression::MessageSend {
+                        selector: MessageSelector::Binary(op),
+                        ..
+                    } => format!("the operator `{op}`"),
+                    Expression::MessageSend { selector, .. } => {
+                        format!("a message send (`{}`)", selector.name())
+                    }
+                    Expression::FieldAccess { field, .. } => {
+                        format!("a field read (`{}`)", field.name)
+                    }
+                    Expression::Block(_) => "a block".to_string(),
+                    Expression::Assignment { .. } => "an assignment".to_string(),
+                    Expression::Cascade { .. } => "a cascade".to_string(),
+                    _ => "this expression".to_string(),
+                };
+                let pattern_var = binary_size_vars(bad)
+                    .into_iter()
+                    .map(|id| id.name.as_str())
+                    .find(|name| bound_here.contains(name));
+                let hint = match pattern_var {
+                    Some(name) => format!(
+                        "`{name}` is bound by this pattern, so split the match: match up to `{name}` with a `rest/binary` tail, compute the size in the arm, then match `rest` against a second pattern"
+                    ),
+                    None => "compute the size before the match and bind it to a variable, then use the variable in the size, e.g. `room := p size - 1` then `body:(room - pad)/binary`".to_string(),
+                };
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "a binary pattern segment size cannot contain {what}: BEAM evaluates a pattern size during the match, so it may only use literals, variables, and `+`, `-`, `*` over them"
+                        ),
+                        bad.span(),
+                    )
+                    .with_hint(hint),
+                );
+            }
+            if let Pattern::Variable(id) = &seg.value {
+                bound_here.push(id.name.as_str());
+            }
+        }
     }
 
     /// Parses one segment of a binary construction (ADR 0143).

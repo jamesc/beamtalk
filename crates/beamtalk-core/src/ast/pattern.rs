@@ -310,6 +310,95 @@ pub fn binary_literal_size(size: &Expression) -> Option<(i64, Span)> {
     }
 }
 
+/// The `erlang` BIF a binary operator lowers to in a guard position — a
+/// `when:` arm guard or a binary-pattern segment size — or `None` when the
+/// operator has no guard-safe lowering.
+///
+/// The one table the code generator's guard lowering reads; a pattern size
+/// allows the integer-arithmetic subset ([`is_pattern_size_operator`]).
+#[must_use]
+pub fn guard_operator_bif(op: &str) -> Option<&'static str> {
+    Some(match op {
+        ">" => ">",
+        "<" => "<",
+        ">=" => ">=",
+        "<=" => "=<",
+        "=:=" => "=:=",
+        "/=" => "/=",
+        "=/=" => "=/=",
+        "+" => "+",
+        "-" => "-",
+        "*" => "*",
+        "/" => "/",
+        _ => return None,
+    })
+}
+
+/// Whether `op` may appear in a binary-pattern segment size: the operators
+/// of [`guard_operator_bif`] that lower to an integer-arithmetic BIF. A
+/// filter over that table, so every size operator has a guard lowering by
+/// construction. `/` (always a float in Erlang) and the comparisons
+/// (booleans) are guard-safe but can never produce a size, so they are
+/// rejected rather than silently never matching.
+#[must_use]
+pub fn is_pattern_size_operator(op: &str) -> bool {
+    guard_operator_bif(op).is_some_and(|bif| matches!(bif, "+" | "-" | "*"))
+}
+
+/// The first sub-expression of a binary-pattern segment size that is not a
+/// valid pattern size, or `None` when the whole size is valid (BT-5285).
+///
+/// BEAM evaluates a pattern's segment size during the match, so `erlc` only
+/// accepts guard expressions there; of those, a size may use literals,
+/// variables and the [`is_pattern_size_operator`] operators over them,
+/// through any parentheses. A message send (`p size`, `n max: 2`), a field
+/// read, a block or any other expression is not one. The parser reports it
+/// at this expression's span, and code generation checks the same rule as a
+/// backstop. A construction size has no such limit — it is evaluated before
+/// the binary is built. A parse error node is skipped: it already has its
+/// diagnostic.
+#[must_use]
+pub fn first_invalid_pattern_size_expr(size: &Expression) -> Option<&Expression> {
+    match size {
+        Expression::Literal(..) | Expression::Identifier(_) | Expression::Error { .. } => None,
+        Expression::Parenthesized { expression, .. } => first_invalid_pattern_size_expr(expression),
+        Expression::MessageSend {
+            receiver,
+            selector: super::MessageSelector::Binary(op),
+            arguments,
+            ..
+        } if is_pattern_size_operator(op) => first_invalid_pattern_size_expr(receiver)
+            .or_else(|| arguments.iter().find_map(first_invalid_pattern_size_expr)),
+        other => Some(other),
+    }
+}
+
+/// Every variable named in a binary segment size expression, in source
+/// order, through parentheses and the receiver and arguments of any send.
+#[must_use]
+pub fn binary_size_vars(size: &Expression) -> Vec<&Identifier> {
+    fn inner<'a>(size: &'a Expression, vars: &mut Vec<&'a Identifier>) {
+        match size {
+            Expression::Identifier(id) => vars.push(id),
+            Expression::Parenthesized { expression, .. } => inner(expression, vars),
+            Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } => {
+                inner(receiver, vars);
+                for arg in arguments {
+                    inner(arg, vars);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut vars = Vec::new();
+    inner(size, &mut vars);
+    vars
+}
+
 impl<V> BinarySegment<V> {
     /// The segment's type: the explicit one, or `integer` (the default).
     #[must_use]
