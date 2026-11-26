@@ -707,3 +707,37 @@ fn test_value_type_field_write_in_match_arm_value_block_local_assign_wrapped_is_
         ),
     }
 }
+
+/// BT-5281: a `match:` whose arm needs `State` threading (here a nested
+/// `ifTrue:` that assigns a local) lowered in a frame whose scratch map is
+/// private: the plain closure the inner conditional's non-Boolean fallback
+/// sends (BT-3912's closure body frame). It keeps its `{Value, State}` tuple
+/// private there, as a conditional producer does, rather than raising the
+/// ADR 0131 §3 internal error. Two guard-style `^nil`s (BT-4415) nest the
+/// rest of the method exactly like this, which is how beamtalk-exdura hit it.
+#[test]
+fn test_match_in_private_scratch_closure_frame_compiles() {
+    let nested = concat!(
+        "Actor subclass: MatchPrivateScratch\n",
+        "  state: n = 0\n\n",
+        "  run: x =>\n",
+        "    x isNil ifTrue: [nil] ifFalse: [\n",
+        "      x isNil ifTrue: [nil] ifFalse: [\n",
+        "        x match: [_ -> x > 0 ifTrue: [p := x. self.n := p]]\n",
+        "        self.n]]\n",
+    );
+    let guards = concat!(
+        "Actor subclass: MatchPrivateScratch\n",
+        "  state: n = 0\n\n",
+        "  run: x =>\n",
+        "    x isNil ifTrue: [^nil]\n",
+        "    x isNil ifTrue: [^nil]\n",
+        "    x match: [_ -> x > 0 ifTrue: [p := x. self.n := p]]\n",
+        "    self.n\n",
+    );
+    for src in [nested, guards] {
+        assert_parses(src);
+        let code = codegen_named(src, "matchprivatescratch");
+        assert_compiles_through_erlc("matchprivatescratch", &code);
+    }
+}

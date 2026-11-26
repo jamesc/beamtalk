@@ -2483,8 +2483,9 @@ fn test_sort_comparator_cf_mutations_local_assign_unpacks_tuple() {
 fn test_actor_match_in_direct_params_loop_never_reaches_private_scratch_error() {
     // ADR 0131 section 3: `match:` is a State-family producer. In an actor
     // instance method a loop body holding a `match:` that writes a local (the
-    // loop threads only locals: the direct-params shape) must compile, not hit
-    // the private-scratch internal error in `control_flow_tuple_to_threaded_value`.
+    // loop threads only locals: the direct-params shape) must compile. (BT-5281
+    // removed the private-scratch internal error this once guarded against: a
+    // `match:` in such a frame keeps its scratch map private.)
     let src = concat!(
         "Actor subclass: MatchLoop\n",
         "  state: x = 0\n\n",
