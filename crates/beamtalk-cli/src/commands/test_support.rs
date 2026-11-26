@@ -93,6 +93,47 @@ impl Drop for ScratchDir {
     }
 }
 
+/// Register the unknown-key `tracing::warn!` callsite exactly once, under a
+/// subscriber that enables it, before any test can race its first
+/// registration (BT-5272).
+///
+/// `warn!` skips its callsite entirely while the process-wide max level is
+/// `OFF` (no subscriber anywhere), so the callsite is registered by whichever
+/// thread first reaches it while *some* test's scoped subscriber has raised
+/// that level. If that thread is another test's, which has no subscriber of
+/// its own, `tracing` computes the callsite's cached `Interest` from that
+/// thread's dispatcher (none) and stores `never` for every thread: the test
+/// that installed the subscriber silently receives nothing. Registering it
+/// here, on one thread, inside a scoped WARN subscriber gives it a correct
+/// interest first; `Once::call_once` blocks every other caller until that is
+/// done. Call this first in every test that reads a dependency manifest with
+/// unknown keys (`parse_dependency_manifest_full`).
+pub(crate) fn register_unknown_key_callsite() {
+    static REGISTERED: std::sync::Once = std::sync::Once::new();
+    REGISTERED.call_once(|| {
+        let Ok(temp) = tempfile::tempdir() else {
+            return;
+        };
+        let path = temp.path().join("beamtalk.toml");
+        let text = "[package]\nname = \"prime\"\nversion = \"0.1.0\"\nprime_only_key = 1\n";
+        let Ok(path) = Utf8PathBuf::from_path_buf(path) else {
+            return;
+        };
+        if std::fs::write(&path, text).is_err() {
+            return;
+        }
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::WARN)
+            .with_writer(std::io::sink)
+            .finish();
+        // Only the registration matters, not the parse result; never panic
+        // inside `call_once` (that would poison it for every other caller).
+        tracing::subscriber::with_default(subscriber, || {
+            let _ = beamtalk_package::manifest::parse_dependency_manifest_full(&path);
+        });
+    });
+}
+
 /// Guards concurrent access to the real `~/.beamtalk` directory versus a
 /// `BEAMTALK_HOME`-overridden hermetic tempdir, across this crate's whole
 /// test binary. `cargo test` runs tests as threads within one
@@ -217,20 +258,35 @@ fn assert_no_home_override_held(acquirer: &str) {
 /// this guard drops.
 pub(crate) struct BeamtalkHomeOverride {
     _lock: RwLockWriteGuard<'static, ()>,
-    prev: Option<String>,
+    prev: Option<std::ffi::OsString>,
 }
 
 impl BeamtalkHomeOverride {
     pub(crate) fn new(dir: &Path) -> Self {
-        assert_no_home_override_held("BeamtalkHomeOverride::new()");
+        Self::with_value(Some(dir.as_os_str()))
+    }
+
+    /// Like [`Self::new`], but sets `BEAMTALK_HOME` to any value: `None`
+    /// unsets it, `Some("")` sets it empty. For a test of how the CLI reads
+    /// the variable itself (BT-5272). Such a test must still take the write
+    /// lock: a bare `set_var`/`remove_var` strips `BEAMTALK_HOME` from every
+    /// concurrent [`real_home_guard`] holder, whose next write then lands in
+    /// the real `$HOME/.beamtalk`.
+    pub(crate) fn with_value(value: Option<&std::ffi::OsStr>) -> Self {
+        assert_no_home_override_held("BeamtalkHomeOverride::with_value()");
         let lock = BEAMTALK_HOME_LOCK
             .write()
             .unwrap_or_else(PoisonError::into_inner);
         HOLDS_HOME_OVERRIDE.with(|held| held.set(true));
-        let prev = std::env::var("BEAMTALK_HOME").ok();
+        let prev = std::env::var_os("BEAMTALK_HOME");
         // SAFETY: the exclusive write lock above guarantees no other thread is
         // reading BEAMTALK_HOME or the directory it controls concurrently.
-        unsafe { std::env::set_var("BEAMTALK_HOME", dir) };
+        unsafe {
+            match value {
+                Some(v) => std::env::set_var("BEAMTALK_HOME", v),
+                None => std::env::remove_var("BEAMTALK_HOME"),
+            }
+        }
         Self { _lock: lock, prev }
     }
 }

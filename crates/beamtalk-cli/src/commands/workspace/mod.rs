@@ -851,6 +851,10 @@ mod tests {
 
     #[test]
     fn test_find_workspace_by_project_path_returns_none() {
+        // BT-5272: reads the workspaces dir under `beamtalk_root_dir()`, so it
+        // must hold the shared hermetic home; unguarded, the dir another holder
+        // owns can be removed between `exists()` and `read_dir`.
+        let _home_guard = crate::commands::test_support::real_home_guard();
         let result = find_workspace_by_project_path(Path::new("/nonexistent/path/test")).unwrap();
         assert!(result.is_none());
     }

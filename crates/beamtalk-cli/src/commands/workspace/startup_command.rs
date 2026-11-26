@@ -202,6 +202,7 @@ pub(super) fn build_detached_node_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::test_support::BeamtalkHomeOverride;
     use crate::commands::util::to_forward_slash;
     use std::ffi::OsStr;
 
@@ -489,11 +490,12 @@ mod tests {
         // The CLI derives the workspace directory from BEAMTALK_HOME; the node
         // resolves its own `port` file through `beamtalk_platform:beamtalk_root_dir/0`,
         // which reads the same variable. If it is not forwarded the two disagree.
-        // SAFETY: serialized via #[serial(env_var)]; restored before returning.
-        unsafe { std::env::set_var("BEAMTALK_HOME", "/opt/custom/beamtalk-home") };
-        let cmd = build_test_command();
-        // SAFETY: see above.
-        unsafe { std::env::remove_var("BEAMTALK_HOME") };
+        // BT-5272: through `BeamtalkHomeOverride`, never a bare `set_var`, which
+        // strips the variable from every concurrent `real_home_guard` holder.
+        let cmd = {
+            let _home = BeamtalkHomeOverride::new(Path::new("/opt/custom/beamtalk-home"));
+            build_test_command()
+        };
 
         assert_eq!(
             env_of(&cmd, "BEAMTALK_HOME").as_deref(),
@@ -505,15 +507,16 @@ mod tests {
     #[serial_test::serial(env_var)]
     fn unset_or_empty_beamtalk_home_is_not_forwarded() {
         // Empty is treated as unset by both resolvers (conformance fixture), so
-        // forwarding it would only add noise.
-        // SAFETY: serialized via #[serial(env_var)]; restored before returning.
-        unsafe { std::env::remove_var("BEAMTALK_HOME") };
-        let unset = build_test_command();
-        // SAFETY: see above.
-        unsafe { std::env::set_var("BEAMTALK_HOME", "") };
-        let empty = build_test_command();
-        // SAFETY: see above.
-        unsafe { std::env::remove_var("BEAMTALK_HOME") };
+        // forwarding it would only add noise. See the note above on why this
+        // goes through `BeamtalkHomeOverride` (BT-5272).
+        let unset = {
+            let _home = BeamtalkHomeOverride::with_value(None);
+            build_test_command()
+        };
+        let empty = {
+            let _home = BeamtalkHomeOverride::with_value(Some(std::ffi::OsStr::new("")));
+            build_test_command()
+        };
 
         assert_eq!(env_of(&unset, "BEAMTALK_HOME"), None);
         assert_eq!(env_of(&empty, "BEAMTALK_HOME"), None);
