@@ -375,7 +375,9 @@ telemetry handler, which `telemetry` detaches if it raises. A missing table
 (the gen_server mid-restart, a hot upgrade before `code_change/3`, a partial
 harness) drops the event, the same way `record_dispatch/6` drops a sample.
 """.
--spec record_trace_event(pid(), atom(), atom(), atom(), non_neg_integer(), atom(), map(), atom()) ->
+-spec record_trace_event(
+    pid() | {atom(), node()}, atom(), atom(), atom(), non_neg_integer(), atom(), map(), atom()
+) ->
     ok.
 record_trace_event(Pid, Class, Selector, Mode, Duration, Outcome, Metadata, _Phase) ->
     case is_enabled() of
