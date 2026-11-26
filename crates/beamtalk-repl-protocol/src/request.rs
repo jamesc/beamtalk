@@ -919,11 +919,25 @@ mod tests {
         );
         let doc = std::fs::read_to_string(root.join("docs/repl-protocol.md"))
             .expect("read repl-protocol.md");
+        // Every other place that spells the kinds out: the op table note, and the
+        // MCP tool and param descriptions (attribute literals, so read the source).
+        let others = [
+            "runtime/apps/beamtalk_runtime/src/beamtalk_repl_op_table.erl",
+            "crates/beamtalk-mcp/src/server/tools/flush.rs",
+            "crates/beamtalk-mcp/src/server/params.rs",
+        ];
         for kind in FLUSH_KINDS {
             assert!(
                 doc.contains(&format!("`{kind}`")),
                 "docs/repl-protocol.md does not list the flush kind `{kind}`"
             );
+            for file in others {
+                let text = std::fs::read_to_string(root.join(file)).expect(file);
+                assert!(
+                    text.contains(kind),
+                    "{file} does not name the flush kind `{kind}`"
+                );
+            }
         }
     }
 

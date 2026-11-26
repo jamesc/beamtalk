@@ -106,7 +106,7 @@ pub fn flush_scope_for(arg: &str) -> Option<ReplFlushScope> {
 }
 
 fn is_class_name(name: &str) -> bool {
-    name.starts_with(|c: char| c.is_ascii_alphabetic())
+    name.starts_with(|c: char| c.is_ascii_uppercase())
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
@@ -317,6 +317,10 @@ mod tests {
             ("two words", None),
             ("new-class", None),
             ("9Lives", None),
+            // A selector is not a class: a lowercase name would match no entry
+            // and report `Flushed 0`, so it is a usage error.
+            ("#increment", None),
+            ("counter", None),
         ] {
             assert_eq!(flush_scope_for(arg), want, "{arg:?}");
         }
