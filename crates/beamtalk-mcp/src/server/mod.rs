@@ -51,7 +51,7 @@ pub(crate) use rmcp::handler::server::wrapper::Parameters;
 #[cfg(test)]
 pub(crate) use tools::docs::compute_doc_method_categories;
 #[cfg(test)]
-pub(crate) use tools::editing::{save_method_expr, try_method_expr};
+pub(crate) use tools::editing::try_method_expr;
 
 /// MCP tool responses are plain text (no terminal escapes).
 const MCP_OUTPUT_MODE: OutputMode = OutputMode::Plain;

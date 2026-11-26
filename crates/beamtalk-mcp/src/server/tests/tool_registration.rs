@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Tool-router registration checks and the small offline handlers (`diagnostic_summary`, `save_method_expr` / `try_method_expr`, `compute_doc_method_categories`).
+//! Tool-router registration checks and the small offline handlers (`diagnostic_summary`, `try_method_expr`, `compute_doc_method_categories`).
 
 use super::*;
 
@@ -136,33 +136,6 @@ fn compute_diagnostic_summary_clean_file() {
 // expression mapping fails CI through these tests.
 
 #[test]
-fn save_method_expr_compiles_durable_patch() {
-    // `save_method` → `aClass compile: #selector source: body`.
-    assert_eq!(
-        save_method_expr("Counter", "increment", "self.value := self.value + 1"),
-        "Counter compile: #increment source: \"self.value := self.value + 1\"",
-    );
-}
-
-#[test]
-fn save_method_expr_escapes_body_quotes_and_braces() {
-    // Interpolation braces in the body must be neutralised — the body is
-    // a String value, not interpolated source.
-    assert_eq!(
-        save_method_expr("Greeter", "greet", "\"Hello, {name}\""),
-        "Greeter compile: #greet source: \"\"\"Hello, \\{name}\"\"\"",
-    );
-}
-
-#[test]
-fn save_method_expr_preserves_keyword_selectors() {
-    assert_eq!(
-        save_method_expr("Dict", "at:put:", "..."),
-        "Dict compile: #at:put: source: \"...\"",
-    );
-}
-
-#[test]
 fn try_method_expr_compiles_ephemeral_patch() {
     // `try_method` → `aClass tryCompile: #selector source: body`.
     assert_eq!(
@@ -171,7 +144,7 @@ fn try_method_expr_compiles_ephemeral_patch() {
     );
 }
 
-// `save_class_expr`, `precheck_method_expr`, `remove_method_expr`,
+// `precheck_method_expr`, `remove_method_expr`,
 // `remove_method_if_absent_expr`, and `flush_expr`/`FlushFilter` are
 // defined in `beamtalk_core::tool_expr` and golden-tested
 // there — that suite is the single source of truth both this crate and

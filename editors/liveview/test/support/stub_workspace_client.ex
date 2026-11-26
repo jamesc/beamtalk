@@ -221,6 +221,9 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   def interrupt(_pid), do: :ok
 
+  # BT-5203: `load_source` compiles source into the image; the stub records it.
+  def load_source(pid, source), do: record({:load_source, pid, source}) && {:ok, [], []}
+
   def attach_session(_session_pid, _client_pid), do: :ok
 
   def eval(_pid, code) do

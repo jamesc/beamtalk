@@ -24,6 +24,7 @@ defmodule BtAttach.FacadeTest do
     def sessions, do: record({:sessions}) && {:ok, [%{id: "s1"}]}
     def flush, do: record({:flush}) && {:ok, %{}}
     def save_method(c, s, src), do: record({:save, c, s, src}) && {:ok, c}
+    def load_source(pid, src), do: record({:load_source, pid, src}) && {:ok, [], []}
 
     # ADR 0082 Phase 5 (BT-2293): the New File + ChangeLog revert affordances.
     # `side` (ADR 0112, BT-3187): the entry's disambiguating side, or nil.
@@ -824,6 +825,28 @@ defmodule BtAttach.FacadeTest do
 
       assert Facade.dispatch(:revert, %{class: "Counter", selector: :value}) ==
                {:error, :invalid_params}
+
+      assert RecordingClient.calls() == []
+    end
+
+    test "load_source routes to the client with the caller's session and the source as a value" do
+      assert Facade.dispatch(:load_source, %{session_pid: self(), source: "Object subclass: G"}) ==
+               {:ok, [], []}
+
+      assert {:load_source, self(), "Object subclass: G"} in RecordingClient.calls()
+    end
+
+    test "load_source with a non-binary source is invalid params, with no dist call" do
+      assert Facade.dispatch(:load_source, %{session_pid: self(), source: 42}) ==
+               {:error, :invalid_params}
+
+      assert RecordingClient.calls() == []
+    end
+
+    test "the observer role is denied load_source, with no dist call" do
+      assert Facade.dispatch(:load_source, %{session_pid: self(), source: "x"}, %{
+               role: :observer
+             }) == {:error, :unauthorized}
 
       assert RecordingClient.calls() == []
     end

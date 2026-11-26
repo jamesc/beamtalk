@@ -130,19 +130,9 @@ warning in this process (`beamtalk_refactor_support:note_changelog_result/1`).
 -spec with_changelog_warnings(fun(() -> Result)) -> Result when
     Result :: tuple().
 with_changelog_warnings(Fun) ->
-    ok = beamtalk_refactor_support:begin_changelog_warnings(),
-    Result =
-        try
-            Fun()
-        catch
-            Class:Reason:Stack ->
-                %% A raise must not leave the process marked as collecting.
-                _ = beamtalk_refactor_support:end_changelog_warnings(),
-                erlang:raise(Class, Reason, Stack)
-        end,
-    case beamtalk_refactor_support:end_changelog_warnings() of
-        [] -> Result;
-        Extra -> setelement(4, Result, element(4, Result) ++ Extra)
+    case beamtalk_refactor_support:collect_changelog_warnings(Fun) of
+        {Result, []} -> Result;
+        {Result, Extra} -> setelement(4, Result, element(4, Result) ++ Extra)
     end.
 
 -spec do_eval_expression(string(), beamtalk_repl_state:state(), pid() | undefined) ->
@@ -691,8 +681,8 @@ etc.). `Path` is a project-relative `.bt` path (the same form git restored).
 """.
 -spec reload_file(string()) -> {ok, [binary()]} | {error, term()}.
 reload_file(Path) ->
-    %% Called over RPC from the LiveView client, bypassing the REPL op seam,
-    %% so it consults the capability check itself (ADR 0125 §1.5).
+    %% The `reload-file` op's chokepoint. The op seam already gates it, but the
+    %% function keeps its own check so a direct caller is gated too (ADR 0125 §1.5).
     case beamtalk_capability:check(reload, 'Workspace', <<"Reloading a file">>) of
         ok -> do_reload_file(Path);
         {error, _} = Refusal -> Refusal
