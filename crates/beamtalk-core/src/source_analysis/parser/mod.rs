@@ -1395,7 +1395,7 @@ impl Parser {
                         block_positions.clear();
                     }
                 }
-                _ => {
+                super::Trivia::LineComment(_) => {
                     // A non-doc-comment (e.g. `//`) resets collection
                     if !lines.is_empty() {
                         had_unattached = true;
