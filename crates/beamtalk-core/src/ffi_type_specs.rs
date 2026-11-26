@@ -1393,6 +1393,23 @@ fn probe_otp_installation() -> Result<OtpDiscovery> {
     })
 }
 
+/// Insert the stems of the `.erl` files directly in `dir` (non-recursive) into
+/// `out` — the one `native/*.erl` / `native/test/*.erl` source scan.
+fn collect_erl_stems(dir: &Utf8Path, out: &mut std::collections::HashSet<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file()
+            && path.extension().is_some_and(|ext| ext == "erl")
+            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+        {
+            out.insert(stem.to_string());
+        }
+    }
+}
+
 /// Insert the `.beam` file stems of `ebin_dir` into `out`.
 fn collect_beam_stems(ebin_dir: &std::path::Path, out: &mut std::collections::HashSet<String>) {
     let Ok(entries) = std::fs::read_dir(ebin_dir) else {
@@ -1436,17 +1453,7 @@ pub fn collect_project_test_helper_modules(
     project_root: &Utf8Path,
 ) -> std::collections::HashSet<String> {
     let mut modules = std::collections::HashSet::new();
-    if let Ok(entries) = std::fs::read_dir(project_root.join("native").join("test")) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file()
-                && path.extension().is_some_and(|ext| ext == "erl")
-                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-            {
-                modules.insert(stem.to_string());
-            }
-        }
-    }
+    collect_erl_stems(&project_root.join("native").join("test"), &mut modules);
     if let Some(ebin) = project_test_helper_ebin_dir(project_root) {
         collect_beam_stems(ebin.as_std_path(), &mut modules);
     }
@@ -1456,9 +1463,17 @@ pub fn collect_project_test_helper_modules(
 /// Whether `file` is a test source of the package at `project_root`, i.e.
 /// lives under `<root>/test/` — the files that may call `native/test/`
 /// helpers (BT-5251).
+///
+/// Both paths are canonicalised (falling back to the spelling given), so a
+/// relative `lint test/x.bt`, a symlinked checkout or macOS `/var` vs
+/// `/private/var` all compare equal, as `is_under_stubs_dir` does.
 #[must_use]
 pub fn is_project_test_file(project_root: &Utf8Path, file: &Utf8Path) -> bool {
-    file.starts_with(project_root.join("test"))
+    let canon = |p: &Utf8Path| {
+        crate::paths::canonicalize(p.as_std_path())
+            .unwrap_or_else(|_| p.as_std_path().to_path_buf())
+    };
+    canon(file).starts_with(canon(project_root).join("test"))
 }
 
 /// Collect the ebin directories for a project's native and path dependencies.
@@ -1602,20 +1617,7 @@ pub fn collect_project_known_erlang_modules(
     }
 
     // Tier 2: the package's own `native/*.erl` sources (pre-build fallback).
-    if let Ok(entries) = std::fs::read_dir(project_root.join("native")) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let is_erl = path.is_file() && path.extension().is_some_and(|ext| ext == "erl");
-            if !is_erl {
-                continue;
-            }
-            if let Ok(utf8) = Utf8PathBuf::from_path_buf(path)
-                && let Some(stem) = utf8.file_stem()
-            {
-                known.insert(stem.to_string());
-            }
-        }
-    }
+    collect_erl_stems(&project_root.join("native"), &mut known);
 
     debug!(
         count = known.len(),
@@ -2284,6 +2286,20 @@ mod tests {
             &root,
             Utf8Path::new("/p/testing/a.bt")
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn is_project_test_file_resolves_symlinks() {
+        let temp = TempDir::new().unwrap();
+        let real = Utf8PathBuf::from_path_buf(temp.path().join("pkg")).unwrap();
+        std::fs::create_dir_all(real.join("test")).unwrap();
+        std::fs::write(real.join("test").join("a.bt"), b"").unwrap();
+        let link = Utf8PathBuf::from_path_buf(temp.path().join("link")).unwrap();
+        std::os::unix::fs::symlink(real.as_std_path(), link.as_std_path()).unwrap();
+        // Root canonical, file spelled through the symlink (and vice versa).
+        assert!(is_project_test_file(&real, &link.join("test").join("a.bt")));
+        assert!(is_project_test_file(&link, &real.join("test").join("a.bt")));
     }
 
     // -----------------------------------------------------------------------

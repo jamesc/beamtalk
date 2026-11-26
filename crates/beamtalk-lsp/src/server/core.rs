@@ -528,7 +528,9 @@ impl Backend {
                 let mut registry = NativeTypeRegistry::new();
                 let mut known_erlang_modules =
                     beamtalk_core::ffi_type_specs::KnownErlangModules::default();
-                // BT-5251: per-root `native/test/` helpers, for test files only.
+                // BT-5251: per-root `native/test/` helpers, for test files only
+                // (loaded once per session, like the set above: helpers added
+                // later need an LSP restart).
                 let mut test_helpers = Vec::new();
                 // Roots whose specs were extracted; only these are marked loaded.
                 let mut extracted = Vec::new();
