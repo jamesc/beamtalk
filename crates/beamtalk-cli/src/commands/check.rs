@@ -9,14 +9,15 @@
 //! ([`crate::beam_compiler::analyse_source_with_bindings`]) as `beamtalk
 //! build`, so annotation/type errors surface with identical diagnostics —
 //! then stops before Core Erlang codegen. In particular it never writes
-//! `.core`/`.beam` files for Beamtalk sources, never runs the post-codegen verifier, and never produces OTP
-//! packaging artifacts (`.app` file, corpus files).
+//! `.core`/`.beam` files for Beamtalk sources, never runs the post-codegen
+//! verifier, and never produces OTP packaging artifacts (`.app` file, corpus
+//! files).
 //!
 //! Dependency resolution is shared with `build` (stale dependencies are
 //! built for their metadata, exactly as a build would do), and the reused
 //! environment setup creates the otherwise-empty build directory. The
-//! package's own `native/*.erl` is compiled first (BT-5342, as `build` does),
-//! so its `-spec`s type FFI calls identically on a clean tree and after a
+//! package's own `native/*.erl` is `erlc`-compiled first (BT-5342; no rebar3,
+//! no network, no lockfile rewrite, failures are warnings), so its `-spec`s type FFI calls identically on a clean tree and after a
 //! build; a passing check still does not guarantee `beamtalk build` succeeds.
 //!
 //! **DDD Context:** Compilation (CLI surface for the semantic checker).
@@ -26,7 +27,7 @@ use tracing::{debug, error, info, instrument};
 
 use crate::beam_compiler::{analyse_source_with_bindings, diagnostics_are_errors};
 use crate::commands::build::{
-    Pass2Inputs, build_class_index, compile_native_sources, compute_file_module_pairs,
+    Pass2Inputs, build_class_index, compile_own_native_for_check, compute_file_module_pairs,
     new_compile_context, pass2_inputs, prepare_options, resolve_and_validate_dependencies,
     setup_build_environment, warn_if_otp_out_of_window,
 };
@@ -63,8 +64,10 @@ pub fn run_check(path: &str, options: &beamtalk_core::CompilerOptions) -> Result
     // clean tree. Without this the FFI type registry reads only already-built
     // artifacts and every call into the package's own native module is
     // inferred as Dynamic, making the result depend on whether `_build`
-    // exists. Only native code is compiled: no `.core`/`.beam` for `.bt`.
-    let _native_result = compile_native_sources(&env, &dep_ctx, &index.class_module_index)?;
+    // exists. Only `erlc` over `native/*.erl`, writing under `_build`: no
+    // rebar3, no network, no `beamtalk.lock` rewrite, and failures are
+    // warnings so every `.bt` file is still checked.
+    compile_own_native_for_check(&env, &dep_ctx, &index.class_module_index);
 
     // Same Pass 2 inputs as `build`: project-known Erlang modules for the
     // `unresolved_ffi` check, plus the ADR 0075 FFI type registry (read from

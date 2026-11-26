@@ -135,4 +135,47 @@ fn check_on_clean_tree_sees_own_native_specs() {
         .assert()
         .success()
         .stderr(predicates::str::contains("untyped FFI").not());
+    // Positive signal, independent of the warning's wording.
+    assert!(
+        project
+            .path()
+            .join("_build/dev/native/ebin/probe_native.beam")
+            .exists(),
+        "check should have compiled the package's own native module"
+    );
+}
+
+/// BT-5342: a broken `native/*.erl` must not hide `.bt` diagnostics. `check`
+/// warns about the native compile failure and still reports the `.bt` error.
+#[test]
+fn check_reports_bt_errors_when_native_compile_fails() {
+    let project = cli_common::fixture_project();
+    std::fs::create_dir_all(project.path().join("native")).unwrap();
+    std::fs::write(
+        project.path().join("native/broken_native.erl"),
+        "%% Copyright 2026 James Casey\n%% SPDX-License-Identifier: Apache-2.0\n\
+         -module(broken_native).\nthis is not erlang\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("src/Probe.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Value subclass: Probe\n\
+         \n\
+         \x20\x20go => 42 frobnicate\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["check", "--warnings-as-errors"])
+        .assert()
+        .failure()
+        .stderr(
+            predicates::str::contains("could not compile native Erlang sources").and(
+                predicates::str::contains("does not understand 'frobnicate'"),
+            ),
+        );
 }

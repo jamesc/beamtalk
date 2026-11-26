@@ -57,7 +57,9 @@ pub(crate) use environment::{
     BuildEnvironment, DependencyContext, package_identity, resolve_and_validate_dependencies,
     setup_build_environment,
 };
-pub(crate) use native::{Rebar3Result, collect_rebar3_ebin_paths, compile_native_sources};
+pub(crate) use native::{
+    Rebar3Result, collect_rebar3_ebin_paths, compile_native_sources, compile_own_native_for_check,
+};
 pub(crate) use outputs::{
     PackageBuildOutputs, build_alias_metadata, build_class_metadata, generate_package_corpus,
     generate_package_outputs,
