@@ -510,6 +510,33 @@ fn map_pattern_short_stays_inline() {
     );
 }
 
+#[test]
+fn map_pattern_long_in_match_arm_and_nested_round_trips() {
+    let long = "#{#access_token => accessToken, #token_type => tokenType, #expires_in => expiresIn, #refresh_token => refreshToken}";
+    for source in [
+        format!("Object subclass: Probe\n\n  a: m => m match: [{long} -> 1; _ -> 2]\n"),
+        format!(
+            "Object subclass: Probe\n\n  a: m => m match: [{long} when: [true] -> 1; _ -> 2]\n"
+        ),
+        format!("Object subclass: Probe\n\n  a: r =>\n    {{#ok, {long}}} := r\n"),
+    ] {
+        let once = format_source(&source).expect("source must parse");
+        let twice = format_source(&once).expect("formatted output must re-parse");
+        assert_eq!(once, twice, "not idempotent:\n{once}");
+    }
+}
+
+#[test]
+fn map_pattern_comment_between_entries_is_rejected_not_dropped() {
+    let source = "Object subclass: Probe\n\n  a: m =>\n    #{\n      #a => a, // note\n      #b => b\n    } := m\n";
+    // Map patterns carry no comment slots; the fidelity check must refuse
+    // the source rather than silently drop the comment.
+    match format_source(source) {
+        Err(_) => {}
+        Ok(out) => assert!(out.contains("// note"), "comment dropped:\n{out}"),
+    }
+}
+
 // --- BT-5024: package-qualified superclass keeps its `package@` prefix ---
 
 #[test]
