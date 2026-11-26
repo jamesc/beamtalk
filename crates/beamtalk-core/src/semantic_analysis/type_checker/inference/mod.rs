@@ -434,7 +434,11 @@ impl TypeChecker {
         };
         let body_type = {
             let mut returned = self.tail_match_return_types(&method.body);
-            returned.extend(collected_returns);
+            // BT-5283: only a declared return type is checked against these;
+            // an undeclared method's inferred (cached) type is unchanged.
+            if method.return_type.is_some() {
+                returned.extend(collected_returns);
+            }
             if returned.is_empty() {
                 body_type
             } else {
