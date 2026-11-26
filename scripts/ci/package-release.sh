@@ -41,7 +41,8 @@ if [ "${PLATFORM}" = "windows-x86_64" ]; then
     scripts/install-otp-apps.sh "${STAGING}/lib/beamtalk/lib"
 
     # OTP application include directories (for native Erlang compilation)
-    for app in beamtalk_runtime; do
+    HEADER_APPS=(beamtalk_runtime)
+    for app in "${HEADER_APPS[@]}"; do
         INC_SRC="runtime/apps/${app}/include"
         if [ ! -d "${INC_SRC}" ] || ! ls "${INC_SRC}"/*.hrl 1>/dev/null 2>&1; then
             echo "❌ No .hrl headers found in ${INC_SRC}. Run 'just build-erlang' first."

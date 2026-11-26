@@ -8,7 +8,7 @@
 #   curl -fsSL https://jamesc.github.io/beamtalk/install.sh | sh
 #   curl ... | sh -s -- --version v0.1.0         # specific version
 #   curl ... | sh -s -- --nightly                # latest nightly build
-#   curl ... | sh -s -- --edge                   # latest main (linux-x86_64 only)
+#   curl ... | sh -s -- --edge                   # latest main (linux-x86_64, macos-arm64)
 #   curl ... | sh -s -- --prefix /usr/local       # custom install location
 #   curl ... | sh -s -- --uninstall               # remove an installed copy
 #   curl ... | sh -s -- --insecure-skip-checksum  # install without verifying
@@ -29,6 +29,10 @@ REPO="jamesc/beamtalk"
 DEFAULT_PREFIX="${HOME}/.beamtalk"
 GITHUB_API="https://api.github.com"
 GITHUB_RELEASES="https://github.com/${REPO}/releases"
+# Targets the rolling edge release is built for: the `platform:` entries of
+# .github/workflows/edge.yml's matrix. scripts/ci/test-install.sh checks the two
+# lists are the same.
+EDGE_PLATFORMS="linux-x86_64 macos-arm64"
 
 # ─── Parse arguments ────────────────────────────────────────────────────
 
@@ -63,7 +67,7 @@ while [ $# -gt 0 ]; do
             echo "  --version VERSION   Install a specific version (e.g., v0.1.0)"
             echo "  --nightly           Install the latest nightly build"
             echo "  --edge              Install the build of the latest main commit"
-            echo "                      (linux-x86_64 only; for CI of downstream packages)"
+            echo "                      (linux-x86_64 and macos-arm64; for CI of downstream packages)"
             echo "  --prefix PATH       Install to PATH (default: ~/.beamtalk)"
             echo "  --insecure-skip-checksum"
             echo "                      Install even if the archive's SHA-256 cannot be fetched"
@@ -158,13 +162,15 @@ resolve_version() {
 
     if [ "${EDGE}" = "1" ]; then
         # The rolling edge release (edge.yml) is rebuilt on every merge to
-        # main, with the same versionless asset naming as nightly. It is only
-        # built for linux-x86_64.
-        if [ "${PLATFORM}" != "linux-x86_64" ]; then
-            echo "Error: --edge is only built for linux-x86_64 (this is ${PLATFORM})."
-            echo "  Use --nightly, or build from source with 'just dist'."
-            exit 1
-        fi
+        # main, with the same versionless asset naming as nightly. It is built
+        # for the targets in EDGE_PLATFORMS only (edge.yml's matrix; BT-5307).
+        case " ${EDGE_PLATFORMS} " in
+            *" ${PLATFORM} "*) ;;
+            *)
+                echo "Error: edge is not built for ${PLATFORM} (--edge covers: $(echo "${EDGE_PLATFORMS}" | sed 's/ /, /g'))."
+                echo "  Use --nightly, or build from source with 'just dist'."
+                exit 1 ;;
+        esac
         TAG="edge"
         VERSION="edge"
         return
