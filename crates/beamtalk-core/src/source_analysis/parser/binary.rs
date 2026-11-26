@@ -849,8 +849,9 @@ impl Parser {
         }
         // A bignum no `f64` equals exactly is not folded: the integer stays
         // in the segment (BT-5239). A pattern arm then never matches. A
-        // construction converts it at run time, rounding to the nearest
-        // float, and fails only when it is beyond `f64` (about 309 digits).
+        // construction converts it at run time with the BEAM's `float/1`
+        // (which need not round to nearest), and fails only when it is
+        // beyond `f64` (about 309 digits).
         let Some((Literal::BigInteger(digits), value_span)) = literal else {
             return;
         };
