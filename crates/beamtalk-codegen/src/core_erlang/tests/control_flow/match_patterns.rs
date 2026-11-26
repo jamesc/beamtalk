@@ -717,5 +717,8 @@ fn test_match_top_level_named_type_pattern_still_binds() {
     // BT-5332: only the discard drops its binding; `n :: T` still binds `n`.
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      n :: Integer -> n;\n      _ -> 0\n    ]\n";
     let code = codegen_named(src, "foo");
-    assert_has("named binding is kept", &code, &["let N = "]);
+    assert!(
+        code.contains("let N@ = _Match@"),
+        "named binding kept. Got:\n{code}"
+    );
 }

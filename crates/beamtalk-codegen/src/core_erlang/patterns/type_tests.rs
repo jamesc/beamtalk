@@ -240,12 +240,7 @@ impl CoreErlangGenerator {
             leaf::var(match_var.to_string()),
             [
                 form::clause([outer_doc], None, inner, form::Layout::Flat),
-                form::clause(
-                    [leaf::var(fallthrough)],
-                    None,
-                    rest_doc,
-                    form::Layout::Flat,
-                ),
+                form::clause([leaf::var(fallthrough)], None, rest_doc, form::Layout::Flat),
             ],
             form::Layout::Flat,
         )))

@@ -24,14 +24,14 @@ fn type_messages(source: &str) -> Vec<String> {
 /// A method matching `v` with `pattern -> body`, where `v :: Object`.
 fn fixture(pattern: &str, body: &str) -> String {
     format!(
-        "typed Object subclass: ZzRepro\n  class run: v :: Object -> Object =>\n    v match: [\n      {pattern} -> {body};\n      _ -> 0\n    ]\n"
+        "typed Object subclass: ZzRepro\n  class run: v :: Object -> Object =>\n    v match: [\n      {pattern} -> {body};\n      _ -> 0\n    ]\n\n  class needsInt: i :: Integer -> Integer => i\n  class needsStr: s :: String -> Integer => s size\n  class needsList: l :: List -> Integer => l size\n"
     )
 }
 
 fn assert_narrowed(pattern: &str, bad_send: &str, good_send: &str) {
     let bad = type_messages(&fixture(pattern, bad_send));
     assert!(
-        bad.iter().any(|m| m.contains("does not understand")),
+        bad.iter().any(|m| m.contains("expects")),
         "`{pattern}`: `{bad_send}` must be flagged: {bad:?}"
     );
     let good = type_messages(&fixture(pattern, good_send));
@@ -45,24 +45,32 @@ fn assert_narrowed(pattern: &str, bad_send: &str, good_send: &str) {
 fn nested_in_map_value_narrows() {
     assert_narrowed(
         "#{#errors => errors :: List}",
-        "errors fooBar",
-        "errors size",
+        "self needsInt: errors",
+        "self needsList: errors",
     );
 }
 
 #[test]
 fn nested_in_tuple_narrows() {
-    assert_narrowed("{#ok, n :: Integer}", "n fooBar", "n + 1");
+    assert_narrowed(
+        "{#ok, n :: Integer}",
+        "self needsStr: n",
+        "self needsInt: n",
+    );
 }
 
 #[test]
 fn nested_in_array_narrows() {
-    assert_narrowed("#[s :: String, _]", "s fooBar", "s size");
+    assert_narrowed("#[s :: String, _]", "self needsInt: s", "self needsStr: s");
 }
 
 #[test]
 fn nested_in_constructor_narrows() {
-    assert_narrowed("Result ok: s :: String", "s fooBar", "s size");
+    assert_narrowed(
+        "Result ok: s :: String",
+        "self needsInt: s",
+        "self needsStr: s",
+    );
 }
 
 #[test]
