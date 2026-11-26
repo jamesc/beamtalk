@@ -907,22 +907,35 @@ fn negative_bignum_unit_is_out_of_range_not_too_large() {
 }
 
 #[test]
-fn bignum_not_exact_as_a_float_warns() {
+fn bignum_in_a_float_segment_warns_where_it_cannot_work() {
+    // Beyond `f64` (400 digits): a construction fails, a pattern never matches.
     let digits = "9".repeat(400);
-    let diagnostics = diagnostics_of(&format!("<<{digits}/float>>"));
-    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-    assert_eq!(diagnostics[0].0, Severity::Warning);
-    assert!(
-        diagnostics[0]
-            .1
-            .contains("cannot be represented exactly as a float"),
-        "{}",
-        diagnostics[0].1
+    let abbreviated = "99999999999999999999...9999999999 (400 digits)";
+    assert_one(
+        &format!("<<{digits}/float>>"),
+        Severity::Warning,
+        &format!(
+            "binary construction will fail because '{abbreviated}' is too large to be a float"
+        ),
     );
-    // So does one that rounds: 2^70 + 1 needs 71 significant bits.
-    assert_eq!(diagnostics_of("<<1180591620717411303425/float>>").len(), 1);
-    // A bignum an f64 holds exactly is clean.
+    assert_one(
+        &format!("x match: [<<{digits}/float>> -> 1]"),
+        Severity::Warning,
+        &format!(
+            "this arm can never match because '{abbreviated}' cannot be represented exactly as a float"
+        ),
+    );
+    // 2^70 + 1 needs 71 significant bits: a construction rounds it at run
+    // time, but a pattern keeps the integer and never matches.
+    assert!(diagnostics_of("<<1180591620717411303425/float>>").is_empty());
+    assert_one(
+        "x match: [<<1180591620717411303425/float>> -> 1]",
+        Severity::Warning,
+        "this arm can never match because '1180591620717411303425' cannot be represented exactly as a float",
+    );
+    // A bignum an f64 holds exactly is clean in both.
     assert!(diagnostics_of(&format!("<<{BIG}/float>>")).is_empty());
+    assert!(diagnostics_of(&format!("x match: [<<{BIG}/float>> -> 1]")).is_empty());
 }
 
 #[test]

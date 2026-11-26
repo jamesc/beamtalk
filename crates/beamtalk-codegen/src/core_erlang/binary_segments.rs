@@ -155,7 +155,8 @@ pub(in crate::core_erlang) fn int_to_f64(v: i64) -> f64 {
 
 /// The float a numeric literal stands for in a `float` segment: `erlc`'s
 /// `float/1` of an integer (bignums included, BT-5239), or the float itself.
-/// `None` for a bignum too large for an `f64` and for non-numeric literals.
+/// `None` for a bignum no `f64` equals exactly (the runtime converts it in a
+/// construction; a pattern never matches it) and for non-numeric literals.
 pub(in crate::core_erlang) fn float_segment_value(lit: &Literal) -> Option<f64> {
     match lit {
         Literal::Float(f) => Some(*f),

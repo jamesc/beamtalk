@@ -826,7 +826,7 @@ impl Parser {
     }
 
     /// The checks on a `float` segment: its bit size (size × unit) and a
-    /// bignum value beyond `f64`.
+    /// bignum value that no `f64` equals exactly.
     fn check_binary_float_shape(
         &mut self,
         size_lit: Option<(i64, Span)>,
@@ -847,21 +847,32 @@ impl Parser {
                 ));
             }
         }
-        // A bignum beyond `f64` (about 309 digits) has no float to
-        // stand for it: a pattern arm never matches, a construction
-        // fails at run time.
-        if let Some((Literal::BigInteger(digits), value_span)) = literal
-            && Literal::bignum_as_f64(digits).is_none()
-        {
-            self.diagnostics.push(Diagnostic::warning(
-                format!(
-                    "{} because '{}' cannot be represented exactly as a float",
-                    direction.cannot_succeed(),
-                    abbreviate_digits(digits)
-                ),
-                value_span,
-            ));
+        // A bignum no `f64` equals exactly is not folded: the integer stays
+        // in the segment (BT-5239). A pattern arm then never matches. A
+        // construction converts it at run time, rounding to the nearest
+        // float, and fails only when it is beyond `f64` (about 309 digits).
+        let Some((Literal::BigInteger(digits), value_span)) = literal else {
+            return;
+        };
+        if Literal::bignum_as_f64(digits).is_some() {
+            return;
         }
+        let shown = abbreviate_digits(digits);
+        let message = match direction {
+            BinaryDirection::Pattern => format!(
+                "{} because '{shown}' cannot be represented exactly as a float",
+                direction.cannot_succeed()
+            ),
+            BinaryDirection::Construction if digits.parse::<f64>().is_ok_and(f64::is_finite) => {
+                return;
+            }
+            BinaryDirection::Construction => format!(
+                "{} because '{shown}' is too large to be a float",
+                direction.cannot_succeed()
+            ),
+        };
+        self.diagnostics
+            .push(Diagnostic::warning(message, value_span));
     }
 
     /// String literal values take no size or unit, and no type other than
