@@ -19,41 +19,45 @@ Actor subclass: Bt5291MatchArmReturnActor
 
   // The issue's repro: a loop body, a self-send scrutinee.
   loopBump =>
-    1 to: 5 do: [:i | self bump match: [k -> k > 2 ifTrue: [^ k * 10]]]
+    1 to: 5 do: [:i | self bump match: [k -> k > 2 ifTrue: [^k * 10]]]
     self.f
 
   // The method-root form.
   rootBump =>
-    self bump match: [k -> k > 0 ifTrue: [^ k * 10]]
+    self bump match: [k -> k > 0 ifTrue: [^k * 10]]
     self.f
 
   // The conditional-arm form.
   armBump: x =>
-    x isNil ifTrue: [nil] ifFalse: [self bump match: [k -> k > 0 ifTrue: [^ k * 10]]]
+    x isNil ifTrue: [
+      nil
+    ] ifFalse: [self bump match: [k -> k > 0 ifTrue: [^k * 10]]]
     self.f
 
   // The conditional-receiver form: the nested `^` reads the loop's `i`.
   receiverBump =>
-    1 to: 5 do: [:i | (self bump) > 0 ifTrue: [i > 2 ifTrue: [^ i * 10]]]
+    1 to: 5 do: [:i | (self bump) > 0 ifTrue: [i > 2 ifTrue: [^i * 10]]]
     self.f
 
   // A field write the `^` must commit, then a scrutinee that advances
   // nothing (the self-send scrutinee's own store hid the bug above).
   writeThenMatch: x =>
     self.f := 50
-    x match: [k -> k > 0 ifTrue: [^ k * 10]]
+    x match: [k -> k > 0 ifTrue: [^k * 10]]
     self.f
 
   // The same in a loop body, with the two-armed conditional.
   loopWriteThenMatch: x =>
-    1 to: 3 do: [:i |
-      self.f := self.f + 100
-      x match: [k -> (k > i) ifTrue: [^ k * 10] ifFalse: [nil]]
-    ]
+    1
+      to: 3
+      do: [:i |
+        self.f := self.f + 100
+        x match: [k -> (k > i) ifTrue: [^k * 10] ifFalse: [nil]]
+      ]
     self.f
 
   // The conditional's own receiver binds the name its `^` block reads.
   receiverBindsThenReturns: x =>
     self.f := 7
-    (y := x) > 0 ifTrue: [^ y * 10]
+    (y := x) > 0 ifTrue: [^y * 10]
     self.f
