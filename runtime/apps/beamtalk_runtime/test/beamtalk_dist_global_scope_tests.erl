@@ -271,7 +271,13 @@ netsplit_heal_conflict_test_() ->
 %% message) confirms it. `peer:call/4` uses the separate `standard_io` channel,
 %% so it keeps working while distribution is down.
 sever(Peer, PeerNode) ->
-    PeerCookie = erlang:get_cookie(PeerNode),
+    %% A failed earlier test can leave the split cookie in place (the peer is
+    %% shared across the group); never capture that as the cookie to restore.
+    PeerCookie =
+        case erlang:get_cookie(PeerNode) of
+            beamtalk_test_split_cookie -> beamtalk_dist_test_helper:peer_cookie();
+            Real -> Real
+        end,
     true = erlang:set_cookie(PeerNode, beamtalk_test_split_cookie),
     true = erlang:disconnect_node(PeerNode),
     ok = beamtalk_test_wait:until(fun() ->

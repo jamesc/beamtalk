@@ -52,6 +52,7 @@ into `peer:start_it/2` — the stacktrace only says where it was parked.
 
 -export([
     ensure_distribution/0,
+    peer_cookie/0,
     start_peer/0,
     start_peer/1,
     start_peer/2,
