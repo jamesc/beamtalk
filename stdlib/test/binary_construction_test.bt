@@ -407,9 +407,8 @@ TestCase subclass: BinaryConstructionTest
 
   testInexactBignumFloatSegmentIsConvertedByTheRuntime =>
     // 166153499473114502559719956244594689 is not a float: the BEAM rounds
-    // it to 2^117. (A variable, as the literal itself draws a warning.)
-    v := 166153499473114502559719956244594689
-    bin := <<v:64/float>>
+    // it to 2^117 at run time, as it does for `float/1` of the same integer.
+    bin := <<166153499473114502559719956244594689:64/float>>
     self assert: bin toBytes equals: #(71, 64, 0, 0, 0, 0, 0, 0)
 
   testExactBignumFloatSegmentIsFolded =>

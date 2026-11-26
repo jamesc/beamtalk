@@ -857,19 +857,24 @@ impl Parser {
         if Literal::bignum_as_f64(digits).is_some() {
             return;
         }
+        // Only a value beyond `f64` fails in a construction; one just past
+        // `f64::MAX` may parse as `f64::MAX` here yet still fail at run time,
+        // a window under one ulp wide.
+        let finite = digits.parse::<f64>().is_ok_and(f64::is_finite);
+        if direction == BinaryDirection::Construction && finite {
+            return;
+        }
         let shown = abbreviate_digits(digits);
-        let message = match direction {
-            BinaryDirection::Pattern => format!(
+        let message = if direction == BinaryDirection::Pattern {
+            format!(
                 "{} because '{shown}' cannot be represented exactly as a float",
                 direction.cannot_succeed()
-            ),
-            BinaryDirection::Construction if digits.parse::<f64>().is_ok_and(f64::is_finite) => {
-                return;
-            }
-            BinaryDirection::Construction => format!(
+            )
+        } else {
+            format!(
                 "{} because '{shown}' is too large to be a float",
                 direction.cannot_succeed()
-            ),
+            )
         };
         self.diagnostics
             .push(Diagnostic::warning(message, value_span));
