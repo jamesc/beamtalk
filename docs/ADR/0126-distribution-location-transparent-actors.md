@@ -775,7 +775,12 @@ reached" is never reported as "dead" or "alive":
 - `isAlive` asks the pid's node (`beamtalk_pid:ask_alive/3`, `erpc`, bounded
   by the 5000 ms remote-call timeout) and answers its `true`/`false`; an
   unreachable node raises `node_down` and no answer in time raises `timeout`.
-  The same holds for `isAlive` on a remote supervisor handle.
+  Sent async, the node is asked from a separate process, so the send still
+  hands back its future at once. On a remote supervisor handle both failures
+  raise the `node_down` every other handle call raises (`details` `reason`
+  `#noconnection` or `#timeout`). On a node-qualified `{registered, Name,
+  Node}` ref whose node cannot be reached, `isAlive` raises `node_down`
+  instead of answering `false`.
 - `kill` answers `ok` only once a `'DOWN'` says the actor is gone; a
   `noconnection` `'DOWN'` (the kill signal was lost) raises `node_down`.
 - `stop`, `stopWith:` and `stopWith:timeout:` raise (or, sent async, reject

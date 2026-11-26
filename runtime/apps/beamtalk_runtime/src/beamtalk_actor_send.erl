@@ -169,6 +169,23 @@ async_send_impl(Ref, Selector, Args, FuturePid, ClassHint) when ?IS_PROXY_REF(Re
             beamtalk_future:reject(FuturePid, Error),
             ok
     end;
+async_send_impl(ActorPid, isAlive, [], FuturePid, ClassHint) when node(ActorPid) =/= node() ->
+    %% BT-5192: a remote isAlive asks the actor's node (up to the remote-call
+    %% timeout). Ask from a separate process so an async send hands back its
+    %% future at once instead of blocking the sender on the round trip; the
+    %% future's own orphan cap is far longer than that bound.
+    Class =
+        case ClassHint of
+            undefined -> unknown;
+            Hint -> Hint
+        end,
+    _ = spawn(fun() ->
+        case beamtalk_pid:ask_alive(ActorPid, Class, isAlive) of
+            {ok, Alive} -> beamtalk_future:resolve(FuturePid, Alive);
+            {error, Error} -> beamtalk_future:reject(FuturePid, Error)
+        end
+    end),
+    ok;
 async_send_impl(ActorPid, Selector, Args, FuturePid, _ClassHint) when
     ?IS_LOCAL_LIFECYCLE(Selector, Args)
 ->
@@ -792,10 +809,12 @@ The error for a stop of `ActorPid` (`stop`, `stopWith:`, `stopWith:timeout:`)
 that exited with `Reason` (BT-5192). Uses `beamtalk_call_failure:classify/2`,
 the classification `sync_call/5` applies to a send:
 
-- unreachable node (`nodedown`, `noconnection`) → `node_down`: the stop request
-  or its `'DOWN'` was lost, and the actor may still be running;
-- `timeout` → `timeout`: the actor has not finished stopping in time (the
-  terminate request was sent, so it may still stop in the background);
+- unreachable node (`nodedown`, `noconnection`) of a **remote** actor →
+  `node_down`: the stop request or its `'DOWN'` was lost, and the actor may
+  still be running;
+- the stop's own `timeout` → `timeout`: the actor has not finished stopping in
+  time (the terminate request was sent, so it may still stop in the
+  background);
 - anything else (the actor exited with another reason first) → `actor_dead`,
   with the exit reason in `details`.
 
@@ -803,8 +822,8 @@ the classification `sync_call/5` applies to a send:
 """.
 -spec lifecycle_exit_error(pid(), atom(), term()) -> #beamtalk_error{}.
 lifecycle_exit_error(ActorPid, Selector, Reason) ->
-    case beamtalk_call_failure:classify(exit, Reason) of
-        {unreachable, _} ->
+    case stop_failure(ActorPid, Reason) of
+        unreachable ->
             node_down_error_record(
                 beamtalk_call_failure:unreachable_node(Reason, node(ActorPid)), Selector
             );
@@ -817,8 +836,21 @@ lifecycle_exit_error(ActorPid, Selector, Reason) ->
                     "it may still stop in the background"
                 >>
             );
-        _ ->
+        exited ->
             beamtalk_error:with_details(actor_dead_error_record(Selector), #{exit_reason => Reason})
+    end.
+
+%% What a failed stop's exit `Reason` says, via `beamtalk_call_failure:classify/2`.
+%% Only a remote actor's node can be unreachable: a local actor that itself
+%% exited with `noconnection` (say, linked to a process on a lost node) is
+%% simply dead. And only `beamtalk_stop:stop/3`'s own bare `timeout` means the
+%% wait ran out; an actor that exited with `{timeout, _}` is dead.
+-spec stop_failure(pid(), term()) -> unreachable | timeout | exited.
+stop_failure(ActorPid, Reason) ->
+    case beamtalk_call_failure:classify(exit, Reason) of
+        {unreachable, _} when node(ActorPid) =/= node() -> unreachable;
+        timeout when Reason =:= timeout -> timeout;
+        _ -> exited
     end.
 
 -doc "Construct a structured node_down error record for the given node and selector.".
@@ -883,7 +915,13 @@ how to deliver the outcome (resolve/reject a future, or raise).
 -spec proxy_route(proxy_ref(), atom(), list()) ->
     {answer, term()} | {pid, pid()} | {error, #beamtalk_error{}}.
 proxy_route(Ref, isAlive, []) ->
-    {answer, is_pid_result(resolve_proxy(Ref))};
+    %% BT-5192: an unreachable node cannot tell whether the name is registered,
+    %% so it is `node_down`, never `false`, as for a remote pid's isAlive.
+    case resolve_proxy(Ref) of
+        {ok, _Pid} -> {answer, true};
+        undefined -> {answer, false};
+        {node_down, Node} -> {error, node_down_error_record(Node, isAlive)}
+    end;
 proxy_route(_Ref, isRegistered, []) ->
     {answer, true};
 proxy_route({_Kind, Name}, registeredName, []) ->
@@ -911,11 +949,6 @@ resolve_or_error(Ref, Selector) ->
         undefined -> {error, no_such_process_error(Ref, Selector)};
         {node_down, Node} -> {error, node_down_error_record(Node, Selector)}
     end.
-
--spec is_pid_result({ok, pid()} | undefined | {node_down, node()}) -> boolean().
-
-is_pid_result({ok, _Pid}) -> true;
-is_pid_result(_) -> false.
 
 -doc "Sync half of `proxy_route/3`: answer, raise, or continue with the resolved pid.".
 -spec sync_send_proxy(proxy_ref(), atom(), list(), fun((pid()) -> term())) -> term().
@@ -994,8 +1027,10 @@ kill_and_wait(ActorPid) ->
     exit(ActorPid, kill),
     receive
         {'DOWN', Ref, process, ActorPid, Reason} ->
+            %% Only a remote actor's kill signal can be lost; a local actor
+            %% that exited with `noconnection` is gone.
             case beamtalk_call_failure:classify(exit, Reason) of
-                {unreachable, _} ->
+                {unreachable, _} when node(ActorPid) =/= node() ->
                     {error,
                         node_down_error_record(
                             beamtalk_call_failure:unreachable_node(Reason, node(ActorPid)), kill

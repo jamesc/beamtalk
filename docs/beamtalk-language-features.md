@@ -4886,7 +4886,7 @@ This matters in practice: you can call `WebApp supervise` at every entry point o
 - `#stale_handle` — the supervisor process itself is dead.
 - `#node_down` — the handle names a supervisor on another node that cannot be reached (down, partitioned, or too slow to answer). The supervisor may still be running, so this is not a stale handle; `details` carries `node` and `reason` (`#nodedown`, `#noconnection` or `#timeout`). Every supervisor handle call (`args`, `count`, `stop`, the child calls above) reports it the same way, where a local handle would report `#stale_handle`.
 
-`isAlive` and `stop` are sealed on `Supervisor` and `DynamicSupervisor`: the runtime answers them on a handle without a method lookup, so overriding either is a compile error. `isAlive` on a remote supervisor asks its node, as it does for an actor, and raises `node_down` (or `timeout`) when that node cannot answer.
+`isAlive` and `stop` are sealed on `Supervisor` and `DynamicSupervisor`: the runtime answers them on a handle without a method lookup, so overriding either is a compile error. `isAlive` on a remote supervisor asks its node, as it does for an actor, and raises `#node_down` (as above, `reason` `#noconnection` or `#timeout`) when that node cannot answer.
 
 ### Call-site patterns
 
@@ -7779,7 +7779,9 @@ refusal have distinct consequences:
 `stop` follow the same rule: when the actor's node cannot be reached they raise
 `node_down` (or `timeout` when it does not answer in time), never an answer
 that guesses. `isAlive` asks the actor's node (up to 5 seconds) and answers
-`true` or `false` from there; `kill` raises `node_down` when the kill signal is
+`true` or `false` from there (an actor found with `named:on:` whose node cannot
+be reached raises `node_down` too, rather than answering `false`); `kill`
+raises `node_down` when the kill signal is
 lost; `stop` raises `node_down` instead of `actor_dead`. Across a partition
 the actor may well still be running.
 

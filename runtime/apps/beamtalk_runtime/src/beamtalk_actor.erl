@@ -650,7 +650,8 @@ Send an asynchronous message to an actor, with lifecycle handling.
 
 Handles lifecycle methods locally without involving the actor process:
 - `isAlive` - checks if process is alive, resolves Future with boolean
-  (remote pid: always `true`, ADR 0126 §7.3 — see moduledoc)
+  (remote pid: its node is asked from a separate process, and the Future is
+  rejected with `node_down`/`timeout` when it cannot tell, BT-5192)
 - `monitor` - creates a monitor reference, resolves Future with ref
 - `stop` - gracefully stops the actor process, resolves Future with ok
 

@@ -4463,3 +4463,38 @@ wire_erpc_targets(Path) ->
         {match, Ms} -> [list_to_atom(M) || [[C | _] = M] <- Ms, C >= $a];
         nomatch -> []
     end.
+
+%%% ============================================================================
+%%% BT-5192: lifecycle failure classification
+%%% ============================================================================
+
+%% `isAlive` on a node-qualified proxy whose node cannot be reached cannot tell
+%% whether the name is registered: `node_down`, not `false`.
+bt5192_proxy_is_alive_on_unreachable_node_raises_node_down_test() ->
+    Node = node(beamtalk_dist_test_helper:unreachable_pid(bt5192_ghost)),
+    ?assertBtErrorDetails(
+        node_down,
+        _,
+        isAlive,
+        #{node := Node},
+        beamtalk_actor:sync_send({registered, bt5192_some_name, Node}, isAlive, [])
+    ).
+
+%% A local actor's own exit reason never reads as "node unreachable" or "the
+%% stop timed out": the actor is dead.
+bt5192_local_stop_failure_is_actor_dead_test() ->
+    Local = self(),
+    lists:foreach(
+        fun(Reason) ->
+            ?assertMatch(
+                #beamtalk_error{kind = actor_dead, details = #{exit_reason := Reason}},
+                beamtalk_actor_send:lifecycle_exit_error(Local, stop, Reason)
+            )
+        end,
+        [noconnection, {nodedown, node()}, {timeout, {gen_server, call, []}}]
+    ),
+    %% The stop's own wait running out is a timeout.
+    ?assertMatch(
+        #beamtalk_error{kind = timeout},
+        beamtalk_actor_send:lifecycle_exit_error(Local, stop, timeout)
+    ).

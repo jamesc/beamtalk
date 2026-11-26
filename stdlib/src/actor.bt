@@ -846,7 +846,9 @@ Object subclass: Actor
   /// exit signal. Plain `spawn` / `spawnWith:` do not link.
   ///
   /// From another process this waits up to 5 seconds for the actor to
-  /// terminate; stopping an already-stopped actor succeeds silently. Sent
+  /// terminate, raising `timeout` if it has not, or `node_down` if the actor
+  /// is on another node that cannot be reached (it may still be running);
+  /// stopping an already-stopped actor succeeds silently. Sent
   /// to `self` from inside one of the actor's own methods, it takes effect
   /// after the current message has been handled (a pending caller still
   /// gets its reply), then the actor terminates. Stopping itself from
@@ -863,7 +865,8 @@ Object subclass: Actor
   /// milliseconds (or `#infinity`) for it to terminate (`gen_server:stop/3`).
   ///
   /// Same semantics as `stopWith:`; raises `timeout` if the actor has not
-  /// terminated within `timeout` (it may still stop in the background). Sent to `self`, the timeout is ignored —
+  /// terminated within `timeout` (it may still stop in the background), and
+  /// `node_down` if it is on another node that cannot be reached. Sent to `self`, the timeout is ignored —
   /// the stop is deferred until the current message has been handled.
   ///
   /// ## Examples

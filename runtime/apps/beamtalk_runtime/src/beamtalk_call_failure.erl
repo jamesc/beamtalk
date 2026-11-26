@@ -29,7 +29,7 @@ on who the callee is. Each caller maps `other` to its own error:
   is re-raised unchanged.
 """.
 
--export([classify/2, unreachable_node/2, erpc/5, tolerate_gone/2, tolerate_gone/3]).
+-export([classify/2, unreachable_node/2, erpc/5, erpc/6, tolerate_gone/2, tolerate_gone/3]).
 
 -export_type([classification/0, erpc_error/0, gone_opts/0]).
 
@@ -99,6 +99,27 @@ erpc(Node, M, F, A, Timeout) ->
             %% BT-5192: the remote process running the call was killed by an
             %% exit signal before it answered.
             {error, {other, {signal, Reason}}}
+    end.
+
+-doc """
+`erpc/5`, plus the target's answer contract (BT-5192): an answer for which
+`IsValid` is false becomes `{error, {other, {unexpected_result, Value}}}`, so a
+call site's `{ok, _}` clauses never meet an answer outside the contract and
+its `{other, _}` error builder reports one. Every remote-call site whose
+target has a fixed answer shape uses this rather than an `{ok, Other}` arm of
+its own.
+""".
+-spec erpc(node(), module(), atom(), [term()], timeout(), fun((term()) -> boolean())) ->
+    {ok, term()} | {error, erpc_error()}.
+erpc(Node, M, F, A, Timeout, IsValid) ->
+    case erpc(Node, M, F, A, Timeout) of
+        {ok, Value} = Ok ->
+            case IsValid(Value) of
+                true -> Ok;
+                false -> {error, {other, {unexpected_result, Value}}}
+            end;
+        {error, _} = Error ->
+            Error
     end.
 
 -type gone_opts() :: #{

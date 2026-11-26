@@ -58,6 +58,9 @@ partition_test_() ->
                 {"remote isAlive across a partition raises node_down", fun() ->
                     is_alive_across_partition(PeerNode)
                 end},
+                {"remote async isAlive across a partition rejects with node_down", fun() ->
+                    async_is_alive_across_partition(PeerNode)
+                end},
                 {"remote supervisor isAlive asks the node", fun() ->
                     supervisor_is_alive_asks_remote_node(PeerNode)
                 end},
@@ -88,16 +91,6 @@ across_partition(PeerNode, Fun) ->
         ok = beamtalk_dist_test_helper:heal(PeerNode)
     end.
 
-assert_node_down(PeerNode, Selector, Fun) ->
-    try Fun() of
-        Result -> erlang:error({expected_node_down, Selector, Result})
-    catch
-        error:Caught ->
-            #beamtalk_error{kind = Kind, selector = Sel, details = Details} = unwrap(Caught),
-            ?assertEqual({node_down, Selector}, {Kind, Sel}),
-            ?assertMatch(#{node := PeerNode}, Details)
-    end.
-
 %% `{error, Error}` returned (a raising op converts its own error with
 %% `?assertBtErrorWith`), or what else happened.
 run_op(F) ->
@@ -115,9 +108,6 @@ is_unexpected_result_error({error, #beamtalk_error{} = E}) ->
 is_unexpected_result_error(_) ->
     false.
 
-unwrap(#beamtalk_error{} = E) -> E;
-unwrap(#{error := #beamtalk_error{} = E}) -> E.
-
 %%====================================================================
 %% 1. kill
 %%====================================================================
@@ -126,7 +116,9 @@ kill_across_partition(PeerNode) ->
     Pid = start_remote_counter(PeerNode),
     try
         across_partition(PeerNode, fun() ->
-            assert_node_down(PeerNode, kill, fun() -> beamtalk_actor:sync_send(Pid, kill, []) end)
+            ?assertBtErrorDetails(
+                node_down, _, kill, #{node := PeerNode}, beamtalk_actor:sync_send(Pid, kill, [])
+            )
         end),
         ?assert(remote_alive(PeerNode, Pid))
     after
@@ -141,7 +133,9 @@ sync_stop_across_partition(PeerNode) ->
     Pid = start_remote_counter(PeerNode),
     try
         across_partition(PeerNode, fun() ->
-            assert_node_down(PeerNode, stop, fun() -> beamtalk_actor:sync_send(Pid, stop, []) end)
+            ?assertBtErrorDetails(
+                node_down, _, stop, #{node := PeerNode}, beamtalk_actor:sync_send(Pid, stop, [])
+            )
         end),
         ?assert(remote_alive(PeerNode, Pid)),
         %% Healed: the same stop now succeeds.
@@ -186,11 +180,35 @@ is_alive_across_partition(PeerNode) ->
     Pid = start_remote_counter(PeerNode),
     try
         across_partition(PeerNode, fun() ->
-            assert_node_down(PeerNode, isAlive, fun() ->
+            ?assertBtErrorDetails(
+                node_down,
+                _,
+                isAlive,
+                #{node := PeerNode},
                 beamtalk_actor:sync_send(Pid, isAlive, [])
-            end)
+            )
         end),
         ?assertEqual(true, beamtalk_actor:sync_send(Pid, isAlive, []))
+    after
+        rpc:call(PeerNode, erlang, exit, [Pid, kill])
+    end.
+
+async_is_alive_across_partition(PeerNode) ->
+    Pid = start_remote_counter(PeerNode),
+    try
+        across_partition(PeerNode, fun() ->
+            Future = beamtalk_future:new(),
+            ok = beamtalk_actor:async_send(Pid, isAlive, [], Future),
+            ?assertThrow(
+                {future_rejected, #beamtalk_error{
+                    kind = node_down, selector = isAlive, details = #{node := PeerNode}
+                }},
+                beamtalk_future:await(Future, 10000)
+            )
+        end),
+        Healed = beamtalk_future:new(),
+        ok = beamtalk_actor:async_send(Pid, isAlive, [], Healed),
+        ?assertEqual(true, beamtalk_future:await(Healed, 10000))
     after
         rpc:call(PeerNode, erlang, exit, [Pid, kill])
     end.
@@ -202,7 +220,13 @@ supervisor_is_alive_asks_remote_node(PeerNode) ->
     ?assertEqual(true, beamtalk_supervisor:isAlive(Handle)),
     try
         across_partition(PeerNode, fun() ->
-            assert_node_down(PeerNode, isAlive, fun() -> beamtalk_supervisor:isAlive(Handle) end)
+            ?assertBtErrorDetails(
+                node_down,
+                'BT5192RemoteSup',
+                isAlive,
+                #{node := PeerNode, reason := noconnection},
+                beamtalk_supervisor:isAlive(Handle)
+            )
         end)
     after
         ok = rpc:call(PeerNode, gen_server, stop, [Pid])

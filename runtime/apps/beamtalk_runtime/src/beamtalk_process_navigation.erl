@@ -341,14 +341,11 @@ on(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}, Limit) ->
 remote_default_snapshot(Name, Limit) ->
     case
         beamtalk_call_failure:erpc(
-            Name, ?MODULE, remote_snapshot_target, [Limit], ?REMOTE_SNAPSHOT_TIMEOUT
+            Name, ?MODULE, remote_snapshot_target, [Limit], ?REMOTE_SNAPSHOT_TIMEOUT, fun is_list/1
         )
     of
         {ok, Snapshot} when is_list(Snapshot) ->
             {ok, [class_ref_in(N) || N <- Snapshot]};
-        {ok, Other} ->
-            %% BT-5192: a target that answers outside its contract.
-            {error, on_error(Name, {unexpected_result, Other})};
         {error, {node_down, _}} ->
             {error, on_node_down_error(Name)};
         {error, timeout} ->
