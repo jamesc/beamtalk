@@ -77,8 +77,9 @@ fn stdlib_protocols() -> &'static StdlibProtocols {
     })
 }
 
-/// Parses `(path, text)` stdlib files into their provision-bearing protocols,
-/// stamped as declared in [`STDLIB_PACKAGE`].
+/// Parses `(path, text)` stdlib files, stamped as declared in
+/// [`STDLIB_PACKAGE`]. Every protocol goes into `all`; only the
+/// provision-bearing ones go into `map` and `sources`.
 fn parse_protocol_files(files: Vec<(&'static str, &'static str)>) -> StdlibProtocols {
     let mut defs = Vec::new();
     let mut all = HashMap::new();
@@ -137,7 +138,9 @@ pub(crate) fn stdlib_protocol_names() -> &'static [EcoString] {
 }
 
 /// The definition of baked stdlib protocol `name` (bare), provision-bearing or
-/// not, for seeding the type checker's registry (BT-5338).
+/// not, for seeding the type checker's registry (BT-5338). Bare names only: a
+/// `stdlib@`-qualified `extending:` parent resolves through the `uses:`
+/// resolver, so only provision-bearing protocols match it.
 pub(crate) fn stdlib_protocol_definition(name: &str) -> Option<&'static ProtocolDefinition> {
     stdlib_protocols().all.get(name)
 }

@@ -645,7 +645,7 @@ The type system — including generics and protocol conformance — **never prod
 | Situation | Diagnostic | Severity |
 |---|---|---|
 | Unknown message send | "Counter does not respond to 'foo'" | Warning |
-| Protocol conformance unverifiable | "cannot verify Printable conformance" | Warning |
+| Protocol conformance unverifiable (`Dynamic` argument) | none — accepted (gradual typing, BT-5338) | — |
 | Type mismatch in argument | "expected Integer, got String" | Warning |
 | Missing annotation in `typed` class | "untyped parameter in typed class" | Warning |
 | Unparameterized generic return | "someMethod returns unparameterized Result" | Warning + hint |
