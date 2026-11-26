@@ -444,7 +444,7 @@ impl CoreErlangGenerator {
     /// of `class`, for the operator fast-path classifiers. Replaces any
     /// previously-recorded facts (call once per class at codegen entry).
     ///
-    /// Own fields and `classState:` variables are classified by their
+    /// Own fields are classified by their
     /// declaration alone ([`classify_fields`]): a declared type is recorded in
     /// full (unions included), an untyped field is always guarded, whatever
     /// its default or the class's own writes (BT-3925 — `spawnWith:`, keyword

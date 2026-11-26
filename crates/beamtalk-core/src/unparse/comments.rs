@@ -67,7 +67,7 @@ pub(super) fn unparse_comment_attachment_leading(ca: &CommentAttachment) -> Vec<
 ///
 /// Ordinary leading comments (license headers, section notes) are
 /// deliberately excluded: several declaration kinds (`Protocol define:`,
-/// `state:`/`classState:`) have established, already-canonical stdlib source
+/// `state:`) have established, already-canonical stdlib source
 /// where such comments sit directly against the following doc comment or
 /// header with no blank line, and this must not force one in.
 ///

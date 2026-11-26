@@ -999,18 +999,17 @@ fn test_meta_field_types_map_records_shape_as_dictionary() {
     assert!(text.contains("'cfg' => 'Dictionary'"), "{text}");
 }
 
-/// The runtime's load gate compares a module's `class_var_abi` with
-/// `?BT_CLASS_VAR_ABI` in the checked-in runtime header; this test is what
-/// keeps the Rust constant and that header equal (ADR 0153: the header is no
-/// longer generated).
+/// The runtime's load gate compares a module's `module_abi` with
+/// `?BT_MODULE_ABI` in the checked-in runtime header; this test is what
+/// keeps the Rust constant and that header equal.
 #[test]
-fn class_var_abi_matches_the_runtime_header() {
+fn module_abi_matches_the_runtime_header() {
     let hrl = include_str!(
-        "../../../../../runtime/apps/beamtalk_runtime/include/beamtalk_class_vars_keys.hrl"
+        "../../../../../runtime/apps/beamtalk_runtime/include/beamtalk_module_abi.hrl"
     );
-    let expected = format!("-define(BT_CLASS_VAR_ABI, {CLASS_VAR_ABI}).");
+    let expected = format!("-define(BT_MODULE_ABI, {MODULE_ABI}).");
     assert!(
         hrl.lines().any(|line| line == expected),
-        "beamtalk_class_vars_keys.hrl must contain `{expected}`"
+        "beamtalk_module_abi.hrl must contain `{expected}`"
     );
 }

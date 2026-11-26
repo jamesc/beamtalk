@@ -27,12 +27,12 @@ mistaken for a delegate selector.
 %% that no real class uses, so `delegate_callers_of_native_module/1` isolates on
 %% it deterministically.
 '__beamtalk_meta'() ->
-    %% Exports `__beamtalk_meta/0`, so it is inside the ADR 0130 class_var_abi load
+    %% Exports `__beamtalk_meta/0`, so it is inside the ADR 0130 module_abi load
     %% gate and declares the current value like a compiled class.
     #{
         native => true,
         backing_module => bt_test_native_backing,
-        class_var_abi => beamtalk_class_var_abi:abi()
+        module_abi => beamtalk_module_abi:abi()
     }.
 
 dispatch_increment(_Self) ->

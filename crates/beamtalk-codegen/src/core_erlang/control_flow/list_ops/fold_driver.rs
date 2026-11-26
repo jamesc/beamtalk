@@ -89,7 +89,7 @@ fn bind_detect_found_or_raise_doc(
     found_result: &str,
     fold_result: &str,
     recv_var: &str,
-    class_var: &str,
+    class_term: &str,
     no_match_var: String,
 ) -> Document<'static> {
     docvec![
@@ -100,11 +100,11 @@ fn bind_detect_found_or_raise_doc(
         " of <'true'> when 'true' -> ",
         form::element(1, leaf::var(fold_result.to_owned())),
         " <'false'> when 'true' -> let ",
-        leaf::var(class_var.to_owned()),
+        leaf::var(class_term.to_owned()),
         " = call 'beamtalk_primitive':'class_of'(",
         leaf::var(recv_var.to_owned()),
         ") in call 'beamtalk_collection':'raiseDetectNotFound'(",
-        leaf::var(class_var.to_owned()),
+        leaf::var(class_term.to_owned()),
         ")",
         // An explicit fallback: a `case` without one inside a `try` body (a
         // protected body, a handler) trips OTP's `beam_validator`

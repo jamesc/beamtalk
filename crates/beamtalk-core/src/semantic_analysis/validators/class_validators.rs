@@ -634,8 +634,8 @@ pub(crate) fn check_value_slot_assignment(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // Instance methods only (inline and standalone Tonel-style
-    // `Counter >> setX: v => ...`): `classState:` slots on class methods are
-    // separate and not subject to value-type immutability rules.
+    // `Counter >> setX: v => ...`): class methods hold no state (ADR 0153), so
+    // value-type immutability rules do not apply to them.
     for (class_name, side, method) in module.methods_with_owner() {
         // TestCase subclasses are permanently exempt from slot
         // assignment checks (see this function's own doc comment) — not a

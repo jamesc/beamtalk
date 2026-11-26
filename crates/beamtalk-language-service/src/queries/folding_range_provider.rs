@@ -65,7 +65,7 @@ pub fn compute_folding_ranges(module: &Module, source: &str) -> Vec<Span> {
             // finding — skip a *named* category with zero methods
             // too: a divider can precede any class member, so
             // `// === Beta ===\nstate: x = 0` (divider directly above a
-            // state/classState declaration with no method before the next
+            // state declaration with no method before the next
             // divider or end of class) produces a named category whose
             // `methods` is empty. `MethodCategory::span()` still resolves
             // for that case — it degenerates to just `divider_span`, the
@@ -286,7 +286,7 @@ Object subclass: B
     fn named_category_with_no_methods_contributes_no_divider_range() {
         // A divider can precede any class member,
         // not only a method. A divider directly above a
-        // `state:`/`classState:` declaration with no method before the next
+        // `state:` declaration with no method before the next
         // divider or the end of the class produces a named category whose
         // `methods` list is empty. Without the `methods.is_empty()` guard,
         // `MethodCategory::span()` still resolves for this case (it

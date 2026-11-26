@@ -10,7 +10,7 @@
 //! - [`gen_server`] — module/class codegen, REPL modules, value subclasses
 //! - [`primitives`] — primitive selector and intrinsic codegen
 //! - [`branch_context`] — `with_branch_context`'s per-prefix
-//!   save/reset/restore discipline (state/`class_vars`/self)
+//!   save/reset/restore discipline (state/self)
 //! - [`late_reconcile_conformance`] — ADR 0124 §8/B9 (BT-3556): the
 //!   cross-boundary `late`-slot reconcile decision-table fixture, asserted
 //!   against `beamtalk_shape_migration_tests.erl`
@@ -424,9 +424,9 @@ mod match_scrutinee_state_corpus;
 mod module_info;
 mod nlr;
 mod nlr_closure_call_corpus;
-mod no_class_var_emission;
 mod number_comparison_right_operand;
 mod number_comparison_right_operand_corpus;
+mod on_do_emission;
 mod open_reach;
 mod operand_evaluation_order;
 mod paren_arm_statements;

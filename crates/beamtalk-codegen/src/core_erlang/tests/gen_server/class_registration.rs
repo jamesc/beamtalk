@@ -241,7 +241,7 @@ fn test_class_registration_generation() {
 }
 
 #[test]
-fn test_meta_carries_no_class_variable_keys() {
+fn test_meta_carries_no_class_side_field_keys() {
     // ADR 0153 (BT-5154): classes have no class variables, so
     // `__beamtalk_meta/0` no longer carries `class_fields` or
     // `class_field_kinds`; the runtime reads a missing key as empty.

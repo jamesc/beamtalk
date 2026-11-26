@@ -264,8 +264,7 @@ impl CoreErlangGenerator {
     /// `generate_field_assignment_open`'s.
     ///
     /// `frame` is the constructed `Bind`'s real [`FrameId`] — the caller's
-    /// own `current_branch_frame()` for a loop/fold-body class-var mutation
-    /// (see `lower_class_var_field_assignment_bind`'s doc comment), or
+    /// own `current_branch_frame()` for a loop/fold-body field mutation, or
     /// [`FrameId::ROOT`] otherwise; `Actor`/`ValueType` writes reached
     /// through this function are always rendered immediately (never spliced
     /// into a larger, independently-verified `ThreadedIr` tree), so `frame`

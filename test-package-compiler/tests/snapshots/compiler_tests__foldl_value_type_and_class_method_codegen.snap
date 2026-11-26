@@ -184,7 +184,6 @@ let _temp@18 = _coll@17 in let _temp@19 = case call 'erlang':'is_list'(_temp@18)
             'classMethodSignatures' => ~{}~,
             'methodXref' => [~{'class_side' => 'false', 'selector' => 'sumDo:', 'line' => 1, 'sends' => [~{'selector' => 'do:', 'line' => 3, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => '+', 'line' => 3, 'recv_kind' => 'other', 'recv_type' => 'Integer'}~], 'references' => [~{'class' => 'Integer', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'totalInject:', 'line' => 1, 'sends' => [~{'selector' => 'inject:into:', 'line' => 1, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => '+', 'line' => 1, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~], 'references' => [], 'source_status' => 'indexed'}~],
             'stateVarXref' => [],
-            'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
             'classMethodDocs' => ~{}~,
@@ -207,7 +206,7 @@ let _temp@18 = _coll@17 in let _temp@19 = case call 'erlang':'is_list'(_temp@18)
       'initialize_assigns' => [],
       'method_info' => ~{'sumDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'totalInject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
       'defines_user_class_new0' => 'false'
@@ -232,7 +231,6 @@ let _temp@18 = _coll@17 in let _temp@19 = case call 'erlang':'is_list'(_temp@18)
                     'classMethodSignatures' => ~{'sumDo:' => #{#<115>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<68>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']])}#, 'totalInject:' => #{#<116>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<106>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']])}#}~,
                     'methodXref' => [~{'class_side' => 'true', 'selector' => 'sumDo:', 'line' => 1, 'sends' => [~{'selector' => 'do:', 'line' => 3, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => '+', 'line' => 3, 'recv_kind' => 'other', 'recv_type' => 'Integer'}~], 'references' => [~{'class' => 'Integer', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'true', 'selector' => 'totalInject:', 'line' => 1, 'sends' => [~{'selector' => 'inject:into:', 'line' => 1, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => '+', 'line' => 1, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~], 'references' => [], 'source_status' => 'indexed'}~],
                     'stateVarXref' => [],
-                    'classState' => ~{}~,
                     'classDoc' => 'none',
                     'methodDocs' => ~{}~,
                     'classMethodDocs' => ~{}~,
@@ -255,7 +253,7 @@ let _temp@18 = _coll@17 in let _temp@19 = case call 'erlang':'is_list'(_temp@18)
       'initialize_assigns' => [],
       'method_info' => ~{}~,
       'class_method_info' => ~{'sumDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'totalInject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
       'defines_user_class_new0' => 'false'
@@ -293,7 +291,7 @@ let _temp@18 = _coll@17 in let _temp@19 = case call 'erlang':'is_list'(_temp@18)
       'initialize_assigns' => [],
       'method_info' => ~{'sumDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'totalInject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
       'defines_user_class_new0' => 'false'

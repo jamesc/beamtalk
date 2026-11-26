@@ -176,7 +176,6 @@ module 'value_type_param_collision' ['new'/0, 'new'/1, 'compute:'/2, 'dispatch'/
             'classMethodSignatures' => ~{}~,
             'methodXref' => [~{'class_side' => 'false', 'selector' => 'compute:', 'line' => 1, 'sends' => [~{'selector' => '+', 'line' => 2, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => '*', 'line' => 3, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~], 'references' => [], 'source_status' => 'indexed'}~],
             'stateVarXref' => [],
-            'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
             'classMethodDocs' => ~{}~,
@@ -199,7 +198,7 @@ module 'value_type_param_collision' ['new'/0, 'new'/1, 'compute:'/2, 'dispatch'/
       'initialize_assigns' => [],
       'method_info' => ~{'compute:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
       'defines_user_class_new0' => 'false'
@@ -236,7 +235,7 @@ module 'value_type_param_collision' ['new'/0, 'new'/1, 'compute:'/2, 'dispatch'/
       'initialize_assigns' => [],
       'method_info' => ~{'compute:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
       'defines_user_class_new0' => 'false'

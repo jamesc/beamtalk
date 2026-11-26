@@ -324,7 +324,7 @@ mod tests {
     #[test]
     fn finds_access_in_class_method_with_return_type() {
         // Class-side methods carry a return-type arrow in the signature. The
-        // walker must still find a `classState:` access in the body.
+        // walker must still find a field access in the body.
         let src = "create -> Counter =>\n  self.instanceCount := self.instanceCount + 1";
         let writes = find_field_writers_in_source(src, "instanceCount");
         assert_eq!(writes, vec![2]);

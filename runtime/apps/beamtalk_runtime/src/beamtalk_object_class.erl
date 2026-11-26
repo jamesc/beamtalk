@@ -168,10 +168,10 @@ before any class registers.
 """.
 -spec start(class_name(), map()) -> {ok, pid()} | {error, term()}.
 start(ClassName, ClassInfo) ->
-    %% ADR 0130 Phase 3: refuse a compiled module with a different
-    %% `class_var_abi` before any process is started (see
-    %% `beamtalk_class_var_abi:check_class_info_abi/2`).
-    case beamtalk_class_var_abi:check_class_info_abi(ClassName, ClassInfo) of
+    %% ADR 0153 Phase 3: refuse a compiled module with a different
+    %% `module_abi` before any process is started (see
+    %% `beamtalk_module_abi:check_class_info_abi/2`).
+    case beamtalk_module_abi:check_class_info_abi(ClassName, ClassInfo) of
         ok -> do_start(ClassName, ClassInfo);
         {error, _} = Refused -> Refused
     end.
@@ -284,8 +284,8 @@ rename(OldName, NewName) ->
 -doc """
 Update an existing class process with new metadata after redefinition.
 
-The hot-reload path of the ADR 0130 `class_var_abi` gate: a module whose
-`class_var_abi` differs from the running runtime's is refused with a structured
+The hot-reload path of the ADR 0130 `module_abi` gate: a module whose
+`module_abi` differs from the running runtime's is refused with a structured
 `abi_mismatch` and the class keeps its current definition.
 
 The gate is atomic only for a caller that has not loaded the new code yet
@@ -296,7 +296,7 @@ refuses, though the class process keeps its previous metadata.
 """.
 -spec update_class(class_name(), map()) -> {ok, [atom()]} | {error, term()}.
 update_class(ClassName, ClassInfo) ->
-    case beamtalk_class_var_abi:check_class_info_abi(ClassName, ClassInfo) of
+    case beamtalk_module_abi:check_class_info_abi(ClassName, ClassInfo) of
         ok ->
             case beamtalk_class_registry:whereis_class(ClassName) of
                 undefined ->

@@ -18,15 +18,13 @@
 //! in name but carried this shared logic.
 
 use super::gen_server::extract_package_from_module_name;
-use super::util::omit_late_defaultless_slot;
 use super::value_accessors::has_opaque_native_representation;
-use super::{CodeGenContext, CoreErlangGenerator, Result};
+use super::{CodeGenContext, CoreErlangGenerator};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{
     ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, MethodKind, Module,
-    ParameterDefinition, ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
-    WellKnownSelector,
+    ParameterDefinition, ProtocolMethodSignature, TypeAnnotation, WellKnownSelector,
 };
 use beamtalk_core::unparse::unparse_method_display_signature;
 
@@ -112,7 +110,6 @@ impl CoreErlangGenerator {
     ///             'classMethodSource' => ~{...}~,
     ///             'methodSignatures' => ~{...}~,
     ///             'classMethodSignatures' => ~{}~,
-    ///             'classState' => ~{}~,
     ///             'classDoc' => 'none',
     ///             'methodDocs' => ~{}~,
     ///             'classMethodDocs' => ~{}~,
@@ -132,22 +129,22 @@ impl CoreErlangGenerator {
         &mut self,
         module: &Module,
         synthesize_supervision_spec: bool,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         // Skip only if there are no class definitions AND no protocols.
         // Protocol-only files still need register_class/0 for protocol
         // registration.
         if module.classes.is_empty() && module.protocols.is_empty() {
-            return Ok(Document::Nil);
+            return Document::Nil;
         }
 
         // Class-less module — generate register_class/0 with only protocol
         // registration calls, no class builder chain.
         if module.classes.is_empty() {
             let protocol_reg_doc = self.generate_protocol_registrations(module);
-            return Ok(Self::register_class_fn_doc(
+            return Self::register_class_fn_doc(
                 docvec![protocol_reg_doc, line(), "'ok'"],
                 Document::Str("of _ProtoRegResult -> _ProtoRegResult"),
-            ));
+            );
         }
 
         let mut class_docs = Vec::new();
@@ -200,9 +197,6 @@ impl CoreErlangGenerator {
             // Per-instance-variable declaration-line index, the
             // state-var analogue of `method_xref_doc` above.
             let state_var_xref_doc = self.build_state_var_xref_list(class);
-
-            // Class variable initial values
-            let class_vars_doc = self.build_class_var_map(&[])?;
 
             // Class-level doc comment
             let class_doc_value: Document<'static> = if let Some(ref doc) = class.doc_comment {
@@ -296,7 +290,6 @@ impl CoreErlangGenerator {
                 class_method_sigs_doc,
                 method_xref_doc,
                 state_var_xref_doc,
-                class_vars_doc,
                 class_doc_value,
                 method_docs_doc,
                 class_method_docs_doc,
@@ -334,7 +327,7 @@ impl CoreErlangGenerator {
             ]
         };
 
-        Ok(Self::register_class_fn_doc(try_body, of_clause))
+        Self::register_class_fn_doc(try_body, of_clause)
     }
 
     /// The `'register_class'/0` function shell shared by every shape of
@@ -435,45 +428,6 @@ impl CoreErlangGenerator {
         Document::Vec(parts)
     }
 
-    /// Builds a Core Erlang map document for class variable initial values.
-    ///
-    /// Each variable maps `'name' => expression`, defaulting to `'nil'` when
-    /// no default value is declared. Returns `Result` because evaluating
-    /// default-value expressions is fallible.
-    fn build_class_var_map(
-        &mut self,
-        class_variables: &[StateDeclaration],
-    ) -> Result<Document<'static>> {
-        // BT-4591: defaults that run code are bound in source order ahead of the
-        // map (`thread_default_values`), so the document is `[let ... in ] ~{..}~`.
-        let vars: Vec<&StateDeclaration> = class_variables
-            .iter()
-            // ADR 0124 §2/B2: a defaultless `late classState:` slot is
-            // omitted from the map entirely, not emitted as `'nil'` — see
-            // `omit_late_defaultless_slot`.
-            .filter(|cv| !omit_late_defaultless_slot(cv))
-            .collect();
-        self.class_var_map_doc(&vars)
-    }
-
-    /// The `[let FieldDefaultN = .. in ] ~{ 'name' => value, .. }~` document of
-    /// `classState:` initial values, shared by the class registry and the
-    /// native-actor facade.
-    pub(super) fn class_var_map_doc(
-        &mut self,
-        vars: &[&StateDeclaration],
-    ) -> Result<Document<'static>> {
-        let (prelude, values) = self.thread_default_values(vars)?;
-        let mut parts: Vec<Document<'static>> = Vec::new();
-        for (cv, val) in vars.iter().zip(values) {
-            if !parts.is_empty() {
-                parts.push(Document::Str(", "));
-            }
-            parts.push(docvec![leaf::atom(cv.name.name.to_string()), " => ", val,]);
-        }
-        Ok(docvec![prelude, "~{", Document::Vec(parts), "}~"])
-    }
-
     /// Builds the `_BuilderState` map and register call block for a single class
     /// at position `idx` in the module.
     ///
@@ -500,7 +454,6 @@ impl CoreErlangGenerator {
         class_method_sigs_doc: Document<'static>,
         method_xref_doc: Document<'static>,
         state_var_xref_doc: Document<'static>,
-        class_vars_doc: Document<'static>,
         class_doc_value: Document<'static>,
         method_docs_doc: Document<'static>,
         class_method_docs_doc: Document<'static>,
@@ -554,10 +507,6 @@ impl CoreErlangGenerator {
                     // maps (like methodXref), not a `~{ }~` map.
                     "'stateVarXref' => ",
                     state_var_xref_doc,
-                    ",",
-                    line(),
-                    "'classState' => ",
-                    class_vars_doc,
                     ",",
                     line(),
                     "'classDoc' => ",

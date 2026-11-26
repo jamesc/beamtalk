@@ -180,7 +180,6 @@ call 'beamtalk_method_resolver':'resolve'(_cls@1, 'getValue')
             'classMethodSignatures' => ~{}~,
             'methodXref' => [~{'class_side' => 'false', 'selector' => 'lookupLiteral', 'line' => 1, 'sends' => [~{'selector' => '>>', 'line' => 1, 'recv_kind' => 'other', 'recv_type' => 'Counter class'}~], 'references' => [~{'class' => 'Counter', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'lookupVariable:', 'line' => 1, 'sends' => [~{'selector' => '>>', 'line' => 1, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~], 'references' => [], 'source_status' => 'indexed'}~],
             'stateVarXref' => [],
-            'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
             'classMethodDocs' => ~{}~,
@@ -203,7 +202,7 @@ call 'beamtalk_method_resolver':'resolve'(_cls@1, 'getValue')
       'initialize_assigns' => [],
       'method_info' => ~{'lookupLiteral' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'lookupVariable:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
       'defines_user_class_new0' => 'false'
@@ -240,7 +239,7 @@ call 'beamtalk_method_resolver':'resolve'(_cls@1, 'getValue')
       'initialize_assigns' => [],
       'method_info' => ~{'lookupLiteral' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'lookupVariable:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
       'defines_user_class_new0' => 'false'

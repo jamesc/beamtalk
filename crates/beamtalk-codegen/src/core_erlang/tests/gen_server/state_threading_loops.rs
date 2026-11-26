@@ -33,10 +33,10 @@ fn test_class_method_local_var_assignment_of_self_class_method() {
 }
 
 #[test]
-fn test_class_method_local_var_after_class_var_mutation() {
-    // A class var mutation (`self.cv := expr`) preceding
+fn test_class_method_local_var_after_field_mutation() {
+    // A field mutation (`self.cv := expr`) preceding
     // a local var assignment (`x := plainExpr`) must NOT incorrectly treat the local var RHS as
-    // a class-var-producing expression. Any stale producer state left over from the field
+    // a field-producing expression. Any stale producer state left over from the field
     // assignment must not leak into processing the local var's RHS.
     //
     // Pattern: class a => self.cv := 1. x := self b. x
@@ -195,21 +195,20 @@ fn test_class_method_self_send_as_collect_transform_still_compiles() {
 }
 
 #[test]
-fn test_class_method_self_send_in_block_compiles_when_class_has_no_class_vars() {
+fn test_class_method_self_send_in_block_compiles_when_class_has_no_fields() {
     // `stdlib/src/subprocess.bt` self-sends `spawnWith:` (inherited from
     // `Actor`, `stdlib/src/actor.bt`) from inside a `tryDo:` block. This class
-    // has no `classState:`, so a self-send to `spawnWith:` — not locally
+    // has no state, so a self-send to `spawnWith:` — not locally
     // defined here, standing in for the real inherited-from-`Actor` case —
     // must compile inside a bare `select:` block.
-    let src = "Value subclass: NoClassVarsDriver\n  class doubled: aList =>\n    aList select: [:x | self spawnWith: x]";
+    let src = "Value subclass: NoStateDriver\n  class doubled: aList =>\n    aList select: [:x | self spawnWith: x]";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(&module, CodegenOptions::new("bt@noclassvarsdriver"));
+    let result = generate_module(&module, CodegenOptions::new("bt@nostatedriver"));
     assert!(
         result.is_ok(),
         "A self-send inside a bare block must not be rejected when the enclosing \
-         class has no class variables at all — there is no classState mutation to \
-         lose. Got: {result:?}"
+         class has no state at all — there is no mutation to lose. Got: {result:?}"
     );
 }
 

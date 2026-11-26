@@ -36,8 +36,7 @@ impl CoreErlangGenerator {
     /// most one default can run code), which the caller places directly before
     /// the map, and one value document per declaration, in order (`'nil'` for a
     /// declaration without a default). The one helper every default-map
-    /// builder uses: an actor's `init/1`, a Value class's `new/0`, and the
-    /// `classState:` initial values.
+    /// builder uses: an actor's `init/1` and a Value class's `new/0`.
     pub(in crate::core_erlang) fn thread_default_values(
         &mut self,
         states: &[&StateDeclaration],

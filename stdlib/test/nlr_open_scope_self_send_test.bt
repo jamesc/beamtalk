@@ -3,7 +3,7 @@
 
 // BT-3051: `^self <selector>` — a self-send fed directly as `^`'s argument —
 // produced invalid Core Erlang when the self-send went through the open-scope
-// codegen pattern (`emit_class_var_result_unwrap`/`finalize_dispatch_with_preamble`):
+// codegen pattern (`finalize_dispatch_with_preamble`):
 // `Expression::Return`'s NLR-throw codegen inserted the dangling open let-chain
 // straight into the `{'$bt_nlr', Token, Value, State}` tuple literal instead of
 // closing it, and never cleared `last_open_scope_result`, so a stale result
