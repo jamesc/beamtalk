@@ -77,8 +77,9 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 -compile(
     {inline, [
         in_caller_owner/2,
+        in_caller_route/2,
         class_method_owner/2,
-        run_in_caller/7,
+        run_in_caller/8,
         send_in_caller_or/4
     ]}
 ).
@@ -86,8 +87,17 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 %% receiving class, its metaclass tag and module, the defining class and
 %% module, and the compiled function name (`class_method_owner/2`).
 -type owner() :: {owner, class_name(), atom(), module(), class_name(), module(), atom()}.
-%% What the class-method memo records (`class_method_owner/2`).
--type verdict() :: owner() | decline.
+%% What the class-method memo records (`class_method_owner/2`): `owner()`'s
+%% fields plus the defining class's metaclass tag, the key of its derived flag
+%% (`beamtalk_class_shadow_flags:direct_call_ok/2`, read per send, BT-5267).
+%% One flat tuple: the memo hit copies it out of ETS on every send.
+-type memo_owner() ::
+    {owner, class_name(), atom(), module(), class_name(), module(), atom(), atom()}.
+-type verdict() :: memo_owner() | decline.
+%% Which body the in-caller path applies (`in_caller_route/2`): `compiled`
+%% when the defining class's derived flag says nothing shadows its compiled
+%% class methods, else `lookup` (`class_method_body/2` picks; BT-5267).
+-type body_route() :: compiled | lookup.
 -export_type([owner/0]).
 %% What the class-side chain walk (`find_class_side_method/3`) finds first: a
 %% class method in a class's table (compiled or ADR 0084 runtime fun).
@@ -248,14 +258,28 @@ class_send_plain(ClassPid, Selector, Args, Timeout) ->
     %% gen_server to deadlock on, so a block re-entering its class answers.
     %% BT-4771: liveness is probed once for the whole send and handed to both
     %% the in-caller check and the via-process path below.
+    %% BT-5267: matched flat, with no intermediate tuple, on the hot path.
     Alive = local_class_alive(ClassPid),
-    case in_caller_owner(ClassPid, Selector, Alive) of
-        {owner, ClassName, Tag, Module, DefiningClass, DefiningModule, FunName} ->
-            ClassSelf = #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid},
-            run_in_caller(
-                ClassSelf, Selector, Args, ClassName, DefiningClass, DefiningModule, FunName
-            );
-        decline ->
+    %% Alive before the memo is consulted (see `in_caller_owner/2`).
+    case Alive andalso class_method_owner(ClassPid, Selector) of
+        {owner, ClassName, Tag, Module, DefiningClass, DefiningModule, FunName, DefiningTag} ->
+            case in_caller_route(DefiningTag, DefiningClass) of
+                decline ->
+                    class_send_via_process(ClassPid, Selector, Args, Timeout, Alive);
+                Route ->
+                    ClassSelf = #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid},
+                    run_in_caller(
+                        ClassSelf,
+                        Selector,
+                        Args,
+                        ClassName,
+                        DefiningClass,
+                        DefiningModule,
+                        FunName,
+                        Route
+                    )
+            end;
+        _DeclineOrDead ->
             class_send_via_process(ClassPid, Selector, Args, Timeout, Alive)
     end.
 
@@ -270,13 +294,25 @@ local_class_alive(ClassPid) ->
 %% general class-method clause and the `new:` clause (BT-4475).
 -spec send_in_caller_or(pid(), selector(), list(), fun(() -> term())) -> term().
 send_in_caller_or(ClassPid, Selector, Args, Otherwise) ->
-    case in_caller_owner(ClassPid, Selector) of
-        {owner, ClassName, Tag, Module, DefiningClass, DefiningModule, FunName} ->
-            ClassSelf = #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid},
-            run_in_caller(
-                ClassSelf, Selector, Args, ClassName, DefiningClass, DefiningModule, FunName
-            );
-        decline ->
+    case local_class_alive(ClassPid) andalso class_method_owner(ClassPid, Selector) of
+        {owner, ClassName, Tag, Module, DefiningClass, DefiningModule, FunName, DefiningTag} ->
+            case in_caller_route(DefiningTag, DefiningClass) of
+                decline ->
+                    Otherwise();
+                Route ->
+                    ClassSelf = #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid},
+                    run_in_caller(
+                        ClassSelf,
+                        Selector,
+                        Args,
+                        ClassName,
+                        DefiningClass,
+                        DefiningModule,
+                        FunName,
+                        Route
+                    )
+            end;
+        _DeclineOrDead ->
             Otherwise()
     end.
 
@@ -311,11 +347,10 @@ DefiningModule, FunName}` when all of these hold, else `decline` (take
 - `class_method_owner/2` (memoised) resolves the defining class: the
   selector is not process-bound (the generated list, ADR 0153 §5) and the
   class-process lookup would answer it with a class method;
-- the runtime is ready (`beamtalk_class_shadow_flags:is_ready/0`, one
-  `persistent_term` read).
+- the runtime is ready (`beamtalk_class_shadow_flags:is_ready/0`).
 
 An ADR 0084 runtime fun does not decline (ADR 0153 §5, BT-5161):
-`run_in_caller/7` applies it from the fun store, for the receiving class's
+`run_in_caller/8` applies it from the fun store, for the receiving class's
 own methods as for an ancestor's. "Not shadowed" is a condition of the static
 call keys only, checked by `beamtalk_class_shadow_flags:static_call_target/4`
 on top of this answer.
@@ -333,31 +368,53 @@ site's own class, module and function and nothing shadows that function.
 """.
 -spec in_caller_owner(pid(), selector()) -> owner() | decline.
 in_caller_owner(ClassPid, Selector) ->
-    in_caller_owner(ClassPid, Selector, local_class_alive(ClassPid)).
-
-%% `in_caller_owner/2` with the liveness probe (`local_class_alive/1`) already
-%% done by the caller.
--spec in_caller_owner(pid(), selector(), boolean()) -> owner() | decline.
-in_caller_owner(ClassPid, Selector, true) ->
     %% Alive before the memo is consulted: a send to a dead incarnation takes
     %% the crash recovery path and never derives a memo from a class mid-init.
-    %% ADR 0153 §5 (BT-5161): running in the caller needs only a ready
-    %% runtime. An ADR 0084 runtime fun no longer declines: `run_in_caller/7`
-    %% applies it from the fun store. "Not shadowed" stays a condition of the
-    %% static call keys only (`beamtalk_class_shadow_flags:static_call_target/4`).
-    case beamtalk_class_shadow_flags:is_ready() of
-        true -> class_method_owner(ClassPid, Selector);
-        false -> decline
-    end;
-in_caller_owner(_ClassPid, _Selector, false) ->
-    decline.
+    %% `andalso` keeps the memo off the path entirely (no tuple, no call) when
+    %% the class is dead or remote.
+    case local_class_alive(ClassPid) andalso class_method_owner(ClassPid, Selector) of
+        {owner, ClassName, Tag, Module, DefiningClass, DefiningModule, FunName, DefiningTag} ->
+            case in_caller_route(DefiningTag, DefiningClass) of
+                decline -> decline;
+                _Route -> {owner, ClassName, Tag, Module, DefiningClass, DefiningModule, FunName}
+            end;
+        _DeclineOrDead ->
+            decline
+    end.
+
+%% How the caller runs a method `DefiningClass` (metaclass tag `DefiningTag`)
+%% defines, or `decline` while the runtime is not ready. ADR 0153 §5
+%% (BT-5161): running in the caller needs only a ready runtime; an ADR 0084
+%% runtime fun does not decline, `run_in_caller/8` applies it from the fun
+%% store. "Not shadowed" stays a condition of the static call keys only
+%% (`beamtalk_class_shadow_flags:static_call_target/4`).
+%%
+%% BT-5267: one `persistent_term` read on the hot path, the defining class's
+%% derived flag (`direct_call_ok/2`: ready and no `runtime_fun` flag). While
+%% it holds the compiled export is the body, as `class_method_body/2` would
+%% answer (the raw flag is raised, and the derived flag erased, before a fun
+%% becomes visible), so no raw flag is read. A miss means "not ready" or "may
+%% be shadowed": ask readiness and leave the body to `class_method_body/2`.
+-spec in_caller_route(atom(), class_name()) -> body_route() | decline.
+in_caller_route(DefiningTag, DefiningClass) ->
+    case beamtalk_class_shadow_flags:direct_call_ok(DefiningTag, DefiningClass) of
+        true ->
+            compiled;
+        false ->
+            case beamtalk_class_shadow_flags:is_ready() of
+                true -> lookup;
+                false -> decline
+            end
+    end.
 
 -doc """
-The class-method owner memo, `{class_method_owner, ClassPid, Selector}` in
+The class-method owner memo, `{ClassPid, Selector}` in
 `beamtalk_class_derived_cache` (ADR 0142 §2, the BT-4109 `resolve_owner`
 pattern of `beamtalk_dispatch`). Keyed by the class object's pid, which names
 one class for its whole life, so a hit needs no pid-to-name lookup; a restarted
-class has a new pid (and its `init/1` flushes the cache anyway).
+class has a new pid (and its `init/1` flushes the cache anyway). The key has
+no leading tag (BT-5267): a pid first element collides with no other key, and
+the key is built and copied out of ETS on every send.
 
 Derived by walking the chain exactly as the class process does
 (`handle_class_method_call/5`), through the one class-side walk
@@ -377,7 +434,7 @@ module) and `put_process_bound_selectors/2`.
 -spec class_method_owner(pid(), selector()) -> verdict().
 class_method_owner(ClassPid, Selector) ->
     beamtalk_class_derived_cache:fetch(
-        {class_method_owner, ClassPid, Selector},
+        {ClassPid, Selector},
         fun() -> compute_class_method_owner(ClassPid, Selector) end
     ).
 
@@ -475,12 +532,12 @@ derive_class_method_owner(ClassName, Selector, ProcessBound) ->
             end
     end.
 
--spec owner_of(class_name(), class_name(), module(), selector()) -> owner() | decline.
+-spec owner_of(class_name(), class_name(), module(), selector()) -> verdict().
 owner_of(ClassName, DefiningClass, DefiningModule, Selector) ->
     case beamtalk_class_metadata:lookup_module(ClassName) of
         {ok, Module} ->
             {owner, ClassName, receiver_tag(ClassName), Module, DefiningClass, DefiningModule,
-                class_method_fun_name(Selector)};
+                class_method_fun_name(Selector), receiver_tag(DefiningClass)};
         not_found ->
             decline
     end.
@@ -504,15 +561,34 @@ outcome (`invoke_class_method/6`'s reply, then `class_method_call/4`), so
 every error is raised with the value it has today.
 """.
 -spec run_in_caller(
-    #beamtalk_object{}, selector(), list(), class_name(), class_name(), module(), atom()
+    #beamtalk_object{},
+    selector(),
+    list(),
+    class_name(),
+    class_name(),
+    module(),
+    atom(),
+    body_route()
 ) -> term().
-run_in_caller(ClassSelf, Selector, Args, ClassName, DefiningClass, DefiningModule, FunName) ->
-    %% ADR 0153 §5 (BT-5161): always through the fun store, the receiving
-    %% class's own methods included: an ADR 0084 runtime fun shadows the
-    %% compiled export wherever the method runs.
-    Outcome = apply_class_method_body(
-        ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector, FunName
-    ),
+run_in_caller(
+    ClassSelf, Selector, Args, ClassName, DefiningClass, DefiningModule, FunName, Route
+) ->
+    %% ADR 0153 §5 (BT-5161): an ADR 0084 runtime fun shadows the compiled
+    %% export wherever the method runs, the receiving class's own methods
+    %% included. `compiled` is `in_caller_route/2`'s derived-flag answer that
+    %% no fun can be installed on the defining class (BT-5267); `lookup` asks
+    %% `class_method_body/2`.
+    Outcome =
+        case Route of
+            compiled ->
+                apply_compiled_class_method(
+                    ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector, FunName
+                );
+            lookup ->
+                apply_class_method_body(
+                    ClassSelf, Args, ClassName, DefiningClass, DefiningModule, Selector, FunName
+                )
+        end,
     case Outcome of
         {ok, Result} ->
             Result;
@@ -1064,7 +1140,7 @@ class_method_call(ClassPid, Selector, Args, Timeout) ->
             %% A `^` out of a caller-supplied block the class process ran:
             %% re-thrown as `class_method_result/4` would, and told to the
             %% test-build commit check as thrown away from home, since the
-            %% block ran in another process (BT-4536). `run_in_caller/7`'s
+            %% block ran in another process (BT-4536). `run_in_caller/8`'s
             %% `^` never hopped, so it takes `class_method_result/4`'s.
             beamtalk_actor_state:rethrow_from_away(Nlr);
         _ ->
@@ -1139,7 +1215,7 @@ class_method_call_timeout(Selector) ->
 
 -doc """
 Interpret a class method's reply (`{ok, Result}`, `{error, _}`), from the
-class process or from `run_in_caller/7` (ADR 0142), as the send's result.
+class process or from `run_in_caller/8` (ADR 0142), as the send's result.
 """.
 -spec class_method_result(pid(), selector(), list(), term()) -> term().
 class_method_result(ClassPid, Selector, Args, Reply) ->
@@ -1409,7 +1485,7 @@ invoke_class_method(Selector, Args, ClassName, Module, DefiningClass, DefiningMo
 -doc """
 The reply a class method's outcome becomes (`{ok, Result}` or `{error, _}`),
 whatever process ran it: the class process's `invoke_class_method/6` and the
-in-caller `run_in_caller/7` (ADR 0142) share it, and `class_method_result/4`
+in-caller `run_in_caller/8` (ADR 0142) share it, and `class_method_result/4`
 interprets it, so a method raises the same value on either path. A foreign `^`
 keeps its `{error, Nlr}` shape so the `?IS_NLR` re-throw in
 `class_method_result/4` and `metaclass_send_dispatch/4` sees it.
@@ -1490,7 +1566,7 @@ apply_class_method_in_context(
 Apply the method `DefiningClass` defines for `Selector` to `ClassSelf`: its
 ADR 0084 runtime fun when one is installed, else the compiled `FunName`
 export. Shared by `apply_class_method_in_context/6` and the in-caller path
-(`run_in_caller/7`, ADR 0142).
+(`run_in_caller/8`, ADR 0142).
 """.
 -spec apply_class_method_body(
     #beamtalk_object{}, list(), class_name(), class_name(), atom(), selector(), atom()

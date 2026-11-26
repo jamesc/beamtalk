@@ -9,7 +9,7 @@
 ADR 0142 Phase 1b (BT-4300), ADR 0153 Phase 3a (BT-5158): a dynamic class
 send (`beamtalk_class_dispatch:class_send/3`) to a class that nothing shadows
 runs the class method in the caller, resolved through the
-`{class_method_owner, ClassPid, Selector}` memo. Class variables, in the class
+`{ClassPid, Selector}` owner memo. Class variables, in the class
 or its chain, are no input. Each decline (a process-bound selector, a
 class-side extension) keeps the class
 process. An error has the same value on both paths.
@@ -80,12 +80,13 @@ in_caller_test_() ->
             with_class('Bt4300Stateless', none, fun(Pid) ->
                 ?assertEqual(self(), send(Pid, testSelf, [])),
                 ?assertEqual({with_arg, 7}, send(Pid, 'testWith:', [7])),
-                %% Memoised under the class object's pid.
+                %% Memoised under the class object's pid, with the defining
+                %% class's tag: the key of its derived flag (BT-5267).
                 ?assertMatch(
                     {owner, 'Bt4300Stateless', _, ?HELPER, 'Bt4300Stateless', ?HELPER,
-                        class_testSelf},
+                        class_testSelf, 'Bt4300Stateless class'},
                     beamtalk_class_derived_cache:fetch(
-                        {class_method_owner, Pid, testSelf}, fun() -> {nocache, miss} end
+                        {Pid, testSelf}, fun() -> {nocache, miss} end
                     )
                 )
             end)
@@ -142,7 +143,7 @@ in_caller_test_() ->
                 ?assertEqual(
                     decline,
                     beamtalk_class_derived_cache:fetch(
-                        {class_method_owner, Pid, 'run:'}, fun() -> {nocache, miss} end
+                        {Pid, 'run:'}, fun() -> {nocache, miss} end
                     )
                 )
             end)
@@ -156,7 +157,7 @@ in_caller_test_() ->
                 ?assertEqual(
                     decline,
                     beamtalk_class_derived_cache:fetch(
-                        {class_method_owner, Pid, 'hasField:'}, fun() -> {nocache, miss} end
+                        {Pid, 'hasField:'}, fun() -> {nocache, miss} end
                     )
                 )
             end)
@@ -698,17 +699,17 @@ invalidation_test_() ->
         end},
         {"put_process_bound_selectors drops derived facts only on a change", fun() ->
             with_class('Bt4300Bound2', none, fun(Pid) ->
-                Key = {class_method_owner, Pid, testSelf},
+                Key = {Pid, testSelf},
                 Miss = fun() -> {nocache, miss} end,
                 ?assertEqual(self(), send(Pid, testSelf, [])),
                 ?assertMatch(
-                    {owner, _, _, _, _, _, _}, beamtalk_class_derived_cache:fetch(Key, Miss)
+                    {owner, _, _, _, _, _, _, _}, beamtalk_class_derived_cache:fetch(Key, Miss)
                 ),
                 ok = beamtalk_class_metadata:put_process_bound_selectors(
                     'Bt4300Bound2', maps:get(process_bound_class_selectors, ?META)
                 ),
                 ?assertMatch(
-                    {owner, _, _, _, _, _, _}, beamtalk_class_derived_cache:fetch(Key, Miss)
+                    {owner, _, _, _, _, _, _, _}, beamtalk_class_derived_cache:fetch(Key, Miss)
                 ),
                 ok = beamtalk_class_metadata:put_process_bound_selectors('Bt4300Bound2', [testSelf]),
                 ?assertEqual(miss, beamtalk_class_derived_cache:fetch(Key, Miss)),
@@ -743,8 +744,168 @@ owner_memo_invalidation_test_() ->
         end}
     ]}.
 
-%% The memo entry for a selector, without computing one.
+%% BT-5267: a dynamic send to a class held in a variable reads two
+%% `persistent_term` keys, the owner memo's generation and the defining
+%% class's derived flag, and still sees every write that changes which body
+%% runs between two sends: a runtime fun installed on an ancestor,
+%% `removeSelector:` of that fun, and a hot reload of the defining class.
+class_in_variable_test_() ->
+    {setup, fun setup/0, fun(_) -> ok end, [
+        {"a send reads only the generation and the defining class's derived flag", fun() ->
+            with_class('Bt5267ReadsRoot', none, fun(RootPid) ->
+                Leaf = beamtalk_test_class:start(
+                    'Bt5267ReadsLeaf', class_info('Bt5267ReadsRoot', #{})
+                ),
+                try
+                    Generation = {beamtalk_class_derived_cache, generation},
+                    %% Own method: the receiving class is the definer.
+                    ?assertEqual(
+                        [Generation, tag('Bt5267ReadsRoot')],
+                        persistent_term_reads(fun() -> send(RootPid, testSelf, []) end)
+                    ),
+                    %% Inherited method: the definer's flag, not the receiver's.
+                    ?assertEqual(
+                        [Generation, tag('Bt5267ReadsRoot')],
+                        persistent_term_reads(fun() -> send(Leaf, testSelf, []) end)
+                    )
+                after
+                    beamtalk_test_proc:stop(Leaf)
+                end
+            end)
+        end},
+        {"an ancestor's runtime fun shadows an inherited method between two sends", fun() ->
+            with_class('Bt5267ShadowRoot', none, fun(RootPid) ->
+                Leaf = beamtalk_test_class:start(
+                    'Bt5267ShadowLeaf', class_info('Bt5267ShadowRoot', #{})
+                ),
+                try
+                    ?assertEqual(self(), send(Leaf, testSelf, [])),
+                    ?assert(
+                        beamtalk_class_shadow_flags:direct_call_ok(
+                            tag('Bt5267ShadowRoot'), 'Bt5267ShadowRoot'
+                        )
+                    ),
+                    ok = beamtalk_object_class:put_class_method(
+                        RootPid, testSelf, fun(_Self) -> {from_fun, self()} end
+                    ),
+                    ?assertEqual({from_fun, self()}, send(Leaf, testSelf, [])),
+                    ?assertEqual({from_fun, self()}, send(RootPid, testSelf, []))
+                after
+                    beamtalk_test_proc:stop(Leaf)
+                end
+            end)
+        end},
+        {"removeSelector: of a class-side fun takes effect between two sends", fun() ->
+            with_class('Bt5267RemoveRoot', none, fun(RootPid) ->
+                Leaf = beamtalk_test_class:start(
+                    'Bt5267RemoveLeaf', class_info('Bt5267RemoveRoot', #{})
+                ),
+                try
+                    ok = beamtalk_object_class:put_class_method(
+                        RootPid, testSelf, fun(_Self) -> {from_fun, self()} end
+                    ),
+                    ?assertEqual({from_fun, self()}, send(Leaf, testSelf, [])),
+                    %% `BtRoot class removeSelector: #testSelf`.
+                    Metaclass = #beamtalk_object{
+                        class = 'Metaclass', class_mod = ?HELPER, pid = RootPid
+                    },
+                    _ = beamtalk_class_refactor:classRemoveSelector(Metaclass, testSelf),
+                    %% The compiled method is back, on the derived-flag route.
+                    ?assertEqual(self(), send(Leaf, testSelf, [])),
+                    ?assertEqual(self(), send(RootPid, testSelf, []))
+                after
+                    beamtalk_test_proc:stop(Leaf)
+                end
+            end)
+        end},
+        {"a hot reload of the defining class takes effect between two sends", fun() ->
+            Module = bt5267_reload_mod,
+            ok = load_versioned_module(Module, v1),
+            RootPid = beamtalk_test_class:start('Bt5267ReloadRoot', #{
+                superclass => none,
+                module => Module,
+                class_methods => #{testSelf => #{arity => 0}},
+                meta => ?META
+            }),
+            Leaf = beamtalk_test_class:start(
+                'Bt5267ReloadLeaf', class_info('Bt5267ReloadRoot', #{})
+            ),
+            try
+                ?assertEqual(v1, send(Leaf, testSelf, [])),
+                ?assertEqual(v1, send(RootPid, testSelf, [])),
+                %% A recompile: new code, then the `-on_load` registration.
+                ok = load_versioned_module(Module, v2),
+                {ok, _} = beamtalk_object_class:update_class('Bt5267ReloadRoot', #{
+                    module => Module,
+                    class_methods => #{testSelf => #{arity => 0}},
+                    meta => ?META
+                }),
+                ?assertEqual(v2, send(Leaf, testSelf, [])),
+                ?assertEqual(v2, send(RootPid, testSelf, []))
+            after
+                beamtalk_test_proc:stop(Leaf),
+                beamtalk_test_proc:stop(RootPid),
+                _ = code:purge(Module),
+                _ = code:delete(Module),
+                _ = code:purge(Module)
+            end
+        end}
+    ]}.
+
+%% The `persistent_term:get/2` keys one call of `Fun` reads, in order, in a
+%% fresh process (after a warm-up call there, so first-send installs are not
+%% counted).
+persistent_term_reads(Fun) ->
+    Self = self(),
+    Worker = spawn_link(fun() ->
+        _ = Fun(),
+        Self ! {warm, self()},
+        receive
+            go -> ok
+        end,
+        _ = Fun(),
+        Self ! {done, self()}
+    end),
+    ?awaitMessage({warm, Worker}),
+    Session = trace:session_create(bt5267_reads, self(), []),
+    try
+        1 = trace:process(Session, Worker, true, [call]),
+        _ = trace:function(Session, {persistent_term, get, 2}, true, [local]),
+        Worker ! go,
+        ?awaitMessage({done, Worker})
+    after
+        trace:session_destroy(Session)
+    end,
+    collect_reads(Worker, []).
+
+collect_reads(Worker, Acc) ->
+    receive
+        {trace, Worker, call, {persistent_term, get, [Key, _Default]}} ->
+            collect_reads(Worker, [Key | Acc])
+    after 0 ->
+        lists:reverse(Acc)
+    end.
+
+%% Load `Module` with `class_testSelf/1` answering `Version`: a stand-in for a
+%% recompile of a class's module.
+load_versioned_module(Module, Version) ->
+    Src = io_lib:format(
+        "-module(~p).~n-export([class_testSelf/1]).~nclass_testSelf(_ClassSelf) -> ~p.~n",
+        [Module, Version]
+    ),
+    {Module, Bin} = beamtalk_test_module:compile(lists:flatten(Src)),
+    _ = code:purge(Module),
+    {module, Module} = code:load_binary(Module, atom_to_list(Module) ++ ".erl", Bin),
+    ok.
+
+%% The memo entry for a selector, without computing one: the owner (its
+%% defining class's tag dropped), `decline` or `miss`.
 memo(Pid, Selector) ->
-    beamtalk_class_derived_cache:fetch(
-        {class_method_owner, Pid, Selector}, fun() -> {nocache, miss} end
-    ).
+    case
+        beamtalk_class_derived_cache:fetch(
+            {Pid, Selector}, fun() -> {nocache, miss} end
+        )
+    of
+        {owner, C, T, M, DC, DM, F, _DefiningTag} -> {owner, C, T, M, DC, DM, F};
+        Other -> Other
+    end.

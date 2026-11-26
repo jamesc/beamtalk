@@ -35,7 +35,10 @@ Keys are caller-chosen terms; namespace them with a leading tag
 (`{inherits_from, Class, Ancestor}`, `{tagged_class_dispatch, Class}`,
 `{instance_method_info, Class, Selector}`, `{class_object, Class}`,
 `{defining_method, Class, Selector}`, `{is_kind_of, Class, Behaviour}`,
-`{class_method_owner, ClassPid, Selector}`,
+`{ClassPid, Selector}` (the in-caller class-method owner memo: the one key
+whose first element is a pid rather than a tag, so it collides with no tagged
+key; every class send held in a variable builds and copies it, and a tag
+would cost two heap words per send, BT-5267),
 `{inherited_target, Class, Selector}`, `{declared_fields, Class}`,
 `{chain_has_user_new1, Class}`, `{chain_has_user_new0, Class}`,
 `module_to_class_map` (a bare atom: the whole module -> class-name map),

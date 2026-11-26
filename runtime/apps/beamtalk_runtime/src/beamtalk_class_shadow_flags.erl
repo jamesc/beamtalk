@@ -831,7 +831,7 @@ key_body_holds(_DirectCallKey, _ClassName, _Module, _Selector) ->
     true.
 
 %% Whether the in-caller path runs the defining class's compiled function for
-%% `Selector` (`beamtalk_class_dispatch:run_in_caller/7`): only while
+%% `Selector` (`beamtalk_class_dispatch:run_in_caller/8`): only while
 %% `beamtalk_class_dispatch:class_method_body/2`, the choice
 %% `apply_class_method_body/7` makes, picks the compiled function over an ADR
 %% 0084 runtime fun. One rule for a method the class defines and an inherited
