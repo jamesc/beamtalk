@@ -734,7 +734,8 @@ instance is not listed. Used by process navigation and `Node current
 supervisors` to find anonymous instances.
 
 Scope (BT-3994): the default `pg` scope, as ADR 0135 §1 specifies and as the
-runtime's other groups (`beamtalk_classes`, `beamtalk_repl_shells`) use. A
+runtime's other groups (`beamtalk_classes`, `beamtalk_repl_shells`) use, and,
+like theirs (BT-5192), its reads are node-local. A
 dedicated scope would not make membership node-local: `pg` synchronises a
 scope with the same-named scope on every connected node, so it would only
 add a scope process to start. The cost of the cluster-wide scope is one

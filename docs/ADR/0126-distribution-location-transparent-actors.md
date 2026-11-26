@@ -418,6 +418,18 @@ by the network; the language docs say so.
 `pg` process groups are **not** in v1 — they are a pub/sub/membership feature,
 not a lookup feature, and belong with a future "cluster announcements" ADR.
 
+The runtime's own internal groups (`beamtalk_classes` for class enumeration,
+`beamtalk_repl_shells` for class-removed notices, the spawn-family supervisor
+instances) are **node-local** (BT-5192). They use `pg`'s default scope, which
+`pg` synchronises with every connected node, so every read takes
+`pg:get_local_members/1`: class enumeration (`all_classes`, `live_class_entries`,
+`user_classes` and what is built on them — browse, the shape manifest,
+`project_class_names`) lists only this node's classes and makes no remote call,
+and a class removed on one node is not announced to another node's REPL shells,
+where that class is still loaded. A class object that crosses a node is
+resolved by name on the receiving node (§5), never through a peer's class
+process.
+
 ### 5. The wire: what crosses a node boundary, and how
 
 #### 5.1 Wrap on remote send only
