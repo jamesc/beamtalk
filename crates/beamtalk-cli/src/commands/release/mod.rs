@@ -931,9 +931,15 @@ fn parked_path(path: &Utf8Path) -> Utf8PathBuf {
 /// by the symlink-resolved location, so `/shared/rel` and `/link/rel` (a
 /// symlink to `/shared`) name one lock.
 fn output_lock_path(release_dir: &Utf8Path) -> Utf8PathBuf {
-    let real = canonicalize_lenient(release_dir.as_std_path())
-        .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
-        .unwrap_or_else(|| release_dir.to_path_buf());
+    // Resolve only the parent and re-append the final component, so the key
+    // stays stable if the output itself later becomes a symlink and the lock
+    // file always sits beside the output, not beside a symlink target.
+    let real = match (release_dir.parent(), release_dir.file_name()) {
+        (Some(parent), Some(name)) => canonicalize_lenient(parent.as_std_path())
+            .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
+            .map_or_else(|| release_dir.to_path_buf(), |p| p.join(name)),
+        _ => release_dir.to_path_buf(),
+    };
     Utf8PathBuf::from(format!("{real}{OUTPUT_LOCK_SUFFIX}"))
 }
 
