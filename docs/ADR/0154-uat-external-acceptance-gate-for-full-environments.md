@@ -1,7 +1,7 @@
 # ADR 0154: beamtalk-uat as the External Acceptance Gate for Full Environments
 
 ## Status
-Proposed (2026-11-26)
+Accepted (2026-11-26)
 
 ## Context
 
