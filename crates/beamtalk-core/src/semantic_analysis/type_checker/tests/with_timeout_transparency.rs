@@ -37,7 +37,6 @@ fn add_slow_db_actor(hierarchy: &mut ClassHierarchy) {
         methods: vec![MethodInfo {
             selector: eco_string("query:"),
             arity: 1,
-            kind: MethodKind::Primary,
             defined_in: eco_string("SlowDb"),
             is_sealed: false,
             is_internal: false,
@@ -67,7 +66,6 @@ fn add_fake_proxy_object(hierarchy: &mut ClassHierarchy) {
         methods: vec![MethodInfo {
             selector: eco_string("withTimeout:"),
             arity: 1,
-            kind: MethodKind::Primary,
             defined_in: eco_string("FakeProxy"),
             is_sealed: false,
             is_internal: false,
@@ -234,7 +232,6 @@ fn logger_class(
         methods: vec![MethodInfo {
             selector: eco_string("log:"),
             arity: 1,
-            kind: MethodKind::Primary,
             defined_in: eco_string(name),
             is_sealed: false,
             is_internal: false,

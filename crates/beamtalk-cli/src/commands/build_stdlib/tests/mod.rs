@@ -60,7 +60,6 @@ pub(super) fn sample_class_meta() -> ClassMeta {
             MethodMeta {
                 selector: "increment".to_string(),
                 arity: 0,
-                kind: MethodKindMeta::Primary,
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
@@ -74,7 +73,6 @@ pub(super) fn sample_class_meta() -> ClassMeta {
             MethodMeta {
                 selector: "add:".to_string(),
                 arity: 1,
-                kind: MethodKindMeta::Primary,
                 is_sealed: true,
                 is_internal: false,
                 spawns_block: false,
@@ -89,7 +87,6 @@ pub(super) fn sample_class_meta() -> ClassMeta {
         class_methods: vec![MethodMeta {
             selector: "default".to_string(),
             arity: 0,
-            kind: MethodKindMeta::Primary,
             is_sealed: false,
             is_internal: false,
             spawns_block: false,

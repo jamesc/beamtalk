@@ -151,9 +151,12 @@ fn resolve_type_annotation_union() {
 }
 
 #[test]
-fn resolve_type_annotation_false_or() {
-    let ann = TypeAnnotation::FalseOr {
-        inner: Box::new(TypeAnnotation::Simple(ident("Integer"))),
+fn resolve_type_annotation_integer_or_false() {
+    let ann = TypeAnnotation::Union {
+        types: vec![
+            TypeAnnotation::Simple(ident("Integer")),
+            TypeAnnotation::Simple(ident("False")),
+        ],
         span: span(),
     };
     let result = TypeChecker::resolve_type_annotation(&ann);
@@ -726,16 +729,19 @@ fn union_receiver_no_members_respond_returns_dynamic() {
     );
 }
 
-/// Integer | False (`FalseOr`) parameter resolution.
+/// `Integer | False` parameter resolution.
 #[test]
-fn false_or_param_resolves_to_union() {
+fn integer_or_false_param_resolves_to_union() {
     // A method with parameter `x :: Integer | False` should infer x as Union.
     let method = MethodDefinition::new(
         MessageSelector::Keyword(vec![KeywordPart::new("check:", span())]),
         vec![ParameterDefinition::with_type(
             ident("x"),
-            TypeAnnotation::FalseOr {
-                inner: Box::new(TypeAnnotation::Simple(ident("Integer"))),
+            TypeAnnotation::Union {
+                types: vec![
+                    TypeAnnotation::Simple(ident("Integer")),
+                    TypeAnnotation::Simple(ident("False")),
+                ],
                 span: span(),
             },
         )],
@@ -769,7 +775,7 @@ fn false_or_param_resolves_to_union() {
         .collect();
     assert!(
         dnu_hints.is_empty(),
-        "FalseOr resolved as union; no DNU for universal messages: {dnu_hints:?}"
+        "`Integer | False` resolved as union; no DNU for universal messages: {dnu_hints:?}"
     );
 }
 
@@ -1141,4 +1147,19 @@ fn bt2679_singleton_binary_send_bypasses_symbol_redirect() {
         "expected the impossible-comparison hint to fire, got: {:?}",
         session.checker.diagnostics()
     );
+}
+
+/// BT-5220: `X | False` is an ordinary `Union` (the removed `FalseOr` variant
+/// was never produced by the parser). Assignability accepts both members and
+/// rejects anything else; narrowing is covered by `bt4638_*`.
+#[test]
+fn integer_or_false_assignability_is_plain_union() {
+    let accepts = |expr: &str| {
+        type_diags(&format!(
+            "typed Object subclass: Repro\n  class go -> Integer | False => {expr}\n"
+        ))
+    };
+    assert_clean_diags(&accepts("3"), "Integer member");
+    assert_clean_diags(&accepts("false"), "False member");
+    assert_has_diags(&accepts("\"text\""), "String is not a member");
 }

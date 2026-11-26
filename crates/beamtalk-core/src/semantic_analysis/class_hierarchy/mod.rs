@@ -11,7 +11,7 @@
 //! - **Diagnostics**: sealed class enforcement, method existence validation
 //!
 //! The hierarchy uses simple depth-first MRO (no multiple inheritance).
-use crate::ast::{ClassDefinition, MethodKind, Module};
+use crate::ast::{ClassDefinition, Module};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -938,11 +938,7 @@ impl ClassHierarchy {
                 let is_abstract_stdlib = stdlib_mode && class.is_abstract;
                 // Instance-method sealed checks: exempt builtin AND abstract stdlib classes.
                 if !is_stdlib_builtin && !is_abstract_stdlib {
-                    for method in class
-                        .methods
-                        .iter()
-                        .filter(|m| m.kind == MethodKind::Primary)
-                    {
+                    for method in class.methods.iter() {
                         let selector = method.selector.name();
                         if let Some((sealed_class, _)) = self
                             .find_sealed_method_in_ancestors(superclass.name.as_str(), &selector)
@@ -960,11 +956,7 @@ impl ClassHierarchy {
                 // Class-method sealed checks: only exempt builtin stdlib classes.
                 // Abstract stdlib classes must still respect sealed class-method overrides.
                 if !is_stdlib_builtin {
-                    for method in class
-                        .class_methods
-                        .iter()
-                        .filter(|m| m.kind == MethodKind::Primary)
-                    {
+                    for method in class.class_methods.iter() {
                         let selector = method.selector.name();
                         if let Some((sealed_class, _)) = self.find_sealed_class_method_in_ancestors(
                             superclass.name.as_str(),

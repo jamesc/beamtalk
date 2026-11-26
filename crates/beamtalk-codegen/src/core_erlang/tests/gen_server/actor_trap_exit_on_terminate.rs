@@ -64,14 +64,12 @@ fn test_actor_with_terminate_override_traps_exit_in_init() {
 /// pattern in `actor_init_and_field_validation.rs`.
 #[test]
 fn test_actor_inheriting_terminate_override_from_cross_file_ancestor_traps_exit() {
-    use beamtalk_core::ast::MethodKind;
     use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 
     let ancestor = ClassInfo {
         methods: vec![MethodInfo {
             selector: "terminate:".into(),
             arity: 1,
-            kind: MethodKind::Primary,
             defined_in: "BaseCleanupActor".into(),
             is_sealed: false,
             is_internal: false,

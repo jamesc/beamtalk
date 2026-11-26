@@ -31,7 +31,7 @@ use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, concat, join, leaf, line, nest};
-use beamtalk_core::ast::{ClassDefinition, ClassKind, MethodKind, Module, TypeAnnotation};
+use beamtalk_core::ast::{ClassDefinition, ClassKind, Module, TypeAnnotation};
 
 /// Classification of how a value-type method body expression should be handled
 /// for Self-threading.  Produced by [`CoreErlangGenerator::classify_vt_body_expr`]
@@ -168,7 +168,6 @@ fn native_constructor_selectors(class: &ClassDefinition, rejected: &str) -> Vec<
     class
         .class_methods
         .iter()
-        .filter(|m| m.kind == MethodKind::Primary)
         .filter(|m| m.selector.name() != rejected)
         .filter(|m| {
             m.return_type
@@ -229,7 +228,6 @@ fn type_mentions_class(annotation: &TypeAnnotation, class_name: &str) -> bool {
         TypeAnnotation::Union { types, .. } => {
             types.iter().any(|t| type_mentions_class(t, class_name))
         }
-        TypeAnnotation::FalseOr { inner, .. } => type_mentions_class(inner, class_name),
         TypeAnnotation::Difference { base, .. } => type_mentions_class(base, class_name),
         TypeAnnotation::Intersection { left, right, .. } => {
             type_mentions_class(left, class_name) || type_mentions_class(right, class_name)
@@ -312,18 +310,10 @@ impl CoreErlangGenerator {
         // If so, skip auto-generating constructors to avoid duplicate definitions
         // Only check Primary methods — check both instance and class methods
         let cf = self.semantic_facts.class_facts(&class.name.name);
-        let has_explicit_new = cf
-            .and_then(|cf| cf.instance_method_index("new"))
-            .is_some_and(|i| class.methods[i].kind == MethodKind::Primary);
-        let has_explicit_class_new = cf
-            .and_then(|cf| cf.class_method_index("new"))
-            .is_some_and(|i| class.class_methods[i].kind == MethodKind::Primary);
-        let has_explicit_new_with = cf
-            .and_then(|cf| cf.instance_method_index("new:"))
-            .is_some_and(|i| class.methods[i].kind == MethodKind::Primary)
-            || cf
-                .and_then(|cf| cf.class_method_index("new:"))
-                .is_some_and(|i| class.class_methods[i].kind == MethodKind::Primary);
+        let has_explicit_new = cf.and_then(|cf| cf.instance_method_index("new")).is_some();
+        let has_explicit_class_new = cf.and_then(|cf| cf.class_method_index("new")).is_some();
+        let has_explicit_new_with = cf.and_then(|cf| cf.instance_method_index("new:")).is_some()
+            || cf.and_then(|cf| cf.class_method_index("new:")).is_some();
 
         // Compute auto-generated slot methods for `Value subclass:` classes.
         // This is `None` for `ClassKind::Object` and `ClassKind::Actor`.
@@ -701,10 +691,7 @@ impl CoreErlangGenerator {
             .semantic_facts
             .class_facts(&class_name)
             .and_then(|cf| cf.class_method_index("new"))
-            .and_then(|i| {
-                let m = &class.class_methods[i];
-                (m.kind == MethodKind::Primary).then_some(m)
-            })
+            .and_then(|i| Some(&class.class_methods[i]))
             .ok_or_else(|| {
                 CodeGenError::Internal("Expected class method 'new' not found".to_string())
             })?;

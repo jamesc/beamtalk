@@ -20,7 +20,7 @@ use beamtalk_cerl_doc::leaf::fname;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{
     Block, ClassDefinition, Expression, Identifier, Literal, MapPair, MessageSelector,
-    MethodDefinition, MethodKind, ParameterDefinition,
+    MethodDefinition, ParameterDefinition,
 };
 use beamtalk_core::semantic_analysis::InferredType;
 use beamtalk_core::semantic_analysis::type_checker::ffi_annotation_type;
@@ -52,7 +52,6 @@ impl CoreErlangGenerator {
         *self.class_method_selectors_mut() = class
             .class_methods
             .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
             .map(|m| m.selector.name().to_string())
             .collect();
 
@@ -67,10 +66,6 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = Vec::new();
 
         for method in &class.class_methods {
-            if method.kind != MethodKind::Primary {
-                continue;
-            }
-
             let selector_name = method.selector.name();
             // +1 for the ClassSelf parameter (ADR 0130 §3: class variables
             // are neither passed in nor returned)

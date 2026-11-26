@@ -4,8 +4,8 @@
 //! Method definition, selector/parameter and method-body parsing (split from `declarations.rs`).
 
 use crate::ast::{
-    ExpressionStatement, KeywordPart, MessageSelector, MethodDefinition, MethodKind,
-    MethodModifiers, ParameterDefinition, StandaloneMethodDefinition, TypeAnnotation,
+    ExpressionStatement, KeywordPart, MessageSelector, MethodDefinition, MethodModifiers,
+    ParameterDefinition, StandaloneMethodDefinition, TypeAnnotation,
 };
 use crate::source_analysis::TokenKind;
 
@@ -31,7 +31,6 @@ impl Parser {
         let header_indent = self.current_token().indentation_after_newline();
         let doc_comment = self.collect_doc_comment();
         let comments = self.collect_comment_attachment();
-        let method_kind = MethodKind::Primary;
         let mut method_is_sealed = false;
         let mut method_is_internal = false;
         let mut method_is_class = false;
@@ -112,7 +111,6 @@ impl Parser {
                 is_sealed: method_is_sealed,
                 is_internal: method_is_internal,
                 is_class_method: method_is_class,
-                kind: method_kind,
             },
             span,
         );

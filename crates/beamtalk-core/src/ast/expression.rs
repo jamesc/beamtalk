@@ -1166,15 +1166,6 @@ pub enum TypeAnnotation {
         /// Source location of the entire generic type.
         span: Span,
     },
-    /// A false-or type (Option/Maybe pattern).
-    ///
-    /// Example: `Integer | False`
-    FalseOr {
-        /// The inner type.
-        inner: Box<TypeAnnotation>,
-        /// Source location of the entire false-or type.
-        span: Span,
-    },
     /// A difference/negation type (e.g., `Symbol \ #foo`) — ADR 0102 §1.
     ///
     /// Denotes the values of `base` that are *not* values of `excluded`.
@@ -1324,7 +1315,6 @@ impl TypeAnnotation {
             Self::Union { span, .. }
             | Self::Singleton { span, .. }
             | Self::Generic { span, .. }
-            | Self::FalseOr { span, .. }
             | Self::Difference { span, .. }
             | Self::Intersection { span, .. }
             | Self::SelfType { span }
@@ -1349,7 +1339,6 @@ impl TypeAnnotation {
             Self::Union { span: s, .. }
             | Self::Singleton { span: s, .. }
             | Self::Generic { span: s, .. }
-            | Self::FalseOr { span: s, .. }
             | Self::Difference { span: s, .. }
             | Self::Intersection { span: s, .. }
             | Self::SelfType { span: s }
@@ -1387,15 +1376,6 @@ impl TypeAnnotation {
         Self::Generic {
             base,
             parameters,
-            span,
-        }
-    }
-
-    /// Creates a false-or type annotation.
-    #[must_use]
-    pub fn false_or(inner: TypeAnnotation, span: Span) -> Self {
-        Self::FalseOr {
-            inner: Box::new(inner),
             span,
         }
     }
@@ -1458,15 +1438,6 @@ impl TypeAnnotation {
                 }
                 result.push(')');
                 result
-            }
-            Self::FalseOr { inner, .. } => {
-                let inner_name = match inner.as_ref() {
-                    Self::Union { .. } | Self::FalseOr { .. } => {
-                        eco_format!("({})", inner.type_name())
-                    }
-                    _ => inner.type_name(),
-                };
-                eco_format!("{inner_name} | False")
             }
             Self::Difference { base, excluded, .. } => {
                 // `\` binds tighter than `|` and shares a tier with `&`, so a
@@ -1535,7 +1506,7 @@ impl TypeAnnotation {
     /// this, not by duplicating the match.
     pub(crate) fn needs_parens_in_difference(&self, is_excluded: bool) -> bool {
         match self {
-            Self::Union { .. } | Self::FalseOr { .. } | Self::Intersection { .. } => true,
+            Self::Union { .. } | Self::Intersection { .. } => true,
             Self::Difference { .. } => is_excluded,
             _ => false,
         }
@@ -1550,7 +1521,7 @@ impl TypeAnnotation {
     /// intersection (`A & (B & C)`).
     pub(crate) fn needs_parens_in_intersection(&self, is_right: bool) -> bool {
         match self {
-            Self::Union { .. } | Self::FalseOr { .. } | Self::Difference { .. } => true,
+            Self::Union { .. } | Self::Difference { .. } => true,
             Self::Intersection { .. } => is_right,
             _ => false,
         }
@@ -1563,7 +1534,7 @@ impl TypeAnnotation {
     /// Block parameter annotations are read with
     /// `parse_single_type_annotation`, which stops at a top-level `|` (the
     /// block's own parameter separator) and does not consume the `&`/`\`
-    /// tier — so a top-level [`Self::Union`], [`Self::FalseOr`],
+    /// tier — so a top-level [`Self::Union`],
     /// [`Self::Difference`], or [`Self::Intersection`] (only reachable via
     /// explicit grouping parens in the source) keeps its parens:
     /// `:x :: (Integer | String)`. Grouping parens re-parse transparently,
@@ -1574,10 +1545,7 @@ impl TypeAnnotation {
     pub(crate) fn needs_parens_in_block_param(&self) -> bool {
         matches!(
             self,
-            Self::Union { .. }
-                | Self::FalseOr { .. }
-                | Self::Difference { .. }
-                | Self::Intersection { .. }
+            Self::Union { .. } | Self::Difference { .. } | Self::Intersection { .. }
         )
     }
 }

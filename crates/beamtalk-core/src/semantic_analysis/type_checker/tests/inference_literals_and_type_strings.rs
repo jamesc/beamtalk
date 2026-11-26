@@ -207,23 +207,6 @@ fn resolve_union_type_annotation() {
 }
 
 #[test]
-fn resolve_false_or_type_annotation() {
-    let ann = TypeAnnotation::FalseOr {
-        inner: Box::new(TypeAnnotation::Simple(ident("Integer"))),
-        span: span(),
-    };
-    let result = TypeChecker::resolve_type_annotation(&ann);
-    match result {
-        InferredType::Union { members, .. } => {
-            assert_eq!(members.len(), 2);
-            assert!(members.contains(&InferredType::known("Integer")));
-            assert!(members.contains(&InferredType::known("False")));
-        }
-        other => panic!("Expected Union, got {other:?}"),
-    }
-}
-
-#[test]
 fn resolve_self_type_annotation() {
     let ann = TypeAnnotation::SelfType { span: span() };
     assert_eq!(

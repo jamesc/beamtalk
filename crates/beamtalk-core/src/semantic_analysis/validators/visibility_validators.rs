@@ -384,9 +384,6 @@ fn check_type_annotation_cross_package(
                 check_type_annotation_cross_package(p, current_pkg, hierarchy, diagnostics);
             }
         }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            check_type_annotation_cross_package(inner, current_pkg, hierarchy, diagnostics);
-        }
         TypeAnnotation::Difference { base, excluded, .. } => {
             check_type_annotation_cross_package(base, current_pkg, hierarchy, diagnostics);
             check_type_annotation_cross_package(excluded, current_pkg, hierarchy, diagnostics);
@@ -568,17 +565,6 @@ fn check_type_annotation_leaked(
                     diagnostics,
                 );
             }
-        }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            check_type_annotation_leaked(
-                inner,
-                class_name,
-                method_selector,
-                current_pkg,
-                hierarchy,
-                alias_registry,
-                diagnostics,
-            );
         }
         TypeAnnotation::Difference { base, excluded, .. } => {
             check_type_annotation_leaked(
@@ -842,16 +828,6 @@ fn check_type_annotation_alias_leak(
                     diagnostics,
                 );
             }
-        }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            check_type_annotation_alias_leak(
-                inner,
-                alias_name,
-                hierarchy,
-                alias_registry,
-                visited,
-                diagnostics,
-            );
         }
         TypeAnnotation::Difference { base, excluded, .. } => {
             check_type_annotation_alias_leak(
@@ -1982,7 +1958,7 @@ mod tests {
     // Additional test imports
     use crate::ast::{
         ClassDefinition, ClassModifiers, CommentAttachment, ExpressionStatement, Identifier,
-        MessageSelector, MethodDefinition, MethodKind,
+        MessageSelector, MethodDefinition,
     };
     use crate::semantic_analysis::class_hierarchy::MethodInfo;
     use crate::source_analysis::Span as Sp;
@@ -2041,7 +2017,6 @@ mod tests {
             methods: vec![MethodInfo {
                 selector: "helper".into(),
                 arity: 0,
-                kind: MethodKind::Primary,
                 defined_in: "Parent".into(),
                 is_sealed: false,
                 is_internal: true,
@@ -2085,7 +2060,6 @@ mod tests {
             methods: vec![MethodInfo {
                 selector: "helper".into(),
                 arity: 0,
-                kind: MethodKind::Primary,
                 defined_in: "Parent".into(),
                 is_sealed: false,
                 is_internal: false,

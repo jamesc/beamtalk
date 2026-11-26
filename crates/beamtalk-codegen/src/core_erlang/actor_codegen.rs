@@ -22,7 +22,7 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_cerl_doc::leaf::{atom, fname};
 use beamtalk_cerl_doc::{Document, INDENT, join, line, nest};
-use beamtalk_core::ast::{MethodKind, Module};
+use beamtalk_core::ast::Module;
 
 impl CoreErlangGenerator {
     /// Generates a full actor module with `gen_server` behaviour.
@@ -432,10 +432,8 @@ impl CoreErlangGenerator {
             self.sealed_method_selectors_mut().clear();
             if class.is_sealed {
                 for method in &class.methods {
-                    if method.kind == MethodKind::Primary {
-                        self.sealed_method_selectors_mut()
-                            .insert(method.selector.name().to_string());
-                    }
+                    self.sealed_method_selectors_mut()
+                        .insert(method.selector.name().to_string());
                 }
             }
         }
@@ -470,11 +468,7 @@ impl CoreErlangGenerator {
             return Document::Nil;
         };
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(class.class_methods.len());
-        for m in class
-            .class_methods
-            .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
-        {
+        for m in class.class_methods.iter() {
             // Class method takes ClassSelf + user params (ADR 0130 §3)
             parts.push(docvec![
                 ", ",
@@ -557,9 +551,6 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = Vec::with_capacity(class.methods.len());
 
         for method in &class.methods {
-            if method.kind != MethodKind::Primary {
-                continue;
-            }
             let selector_name = method.selector.name().to_string();
             if !self.sealed_method_selectors().contains(&selector_name) {
                 continue;

@@ -16,7 +16,7 @@ use super::super::{CoreErlangGenerator, Result};
 use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
-use beamtalk_core::ast::{Block, Expression, MethodKind, Module};
+use beamtalk_core::ast::{Block, Expression, Module};
 use beamtalk_core::source_analysis::Span;
 
 /// A primary method of a module: its selector, arity and source span, and
@@ -36,7 +36,7 @@ struct PrimaryMethod {
 ///    assignments compiled as the module's methods (LIVE compilation mode,
 ///    exercised by the test-package-compiler snapshot cases). Not dead code:
 ///    removing this strips methods from every compiled script.
-/// 2. Class definition primary methods — `MethodKind::Primary` entries from
+/// 2. Class definition primary methods — entries from
 ///    every class in the module.
 ///
 /// `generate_method_table`, `generate_has_method` and
@@ -63,14 +63,12 @@ fn collect_primary_methods(module: &Module) -> Vec<PrimaryMethod> {
         .collect();
     for class in &module.classes {
         for method in &class.methods {
-            if method.kind == MethodKind::Primary {
-                methods.push(PrimaryMethod {
-                    name: method.selector.name().to_string(),
-                    arity: method.selector.arity(),
-                    span: method.span,
-                    in_class: true,
-                });
-            }
+            methods.push(PrimaryMethod {
+                name: method.selector.name().to_string(),
+                arity: method.selector.arity(),
+                span: method.span,
+                in_class: true,
+            });
         }
     }
     methods

@@ -39,7 +39,7 @@
 //! ...); and dataflow-sensitive cases such as `process_info(self())` (needs
 //! argument tracking).
 
-use crate::ast::{Expression, MessageSelector, MethodDefinition, MethodKind, Module};
+use crate::ast::{Expression, MessageSelector, MethodDefinition, Module};
 use crate::ast_walker::walk_expression;
 use crate::ffi_receiver::erlang_module_of_receiver;
 use crate::semantic_analysis::ClassHierarchy;
@@ -179,18 +179,14 @@ pub(crate) fn check_class_method_ffi(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for class in &module.classes {
-        for method in class
-            .class_methods
-            .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
-        {
+        for method in class.class_methods.iter() {
             check_method(class.name.name.as_str(), method, hierarchy, diagnostics);
         }
     }
     // Standalone `Foo class >> bar => ...` definitions are class methods of
     // `Foo` too.
     for standalone in &module.method_definitions {
-        if standalone.is_class_method && standalone.method.kind == MethodKind::Primary {
+        if standalone.is_class_method {
             check_method(
                 standalone.class_name.name.as_str(),
                 &standalone.method,

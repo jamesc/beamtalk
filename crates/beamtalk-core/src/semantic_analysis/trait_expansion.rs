@@ -90,8 +90,8 @@ use ecow::EcoString;
 
 use crate::ast::{
     ClassDefinition, ClassKind, Expression, ExpressionStatement, Identifier, MessageSelector,
-    MethodDefinition, MethodKind, Module, ParameterDefinition, ProtocolDefinition,
-    ProtocolMethodSignature, ProtocolUse, TypeAnnotation, TypeParamDecl,
+    MethodDefinition, Module, ParameterDefinition, ProtocolDefinition, ProtocolMethodSignature,
+    ProtocolUse, TypeAnnotation, TypeParamDecl,
 };
 use crate::ast_walker::{walk_expression, walk_expression_mut};
 use crate::method_source_walker::collect_self_sends;
@@ -1221,7 +1221,6 @@ fn substitute_provision(
         is_sealed: method.is_sealed,
         is_internal: method.is_internal,
         is_class_method: false, // class-side provisions are post-v1 (§9)
-        kind: method.kind,
         expect: method.expect.clone(),
         comments: method.comments.clone(),
         doc_comment: method.doc_comment.clone(),
@@ -1305,9 +1304,6 @@ fn collect_local_type_vars(
             for t in parameters {
                 collect_local_type_vars(t, protocol_type_params, out);
             }
-        }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            collect_local_type_vars(inner, protocol_type_params, out);
         }
         TypeAnnotation::Difference { base, excluded, .. } => {
             collect_local_type_vars(base, protocol_type_params, out);
@@ -1413,16 +1409,6 @@ fn substitute_type_annotation(
                     )
                 })
                 .collect(),
-            *span,
-        ),
-        TypeAnnotation::FalseOr { inner, span } => TypeAnnotation::false_or(
-            substitute_type_annotation(
-                inner,
-                type_arg_subst,
-                local_renames,
-                self_class_name,
-                self_class_type_params,
-            ),
             *span,
         ),
         TypeAnnotation::Difference {
@@ -1998,11 +1984,7 @@ fn check_dropped_provision_overrides(
         if !is_own_body_method {
             continue;
         }
-        let Some(own_method) = class
-            .methods
-            .iter()
-            .find(|m| m.kind == MethodKind::Primary && m.selector.name() == selector)
-        else {
+        let Some(own_method) = class.methods.iter().find(|m| m.selector.name() == selector) else {
             continue;
         };
 

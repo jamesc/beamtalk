@@ -2964,7 +2964,6 @@ mod tests {
     }
     #[test]
     fn cross_package_internal_method_helper() {
-        use beamtalk_core::ast::MethodKind;
         let mut hierarchy = ClassHierarchy::with_builtins();
         // Inject a class with both public and internal methods from "other_pkg"
         hierarchy.add_from_beam_meta(vec![
@@ -2974,7 +2973,6 @@ mod tests {
                     MethodInfo {
                         selector: EcoString::from("publicMethod"),
                         arity: 0,
-                        kind: MethodKind::Primary,
                         defined_in: EcoString::from("RemoteService"),
                         is_sealed: false,
                         is_internal: false,
@@ -2991,7 +2989,6 @@ mod tests {
                     MethodInfo {
                         selector: EcoString::from("internalHelper"),
                         arity: 0,
-                        kind: MethodKind::Primary,
                         defined_in: EcoString::from("RemoteService"),
                         is_sealed: false,
                         is_internal: true,
@@ -3072,7 +3069,6 @@ mod tests {
     }
     #[test]
     fn internal_method_excluded_from_typed_receiver_completions() {
-        use beamtalk_core::ast::MethodKind;
         // Use source that references RemoteService with a typed variable
         let source = "Object subclass: Client\n  doWork: svc :: RemoteService =>\n    svc pub";
         let tokens = lex_with_eof(source);
@@ -3086,7 +3082,6 @@ mod tests {
                     MethodInfo {
                         selector: EcoString::from("publicMethod"),
                         arity: 0,
-                        kind: MethodKind::Primary,
                         defined_in: EcoString::from("RemoteService"),
                         is_sealed: false,
                         is_internal: false,
@@ -3103,7 +3098,6 @@ mod tests {
                     MethodInfo {
                         selector: EcoString::from("internalHelper"),
                         arity: 0,
-                        kind: MethodKind::Primary,
                         defined_in: EcoString::from("RemoteService"),
                         is_sealed: false,
                         is_internal: true,

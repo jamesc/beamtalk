@@ -20,7 +20,7 @@
 //! (byte-identical to `TypeAnnotation::type_name()`, enforced by
 //! `declared_type.rs`'s own `assert_display_parity` tests) so the
 //! shapes this test carries across the wire — union, generic,
-//! singleton, `FalseOr`, difference, intersection, self-types — are
+//! singleton, difference, intersection, self-types — are
 //! the exact same canonical text a real compiled method signature
 //! would send, not an ad hoc string format.
 //!

@@ -2332,7 +2332,6 @@ fn parse_sealed_method() {
 
     let method = &class.methods[0];
     assert!(method.is_sealed);
-    assert_eq!(method.kind, crate::ast::MethodKind::Primary);
 }
 
 #[test]
@@ -2710,8 +2709,6 @@ fn parse_class_with_mixed_content() {
     assert_eq!(class.methods.len(), 2);
 
     // Check method kinds
-    assert_eq!(class.methods[0].kind, crate::ast::MethodKind::Primary);
-    assert_eq!(class.methods[1].kind, crate::ast::MethodKind::Primary);
 }
 
 #[test]

@@ -1335,7 +1335,6 @@ fn add_from_beam_meta_inserts_non_builtin_class() {
         methods: vec![MethodInfo {
             selector: EcoString::from("value"),
             arity: 0,
-            kind: MethodKind::Primary,
             defined_in: EcoString::from("Counter"),
             is_sealed: false,
             is_internal: false,
@@ -1367,7 +1366,6 @@ fn add_from_beam_meta_preserves_existing_entries() {
         methods: vec![MethodInfo {
             selector: EcoString::from("increment"),
             arity: 0,
-            kind: MethodKind::Primary,
             defined_in: EcoString::from("Counter"),
             is_sealed: false,
             is_internal: false,
@@ -1389,7 +1387,6 @@ fn add_from_beam_meta_preserves_existing_entries() {
         methods: vec![MethodInfo {
             selector: EcoString::from("old_method"),
             arity: 0,
-            kind: MethodKind::Primary,
             defined_in: EcoString::from("Counter"),
             is_sealed: false,
             is_internal: false,

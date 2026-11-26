@@ -19,7 +19,6 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
             MethodInfo {
                 selector: eco_string("first"),
                 arity: 0,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("GenCollection"),
                 is_sealed: false,
                 is_internal: false,
@@ -36,7 +35,6 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
             MethodInfo {
                 selector: eco_string("size"),
                 arity: 0,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("GenCollection"),
                 is_sealed: false,
                 is_internal: false,
@@ -53,7 +51,6 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
             MethodInfo {
                 selector: eco_string("select:"),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("GenCollection"),
                 is_sealed: false,
                 is_internal: false,
@@ -77,7 +74,6 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
         methods: vec![MethodInfo {
             selector: eco_string("append:"),
             arity: 1,
-            kind: MethodKind::Primary,
             defined_in: eco_string("GenArray"),
             is_sealed: false,
             is_internal: false,
@@ -482,7 +478,6 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
         methods: vec![MethodInfo {
             selector: eco_string("value"),
             arity: 0,
-            kind: MethodKind::Primary,
             defined_in: eco_string("SealedBox"),
             is_sealed: true,
             is_internal: false,
@@ -499,7 +494,6 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
         class_methods: vec![MethodInfo {
             selector: eco_string("wrap:"),
             arity: 1,
-            kind: MethodKind::Primary,
             defined_in: eco_string("SealedBox"),
             is_sealed: true,
             is_internal: false,
@@ -530,7 +524,6 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
             MethodInfo {
                 selector: eco_string("value"),
                 arity: 0,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("ActorBox"),
                 is_sealed: false,
                 is_internal: false,
@@ -547,7 +540,6 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
             MethodInfo {
                 selector: eco_string("value:"),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("ActorBox"),
                 is_sealed: false,
                 is_internal: false,
@@ -582,7 +574,6 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
             MethodInfo {
                 selector: eco_string("printBox:"),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("BoxConsumer"),
                 is_sealed: false,
                 is_internal: false,
@@ -599,7 +590,6 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
             MethodInfo {
                 selector: eco_string("setActor:"),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("BoxConsumer"),
                 is_sealed: false,
                 is_internal: false,
@@ -989,7 +979,6 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
             MethodInfo {
                 selector: "get:".into(),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: "HttpClient".into(),
                 is_sealed: false,
                 is_internal: false,
@@ -1006,7 +995,6 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
             MethodInfo {
                 selector: "buildHeaders:".into(),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: "HttpClient".into(),
                 is_sealed: false,
                 is_internal: true,
@@ -1024,7 +1012,6 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
         class_methods: vec![MethodInfo {
             selector: "internalFactory".into(),
             arity: 0,
-            kind: MethodKind::Primary,
             defined_in: "HttpClient".into(),
             is_sealed: false,
             is_internal: true,

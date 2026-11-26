@@ -270,7 +270,7 @@ pub(super) fn generate_builtins_rs(
          //! run `just build` (or `beamtalk build-stdlib`) to regenerate.\n\
          \n\
          use super::super::{AutoConstructors, ClassInfo, DeclaredType, MethodInfo, SuperclassTypeArg};\n\
-         use crate::ast::{ConstantValue, MethodKind, SlotKind};\n\
+         use crate::ast::{ConstantValue, SlotKind};\n\
          use ecow::EcoString;\n\
          use std::collections::{BTreeSet, HashMap};\n\
          \n",
@@ -760,7 +760,7 @@ fn slot_kind_to_rust_expr(kind: beamtalk_core::ast::SlotKind) -> &'static str {
 /// `Display` and re-parsing on read. Mirrors every `DeclaredType` variant:
 /// `Simple`/`Singleton`/`Generic`/`Union` go through
 /// the compact constructors added for this purpose
-/// ([`DeclaredType::simple`], etc.); the remaining variants (`FalseOr`,
+/// ([`DeclaredType::simple`], etc.); the remaining variants (
 /// `Difference`, `Intersection`, `SelfType`, `SelfClass`, `ClassOf`) are rare
 /// in stdlib signatures but still emitted structurally rather than silently
 /// dropped, so a stdlib author who *does* write one of them gets a correct
@@ -781,12 +781,6 @@ pub(super) fn declared_type_to_rust_expr(dt: &DeclaredType) -> String {
                 "DeclaredType::generic({}, vec![{}])",
                 rust_str_lit(base),
                 parts.join(", ")
-            )
-        }
-        DeclaredType::FalseOr(inner) => {
-            format!(
-                "DeclaredType::FalseOr(Box::new({}))",
-                declared_type_to_rust_expr(inner)
             )
         }
         DeclaredType::Difference { base, excluded } => format!(
@@ -866,7 +860,6 @@ pub(super) fn generate_method_list(
 
     let _ = writeln!(code, "            {field_name}: vec![");
     for m in methods {
-        let kind = m.kind.to_rust_expr();
         let selector = rust_str_lit(&m.selector);
         let return_type_expr = match &m.return_type {
             Some(t) => format!("Some({})", declared_type_to_rust_expr(t)),
@@ -900,7 +893,7 @@ pub(super) fn generate_method_list(
         let _ = writeln!(
             code,
             "                MethodInfo {{ selector: {selector}.into(), arity: {arity}, \
-             kind: {kind}, defined_in: \"{class}\".into(), is_sealed: {sealed}, \
+             defined_in: \"{class}\".into(), is_sealed: {sealed}, \
              is_internal: {internal}, spawns_block: {spawns_block}, \
              return_type: {return_type_expr}, param_types: {param_types_expr}, doc: {doc_expr}, \
              origin: None, primitive: {primitive_expr}, \

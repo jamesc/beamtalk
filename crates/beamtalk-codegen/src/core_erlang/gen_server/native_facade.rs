@@ -20,7 +20,7 @@ use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use super::spawn::SpawnVariant;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, form, join, leaf, line, nest};
-use beamtalk_core::ast::{MethodDefinition, MethodKind, Module};
+use beamtalk_core::ast::{MethodDefinition, Module};
 use beamtalk_core::unparse::unparse_method_display_signature;
 
 impl CoreErlangGenerator {
@@ -97,12 +97,7 @@ impl CoreErlangGenerator {
         let self_delegate_methods: Vec<&MethodDefinition> = module
             .classes
             .first()
-            .map(|c| {
-                c.methods
-                    .iter()
-                    .filter(|m| m.kind == MethodKind::Primary && m.is_self_delegate())
-                    .collect()
-            })
+            .map(|c| c.methods.iter().filter(|m| m.is_self_delegate()).collect())
             .unwrap_or_default();
 
         // Build dispatch export entries: 'dispatch_<selector>'/<arity+1>
@@ -557,19 +552,11 @@ impl CoreErlangGenerator {
             };
 
             // Instance methods
-            let instance_methods: Vec<_> = class
-                .methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-                .collect();
+            let instance_methods: Vec<_> = class.methods.iter().collect();
 
             // Class-side primary methods (used for both the signature/source maps
             // below and the xref index).
-            let class_methods_primary: Vec<_> = class
-                .class_methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-                .collect();
+            let class_methods_primary: Vec<_> = class.class_methods.iter().collect();
 
             // ADR 0087 Phase 2: per-method cross-reference
             // index. The standard `register_class/0` path bakes this for every
@@ -615,12 +602,7 @@ impl CoreErlangGenerator {
 
             // Class-side method display signatures
             let mut class_method_sig_docs: Vec<Document<'static>> = Vec::new();
-            for (method_idx, method) in class
-                .class_methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-                .enumerate()
-            {
+            for (method_idx, method) in class.class_methods.iter().enumerate() {
                 if method_idx > 0 {
                     class_method_sig_docs.push(Document::Str(", "));
                 }
@@ -637,12 +619,7 @@ impl CoreErlangGenerator {
             // instance side). Allows SystemNavigation source-text scanners to
             // walk class-side method bodies.
             let mut class_method_source_docs: Vec<Document<'static>> = Vec::new();
-            for (method_idx, method) in class
-                .class_methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-                .enumerate()
-            {
+            for (method_idx, method) in class.class_methods.iter().enumerate() {
                 if method_idx > 0 {
                     class_method_source_docs.push(Document::Str(", "));
                 }

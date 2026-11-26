@@ -68,9 +68,7 @@ use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::{atom, int_lit};
 use beamtalk_cerl_doc::{Document, join};
-use beamtalk_core::ast::{
-    ClassDefinition, MethodDefinition, MethodKind, TypeAnnotation, to_module_name,
-};
+use beamtalk_core::ast::{ClassDefinition, MethodDefinition, TypeAnnotation, to_module_name};
 use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
 
 /// Converts a `TypeAnnotation` to its Core Erlang abstract type representation.
@@ -119,14 +117,6 @@ pub(super) fn type_annotation_to_spec(
         TypeAnnotation::Generic {
             base, parameters, ..
         } => generic_type_to_spec(base.name.as_str(), parameters, aliases, referenced),
-        TypeAnnotation::FalseOr { inner, .. } => {
-            let inner_spec = type_annotation_to_spec(inner, aliases, referenced);
-            docvec![
-                "{'type', 0, 'union', [",
-                inner_spec,
-                ", {'atom', 0, 'false'}]}"
-            ]
-        }
         // Difference (`base \ excluded`) has no precise Erlang spec form; the
         // excluded set only narrows `base`, so the base spec is a sound (if
         // wider) over-approximation for the generated `-spec`. This same
@@ -473,28 +463,18 @@ pub fn generate_class_specs(
     // Only generate instance method specs for value types where methods
     // are standalone functions. Actor instance methods live inside safe_dispatch/3.
     let instance_specs: Box<dyn Iterator<Item = Document<'static>>> = if is_value_type {
-        Box::new(
-            class
-                .methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-                .filter_map(move |m| {
-                    generate_method_spec(m, is_value_type, aliases, referenced)
-                        .map(|spec| docvec!["'spec' =\n        [{", spec, "}]"])
-                }),
-        )
+        Box::new(class.methods.iter().filter_map(move |m| {
+            generate_method_spec(m, is_value_type, aliases, referenced)
+                .map(|spec| docvec!["'spec' =\n        [{", spec, "}]"])
+        }))
     } else {
         Box::new(std::iter::empty())
     };
 
-    let class_specs = class
-        .class_methods
-        .iter()
-        .filter(|m| m.kind == MethodKind::Primary)
-        .filter_map(move |m| {
-            generate_class_method_spec(m, aliases, referenced)
-                .map(|spec| docvec!["'spec' =\n        [{", spec, "}]"])
-        });
+    let class_specs = class.class_methods.iter().filter_map(move |m| {
+        generate_class_method_spec(m, aliases, referenced)
+            .map(|spec| docvec!["'spec' =\n        [{", spec, "}]"])
+    });
 
     instance_specs.chain(class_specs).collect()
 }
@@ -806,8 +786,14 @@ mod tests {
                 "{'atom', 0, 'north'}",
             ),
             (
-                "false_or_type_maps_correctly",
-                TypeAnnotation::false_or(TypeAnnotation::simple("Integer", span()), span()),
+                "integer_or_false_union_maps_correctly",
+                TypeAnnotation::union(
+                    vec![
+                        TypeAnnotation::simple("Integer", span()),
+                        TypeAnnotation::simple("False", span()),
+                    ],
+                    span(),
+                ),
                 "{'type', 0, 'union', [{'type', 0, 'integer', []}, {'atom', 0, 'false'}]}",
             ),
         ]

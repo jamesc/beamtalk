@@ -23,7 +23,7 @@ use super::{CodeGenContext, CoreErlangGenerator};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{
-    ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, MethodKind, Module,
+    ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module,
     ParameterDefinition, ProtocolMethodSignature, TypeAnnotation, WellKnownSelector,
 };
 use beamtalk_core::unparse::unparse_method_display_signature;
@@ -36,7 +36,6 @@ impl CoreErlangGenerator {
         class
             .methods
             .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
             .filter(|m| m.selector == MessageSelector::Unary("new".into()))
             .any(|m| Self::is_self_error_body(&m.body))
     }
@@ -59,7 +58,6 @@ impl CoreErlangGenerator {
             .methods
             .iter()
             .chain(class.class_methods.iter())
-            .filter(|m| m.kind == MethodKind::Primary)
             .any(|m| m.selector == MessageSelector::Unary("new".into()))
     }
 
@@ -151,11 +149,7 @@ impl CoreErlangGenerator {
 
         for (i, class) in module.classes.iter().enumerate() {
             // Instance methods — used for methodSource, methodSignatures, and methodDocs
-            let instance_methods: Vec<_> = class
-                .methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-                .collect();
+            let instance_methods: Vec<_> = class.methods.iter().collect();
 
             // Method source
             let method_source_doc = Self::build_selector_map(&instance_methods, |m| {
@@ -170,11 +164,7 @@ impl CoreErlangGenerator {
             });
 
             // Class-side method display signatures for :help command
-            let class_methods_primary: Vec<_> = class
-                .class_methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-                .collect();
+            let class_methods_primary: Vec<_> = class.class_methods.iter().collect();
             let class_method_sigs_doc = Self::build_selector_map(&class_methods_primary, |m| {
                 let sig_str = unparse_method_display_signature(m);
                 leaf::binary_lit(&sig_str)
