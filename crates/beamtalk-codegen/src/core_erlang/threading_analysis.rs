@@ -241,12 +241,26 @@ impl CoreErlangGenerator {
             || !analysis.field_writes.is_empty()
             || analysis.has_self_sends
             || analysis.has_user_code_sends
-            || analysis.captured_reads.iter().any(|name| {
-                !matches!(name.as_str(), "self" | "super" | "true" | "false" | "nil")
-                    && self.lookup_var(name).is_none()
-                    // BT-4269: a name the loop being planned will bind.
-                    && !self.synced.probe_locals.borrow().iter().any(|l| l == name)
-            })
+            || analysis
+                .captured_reads
+                .iter()
+                .any(|name| self.name_is_unbound_here(name))
+    }
+
+    /// Whether `name`, read by code being classified, is bound by nothing in
+    /// the scope being compiled now: not a pseudo-variable, not a local in
+    /// scope, and (BT-4269) not a name the loop being planned will bind. An
+    /// unbound name may be a bare field read, so
+    /// [`Self::analysis_touches_actor_state`] counts it as touching the
+    /// actor's state. The answer depends on where the classifier is asked:
+    /// a name an enclosing construct binds (a `match:` arm's pattern
+    /// variable, a loop's block parameter) is unbound to a probe run before
+    /// that construct binds it, which is why a per-send class cached off it
+    /// is keyed by these names too (BT-5291, `InlinedClassScope`).
+    pub(in crate::core_erlang) fn name_is_unbound_here(&self, name: &str) -> bool {
+        !matches!(name, "self" | "super" | "true" | "false" | "nil")
+            && self.lookup_var(name).is_none()
+            && !self.synced.probe_locals.borrow().iter().any(|l| l == name)
     }
 
     /// [`Self::needs_mutation_threading`] with the bracket's contribution
