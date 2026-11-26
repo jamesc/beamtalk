@@ -19,7 +19,7 @@ use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{Block, Expression, Module};
 use beamtalk_core::source_analysis::Span;
 
-/// A primary method of a module: its selector, arity and source span, and
+/// A dispatchable method of a module: its selector, arity and source span, and
 /// whether it is a class-definition method (a script `name := [block]` method
 /// is not).
 struct DispatchMethod {
