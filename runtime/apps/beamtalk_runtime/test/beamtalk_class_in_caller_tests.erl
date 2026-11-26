@@ -767,6 +767,20 @@ class_in_variable_test_() ->
                     ?assertEqual(
                         [Generation, tag('Bt5267ReadsRoot')],
                         persistent_term_reads(fun() -> send(Leaf, testSelf, []) end)
+                    ),
+                    %% A shadowed definer: the derived flag misses, readiness and
+                    %% the raw flag are read once each, then the fun store.
+                    ok = beamtalk_object_class:put_class_method(
+                        RootPid, testSelf, fun(_Self) -> from_fun end
+                    ),
+                    ?assertEqual(
+                        [
+                            Generation,
+                            tag('Bt5267ReadsRoot'),
+                            beamtalk_class_shadow_ready,
+                            {beamtalk_class_shadow, runtime_fun, 'Bt5267ReadsRoot'}
+                        ],
+                        persistent_term_reads(fun() -> from_fun = send(Leaf, testSelf, []) end)
                     )
                 after
                     beamtalk_test_proc:stop(Leaf)
@@ -821,30 +835,36 @@ class_in_variable_test_() ->
         {"a hot reload of the defining class takes effect between two sends", fun() ->
             Module = bt5267_reload_mod,
             ok = load_versioned_module(Module, v1),
-            RootPid = beamtalk_test_class:start('Bt5267ReloadRoot', #{
-                superclass => none,
-                module => Module,
-                class_methods => #{testSelf => #{arity => 0}},
-                meta => ?META
-            }),
-            Leaf = beamtalk_test_class:start(
-                'Bt5267ReloadLeaf', class_info('Bt5267ReloadRoot', #{})
-            ),
             try
-                ?assertEqual(v1, send(Leaf, testSelf, [])),
-                ?assertEqual(v1, send(RootPid, testSelf, [])),
-                %% A recompile: new code, then the `-on_load` registration.
-                ok = load_versioned_module(Module, v2),
-                {ok, _} = beamtalk_object_class:update_class('Bt5267ReloadRoot', #{
+                RootPid = beamtalk_test_class:start('Bt5267ReloadRoot', #{
+                    superclass => none,
                     module => Module,
                     class_methods => #{testSelf => #{arity => 0}},
                     meta => ?META
                 }),
-                ?assertEqual(v2, send(Leaf, testSelf, [])),
-                ?assertEqual(v2, send(RootPid, testSelf, []))
+                try
+                    Leaf = beamtalk_test_class:start(
+                        'Bt5267ReloadLeaf', class_info('Bt5267ReloadRoot', #{})
+                    ),
+                    try
+                        ?assertEqual(v1, send(Leaf, testSelf, [])),
+                        ?assertEqual(v1, send(RootPid, testSelf, [])),
+                        %% A recompile: new code, then the `-on_load` registration.
+                        ok = load_versioned_module(Module, v2),
+                        {ok, _} = beamtalk_object_class:update_class('Bt5267ReloadRoot', #{
+                            module => Module,
+                            class_methods => #{testSelf => #{arity => 0}},
+                            meta => ?META
+                        }),
+                        ?assertEqual(v2, send(Leaf, testSelf, [])),
+                        ?assertEqual(v2, send(RootPid, testSelf, []))
+                    after
+                        beamtalk_test_proc:stop(Leaf)
+                    end
+                after
+                    beamtalk_test_proc:stop(RootPid)
+                end
             after
-                beamtalk_test_proc:stop(Leaf),
-                beamtalk_test_proc:stop(RootPid),
                 _ = code:purge(Module),
                 _ = code:delete(Module),
                 _ = code:purge(Module)
@@ -872,7 +892,10 @@ persistent_term_reads(Fun) ->
         1 = trace:process(Session, Worker, true, [call]),
         _ = trace:function(Session, {persistent_term, get, 2}, true, [local]),
         Worker ! go,
-        ?awaitMessage({done, Worker})
+        ?awaitMessage({done, Worker}),
+        %% Every call trace message is in the mailbox before it is read.
+        Ref = erlang:trace_delivered(Worker),
+        ?awaitMessage({trace_delivered, Worker, Ref})
     after
         trace:session_destroy(Session)
     end,
