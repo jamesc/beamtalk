@@ -64,6 +64,7 @@ impl TypeChecker {
                     .chain(messages.iter().flat_map(|m| &m.arguments)),
                 env,
             );
+            self.mark_run_once_blocks(Some(inner.as_ref()), inner_sel, inner_args);
             let inner_ty = self.infer_send_receiver(inner, hierarchy, env, in_abstract_method);
             let send_ty = self.infer_message_send_with_receiver_ty(
                 inner,

@@ -42,6 +42,7 @@ mod cascade;
 mod flow;
 mod generics;
 mod literals;
+mod loop_head;
 mod send;
 
 pub use cascade::cascade_drops_update;

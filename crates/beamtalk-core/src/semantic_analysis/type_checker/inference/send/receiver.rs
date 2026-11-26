@@ -456,6 +456,7 @@ impl TypeChecker {
             loop_body: loop_facts,
         } = self.send_block_facts(ctx, env);
         Self::forget_error_variants_written_by_send_blocks(None, selector, arguments, env);
+        self.mark_run_once_blocks(None, selector, arguments);
 
         // `Object >> then:` (ADR 0145 § 2, BT-4515): types a literal block's
         // parameter as the receiver and answers the block's result type. Only
