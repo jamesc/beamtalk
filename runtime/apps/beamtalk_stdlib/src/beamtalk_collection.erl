@@ -87,31 +87,114 @@ sum(Self) ->
     lists:foldl(fun(Elem, Acc) -> Acc + Elem end, 0, to_list(Self)).
 
 -doc """
-Return the largest element using Erlang's native term ordering (`>`), not a
-dispatched Beamtalk `>` message.
+Return the largest element.
 
 Backs `@primitive "max"` on Collection. Raises `empty_collection` on an empty
 collection — there is no sensible maximum of nothing.
+
+When every element is a number, or every element is a String, or every
+element is a Symbol, this is `lists:max/1` (native order; for Strings and
+Symbols that is today's behaviour). Any other mix is folded pairwise with a
+dispatched `>`, exactly as `Number>>max:` does (`Acc > Elem` keeps `Acc`,
+otherwise `Elem`), so a user type's `>` and the `greaterThanFromNumber:`
+hooks are honoured and `#(3, nil) max` raises what `3 max: nil` raises.
 """.
 -spec maximum(term()) -> term().
 maximum(Self) ->
     case to_list(Self) of
-        [] -> raise_empty('max');
-        List -> lists:max(List)
+        [] ->
+            raise_empty('max');
+        [First | Rest] = List when is_number(First) ->
+            case num_max(Rest, First) of
+                {ok, Max} -> Max;
+                not_numbers -> extreme(List, '>')
+            end;
+        List ->
+            extreme(List, '>')
     end.
 
 -doc """
-Return the smallest element using Erlang's native term ordering (`<`), not a
-dispatched Beamtalk `<` message.
+Return the smallest element.
 
 Backs `@primitive "min"` on Collection. Raises `empty_collection` on an empty
-collection.
+collection. Same strategy as `maximum/1`, with a dispatched `<`
+(`Acc < Elem` keeps `Acc`, otherwise `Elem`, as `Number>>min:`). On the
+dispatched path a tie takes the later element, as the pairwise fold does.
 """.
 -spec minimum(term()) -> term().
 minimum(Self) ->
     case to_list(Self) of
-        [] -> raise_empty('min');
-        List -> lists:min(List)
+        [] ->
+            raise_empty('min');
+        [First | Rest] = List when is_number(First) ->
+            case num_min(Rest, First) of
+                {ok, Min} -> Min;
+                not_numbers -> extreme(List, '<')
+            end;
+        List ->
+            extreme(List, '<')
+    end.
+
+%% All-number fast path: one pass that tracks the extreme and gives up at the
+%% first non-number. Same tie behaviour as `lists:max/1` / `lists:min/1`
+%% (first of equal elements wins), so all-number answers are unchanged.
+-spec num_max(list(), number()) -> {ok, number()} | not_numbers.
+num_max([], Acc) -> {ok, Acc};
+num_max([H | T], Acc) when is_number(H), H > Acc -> num_max(T, H);
+num_max([H | T], Acc) when is_number(H) -> num_max(T, Acc);
+num_max(_, _) -> not_numbers.
+
+-spec num_min(list(), number()) -> {ok, number()} | not_numbers.
+num_min([], Acc) -> {ok, Acc};
+num_min([H | T], Acc) when is_number(H), H < Acc -> num_min(T, H);
+num_min([H | T], Acc) when is_number(H) -> num_min(T, Acc);
+num_min(_, _) -> not_numbers.
+
+%% Strings (all binaries) and Symbols (all atoms) keep native term order;
+%% any other mix is folded pairwise with the dispatched operator.
+-spec extreme([term(), ...], '>' | '<') -> term().
+extreme([First | Rest] = List, Op) ->
+    case native_orderable(First, Rest) of
+        true when Op =:= '>' -> lists:max(List);
+        true -> lists:min(List);
+        false -> fold_dispatched(Rest, First, Op)
+    end.
+
+-spec native_orderable(term(), list()) -> boolean().
+native_orderable({beamtalk_string, _}, Rest) ->
+    lists:all(fun is_string/1, Rest);
+native_orderable(First, Rest) ->
+    is_symbol(First) andalso lists:all(fun is_symbol/1, Rest).
+
+%% A String is the tagged tuple `{beamtalk_string, Bin}` (BT-4170); a Symbol
+%% is an atom other than the ones that stand for nil and the Booleans.
+-spec is_string(term()) -> boolean().
+is_string({beamtalk_string, _}) -> true;
+is_string(_) -> false.
+
+-spec is_symbol(term()) -> boolean().
+is_symbol(nil) -> false;
+is_symbol(true) -> false;
+is_symbol(false) -> false;
+is_symbol(A) -> is_atom(A).
+
+-spec fold_dispatched(list(), term(), '>' | '<') -> term().
+fold_dispatched([], Acc, _Op) ->
+    Acc;
+fold_dispatched([Elem | Rest], Acc, Op) ->
+    case beamtalk_message_dispatch:send(Acc, Op, [Elem]) of
+        true ->
+            fold_dispatched(Rest, Acc, Op);
+        false ->
+            fold_dispatched(Rest, Elem, Op);
+        Other ->
+            %% `Number>>max:` is `(self > other) ifTrue: [self] ifFalse: [other]`,
+            %% so a non-Boolean answer is *sent* `ifTrue:ifFalse:` (DNU unless
+            %% it understands it). Do exactly that, for the same error.
+            Chosen = beamtalk_message_dispatch:send(Other, 'ifTrue:ifFalse:', [
+                fun() -> Acc end, fun() -> Elem end
+            ]),
+            fold_dispatched(Rest, Chosen, Op)
     end.
 
 -doc """
