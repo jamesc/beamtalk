@@ -1405,19 +1405,6 @@ mod tests {
     }
 
     #[test]
-    fn comment_between_receiver_and_binary_selector_is_not_swallowed() {
-        let src = "combine: n => self /* why */ + n";
-        let occurrences = find_selector_send_spans(src, "+", "plus");
-        assert_eq!(occurrences.len(), 1, "got {occurrences:?}");
-        let hit = &occurrences[0][0];
-        assert_eq!(
-            slice(src, hit.span),
-            "+",
-            "span should be JUST the operator token"
-        );
-    }
-
-    #[test]
     fn unary_super_send_is_found() {
         let src = "increment => super bump";
         let occurrences = find_selector_send_spans(src, "bump", "increase");

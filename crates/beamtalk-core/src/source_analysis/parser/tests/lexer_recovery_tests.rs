@@ -578,7 +578,8 @@ fn unterminated_string_is_still_incomplete_input() {
     assert!(!is_input_complete("x := \"abc"));
     assert!(!is_input_complete("x := \"abc {y"));
     assert!(!is_input_complete("x := \"abc\\"));
-    assert!(!is_input_complete("x := 1 /* note"));
+    // A stray `/*` is complete but invalid (BT-5229): more input cannot fix it.
+    assert!(is_input_complete("x := 1 /* note"));
     assert!(is_input_complete("x := \"abc\ndef\""));
 }
 

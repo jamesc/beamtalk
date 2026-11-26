@@ -3248,6 +3248,20 @@ mod tests {
                 !tokens.is_empty(),
                 "expected at least an EOF token for {source:?} ({why})"
             );
+            if kind == "block_comment_opener" {
+                // The opener is one error token to the end of its line (BT-5229).
+                assert!(
+                    matches!(tokens[0].kind(), TokenKind::Error(m) if m == BLOCK_COMMENT_MESSAGE),
+                    "expected the block-comment diagnostic for {source:?}, got {:?} ({why})",
+                    tokens[0].kind()
+                );
+                assert_eq!(
+                    u64::from(tokens[0].span().end()),
+                    expected_end,
+                    "span-end mismatch for {source:?} ({why})"
+                );
+                continue;
+            }
             let leading = tokens[0].leading_trivia();
             assert!(
                 !leading.is_empty(),
