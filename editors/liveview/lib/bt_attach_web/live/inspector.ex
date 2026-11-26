@@ -64,6 +64,8 @@ defmodule BtAttachWeb.Live.Inspector do
   defdelegate scalar_kind(term), to: View
   defdelegate supervisor_child_rows(term), to: View
   defdelegate target_info(label, term), to: View
+  defdelegate children_cut_notice(target), to: View
+  defdelegate supervisor_target_info(label, term, rows, truncated), to: View
   defdelegate watched_pid?(watch, pid), to: View
   defdelegate valid_receiver?(label), to: View
   defdelegate window_watched_terms(windows), to: View
@@ -570,10 +572,10 @@ defmodule BtAttachWeb.Live.Inspector do
   defp inspect_pane(pane, socket, label, term, crumbs) do
     if Workspace.inspectable?(term) do
       case Facade.dispatch(:inspect, %{term: term}, RequestContext.build(socket)) do
-        {:ok, {:supervisor_children, child_rows}} ->
+        {:ok, {:supervisor_children, child_rows, truncated}} ->
           %{
             pane
-            | target: target_info(label, term),
+            | target: supervisor_target_info(label, term, child_rows, truncated),
               rows: supervisor_child_rows(child_rows),
               crumbs: crumbs,
               error: nil

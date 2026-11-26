@@ -1302,7 +1302,7 @@ defmodule BtAttachWeb.Live.InspectorTest do
                 "childCount" => 1,
                 "handle" => :null
               }
-            ]}}
+            ], false}}
       })
 
       sup = {:beamtalk_supervisor, :AppSup, :AppSup, self()}
