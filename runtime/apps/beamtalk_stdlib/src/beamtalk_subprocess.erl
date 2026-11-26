@@ -437,8 +437,7 @@ handle_writeLine(_Data, _From, #{stdin_dropped := Reason} = State) ->
     Err = beamtalk_subprocess_port:stdin_dropped_error('Subprocess', Reason),
     {reply, {error, Err}, State};
 handle_writeLine(Data, From, State) ->
-    #{port := Port, child_id := ChildId, port_closed := PortClosed, child_exited := ChildExited} =
-        State,
+    #{port_closed := PortClosed, child_exited := ChildExited} = State,
     case PortClosed orelse ChildExited of
         true ->
             Err = beamtalk_error:new(port_closed, 'Subprocess', 'writeLine:'),
