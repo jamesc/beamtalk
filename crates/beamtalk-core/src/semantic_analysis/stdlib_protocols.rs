@@ -121,16 +121,6 @@ pub(crate) fn stdlib_protocol_names() -> &'static [EcoString] {
     })
 }
 
-/// Whether a registry entry is a baked stdlib protocol seeded into a user
-/// compile, rather than one the package declared or carried in. Registry-wide
-/// scans that reason about *the package's own* protocols (`respondsTo:`
-/// narrowing, the visibility validator) skip these so seeding cannot change
-/// their results.
-#[must_use]
-pub(crate) fn is_seeded_stdlib_info(info: &crate::semantic_analysis::ProtocolInfo) -> bool {
-    info.package.as_deref() == Some(STDLIB_PACKAGE)
-}
-
 /// The source file of stdlib protocol `name`, if it is one.
 #[must_use]
 pub fn stdlib_protocol_source(name: &str) -> Option<&'static ProtocolSource> {

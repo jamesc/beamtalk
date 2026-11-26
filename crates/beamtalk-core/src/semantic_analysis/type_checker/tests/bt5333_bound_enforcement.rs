@@ -237,3 +237,18 @@ fn top_level_local_annotation_is_bound_checked() {
     let source = format!("{LOCAL_PROTOCOL}\nb :: Boxed(Integer) := nil.\nb\n");
     assert_eq!(violations(&source).len(), 1, "{:?}", violations(&source));
 }
+
+#[test]
+fn extending_parent_stays_visible_to_selector_narrowing() {
+    // `Ranked extending: Comparable` registers `Comparable` for its own sake
+    // (BT-5111), so it still counts: `<` is required by both protocols and
+    // the lookup stays ambiguous, exactly as before BT-5333.
+    use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+    let module = parse_ok("Protocol define: Ranked extending: Comparable\n  rank -> Integer\n");
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut registry = ProtocolRegistry::new();
+    let _ = registry.seed_and_register_module(&module, Vec::new(), &hierarchy, None);
+    assert!(!registry.is_seeded_only("Comparable"));
+    assert!(registry.is_seeded_only("Enumerable"));
+    assert_eq!(registry.find_unique_protocol_for_selector("<"), None);
+}
