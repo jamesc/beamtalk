@@ -56,6 +56,8 @@ into `peer:start_it/2` — the stacktrace only says where it was parked.
     start_peer/1,
     start_peer/2,
     stop_peer/1,
+    partition/1,
+    heal/1,
     unreachable_pid/1
 ]).
 
@@ -413,6 +415,34 @@ itself never *introduces* one.
 -spec ensure_epmd() -> ok.
 ensure_epmd() ->
     _ = os:cmd("ERL_EPMD_ADDRESS=127.0.0.1 epmd -daemon"),
+    ok.
+
+-doc """
+Partition this node from `PeerNode` (BT-5192): the peer keeps running, but
+neither side can reach the other until `heal/1`.
+
+`erlang:disconnect_node/1` alone is not a partition: the next send or monitor
+auto-connects again. So this node first switches the cookie it uses for
+`PeerNode` to a throwaway one, which fails every connection attempt in both
+directions (each side checks the other's digest against the cookie it holds
+for that node), then drops the connection. Returns once the connection is
+gone and a fresh `net_adm:ping/1` answers `pang`, so the caller starts from a
+real partition, not a race with the disconnect. The peer's `standard_io`
+control channel (start_peer/2) keeps it alive meanwhile.
+""".
+-spec partition(node()) -> ok.
+partition(PeerNode) ->
+    true = erlang:set_cookie(PeerNode, bt_dist_test_partitioned),
+    _ = erlang:disconnect_node(PeerNode),
+    ok = beamtalk_test_wait:until(fun() -> not lists:member(PeerNode, nodes(connected)) end),
+    pang = net_adm:ping(PeerNode),
+    ok.
+
+-doc "Undo `partition/1`: restore the peer cookie and reconnect (answers once connected).".
+-spec heal(node()) -> ok.
+heal(PeerNode) ->
+    true = erlang:set_cookie(PeerNode, peer_cookie()),
+    pong = await_ping(PeerNode, ?PING_ATTEMPTS),
     ok.
 
 -doc """

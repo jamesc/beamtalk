@@ -604,11 +604,13 @@ unreachable_node_handle_calls_are_node_down_test() ->
         Calls
     ).
 
-unreachable_node_is_alive_is_optimistic_test() ->
-    %% As for a remote actor (`beamtalk_pid:is_alive/1`): no network round
-    %% trip, and no `badarg` from `erlang:is_process_alive/1` on a remote pid.
+unreachable_node_is_alive_raises_node_down_test() ->
+    %% BT-5192: as for a remote actor (`beamtalk_pid:ask_alive/3`), the node is
+    %% asked; one that cannot be reached raises `node_down` (it used to answer
+    %% `true` without asking), and never `badarg` from
+    %% `erlang:is_process_alive/1` on a remote pid.
     Self = make_supervisor_tuple('BT3984RemoteSup', bt3984_remote_mod, unreachable_remote_pid()),
-    ?assert(beamtalk_supervisor:isAlive(Self)).
+    ?assertBtError(node_down, beamtalk_supervisor:isAlive(Self)).
 
 classify_call_failure_test() ->
     %% The exit/error shapes a supervisor call can fail with. A timeout (an

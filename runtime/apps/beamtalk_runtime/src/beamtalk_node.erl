@@ -483,6 +483,9 @@ remote_shape_manifest(Name) ->
     of
         {ok, Manifest} when is_map(Manifest) ->
             {ok, Manifest};
+        {ok, Other} ->
+            %% BT-5192: a target that answers outside its contract.
+            {error, remote_manifest_error(Name, {unexpected_result, Other})};
         {error, {node_down, _}} ->
             {error, remote_manifest_node_down_error(Name)};
         {error, timeout} ->

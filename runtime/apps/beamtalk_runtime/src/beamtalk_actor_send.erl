@@ -22,6 +22,7 @@ them, so the send path costs the same number of calls as before the split.
 -export([
     actor_dead_error_record/1,
     async_send_impl/5,
+    lifecycle_exit_error/3,
     cast_send_pid/4,
     get_otel_ctx/0,
     get_propagated_ctx/0,
@@ -72,7 +73,11 @@ them, so the send path costs the same number of calls as before the split.
 -spec local_lifecycle(pid(), atom(), list()) -> {value, term()} | {error, #beamtalk_error{}}.
 
 local_lifecycle(ActorPid, isAlive, []) ->
-    {value, beamtalk_pid:is_alive(ActorPid)};
+    %% BT-5192: a remote pid's node is asked (bounded); see beamtalk_pid:ask_alive/3.
+    case beamtalk_pid:ask_alive(ActorPid, unknown, isAlive) of
+        {ok, Alive} -> {value, Alive};
+        {error, _} = Err -> Err
+    end;
 local_lifecycle(ActorPid, kill, []) ->
     %% Telemetry, monitor-before-kill, and DOWN-wait are in kill_and_wait/1.
     %% If no DOWN is observed within 5 s we cannot claim success.
@@ -782,6 +787,40 @@ is_remote(ActorPid, AskNode) ->
         end,
     NodeName =/= node().
 
+-doc """
+The error for a stop of `ActorPid` (`stop`, `stopWith:`, `stopWith:timeout:`)
+that exited with `Reason` (BT-5192). Uses `beamtalk_call_failure:classify/2`,
+the classification `sync_call/5` applies to a send:
+
+- unreachable node (`nodedown`, `noconnection`) → `node_down`: the stop request
+  or its `'DOWN'` was lost, and the actor may still be running;
+- `timeout` → `timeout`: the actor has not finished stopping in time (the
+  terminate request was sent, so it may still stop in the background);
+- anything else (the actor exited with another reason first) → `actor_dead`,
+  with the exit reason in `details`.
+
+`noproc` never reaches here: an already-dead actor counts as stopped.
+""".
+-spec lifecycle_exit_error(pid(), atom(), term()) -> #beamtalk_error{}.
+lifecycle_exit_error(ActorPid, Selector, Reason) ->
+    case beamtalk_call_failure:classify(exit, Reason) of
+        {unreachable, _} ->
+            node_down_error_record(
+                beamtalk_call_failure:unreachable_node(Reason, node(ActorPid)), Selector
+            );
+        timeout ->
+            beamtalk_error:timeout(
+                unknown,
+                Selector,
+                <<
+                    "The actor did not finish stopping within the timeout; "
+                    "it may still stop in the background"
+                >>
+            );
+        _ ->
+            beamtalk_error:with_details(actor_dead_error_record(Selector), #{exit_reason => Reason})
+    end.
+
 -doc "Construct a structured node_down error record for the given node and selector.".
 -spec node_down_error_record(node(), atom()) -> #beamtalk_error{}.
 
@@ -926,8 +965,15 @@ not yet processed the signal.  Waiting for `'DOWN'` guarantees the process
 is gone before this function returns.  If the process is already dead, the
 `'DOWN'` message arrives instantly.
 
-Returns `ok` on success, or `{error, Error}` if the `'DOWN'` message is not
-received within 5 000 ms.  The error is a structured `#beamtalk_error{}` with
+A `'DOWN'` whose reason says the actor's node could not be reached
+(`noconnection`, classified by `beamtalk_call_failure:classify/2` exactly as
+`sync_call/5` classifies a failed send) is not a kill: the signal was lost
+and the actor may still be running on the far side, so it answers
+`{error, node_down}` (BT-5192). Every other `'DOWN'` reason (`killed`, an
+earlier exit, `noproc` for an already-dead actor) means the actor is gone.
+
+Returns `ok` on success, or `{error, Error}` if the node was unreachable or
+the `'DOWN'` message is not received within 5 000 ms.  The error is a structured `#beamtalk_error{}` with
 kind `timeout` and the message `"Actor kill timed out: did not receive DOWN
 within 5000ms"`.  Building it here keeps the message in one place: callers
 pass the error directly to `beamtalk_future:reject/2` (async path) or wrap it
@@ -947,7 +993,16 @@ kill_and_wait(ActorPid) ->
     Ref = erlang:monitor(process, ActorPid),
     exit(ActorPid, kill),
     receive
-        {'DOWN', Ref, process, ActorPid, _Reason} -> ok
+        {'DOWN', Ref, process, ActorPid, Reason} ->
+            case beamtalk_call_failure:classify(exit, Reason) of
+                {unreachable, _} ->
+                    {error,
+                        node_down_error_record(
+                            beamtalk_call_failure:unreachable_node(Reason, node(ActorPid)), kill
+                        )};
+                _Gone ->
+                    ok
+            end
     after 5000 ->
         erlang:demonitor(Ref, [flush]),
         {error,

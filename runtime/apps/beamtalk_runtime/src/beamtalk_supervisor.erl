@@ -1730,13 +1730,18 @@ Is the supervisor running? Backs `isAlive` on Supervisor and DynamicSupervisor
 instances (sealed, BT-3984), which `beamtalk_message_dispatch:send/3` also
 answers directly.
 
-A local supervisor is checked with `erlang:is_process_alive/1`; a remote one
-answers `true` optimistically, as for actors (`beamtalk_pid:is_alive/1`): the
-next call to it reports `stale_handle` or `node_down`.
+A local supervisor is checked with `erlang:is_process_alive/1`; a remote
+one's node is asked, as for actors (`beamtalk_pid:ask_alive/3`, BT-5192), and
+raises `node_down` or `timeout` when that node cannot tell.
 """.
 -spec isAlive(term()) -> boolean().
+isAlive({beamtalk_supervisor, undefined, _Module, _Pid}) ->
+    false;
 isAlive({beamtalk_supervisor, ClassName, _Module, Pid}) when is_pid(Pid) ->
-    ClassName =/= undefined andalso beamtalk_pid:is_alive(Pid);
+    case beamtalk_pid:ask_alive(Pid, ClassName, isAlive) of
+        {ok, Alive} -> Alive;
+        {error, Error} -> beamtalk_error:raise(Error)
+    end;
 isAlive(_) ->
     false.
 

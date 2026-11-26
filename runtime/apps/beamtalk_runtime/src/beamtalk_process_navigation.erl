@@ -346,6 +346,9 @@ remote_default_snapshot(Name, Limit) ->
     of
         {ok, Snapshot} when is_list(Snapshot) ->
             {ok, [class_ref_in(N) || N <- Snapshot]};
+        {ok, Other} ->
+            %% BT-5192: a target that answers outside its contract.
+            {error, on_error(Name, {unexpected_result, Other})};
         {error, {node_down, _}} ->
             {error, on_node_down_error(Name)};
         {error, timeout} ->

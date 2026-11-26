@@ -419,6 +419,11 @@ unregister(#beamtalk_object{pid = {registered, Name0, Node0}} = Self) when
     of
         {ok, ok} ->
             ok;
+        {ok, Other} ->
+            %% BT-5192: a target that answers outside its contract.
+            beamtalk_error:raise(
+                remote_unregister_error(Self#beamtalk_object.class, {unexpected_result, Other})
+            );
         {error, {node_down, _}} ->
             beamtalk_error:raise(
                 (beamtalk_actor_send:node_down_error_record(Node0, unregister))#beamtalk_error{

@@ -70,7 +70,9 @@ remote-call sites supply only their own error builder.
 - `{error, timeout}` — `{erpc, timeout}`.
 - `{error, {other, Reason}}` — every other `erpc` failure: `{erpc, R}` becomes
   `{other, {erpc, R}}`; a remote error or exit (`{exception, R, _}` /
-  `exit:{exception, R}`) becomes `{other, R}`.
+  `exit:{exception, R}`) becomes `{other, R}`, and an exit signal that killed
+  the remote process running the call (`exit:{signal, R}`) becomes
+  `{other, {signal, R}}`.
 
 A remote `throw` is not caught: it propagates, as it did from the inlined
 `try`/`catch` blocks this replaces. The caller handles `{ok, Value}` *outside*
@@ -92,7 +94,11 @@ erpc(Node, M, F, A, Timeout) ->
         error:{exception, Reason, _Stack} ->
             {error, {other, Reason}};
         exit:{exception, Reason} ->
-            {error, {other, Reason}}
+            {error, {other, Reason}};
+        exit:{signal, Reason} ->
+            %% BT-5192: the remote process running the call was killed by an
+            %% exit signal before it answered.
+            {error, {other, {signal, Reason}}}
     end.
 
 -type gone_opts() :: #{

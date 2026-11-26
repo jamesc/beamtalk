@@ -217,6 +217,12 @@ remote_spawn_erpc_call(Node, ClassName, NameOrUndefined, Selector, TargetFun, Ex
             {error, Err#beamtalk_error{class = ClassName, selector = Selector}};
         {ok, {error, Reason}} ->
             {error, beamtalk_actor_ffi:generic_spawn_error(ClassName, Selector, Reason)};
+        {ok, Other} ->
+            %% BT-5192: a target that answers outside its contract.
+            {error,
+                beamtalk_actor_ffi:generic_spawn_error(
+                    ClassName, Selector, {unexpected_result, Other}
+                )};
         {error, {node_down, _}} ->
             {error, beamtalk_actor_send:node_down_error_record(Node, Selector)};
         {error, timeout} ->
@@ -256,6 +262,12 @@ remote_named(Node, ReceiverClass, Name) ->
                     {ok, qualify_registered_ref(Obj, Node)};
                 {ok, {error, #beamtalk_error{}} = Err} ->
                     Err;
+                {ok, Other} ->
+                    %% BT-5192: a target that answers outside its contract.
+                    {error,
+                        remote_failure_error(
+                            {other, {unexpected_result, Other}}, Node, ReceiverClass, Selector
+                        )};
                 {error, Failure} ->
                     {error, remote_failure_error(Failure, Node, ReceiverClass, Selector)}
             end
@@ -294,6 +306,12 @@ remote_all_registered(Node) ->
             of
                 {ok, List} when is_list(List) ->
                     {ok, [qualify_registered_ref(Obj, Node) || Obj <- List]};
+                {ok, Other} ->
+                    %% BT-5192: a target that answers outside its contract.
+                    {error,
+                        remote_failure_error(
+                            {other, {unexpected_result, Other}}, Node, 'Actor', Selector
+                        )};
                 {error, Failure} ->
                     {error, remote_failure_error(Failure, Node, 'Actor', Selector)}
             end

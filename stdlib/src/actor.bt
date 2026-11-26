@@ -822,8 +822,9 @@ Object subclass: Actor
   /// Gracefully stop this actor (gen_server:stop).
   ///
   /// Equivalent to `stopWith: #normal`. Idempotent: stopping an
-  /// already-stopped actor succeeds silently. Raises an error if the actor
-  /// times out during shutdown. Sent to `self` from inside one of the
+  /// already-stopped actor succeeds silently. Raises `timeout` if the actor
+  /// has not finished stopping within 5 seconds, and `node_down` if it is on
+  /// another node that cannot be reached (the actor may still be running). Sent to `self` from inside one of the
   /// actor's own methods, the stop takes effect after the current message
   /// has been handled.
   ///
@@ -861,8 +862,8 @@ Object subclass: Actor
   /// Stop this actor with a chosen exit reason, waiting up to `timeout`
   /// milliseconds (or `#infinity`) for it to terminate (`gen_server:stop/3`).
   ///
-  /// Same semantics as `stopWith:`; raises an error if the actor has not
-  /// terminated within `timeout`. Sent to `self`, the timeout is ignored —
+  /// Same semantics as `stopWith:`; raises `timeout` if the actor has not
+  /// terminated within `timeout` (it may still stop in the background). Sent to `self`, the timeout is ignored —
   /// the stop is deferred until the current message has been handled.
   ///
   /// ## Examples
@@ -986,7 +987,10 @@ Object subclass: Actor
 
   /// Forcefully kill this actor (exit(Pid, kill)).
   ///
-  /// Unlike `stop`, kill cannot be trapped by the actor process.
+  /// Unlike `stop`, kill cannot be trapped by the actor process. Answers
+  /// once the actor is gone. For an actor on another node that cannot be
+  /// reached, the kill signal is lost and the actor may still be running, so
+  /// this raises `node_down` rather than answering `#ok`.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -999,6 +1003,11 @@ Object subclass: Actor
   /// WARNING: isAlive check-then-act is inherently racy. The actor could die
   /// between the isAlive check and a subsequent message send. Use monitors
   /// for robust lifecycle management.
+  ///
+  /// For an actor on another node, this asks that node, waiting up to 5
+  /// seconds. If the node cannot be reached it raises `node_down`, and if it
+  /// does not answer in time it raises `timeout`: across a partition the
+  /// actor may be alive or dead, and neither answer would be true.
   ///
   /// ## Examples
   /// ```beamtalk
