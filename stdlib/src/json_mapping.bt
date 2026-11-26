@@ -120,8 +120,8 @@ Value subclass: JsonMapping
   omittingNil -> JsonMapping => self withOmitNil: true
 
   /// Check the entry list and answer the receiver. Raises a `user_error` for
-  /// an entry that is not a Dictionary with a Symbol `#field`, a String `#key`
-  /// and a Block or nil `#using`, or for a repeated wire key. `encode:` calls
+  /// an entry that is not a Dictionary with a Symbol `#field`, a String (or Symbol)
+  /// `#key` and a Block or nil `#using`, or for a repeated wire key. `encode:` calls
   /// it, so an entry list built with `withEntries:` cannot skip it.
   validate -> JsonMapping =>
     self.entries

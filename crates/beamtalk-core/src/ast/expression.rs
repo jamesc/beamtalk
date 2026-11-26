@@ -175,8 +175,9 @@ impl ExpectCategory {
 
     /// Returns the list of valid category name strings, for use in error messages.
     /// Omits the deprecated parse-only names (`stored_closure`,
-    /// `class_state_abroad`, `class_process_ffi`,
-    /// `class_var_reflection_shadowing`) so they are not advertised.
+    /// `class_state_abroad`, `class_process_ffi`, `deprecation`,
+    /// `shadowed_class`, `class_var_reflection_shadowing`) so they are not
+    /// advertised.
     #[must_use]
     pub const fn valid_names() -> &'static [&'static str] {
         &[

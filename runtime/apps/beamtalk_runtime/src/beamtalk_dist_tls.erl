@@ -206,7 +206,7 @@ format_error({peer_verification, Problems}) ->
 
 %% `none`, or the first problem: an entry that is not `{server | client,
 %% list()}`, a repeated side, a side whose options are an improper list
-%% (`{not_a_list, Side}`), or the tail of an improper outer list.
+%% (`{improper_options, Side}`), or the tail of an improper outer list.
 sides_problem(Opts) ->
     sides_problem(Opts, []).
 
@@ -217,7 +217,7 @@ sides_problem([{Side, List} | Rest], Seen) when
 ->
     case {lists:member(Side, Seen), is_proper_list(List)} of
         {true, _} -> {duplicate_side, Side};
-        {false, false} -> {not_a_list, Side};
+        {false, false} -> {improper_options, Side};
         {false, true} -> sides_problem(Rest, [Side | Seen])
     end;
 sides_problem([Other | _], _Seen) ->

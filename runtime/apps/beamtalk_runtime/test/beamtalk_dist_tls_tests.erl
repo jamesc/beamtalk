@@ -240,7 +240,7 @@ optfile_test_() ->
                     beamtalk_dist_tls:check_optfile(Improper, [])
                 ),
                 ?_assertEqual(
-                    {error, {optfile_malformed, ImproperInner, {not_a_list, server}}},
+                    {error, {optfile_malformed, ImproperInner, {improper_options, server}}},
                     beamtalk_dist_tls:check_optfile(ImproperInner, [])
                 ),
                 ?_assert(
