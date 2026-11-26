@@ -1037,7 +1037,12 @@ pub fn check_leaked_method_visibility(
     }
     // Sorted by name so the errors come out in a stable order: the registry
     // is a `HashMap` (BT-5184).
-    let mut protocols: Vec<_> = protocol_registry.protocols().collect();
+    let mut protocols: Vec<_> = protocol_registry
+        .protocols()
+        .filter(|(_, info)| {
+            !crate::semantic_analysis::stdlib_protocols::is_seeded_stdlib_info(info)
+        })
+        .collect();
     protocols.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
     for (class_name, internal_instance, internal_class) in &by_class {

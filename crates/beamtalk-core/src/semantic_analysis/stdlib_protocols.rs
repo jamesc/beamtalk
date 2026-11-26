@@ -112,10 +112,23 @@ pub fn is_stdlib_protocol_name(name: &str) -> bool {
 }
 
 /// Names of every baked stdlib protocol (bare), in a stable order.
-pub(crate) fn stdlib_protocol_names() -> Vec<EcoString> {
-    let mut names: Vec<EcoString> = stdlib_protocols().sources.keys().cloned().collect();
-    names.sort();
-    names
+pub(crate) fn stdlib_protocol_names() -> &'static [EcoString] {
+    static NAMES: OnceLock<Vec<EcoString>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        let mut names: Vec<EcoString> = stdlib_protocols().sources.keys().cloned().collect();
+        names.sort();
+        names
+    })
+}
+
+/// Whether a registry entry is a baked stdlib protocol seeded into a user
+/// compile, rather than one the package declared or carried in. Registry-wide
+/// scans that reason about *the package's own* protocols (`respondsTo:`
+/// narrowing, the visibility validator) skip these so seeding cannot change
+/// their results.
+#[must_use]
+pub(crate) fn is_seeded_stdlib_info(info: &crate::semantic_analysis::ProtocolInfo) -> bool {
+    info.package.as_deref() == Some(STDLIB_PACKAGE)
 }
 
 /// The source file of stdlib protocol `name`, if it is one.

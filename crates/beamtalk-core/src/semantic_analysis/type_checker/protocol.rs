@@ -269,6 +269,10 @@ impl TypeChecker {
             }
         }
 
+        // Top-level script / REPL statements (`b :: Boxed(X) := ...`, typed
+        // block parameters)
+        self.check_bounds_in_body_annotations(&module.expressions, hierarchy, protocol_registry);
+
         // Check standalone method definitions
         for standalone in &module.method_definitions {
             for param in &standalone.method.parameters {
@@ -295,20 +299,23 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         protocol_registry: &ProtocolRegistry,
     ) {
-        let mut annotations: Vec<TypeAnnotation> = Vec::new();
         for statement in body {
-            crate::ast_walker::walk_expression(&statement.expression, &mut |e| {
-                if let crate::ast::Expression::Assignment {
+            crate::ast_walker::walk_expression(&statement.expression, &mut |e| match e {
+                crate::ast::Expression::Assignment {
                     type_annotation: Some(ann),
                     ..
-                } = e
-                {
-                    annotations.push(ann.clone());
+                } => {
+                    self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
                 }
+                crate::ast::Expression::Block(block) => {
+                    for param in &block.parameters {
+                        if let Some(ann) = &param.type_annotation {
+                            self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+                        }
+                    }
+                }
+                _ => {}
             });
-        }
-        for ann in &annotations {
-            self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
         }
     }
 

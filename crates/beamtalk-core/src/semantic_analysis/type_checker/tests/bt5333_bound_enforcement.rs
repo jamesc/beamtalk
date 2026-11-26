@@ -133,3 +133,107 @@ Object subclass: H
 ";
     assert!(violations(source).is_empty(), "{:?}", violations(source));
 }
+
+#[test]
+fn enumerable_annotation_accepts_stdlib_collections() {
+    // Seeding `Enumerable` must not make the stdlib's own collections fail it.
+    let source = r"
+Object subclass: H
+  total: xs :: Enumerable(Integer) => xs
+  go =>
+    self total: #(1, 2).
+    self total: (Set new).
+    self total: (1 to: 3).
+    self total: #{#a => 1}
+";
+    let msgs: Vec<_> = analyse_diags(source)
+        .iter()
+        .map(|d| d.message.to_string())
+        .filter(|m| m.contains("conform"))
+        .collect();
+    assert!(msgs.is_empty(), "{msgs:?}");
+}
+
+#[test]
+fn class_that_uses_comparable_satisfies_a_comparable_bound() {
+    let source = r"
+Value subclass: Boxed(T :: Comparable)
+  field: item :: T = 0
+
+Value subclass: Ranked
+  uses: Comparable
+  field: n :: Integer = 0
+  < other :: Ranked -> Boolean => self.n < other n
+
+Object subclass: H
+  state: h :: Boxed(Ranked) = nil
+";
+    assert!(violations(source).is_empty(), "{:?}", violations(source));
+}
+
+#[test]
+fn seeded_stdlib_protocols_do_not_change_selector_narrowing() {
+    // A package protocol that is the only *package* protocol requiring `<`
+    // must stay the unique answer even though the seeded `Comparable` also
+    // requires it.
+    use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+    let module = parse_ok("Protocol define: Orderly\n  < other :: Self -> Boolean\n");
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut registry = ProtocolRegistry::new();
+    let _ = registry.seed_and_register_module(&module, Vec::new(), &hierarchy, None);
+    assert!(
+        registry.has_protocol("Comparable"),
+        "stdlib protocol is seeded"
+    );
+    assert_eq!(
+        registry
+            .find_unique_protocol_for_selector("<")
+            .map(ecow::EcoString::as_str),
+        Some("Orderly")
+    );
+}
+
+#[test]
+fn seeded_stdlib_protocols_do_not_trigger_visibility_errors() {
+    let source = r"
+Object subclass: Bag
+  internal elements -> List(Integer) => #()
+";
+    let msgs: Vec<_> = analyse_diags(source)
+        .iter()
+        .map(|d| d.message.to_string())
+        .filter(|m| m.contains("declared 'internal'"))
+        .collect();
+    assert!(msgs.is_empty(), "{msgs:?}");
+}
+
+#[test]
+fn enumerable_annotation_flags_lazy_stream() {
+    // `Stream` is lazy and has no `elements`: it is not `Enumerable`
+    // (language features, "Eager vs Lazy — The Boundary").
+    let source = r"
+Object subclass: H
+  total: xs :: Enumerable(Integer) => xs
+  go => self total: #(1, 2) stream
+";
+    let msgs: Vec<_> = analyse_diags(source)
+        .iter()
+        .map(|d| d.message.to_string())
+        .filter(|m| m.contains("conform"))
+        .collect();
+    assert_eq!(msgs, vec!["Stream does not conform to protocol Enumerable"]);
+}
+
+#[test]
+fn block_parameter_annotation_is_bound_checked() {
+    let source = format!(
+        "{LOCAL_PROTOCOL}\nObject subclass: Holder\n  go => #(1) do: [:b :: Boxed(Integer) | b]\n"
+    );
+    assert_eq!(violations(&source).len(), 1, "{:?}", violations(&source));
+}
+
+#[test]
+fn top_level_local_annotation_is_bound_checked() {
+    let source = format!("{LOCAL_PROTOCOL}\nb :: Boxed(Integer) := nil.\nb\n");
+    assert_eq!(violations(&source).len(), 1, "{:?}", violations(&source));
+}

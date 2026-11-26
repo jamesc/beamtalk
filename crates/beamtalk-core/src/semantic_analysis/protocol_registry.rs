@@ -678,11 +678,16 @@ impl ProtocolRegistry {
             .iter()
             .filter_map(|p| p.extending.as_ref().map(|e| e.name.clone()))
             .chain(self.protocols.values().filter_map(|p| p.extending.clone()))
-            .chain(stdlib_names.into_iter().filter(|n| {
-                hierarchy
-                    .get_class(n)
-                    .is_none_or(|ci| ci.superclass.as_deref() == Some("Protocol"))
-            }))
+            .chain(
+                stdlib_names
+                    .iter()
+                    .filter(|n| {
+                        hierarchy
+                            .get_class(n)
+                            .is_none_or(|ci| ci.superclass.as_deref() == Some("Protocol"))
+                    })
+                    .cloned(),
+            )
             .collect();
         while let Some(parent) = pending.pop() {
             if own.contains(&parent) || self.protocols.contains_key(&parent) {
@@ -832,6 +837,9 @@ impl ProtocolRegistry {
         );
         let mut found: Option<&EcoString> = None;
         for (name, info) in &self.protocols {
+            if stdlib_protocols::is_seeded_stdlib_info(info) {
+                continue;
+            }
             let selectors = info.all_required_selectors(self);
             if selectors.iter().any(|s| s.as_str() == selector) {
                 if found.is_some() {
