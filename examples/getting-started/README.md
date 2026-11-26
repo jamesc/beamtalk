@@ -44,6 +44,23 @@ All source files in `src/` load automatically when you start the REPL.
 > lc getValue
 ```
 
+### shipping.bt — Pattern matching on tagged data
+
+Tuple and guard patterns, constructor patterns (`Result ok: v`), destructuring
+assignment (`{total, rejected} := acc`) and `matchExhaustive:` over a closed
+symbol type (`ShippingSpeed`).
+
+```text
+> Shipping quote: {#parcel, #express, 2500}
+Result ok: 1500
+> Shipping describe: (Shipping quote: {#parcel, #standard, 0})
+"rejected: weight must be positive"
+```
+
+### report.bt — Bounded type parameter
+
+`Report(T :: Printable)` declares that its elements answer `asString`.
+
 ## Running Tests
 
 ```text

@@ -823,6 +823,17 @@ advisory (`Warning`/`Lint`), so no previously-clean build newly fails — even w
 a scrutinee is now *inferred* as a singleton union. No existing `.bt` source
 changes meaning.
 
+## Review note (2026-11-26, BT-5219)
+
+A pass over `stdlib/src` and `examples/` for difference (`A \ B`) and
+intersection (`A & B`) annotations found no genuine use. The stdlib's unions
+are plain closed sets (`type FileMode = #read | #write | ...`), and its
+parameters name one class or protocol, so nothing needs "this set minus that
+member" or "both of these protocols" spelled in a signature. The operators are
+exercised only by their own tests. Reconsider the feature at the next review:
+keep it if downstream code has started to use it, otherwise weigh its
+maintenance cost against that. Nothing is removed here.
+
 ## References
 - Related issues: Epic BT-2738 (implementation — see Implementation Tracking
   above for BT-2739…BT-2746); builds on BT-2617,

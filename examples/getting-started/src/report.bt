@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// A printable report of items, one per line.
+///
+/// `T :: Printable` declares that elements answer `asString`, which
+/// `render` relies on.
+///
+/// ```beamtalk
+/// > (Report withAll: #(700, 1500)) render
+/// "700\n1500"
+/// ```
+Value subclass: Report(T :: Printable)
+  field: items :: List(T) = #()
+
+  class withAll: items :: List(T) -> Report(T) => self new: #{#items => items}
+
+  render -> String => (self.items collect: [:item | item asString]) join: "\n"
