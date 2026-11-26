@@ -533,6 +533,16 @@ guard_writing_fold(Recv, Selector) ->
             end;
         none ->
             beamtalk_error:raise(beamtalk_error:new(does_not_understand, Class, Selector));
+        dnu ->
+            refuse_writing_fold(
+                Class,
+                Selector,
+                [
+                    <<" forwards '">>,
+                    atom_to_binary(Selector, utf8),
+                    <<"' through its own 'doesNotUnderstand:args:', which the in-place fold would skip">>
+                ]
+            );
         user ->
             refuse_writing_fold(
                 Class,
@@ -632,7 +642,7 @@ refuse_writing_fold(Class, Selector, Reason) ->
 %% object answers from its class side: whatever the class defines there is a
 %% method the fold would bypass, and the generic `Class` protocol does not
 %% define the collection selectors.
--spec selector_provider(term(), atom()) -> {atom(), stdlib | user | none}.
+-spec selector_provider(term(), atom()) -> {atom(), stdlib | user | dnu | none}.
 selector_provider(Recv, Selector) ->
     case beamtalk_class_registry:is_class_object(Recv) of
         true ->
@@ -643,7 +653,21 @@ selector_provider(Recv, Selector) ->
             end;
         false ->
             Class = beamtalk_primitive:class_of(Recv),
-            {Class, beamtalk_behaviour_intrinsics:selectorProviderFromName(Class, Selector)}
+            case beamtalk_behaviour_intrinsics:selectorProviderFromName(Class, Selector) of
+                none -> {Class, dnu_provider(Class)};
+                Provider -> {Class, Provider}
+            end
+    end.
+
+%% BT-5236: nothing answers the selector, but a class with its own
+%% `doesNotUnderstand:args:` (a forwarding proxy, user or stdlib) would run it on
+%% the pure send, which the guard cannot stand in for: report `dnu` so it
+%% refuses with `stateful_block_dispatch`.
+-spec dnu_provider(atom()) -> dnu | none.
+dnu_provider(Class) ->
+    case beamtalk_behaviour_intrinsics:overridesDoesNotUnderstandFromName(Class) of
+        true -> dnu;
+        false -> none
     end.
 
 %% Drain the elements posted by the iteration block, oldest first.

@@ -75,6 +75,7 @@ that the Behaviour/Class libraries can rely on.
     compiled_includes_selector/2,
     classCanUnderstandFromName/2,
     selectorProviderFromName/2,
+    overridesDoesNotUnderstandFromName/1,
     overridesCollectionSelectorFromName/1,
     speciesConstructionOverriddenFromName/2,
     speciesDependentThroughCollectionFromName/2,
@@ -391,6 +392,25 @@ selectorProviderFromName(ClassName, Selector) ->
             end
         end,
         none
+    ).
+
+-doc """
+Whether the class named ClassName answers an unknown message with a
+`doesNotUnderstand:args:` override (BT-5236): the first class on the chain that
+defines it is not `ProtoObject`, whose own definition is the default that raises.
+A stdlib forwarder (`TimeoutProxy`, `ErlangModule`) counts, as a user proxy does.
+""".
+-spec overridesDoesNotUnderstandFromName(atom()) -> boolean().
+overridesDoesNotUnderstandFromName(ClassName) ->
+    walk_hierarchy(
+        ClassName,
+        fun(CN, CPid, _Acc) ->
+            case defines_selector_locally(CN, CPid, 'doesNotUnderstand:args:') of
+                true -> {halt, CN =/= 'ProtoObject'};
+                false -> {cont, false}
+            end
+        end,
+        false
     ).
 
 %% Does this exact class (not an ancestor) define `Selector`? The published
