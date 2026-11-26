@@ -31,10 +31,12 @@
 # to. BT-5315 sets RELEASE_PUBLISH_MODE=promote, which skips them, and moves
 # those calls into promote.yml.
 #
-# workflow_dispatch is a DRY RUN of the tag flow for an existing tag: it builds
-# that tag's commit and attaches to its pre-release (creating it), but never
+# workflow_dispatch is a DRY RUN of the tag flow for a tag: it builds that tag's
+# commit and attaches to its pre-release (creating it), but never
 # publishes, never moves `latest` and never dispatches uat (the payload is still
-# built and shown). It refuses a release that is no longer a pre-release.
+# built and shown). It refuses a release that is no longer a pre-release. A test
+# tag (one not starting with `v`) that does not exist yet is created at the
+# dispatched commit, so a dry run needs no tag push.
 # `discard` deletes the pre-release, the tag and the rc image afterwards; it is
 # refused for a tag starting with `v`, so only a test tag (whose push never
 # started this workflow) can be discarded.
@@ -56,7 +58,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing tag to dry-run (e.g. a test tag such as 0.0.0-test.1). Its commit is built and attached to its pre-release; nothing is published.'
+        description: 'Tag to dry-run: an existing tag, or a new test tag not starting with v (e.g. 0.0.0-test.1), created at this commit. Built and attached to its pre-release; nothing is published.'
         required: true
         type: string
       discard:
@@ -107,7 +109,9 @@ jobs:
           INPUT_TAG: ${{ inputs.tag }}
         run: scripts/ci/determine-version.sh "$EVENT_NAME" "$REF_TAG" "$INPUT_TAG"
 
-      # A dispatch names an existing tag; on a push the tag is the pushed commit.
+      # On a push the tag is the pushed commit. A dispatch names an existing tag,
+      # or a test tag (not starting with v) that does not exist yet: that one is
+      # created at the dispatched commit by the release create below.
       - name: Resolve the tagged commit
         id: sha
         env:
@@ -116,8 +120,12 @@ jobs:
         run: |
           set -euo pipefail
           if ! sha="$(git rev-parse --verify --quiet "refs/tags/${TAG}^{commit}")"; then
-            echo "::error::tag ${TAG} does not exist; push it first"
-            exit 1
+            if [ "${EVENT_NAME}" = push ] || [[ "${TAG}" == v* ]]; then
+              echo "::error::tag ${TAG} does not exist; push it first"
+              exit 1
+            fi
+            sha="${GITHUB_SHA}"
+            echo "::notice::test tag ${TAG} does not exist; it will be created at ${sha}"
           fi
           if [ "${EVENT_NAME}" = push ] && [ "${sha}" != "${GITHUB_SHA}" ]; then
             echo "::error::tag ${TAG} is ${sha}, but this push is ${GITHUB_SHA}"
@@ -156,7 +164,8 @@ jobs:
               echo "::warning::release ${TAG} already exists and is not a pre-release (isPrerelease isDraft = ${state}); attaching to it as it is. Users can already install it."
             fi
           else
-            gh release create "${TAG}" --verify-tag --prerelease --latest=false \
+            # --target only matters for a new test tag; an existing tag keeps its commit.
+            gh release create "${TAG}" --target "${SHA}" --prerelease --latest=false \
               --title "${TAG}" \
               --notes "Release candidate built from ${SHA}. It stays a pre-release until the beamtalk-uat gate passes and it is promoted (ADR 0154 § 10). See CHANGELOG.md for what changed."
             echo "Created pre-release ${TAG}."
