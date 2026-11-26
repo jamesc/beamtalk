@@ -2249,14 +2249,6 @@ defmodule BtAttach.Workspace do
     end
   end
 
-  # The status words `beamtalk_git:classify_xy/1` produces, mapped by name so
-  # remote text never makes an atom. A word this node does not know stays text.
-  @git_states Map.new(
-                ~w(unmodified modified added deleted renamed copied type_changed untracked
-                   ignored unmerged updated_unmerged),
-                &{&1, String.to_atom(&1)}
-              )
-
   defp git_file_from_wire(file) when is_map(file) do
     %{
       path: Map.get(file, "path"),
@@ -2265,7 +2257,15 @@ defmodule BtAttach.Workspace do
     }
   end
 
-  defp git_state(word), do: Map.get(@git_states, word, word)
+  # A status word is an atom the cockpit already names (`git_state_label/1`);
+  # one this node has never seen stays text, so remote text never makes an atom.
+  defp git_state(word) when is_binary(word) do
+    String.to_existing_atom(word)
+  rescue
+    ArgumentError -> word
+  end
+
+  defp git_state(word), do: word
 
   # A refusal or failure from a git operation (`dispatch_browse/2` has already
   # turned a badrpc into `{:error, {:unreachable, _}}`), or a reply of the wrong
@@ -2321,10 +2321,12 @@ defmodule BtAttach.Workspace do
   end
 
   @doc "Stage a single path (`git add`). Returns `{:ok, nil}` or `{:error, reason}`."
-  def git_stage(path) when is_binary(path), do: git_mutate("git-stage", %{"path" => path})
+  def git_stage(path) when is_binary(path),
+    do: git_mutation_result(dispatch_browse("git-stage", %{"path" => path}))
 
   @doc "Unstage a single path (`git restore --staged`). Returns `{:ok, nil}` or `{:error, reason}`."
-  def git_unstage(path) when is_binary(path), do: git_mutate("git-unstage", %{"path" => path})
+  def git_unstage(path) when is_binary(path),
+    do: git_mutation_result(dispatch_browse("git-unstage", %{"path" => path}))
 
   @doc """
   Commit the staged index with `message` (`git commit -m`). Invokes system `git`
@@ -2332,7 +2334,7 @@ defmodule BtAttach.Workspace do
   never through a shell. Returns `{:ok, nil}` or `{:error, reason}`.
   """
   def git_commit(message) when is_binary(message),
-    do: git_mutate("git-commit", %{"message" => message})
+    do: git_mutation_result(dispatch_browse("git-commit", %{"message" => message}))
 
   @doc """
   Discard a working-tree change for a single path (`git restore --`) — the
@@ -2340,15 +2342,11 @@ defmodule BtAttach.Workspace do
   `{:error, reason}`.
   """
   def git_revert_file(path) when is_binary(path),
-    do: git_mutate("git-revert-file", %{"path" => path})
+    do: git_mutation_result(dispatch_browse("git-revert-file", %{"path" => path}))
 
-  # Shared transport for the mutating git ops, all of which answer `{:ok, nil}`.
-  defp git_mutate(op, params) do
-    case dispatch_browse(op, params) do
-      {:value, _} -> {:ok, nil}
-      other -> git_result_error(other)
-    end
-  end
+  # The mutating git ops all answer `{:value, _}`; callers get `{:ok, nil}`.
+  defp git_mutation_result({:value, _}), do: {:ok, nil}
+  defp git_mutation_result(other), do: git_result_error(other)
 
   @doc false
   # Pure: reduce the raw change-entry value maps to the pending view and render
