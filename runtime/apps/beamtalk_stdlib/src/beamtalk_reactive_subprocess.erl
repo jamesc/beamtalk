@@ -380,10 +380,25 @@ handle_writeLine(Data, From, State) ->
             try iolist_to_binary(Data) of
                 Bin ->
                     Line = <<Bin/binary, $\n>>,
-                    %% BT-5248/BT-5259: reply is the port's answer; a dead port errors.
-                    beamtalk_subprocess_port:submit_write(
-                        'ReactiveSubprocess', Port, ChildId, Line, From, State
-                    )
+                    %% BT-5248/BT-5259: reply is the port's answer; a dead port errors
+                    %% and is torn down like an unexpected exit_status.
+                    case
+                        beamtalk_subprocess_port:submit_write(
+                            'ReactiveSubprocess', Port, ChildId, Line, From, State
+                        )
+                    of
+                        {port_dead, Err, S0} ->
+                            S1 = push_pending(stderr, push_pending(stdout, S0)),
+                            NewState = S1#{port_closed => true},
+                            cast_notify(
+                                NewState, 'subprocessExit:from:', [
+                                    maps:get(exit_code, NewState, nil)
+                                ]
+                            ),
+                            {reply, {error, Err}, NewState};
+                        Noreply ->
+                            Noreply
+                    end
             catch
                 error:badarg ->
                     Err = beamtalk_error:new(type_error, 'ReactiveSubprocess', 'writeLine:'),

@@ -444,13 +444,27 @@ handle_writeLine(Data, From, State) ->
             Err = beamtalk_error:new(port_closed, 'Subprocess', 'writeLine:'),
             {reply, {error, Err}, State};
         false ->
-            Bin = iolist_to_binary(Data),
-            Line = <<Bin/binary, $\n>>,
-            %% BT-5248: the reply is the port's answer (queued or dropped).
-            %% BT-5259: a dead port is an error reply, not a gen_server crash.
-            beamtalk_subprocess_port:submit_write(
-                'Subprocess', Port, ChildId, Line, From, State
-            )
+            try iolist_to_binary(Data) of
+                Bin -> submit_line(<<Bin/binary, $\n>>, From, State)
+            catch
+                error:badarg ->
+                    Err = beamtalk_error:new(type_error, 'Subprocess', 'writeLine:'),
+                    {reply, {error, Err}, State}
+            end
+    end.
+
+%% BT-5248: the reply is the port's answer (queued or dropped).
+%% BT-5259: a dead port is an error reply and the same teardown as an
+%% unexpected exit_status, not a gen_server crash.
+submit_line(Line, From, #{port := Port, child_id := ChildId} = State) ->
+    case beamtalk_subprocess_port:submit_write('Subprocess', Port, ChildId, Line, From, State) of
+        {port_dead, Err, S0} ->
+            S1 = flush_pending(stdout, S0),
+            S2 = flush_pending(stderr, S1),
+            S3 = maybe_reply_eof(stdout, S2#{port_closed => true}),
+            {reply, {error, Err}, maybe_reply_eof(stderr, S3)};
+        Noreply ->
+            Noreply
     end.
 
 -doc "Fail the `writeLine:` callers still awaiting the port's answer.".
