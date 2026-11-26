@@ -91,6 +91,89 @@ impl TypeChecker {
         }
     }
 
+    /// Apply `x :: T` annotations in a destructuring pattern (BT-5284).
+    ///
+    /// The annotation is the declared type of the local and wins over any
+    /// inferred position type, exactly as in `x :: T := expr`. It is trusted,
+    /// not tested at runtime. For a tuple position whose type is known, an
+    /// incompatible annotation draws the same assignment-mismatch warning as
+    /// `x :: T := expr`.
+    pub(in crate::semantic_analysis::type_checker) fn bind_annotated_destructure_vars(
+        &mut self,
+        pattern: &Pattern,
+        value_ty: &InferredType,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+    ) {
+        let positions = match pattern {
+            Pattern::Tuple { elements, .. } => {
+                Self::tuple_positions(&Self::non_nil_type(value_ty), elements.len())
+            }
+            _ => None,
+        };
+        let mut annotated: Vec<(
+            &crate::ast::Identifier,
+            &crate::ast::Identifier,
+            Option<InferredType>,
+        )> = Vec::new();
+        Self::collect_type_patterns(pattern, &mut |binding, class, idx| {
+            let position = match (idx, &positions) {
+                (Some(i), Some(p)) => p.get(i).cloned(),
+                _ => None,
+            };
+            annotated.push((binding, class, position));
+        });
+        for (binding, class, position) in annotated {
+            let declared = InferredType::known(class.name.clone());
+            if let Some(position) = position
+                && let Some(mismatch) = Self::detect_assignment_type_mismatch(
+                    &position,
+                    &declared,
+                    hierarchy,
+                    self.protocol_registry.as_deref(),
+                )
+            {
+                self.emit_assignment_type_mismatch(&mismatch, binding.span.merge(class.span));
+            }
+            env.set_local(binding.name.clone(), declared);
+        }
+    }
+
+    /// Visit every `Pattern::Type` in `pattern`. `idx` is the element index
+    /// when the type pattern is a direct element of the top-level tuple.
+    fn collect_type_patterns<'p>(
+        pattern: &'p Pattern,
+        visit: &mut dyn FnMut(
+            &'p crate::ast::Identifier,
+            &'p crate::ast::Identifier,
+            Option<usize>,
+        ),
+    ) {
+        match pattern {
+            Pattern::Tuple { elements, .. } => {
+                for (i, e) in elements.iter().enumerate() {
+                    if let Pattern::Type { binding, class, .. } = e {
+                        visit(binding, class, Some(i));
+                    } else {
+                        Self::collect_type_patterns(e, &mut |b, c, _| visit(b, c, None));
+                    }
+                }
+            }
+            Pattern::Array { elements, .. } => {
+                for e in elements {
+                    Self::collect_type_patterns(e, &mut |b, c, _| visit(b, c, None));
+                }
+            }
+            Pattern::Map { pairs, .. } => {
+                for p in pairs {
+                    Self::collect_type_patterns(&p.value, &mut |b, c, _| visit(b, c, None));
+                }
+            }
+            Pattern::Type { binding, class, .. } => visit(binding, class, None),
+            _ => {}
+        }
+    }
+
     /// Whether a destructured tuple position must bind as `Dynamic`: it is
     /// `Dynamic`, bare `Object`, or an unresolved type variable — or, for a
     /// union column, any member is (BT-4628).

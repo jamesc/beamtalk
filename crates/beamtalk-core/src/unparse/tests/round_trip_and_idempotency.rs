@@ -591,3 +591,20 @@ fn binary_pattern_new_spellings_round_trip() {
         assert_idempotent(source);
     }
 }
+
+// --- Round-trip: annotated destructuring elements (BT-5284) ---
+
+#[test]
+fn round_trip_typed_tuple_destructure() {
+    assert_annotation_round_trip("{_, sid :: Integer, es :: Boolean} := frame\n");
+}
+
+#[test]
+fn round_trip_typed_array_destructure() {
+    assert_annotation_round_trip("#[a :: Integer, b, c :: String] := xs\n");
+}
+
+#[test]
+fn round_trip_typed_map_destructure() {
+    assert_annotation_round_trip("#{#id => i :: Integer, #name => n} := m\n");
+}

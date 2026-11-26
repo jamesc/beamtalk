@@ -512,7 +512,25 @@ impl Parser {
                 let TokenKind::Identifier(name) = token.into_kind() else {
                     unreachable!()
                 };
-                Pattern::Variable(Identifier::new(name, span))
+                let binding = Identifier::new(name, span);
+                // `#{#k => v :: Integer}` (BT-5284): same `x :: T` form as
+                // a tuple/array element.
+                if matches!(self.current_kind(), TokenKind::DoubleColon)
+                    && matches!(self.peek_kind(), Some(TokenKind::Identifier(_)))
+                {
+                    self.advance(); // consume '::'
+                    let class_token = self.advance();
+                    let class_span = class_token.span();
+                    let TokenKind::Identifier(class_name) = class_token.into_kind() else {
+                        unreachable!()
+                    };
+                    return Pattern::Type {
+                        binding,
+                        class: Identifier::new(class_name, class_span),
+                        span: span.merge(class_span),
+                    };
+                }
+                Pattern::Variable(binding)
             }
             TokenKind::String(_)
             | TokenKind::Integer(_)
