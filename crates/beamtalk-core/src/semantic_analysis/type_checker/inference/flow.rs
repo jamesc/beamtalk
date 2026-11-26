@@ -126,15 +126,7 @@ impl TypeChecker {
         for (binding, class, position) in annotated {
             // Resolve like `x :: T := expr` (aliases, protocols, hot-reload
             // alias dependencies), not as a bare class name.
-            let declared = super::super::type_resolver::ResolutionContext::new(
-                self.alias_registry.as_deref(),
-                &mut self.referenced_aliases,
-            )
-            .resolve_type_annotation(
-                &crate::ast::TypeAnnotation::simple(class.name.clone(), class.span),
-                &super::super::type_resolver::SubstitutionMap::new(),
-                self.protocol_registry.as_deref(),
-            );
+            let declared = self.resolve_pattern_class(class);
             if let Some(position) = position
                 && let Some(mismatch) = Self::detect_assignment_type_mismatch(
                     &position,
@@ -146,6 +138,52 @@ impl TypeChecker {
                 self.emit_assignment_type_mismatch(&mismatch, binding.span.merge(class.span));
             }
             env.set_local(binding.name.clone(), declared);
+        }
+    }
+
+    /// Resolve the class of an `x :: T` pattern like `x :: T := expr` does
+    /// (aliases, protocols, hot-reload alias dependencies), not as a bare
+    /// class name.
+    fn resolve_pattern_class(&mut self, class: &crate::ast::Identifier) -> InferredType {
+        super::super::type_resolver::ResolutionContext::new(
+            self.alias_registry.as_deref(),
+            &mut self.referenced_aliases,
+        )
+        .resolve_type_annotation(
+            &crate::ast::TypeAnnotation::simple(class.name.clone(), class.span),
+            &super::super::type_resolver::SubstitutionMap::new(),
+            self.protocol_registry.as_deref(),
+        )
+    }
+
+    /// BT-5332: narrow every `x :: T` nested inside a composite match-arm
+    /// pattern (tuple, list, map value, constructor keyword, array) to `T`,
+    /// like a top-level `x :: T` arm. The runtime class test guarantees the
+    /// type inside the arm. A top-level type pattern is narrowed by
+    /// `infer_match` itself, from the scrutinee's residual type; `_ :: T`
+    /// binds nothing.
+    fn narrow_nested_type_patterns(
+        &mut self,
+        pattern: &Pattern,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+    ) {
+        if matches!(pattern, Pattern::Type { .. }) {
+            return;
+        }
+        let mut nested = Vec::new();
+        Self::collect_type_patterns(pattern, &mut |binding, class, _| {
+            nested.push((binding.name.clone(), class));
+        });
+        for (name, class) in nested {
+            if name != "_" {
+                let declared = self.resolve_pattern_class(class);
+                // `Object` is never a useful typed-send target; keep the
+                // unchecked `Dynamic` binding, as destructuring does.
+                if !Self::is_dynamic_position(&declared, hierarchy) {
+                    env.set_local(name, declared);
+                }
+            }
         }
     }
 
@@ -177,6 +215,11 @@ impl TypeChecker {
             Pattern::Map { pairs, .. } => {
                 for p in pairs {
                     Self::collect_type_patterns(&p.value, &mut |b, c, _| visit(b, c, None));
+                }
+            }
+            Pattern::Constructor { keywords, .. } => {
+                for (_, e) in keywords {
+                    Self::collect_type_patterns(e, &mut |b, c, _| visit(b, c, None));
                 }
             }
             Pattern::Type { binding, class, .. } => visit(binding, class, None),
@@ -698,12 +741,17 @@ impl TypeChecker {
                     } else {
                         // Deliberately overwrites whatever
                         // `bind_pattern_vars` (above) just set for
-                        // this key: today that's always `Dynamic` for
-                        // a pattern-bound variable, so the residual
+                        // this key: today that's `Dynamic` for
+                        // a pattern-bound variable (a nested `x :: T` is
+                        // narrowed again afterwards), so the residual
                         // here is strictly more precise.
                         arm_env.set(key.clone(), residual_scrutinee_ty.clone());
                     }
                 }
+                // BT-5332: nested `x :: T` bindings narrow to `T`, after the scrutinee-key
+                // rewrite above so a nested binding that shadows the
+                // scrutinee variable keeps its narrowed type.
+                self.narrow_nested_type_patterns(&arm.pattern, hierarchy, &mut arm_env);
                 // Guard sees `binding`/scrutinee already narrowed
                 // above (ADR 0107: "scope includes the arm's `when:`
                 // guard, not just its body").

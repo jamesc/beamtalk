@@ -88,6 +88,7 @@ mod bt5284_typed_destructure;
 mod bt5290_result_error_narrowing;
 mod bt5292_early_return_diagnostics;
 mod bt5298_loop_head_join;
+mod bt5332_nested_type_pattern_narrowing;
 mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;
