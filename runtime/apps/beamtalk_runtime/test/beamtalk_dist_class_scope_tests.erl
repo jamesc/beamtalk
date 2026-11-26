@@ -14,7 +14,9 @@ local members only:
 
 1. `all_classes/0`, `live_class_entries/0` and `user_classes/0` on this node
    list none of the peer's class processes (before the fix they listed them and
-   resolved each with a blocking `gen_server:call`).
+   resolved each with a blocking `gen_server:call`), and `SystemNavigation`'s
+   liveness probe (`beamtalk_interface:liveClassName/1`) does not call into a
+   peer's class process.
 2. A class removal published on this node does not reach a shell that joined
    `beamtalk_repl_shells` on the peer (before the fix it was broadcast to it).
 
@@ -24,6 +26,7 @@ pass cannot come from `pg` not having caught up yet.
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
+-include("beamtalk.hrl").
 
 -export([remote_shell_loop/1]).
 
@@ -73,14 +76,16 @@ class_enumeration_excludes_peer_classes(PeerNode) ->
                 node(Pid) =/= node()
             ]
         ),
-        ?assertEqual(
-            [],
-            [
-                E
-             || {beamtalk_object, _, _, Pid} = E <- beamtalk_class_registry:user_classes(),
-                node(Pid) =/= node()
-            ]
-        ),
+        %% `user_classes/0` filters `all_classes/0` (a peer class with no source
+        %% file would be dropped by it either way, so it is covered through
+        %% `all_classes/0` above, not asserted separately).
+        %% SystemNavigation's per-class liveness probe never calls into a
+        %% peer's class process: before BT-5192 it answered the peer class's
+        %% name by `gen_server:call`.
+        RemoteClassObj = #beamtalk_object{
+            class = 'BT5192PeerOnlyClass class', class_mod = undefined, pid = RemotePid
+        },
+        ?assertEqual(nil, beamtalk_interface:liveClassName(RemoteClassObj)),
         %% And every member listed is this node's own.
         ?assertEqual(
             [], [P || P <- beamtalk_class_registry:all_classes(), node(P) =/= node()]
