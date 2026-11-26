@@ -64,7 +64,8 @@ pub(crate) fn compare(existing: &str, rendered: &str) -> Status {
     let (Some((s, e)), Some((rs, re))) = (region(existing), region(rendered)) else {
         return Status::NoMarkers;
     };
-    if existing[s..e] == rendered[rs..re] {
+    // A CRLF checkout (e.g. Windows `autocrlf`) must not read as stale.
+    if existing[s..e].replace("\r\n", "\n") == rendered[rs..re] {
         Status::Current
     } else {
         Status::Stale(format!(
@@ -108,7 +109,8 @@ pub fn run(action: &AgentsCommand) -> Result<()> {
 
 /// Returns the number of stale files (refreshed ones count when `refresh`).
 fn process(root: &Utf8Path, name: &str, refresh: bool) -> Result<usize> {
-    let mut stale = 0;
+    // Validate every file before writing any, so a refresh is all or nothing.
+    let mut pending = Vec::new();
     for target in &TARGETS {
         let path = root.join(target.rel);
         if !path.exists() {
@@ -126,20 +128,20 @@ fn process(root: &Utf8Path, name: &str, refresh: bool) -> Result<usize> {
                  copy the marked template, then add your notes back outside the markers.",
                 target.rel
             ),
-            Status::Stale(updated) => {
-                stale += 1;
-                if refresh {
-                    fs::write(&path, updated)
-                        .into_diagnostic()
-                        .wrap_err_with(|| format!("Failed to write {path}"))?;
-                    println!("{}: refreshed", target.rel);
-                } else {
-                    println!("{}: stale", target.rel);
-                }
-            }
+            Status::Stale(updated) => pending.push((target.rel, path, updated)),
         }
     }
-    Ok(stale)
+    for (rel, path, updated) in &pending {
+        if refresh {
+            fs::write(path, updated)
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to write {path}"))?;
+            println!("{rel}: refreshed");
+        } else {
+            println!("{rel}: stale");
+        }
+    }
+    Ok(pending.len())
 }
 
 #[cfg(test)]
@@ -167,6 +169,12 @@ mod tests {
         assert!(new.ends_with("\n\n## Local rules\nkeep me\n"));
         assert!(!new.contains("old text"));
         assert_eq!(compare(&new, &rendered), Status::Current);
+    }
+
+    #[test]
+    fn crlf_checkout_is_current() {
+        let r = render_agents_md("demo");
+        assert_eq!(compare(&r.replace('\n', "\r\n"), &r), Status::Current);
     }
 
     #[test]

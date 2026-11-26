@@ -275,6 +275,37 @@ Object subclass: ModeLabel
     ]
 ```
 
+There is a closed set whenever you can name the cases, even for classes: a
+`type` alias over leaf classes, matched with `x :: Class ->` arms. Adding a
+member to the alias makes every match that does not handle it a compile error:
+
+```beamtalk
+Value subclass: TextPiece
+  field: text :: String = ""
+```
+
+```beamtalk
+Value subclass: VarPiece
+  field: name :: String = ""
+```
+
+```beamtalk
+Value subclass: TagPiece
+  field: tag :: String = ""
+```
+
+```beamtalk
+type Piece = TextPiece | VarPiece | TagPiece
+
+Object subclass: Renderer
+  class render: node :: Piece -> String =>
+    node matchExhaustive: [
+      t :: TextPiece -> t text;
+      v :: VarPiece -> "{" ++ v name ++ "}";
+      g :: TagPiece -> "<" ++ g tag ++ ">"
+    ]
+```
+
 The scrutinee must have a known closed type: a `Dynamic` value (a bare tuple
 element, an untyped parameter) is an error, so annotate it first or use `match:`
 with a `_` arm.
