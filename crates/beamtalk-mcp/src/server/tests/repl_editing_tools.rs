@@ -50,6 +50,76 @@ async fn save_method_error() {
     assert_eq!(result.is_error, Some(true));
 }
 
+/// A fake REPL that answers only the exact request `expected` (compared on
+/// every field but the per-request `id`): any other request, such as an `eval`
+/// carrying a spliced expression, gets an error reply.
+fn respond_only_to(expected: serde_json::Value, reply: serde_json::Value) -> FakeReplResponder {
+    Box::new(move |req| {
+        let mut got = req.clone();
+        if let Some(map) = got.as_object_mut() {
+            map.remove("id");
+        }
+        if got == expected {
+            reply.clone()
+        } else {
+            serde_json::json!({
+                "status": ["done", "error"],
+                "error": format!("unexpected request: {got}")
+            })
+        }
+    })
+}
+
+#[tokio::test]
+async fn save_method_dispatches_the_save_method_op_with_structured_params() {
+    // The body carries a quote, a brace and a backslash: it must reach the
+    // workspace byte for byte, as a value, with no escaping and no `eval`.
+    let body = "\"he said {x}\" \\ ^1";
+    let (_fake, mcp) = fake_mcp(respond_only_to(
+        serde_json::json!({
+            "op": "save-method",
+            "class": "Counter",
+            "selector": "at:put:",
+            "source": body
+        }),
+        serde_json::json!({"value": {"class": "Counter", "selector": "at:put:"}}),
+    ))
+    .await;
+    let result = mcp
+        .save_method(Parameters(SaveMethodParams {
+            class: "Counter".to_string(),
+            selector: "#at:put:".to_string(),
+            body: body.to_string(),
+        }))
+        .await
+        .unwrap();
+    assert_ne!(result.is_error, Some(true), "{}", call_text(&result));
+    assert_eq!(call_text(&result), "Counter");
+}
+
+#[tokio::test]
+async fn save_class_dispatches_the_save_class_op_with_structured_params() {
+    let source = "Object subclass: Greeter\n  greet => \"hi {name}\"";
+    let (_fake, mcp) = fake_mcp(respond_only_to(
+        serde_json::json!({
+            "op": "save-class",
+            "source": source,
+            "path": "src/greeter.bt"
+        }),
+        serde_json::json!({"value": {"path": "src/greeter.bt"}}),
+    ))
+    .await;
+    let result = mcp
+        .save_class(Parameters(SaveClassParams {
+            source: source.to_string(),
+            path: "src/greeter.bt".to_string(),
+        }))
+        .await
+        .unwrap();
+    assert_ne!(result.is_error, Some(true), "{}", call_text(&result));
+    assert_eq!(call_text(&result), "New class queued for src/greeter.bt");
+}
+
 #[tokio::test]
 async fn try_method_success_and_error() {
     let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;

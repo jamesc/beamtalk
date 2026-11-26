@@ -15,7 +15,7 @@
 
 use beamtalk_core::tool_expr::{
     precheck_method_expr, remove_class_expr, remove_method_expr, remove_method_if_absent_expr,
-    rename_class_expr, rename_method_expr, save_class_expr,
+    rename_class_expr, rename_method_expr,
 };
 use beamtalk_core::unparse::escape_string_literal;
 use rmcp::{handler::server::wrapper::Parameters, model::CallToolResult, tool, tool_router};
@@ -27,17 +27,6 @@ use crate::server::params::{
 use crate::server::{
     BeamtalkMcp, InternalErr, ToolTimer, check_response, validate_class_name, validate_selector,
 };
-
-/// Build the Beamtalk expression for the `save_method` MCP tool — durable
-/// patch path (ADR 0082 Phase 3). Selector is the bare form (no leading `#`).
-pub(crate) fn save_method_expr(class: &str, selector: &str, body: &str) -> String {
-    format!(
-        "{} compile: #{} source: \"{}\"",
-        class,
-        selector,
-        escape_string_literal(body),
-    )
-}
 
 /// Build the Beamtalk expression for the `try_method` MCP tool — ephemeral
 /// patch path (ADR 0082 Phase 3). Selector is the bare form (no leading `#`).
@@ -114,26 +103,27 @@ impl BeamtalkMcp {
             "tool invoked"
         );
 
-        // `aClass compile: #selector source: "body"`. The body is passed as a
-        // String value through eval; the runtime primitive (classCompileSource)
-        // takes the body as a value, so we never re-parse it as Beamtalk source.
-        let expr = save_method_expr(&params.class, selector, &params.body);
+        // The `save-method` operation: class, selector and body travel as
+        // structured params (never spliced into a Beamtalk expression), and it
+        // is the same implementation the LiveView method editor dispatches.
         let response = self
             .client
-            .evaluate_with_options(&expr, false)
+            .save_method(&params.class, selector, &params.body)
             .await
             .internal_err()?;
 
         check_response!(response, "Failed to save method");
 
-        let text = {
-            let v = response.value_string();
-            if v.is_empty() {
-                format!("Method {}>>#{} saved", params.class, selector)
-            } else {
-                v
-            }
-        };
+        let text = response
+            .value
+            .as_ref()
+            .and_then(|v| v.get("class"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|class| !class.is_empty())
+            .map_or_else(
+                || format!("Method {}>>#{} saved", params.class, selector),
+                str::to_string,
+            );
 
         timer.ok_text(text)
     }
@@ -225,23 +215,25 @@ impl BeamtalkMcp {
             "tool invoked"
         );
 
-        let expr = save_class_expr(&params.source, &params.path);
+        // The `save-class` operation: source and path travel as structured
+        // params, the same implementation the LiveView New Class action uses.
         let response = self
             .client
-            .evaluate_with_options(&expr, false)
+            .save_class(&params.source, &params.path)
             .await
             .internal_err()?;
 
         check_response!(response, "Failed to save class");
 
-        let text = {
-            let v = response.value_string();
-            if v.is_empty() {
-                format!("New class queued for {}", params.path)
-            } else {
-                v
-            }
-        };
+        let text = format!(
+            "New class queued for {}",
+            response
+                .value
+                .as_ref()
+                .and_then(|v| v.get("path"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(&params.path)
+        );
 
         timer.ok_text(text)
     }

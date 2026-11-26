@@ -263,6 +263,35 @@ impl RequestBuilder {
         })
     }
 
+    // --- Code editing operations (BT-5203) ---
+
+    /// Build a `save-method` request: durably install `source` (the body to the
+    /// right of `=>`) as `selector` on `class`.
+    ///
+    /// The three values cross as structured params, never spliced into a
+    /// Beamtalk expression, so the body needs no escaping.
+    #[must_use]
+    pub fn save_method(class: &str, selector: &str, source: &str) -> serde_json::Value {
+        serde_json::json!({
+            "op": "save-method",
+            "id": next_msg_id(),
+            "class": class,
+            "selector": selector,
+            "source": source
+        })
+    }
+
+    /// Build a `save-class` request: create a class from `source` at `path`.
+    #[must_use]
+    pub fn save_class(source: &str, path: &str) -> serde_json::Value {
+        serde_json::json!({
+            "op": "save-class",
+            "id": next_msg_id(),
+            "source": source,
+            "path": path
+        })
+    }
+
     // --- Test operations ---
 
     /// Build a `test` request for a class.
@@ -738,6 +767,25 @@ mod tests {
     }
 
     #[test]
+    fn save_method_sends_values_not_source() {
+        let body = "\"he said {x}\" \\ ^1";
+        let req = RequestBuilder::save_method("Counter", "at:put:", body);
+        assert_eq!(req["op"], "save-method");
+        assert_eq!(req["class"], "Counter");
+        assert_eq!(req["selector"], "at:put:");
+        // The body is the value, byte for byte: nothing is escaped.
+        assert_eq!(req["source"], body);
+    }
+
+    #[test]
+    fn save_class_sends_source_and_path() {
+        let req = RequestBuilder::save_class("Object subclass: Greeter", "src/greeter.bt");
+        assert_eq!(req["op"], "save-class");
+        assert_eq!(req["source"], "Object subclass: Greeter");
+        assert_eq!(req["path"], "src/greeter.bt");
+    }
+
+    #[test]
     fn unload_request_has_correct_shape() {
         let req = RequestBuilder::unload("bt@counter");
         assert_eq!(req["op"], "unload");
@@ -1017,6 +1065,8 @@ mod tests {
             RequestBuilder::interrupt(),
             RequestBuilder::interrupt_with_session("s"),
             RequestBuilder::unload("m"),
+            RequestBuilder::save_method("C", "s", "1"),
+            RequestBuilder::save_class("Object subclass: C", "src/c.bt"),
             RequestBuilder::test_class("C"),
             RequestBuilder::test_file("f"),
             RequestBuilder::test_all(),

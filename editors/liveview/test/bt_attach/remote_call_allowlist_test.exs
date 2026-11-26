@@ -60,12 +60,6 @@ defmodule BtAttach.RemoteCallAllowlistTest do
     {:beamtalk_repl_ops, :session_alive, :operation_layer, :permanent},
     {:beamtalk_repl_ops, :session_count, :operation_layer, :permanent},
 
-    # Code editing.
-    {:beamtalk_repl_eval, :compile_method, :capability, "BT-5203"},
-    {:beamtalk_repl_eval, :reload_file, :capability, "BT-5203"},
-    {:beamtalk_repl_loader_newclass, :new_class, :capability, "BT-5203"},
-    {:beamtalk_workspace_interface_primitives, :revert_method, :capability, "BT-5203"},
-
     # Workspace state.
     {:beamtalk_workspace_flush, :flush, :capability, "BT-5204"},
     {:beamtalk_workspace_changelog_views, :change_entries, :capability, "BT-5204"},

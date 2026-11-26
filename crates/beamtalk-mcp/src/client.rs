@@ -582,6 +582,30 @@ impl ReplClient {
         self.send_once(&RequestBuilder::unload(module)).await
     }
 
+    /// Send a `save-method` operation: durably install a method (BT-5203).
+    ///
+    /// Uses [`send_once`] (no retry): the op appends a `ChangeLog` entry, so a
+    /// retry after a dropped connection could record the patch twice.
+    pub async fn save_method(
+        &self,
+        class: &str,
+        selector: &str,
+        source: &str,
+    ) -> Result<ReplResponse, String> {
+        self.send_once_with_timeout(
+            &RequestBuilder::save_method(class, selector, source),
+            eval_io_timeout(),
+        )
+        .await
+    }
+
+    /// Send a `save-class` operation: create a class from source at a path
+    /// (BT-5203). Uses [`send_once`] (no retry), like [`save_method`](Self::save_method).
+    pub async fn save_class(&self, source: &str, path: &str) -> Result<ReplResponse, String> {
+        self.send_once_with_timeout(&RequestBuilder::save_class(source, path), eval_io_timeout())
+            .await
+    }
+
     /// Send an interrupt operation to cancel a running evaluation.
     ///
     /// The main connection is held by the in-flight eval for its whole

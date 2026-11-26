@@ -826,134 +826,183 @@ defmodule BtAttach.WorkspaceRpcTest do
   end
 
   describe "write-surface: save_method/3, new_class/2, revert/3, reload_file/1, flush/0" do
-    test "save_method/3 returns the installed class name on success" do
-      mock_rpc(%{{:beamtalk_repl_eval, :compile_method} => {:ok, "Counter"}})
-      assert Workspace.save_method("Counter", "increment", "^self") == {:ok, "Counter"}
+    test "save_method/3 dispatches save-method with structured params and returns the class" do
+      mock_rpc(
+        decode_asserting(
+          fn request ->
+            assert request == %{
+                     "op" => "save-method",
+                     "class" => "Counter",
+                     "selector" => "at:put:",
+                     "source" => "\"quoted\" {braces} \\ ^self",
+                     "author" => "liveview",
+                     "author_kind" => "human"
+                   }
+          end,
+          {:value, %{"class" => "Counter", "selector" => "at:put:"}}
+        )
+      )
+
+      assert Workspace.save_method("Counter", "at:put:", "\"quoted\" {braces} \\ ^self") ==
+               {:ok, "Counter"}
     end
 
-    test "save_method/3 structures a raw error via render(:error, _)" do
-      mock_rpc(%{
-        {:beamtalk_repl_eval, :compile_method} => {:error, :parse_error},
-        {:beamtalk_repl_ops, :render} => {{:beamtalk_error, :parse_error}, "structured"}
-      })
-
-      assert Workspace.save_method("Counter", "increment", "bad(") ==
-               {:error, {:beamtalk_error, :parse_error}}
-    end
-
-    test "save_method/3 falls back to the raw reason when structuring itself is unreachable" do
-      mock_rpc(%{
-        {:beamtalk_repl_eval, :compile_method} => {:error, :parse_error},
-        {:beamtalk_repl_ops, :render} => {:badrpc, :mock_scripted}
-      })
-
-      assert Workspace.save_method("Counter", "increment", "bad(") == {:error, :parse_error}
+    test "save_method/3 returns the operation's structured error as is" do
+      err = {:beamtalk_error, :compile_failed}
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, err}))
+      assert Workspace.save_method("Counter", "increment", "bad(") == {:error, err}
     end
 
     test "save_method/3 surfaces a badrpc as unreachable" do
-      mock_rpc(%{{:beamtalk_repl_eval, :compile_method} => {:badrpc, :mock_scripted}})
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
 
       assert Workspace.save_method("Counter", "increment", "^self") ==
                {:error, {:unreachable, :mock_scripted}}
     end
 
     test "save_method/3 degrades an unrecognised reply to unexpected_reply" do
-      mock_rpc(%{{:beamtalk_repl_eval, :compile_method} => :odd})
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
 
       assert Workspace.save_method("Counter", "increment", "^self") ==
                {:error, {:unexpected_reply, :odd}}
     end
 
-    test "new_class/2 returns the target path on success" do
-      mock_rpc(%{{:beamtalk_repl_loader_newclass, :new_class} => {:ok, [:some_class_object]}})
+    test "new_class/2 dispatches save-class and returns the target path" do
+      mock_rpc(
+        decode_asserting(
+          fn request ->
+            assert request == %{
+                     "op" => "save-class",
+                     "source" => "Object subclass: Greeter",
+                     "path" => "src/greeter.bt"
+                   }
+          end,
+          {:value, %{"path" => "src/greeter.bt"}}
+        )
+      )
 
       assert Workspace.new_class("Object subclass: Greeter", "src/greeter.bt") ==
                {:ok, "src/greeter.bt"}
     end
 
-    test "new_class/2 structures a raw error" do
-      mock_rpc(%{
-        {:beamtalk_repl_loader_newclass, :new_class} => {:error, :name_clash},
-        {:beamtalk_repl_ops, :render} => {{:beamtalk_error, :name_clash}, "structured"}
-      })
-
-      assert Workspace.new_class("Object subclass: Greeter", "src/greeter.bt") ==
-               {:error, {:beamtalk_error, :name_clash}}
+    test "new_class/2 returns the operation's structured error as is" do
+      err = {:beamtalk_error, :name_clash}
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, err}))
+      assert Workspace.new_class("Object subclass: Greeter", "src/greeter.bt") == {:error, err}
     end
 
     test "new_class/2 surfaces a badrpc as unreachable" do
-      mock_rpc(%{{:beamtalk_repl_loader_newclass, :new_class} => {:badrpc, :mock_scripted}})
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
 
       assert Workspace.new_class("Object subclass: G", "src/g.bt") ==
                {:error, {:unreachable, :mock_scripted}}
     end
 
     test "new_class/2 degrades an unrecognised reply to unexpected_reply" do
-      mock_rpc(%{{:beamtalk_repl_loader_newclass, :new_class} => :odd})
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
 
       assert Workspace.new_class("Object subclass: G", "src/g.bt") ==
                {:error, {:unexpected_reply, :odd}}
     end
 
-    test "revert/3 returns the reverted class name on success" do
-      mock_rpc(%{
-        {:beamtalk_workspace_interface_primitives, :revert_method} => {:ok, [:class_obj]}
-      })
+    test "revert/3 dispatches revert-method, omitting an unknown side" do
+      mock_rpc(
+        decode_asserting(
+          fn request ->
+            assert request == %{
+                     "op" => "revert-method",
+                     "class" => "Counter",
+                     "selector" => "increment"
+                   }
+          end,
+          {:value, %{"class" => "Counter", "selector" => "increment"}}
+        )
+      )
 
       assert Workspace.revert("Counter", "increment") == {:ok, "Counter"}
     end
 
-    test "revert/3 structures a raw error and threads the side through" do
-      mock_rpc(%{
-        {:beamtalk_workspace_interface_primitives, :revert_method} => fn [
-                                                                           "Counter",
-                                                                           "increment",
-                                                                           "class"
-                                                                         ] ->
-          {:error, :not_revertable}
-        end,
-        {:beamtalk_repl_ops, :render} => {{:beamtalk_error, :not_revertable}, "structured"}
-      })
+    test "revert/3 threads the side through and returns the structured error" do
+      err = {:beamtalk_error, :not_revertable}
 
-      assert Workspace.revert("Counter", "increment", "class") ==
-               {:error, {:beamtalk_error, :not_revertable}}
+      mock_rpc(
+        decode_asserting(
+          fn request -> assert request["side"] == "class" end,
+          {:error, err}
+        )
+      )
+
+      assert Workspace.revert("Counter", "increment", "class") == {:error, err}
     end
 
     test "revert/3 surfaces a badrpc as unreachable" do
-      mock_rpc(%{
-        {:beamtalk_workspace_interface_primitives, :revert_method} => {:badrpc, :mock_scripted}
-      })
-
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
       assert Workspace.revert("Counter", "increment") == {:error, {:unreachable, :mock_scripted}}
     end
 
     test "revert/3 degrades an unrecognised reply to unexpected_reply" do
-      mock_rpc(%{{:beamtalk_workspace_interface_primitives, :revert_method} => :odd})
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
       assert Workspace.revert("Counter", "increment") == {:error, {:unexpected_reply, :odd}}
     end
 
-    test "reload_file/1 returns the reloaded class names on success" do
-      mock_rpc(%{{:beamtalk_repl_eval, :reload_file} => {:ok, [~c"Counter", ~c"Greeter"]}})
+    test "reload_file/1 dispatches reload-file and returns the reloaded class names" do
+      mock_rpc(
+        decode_asserting(
+          fn request ->
+            assert request == %{"op" => "reload-file", "path" => "src/counter.bt"}
+          end,
+          {:value, %{"classes" => ["Counter", "Greeter"]}}
+        )
+      )
+
       assert Workspace.reload_file("src/counter.bt") == {:ok, ["Counter", "Greeter"]}
     end
 
-    test "reload_file/1 structures a raw error" do
-      mock_rpc(%{
-        {:beamtalk_repl_eval, :reload_file} => {:error, :enoent},
-        {:beamtalk_repl_ops, :render} => {{:beamtalk_error, :enoent}, "structured"}
-      })
-
-      assert Workspace.reload_file("src/missing.bt") == {:error, {:beamtalk_error, :enoent}}
+    test "reload_file/1 returns the operation's structured error as is" do
+      err = {:beamtalk_error, :file_not_found}
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, err}))
+      assert Workspace.reload_file("src/missing.bt") == {:error, err}
     end
 
     test "reload_file/1 surfaces a badrpc as unreachable" do
-      mock_rpc(%{{:beamtalk_repl_eval, :reload_file} => {:badrpc, :mock_scripted}})
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
       assert Workspace.reload_file("src/counter.bt") == {:error, {:unreachable, :mock_scripted}}
     end
 
     test "reload_file/1 degrades an unrecognised reply to unexpected_reply" do
-      mock_rpc(%{{:beamtalk_repl_eval, :reload_file} => :odd})
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
       assert Workspace.reload_file("src/counter.bt") == {:error, {:unexpected_reply, :odd}}
+    end
+
+    test "load_source/2 dispatches load-source in the caller's session" do
+      pid = self()
+
+      mock_rpc(%{
+        {:beamtalk_repl_ops, :request} => fn [
+                                               "load-source",
+                                               %{"source" => "Object subclass: Foo"},
+                                               ^pid
+                                             ] ->
+          {:loaded, [%{"name" => "Foo"}], [%{message: "unused", hint: nil}, "plain"]}
+        end
+      })
+
+      assert Workspace.load_source(pid, "Object subclass: Foo") ==
+               {:ok, [%{"name" => "Foo"}],
+                [%{message: "unused", hint: nil}, %{message: "plain", hint: nil}]}
+    end
+
+    test "load_source/2 returns the structured error, unreachable and unexpected replies" do
+      pid = self()
+      err = {:beamtalk_error, :compile_error}
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, err}))
+      assert Workspace.load_source(pid, "bad") == {:error, err}
+
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
+      assert Workspace.load_source(pid, "x") == {:error, {:unreachable, :mock_scripted}}
+
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
+      assert Workspace.load_source(pid, "x") == {:error, {:unexpected_reply, :odd}}
     end
 
     test "flush/0 returns the FlushResult summary on success" do

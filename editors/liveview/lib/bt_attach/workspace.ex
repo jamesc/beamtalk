@@ -1802,16 +1802,13 @@ defmodule BtAttach.Workspace do
   Save (durably patch) a single method on a class in the attached workspace,
   through the write-surface (ADR 0082, Wave 3).
 
-  This is the method editor's "Save" action. Per ADR 0082 the operation is the
-  Beamtalk-level `aClass compile: #selector source: body` primitive — but rather
-  than building a `compile:source:` *eval string* (which would force escaping the
-  body's quotes, backslashes, and `{` interpolation markers back into Beamtalk
-  source — exactly the fragility ADR 0082 calls out), we call the runtime install
-  chokepoint `beamtalk_repl_eval:compile_method/6` directly over distribution,
-  passing the body as a **String value**. `>>`, `compile:source:`, and this entry
-  all converge at the same in-memory install + ChangeLog append, so the saved
-  method is compiled, flushed into the live BEAM module, and recorded in the
-  workspace's change history (the ChangeLog coherence criterion) in one step.
+  This is the method editor's "Save" action. It dispatches the `save-method`
+  operation, the one implementation of "save this method" that MCP's
+  `save_method` tool and wire clients share. The class, selector and body travel
+  as structured params, so nothing is escaped into, or re-parsed as, Beamtalk
+  source; the operation compiles the body, flushes it into the live BEAM module
+  and records it in the workspace's change history (the ChangeLog coherence
+  criterion) in one step.
 
   `selector` is the method selector (e.g. `"increment"` or `"at:put:"`), `source`
   the method definition body. Author metadata is stamped as `liveview` / `human`
@@ -1829,26 +1826,17 @@ defmodule BtAttach.Workspace do
   """
   def save_method(class, selector, source)
       when is_binary(class) and is_binary(selector) and is_binary(source) do
-    # compile_method/6: (ClassNameBin, Selector, SourceBin, Intent, Author, AuthorKind).
-    # Intent `durable` so the patch is logged as a keepable change (ADR 0082); the
-    # selector and body are passed as values — no source-string round-trip.
-    args = [class, selector, source, :durable, "liveview", :human]
+    params = %{
+      "class" => class,
+      "selector" => selector,
+      "source" => source,
+      "author" => "liveview",
+      "author_kind" => "human"
+    }
 
-    case rpc(:beamtalk_repl_eval, :compile_method, args, @rpc_long_timeout) do
-      {:ok, class_bin} ->
-        {:ok, to_string(class_bin)}
-
-      # A compile/install failure returns {error, Reason}; structure it so the
-      # LiveView renders an actionable #beamtalk_error{} rather than a flattened
-      # internal term.
-      {:error, reason} ->
-        {:error, structure_error(reason)}
-
-      {:badrpc, reason} ->
-        {:error, {:unreachable, reason}}
-
-      other ->
-        {:error, {:unexpected_reply, other}}
+    case dispatch_browse("save-method", params) do
+      {:value, %{"class" => class_bin}} -> {:ok, to_string(class_bin)}
+      other -> edit_error(other)
     end
   end
 
@@ -1859,12 +1847,9 @@ defmodule BtAttach.Workspace do
   `kind: "new-class"` ChangeLog entry; the `.bt` file itself is written later on
   `flush/0`.
 
-  Like `save_method/3`, this calls the runtime install chokepoint directly —
-  `beamtalk_repl_loader_newclass:new_class/2`, which returns the same clean term contract
-  (`{ok, ClassObjects} | {error, Reason}`) rather than the raising FFI surface
-  (`beamtalk_workspace_interface_primitives:newClass/2`). `source` is the class
-  definition (e.g. `"Object subclass: Greeter"`), `path` the in-project target
-  (e.g. `"src/Greeter.bt"`, as the LiveView derives from the class name).
+  Dispatches the `save-class` operation. `source` is the class definition (e.g.
+  `"Object subclass: Greeter"`), `path` the in-project target (e.g.
+  `"src/Greeter.bt"`, as the LiveView derives from the class name).
 
   Returns:
 
@@ -1875,18 +1860,9 @@ defmodule BtAttach.Workspace do
       workspace is gone
   """
   def new_class(source, path) when is_binary(source) and is_binary(path) do
-    case rpc(:beamtalk_repl_loader_newclass, :new_class, [source, path], @rpc_long_timeout) do
-      {:ok, _class_objects} ->
-        {:ok, path}
-
-      {:error, reason} ->
-        {:error, structure_error(reason)}
-
-      {:badrpc, reason} ->
-        {:error, {:unreachable, reason}}
-
-      other ->
-        {:error, {:unexpected_reply, other}}
+    case dispatch_browse("save-class", %{"source" => source, "path" => path}) do
+      {:value, %{"path" => path_bin}} -> {:ok, to_string(path_bin)}
+      other -> edit_error(other)
     end
   end
 
@@ -1906,33 +1882,25 @@ defmodule BtAttach.Workspace do
   `change_history/0` row being reverted, or `nil` when it is not known (a
   new-class row has no side).
 
-  Calls `beamtalk_workspace_interface_primitives:revert_method/3`, the
-  clean-returning wrapper over the FFI `changeLogRevert/1` (which would `error`-
-  raise across the dist boundary). `class` and `selector` are the binaries
-  carried by a `change_history/0` row.
+  Dispatches the `revert-method` operation. `class` and `selector` are the
+  binaries carried by a `change_history/0` row.
 
   Returns `{:ok, class}` on a successful revert, or `{:error, reason_term}` for
   a non-revertable entry (new-class creation, class-side patch, no recorded
   prior body, or no active entry) / an unreachable workspace.
   """
   def revert(class, selector, side \\ nil) when is_binary(class) and is_binary(selector) do
-    case rpc(
-           :beamtalk_workspace_interface_primitives,
-           :revert_method,
-           [class, selector, side],
-           @rpc_long_timeout
-         ) do
-      {:ok, _class_object} ->
-        {:ok, class}
+    # `side` is optional on the wire: a row with no recorded side (a new-class
+    # row) omits it, so the operation falls back to the highest-seq entry for
+    # `(class, selector)`. An absent param is omitted, never sent as `nil`, which
+    # `wire_params/1` would turn into the string "nil".
+    params =
+      %{"class" => class, "selector" => selector}
+      |> maybe_put_param("side", side)
 
-      {:error, reason} ->
-        {:error, structure_error(reason)}
-
-      {:badrpc, reason} ->
-        {:error, {:unreachable, reason}}
-
-      other ->
-        {:error, {:unexpected_reply, other}}
+    case dispatch_browse("revert-method", params) do
+      {:value, %{"class" => class_bin}} -> {:ok, to_string(class_bin)}
+      other -> edit_error(other)
     end
   end
 
@@ -1942,23 +1910,43 @@ defmodule BtAttach.Workspace do
   `git restore -- <path>`), so the live image matches the reverted working tree
   (image == disk, git-first / disk-as-source-of-truth, BT-2585).
 
-  Calls `beamtalk_repl_eval:reload_file/1`, the clean-returning reload entry: it
-  re-installs the file's classes via hot redefinition (which fires a `ClassLoaded`
-  announcement on the `classes` stream, so subscribed surfaces refresh their open
-  windows) and repopulates the workspace_meta class-source cache. `path` is the
-  project-relative `.bt` path git just restored.
+  Dispatches the `reload-file` operation: it re-installs the file's classes via
+  hot redefinition (which fires a `ClassLoaded` announcement on the `classes`
+  stream, so subscribed surfaces refresh their open windows) and repopulates the
+  workspace_meta class-source cache. `path` is the project-relative `.bt` path
+  git just restored.
 
   Returns `{:ok, [class_name]}` (the reloaded class-name binaries) or
   `{:error, reason_term}` (a structured `#beamtalk_error{}` for a compile failure
   / missing file, or `{:unreachable, _}` if the workspace is gone).
   """
   def reload_file(path) when is_binary(path) do
-    case rpc(:beamtalk_repl_eval, :reload_file, [binary_to_list_path(path)], @rpc_long_timeout) do
-      {:ok, class_names} when is_list(class_names) ->
+    case dispatch_browse("reload-file", %{"path" => path}) do
+      {:value, %{"classes" => class_names}} when is_list(class_names) ->
         {:ok, Enum.map(class_names, &to_string/1)}
 
+      other ->
+        edit_error(other)
+    end
+  end
+
+  @doc """
+  Compile Beamtalk source (class and method definitions) into the live image
+  through the `load-source` operation, in the caller's session.
+
+  This is the facade's `load_source` capability. `source` is passed as a value,
+  never spliced into an expression. Returns `{:ok, classes, warnings}` where
+  `classes` are the loaded-class maps the operation answers and `warnings` are
+  `%{message, hint}` maps like `eval/2`'s, or `{:error, reason_term}` (a
+  structured `#beamtalk_error{}`, or `{:unreachable, _}`).
+  """
+  def load_source(session_pid, source) when is_pid(session_pid) and is_binary(source) do
+    case request_op("load-source", %{"source" => source}, session_pid, @rpc_long_timeout) do
+      {:loaded, classes, warnings} ->
+        {:ok, classes, Enum.map(warnings, &normalize_warning/1)}
+
       {:error, reason} ->
-        {:error, structure_error(reason)}
+        {:error, reason}
 
       {:badrpc, reason} ->
         {:error, {:unreachable, reason}}
@@ -1968,10 +1956,11 @@ defmodule BtAttach.Workspace do
     end
   end
 
-  # `reload_file/1` takes an Erlang string (charlist) path — the runtime opens it
-  # with `file:read_file/1` and resolves it against the workspace node's cwd (the
-  # project root), the same form git restored.
-  defp binary_to_list_path(path) when is_binary(path), do: String.to_charlist(path)
+  # An editing operation's non-success reply. Its `{:error, reason}` is already a
+  # structured `#beamtalk_error{}` (the operation structures it), or
+  # `{:unreachable, _}` from `dispatch_browse/2`; anything else is a contract break.
+  defp edit_error({:error, reason}), do: {:error, reason}
+  defp edit_error(other), do: {:error, {:unexpected_reply, other}}
 
   @doc """
   Flush the workspace's pending durable changes to disk (ADR 0082 `Workspace
