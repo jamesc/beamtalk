@@ -6,7 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 
 use crate::core_erlang::binary_segments::{
-    SegmentDirection, expand_utf_string_literals, int_to_f64, segment_spec_tail,
+    SegmentDirection, expand_utf_string_literals, float_segment_value, segment_spec_tail,
 };
 use crate::core_erlang::util::index_lit;
 use crate::core_erlang::{CodeGenError, CoreErlangGenerator, Result};
@@ -591,11 +591,14 @@ impl CoreErlangGenerator {
         let seg_type = seg.segment_type.unwrap_or(BinarySegmentType::Integer);
         let value_doc = match (&seg.value, seg_type) {
             (Pattern::Literal(Literal::String(s), _), _) => binary_string_folded_value(s),
-            (Pattern::Literal(Literal::Integer(v), _), BinarySegmentType::Float) => {
-                leaf::float_lit(int_to_f64(*v))
-            }
-            (Pattern::Literal(Literal::Character(c), _), BinarySegmentType::Float) => {
-                leaf::float_lit(f64::from(u32::from(*c)))
+            (
+                Pattern::Literal(
+                    lit @ (Literal::Integer(_) | Literal::BigInteger(_) | Literal::Character(_)),
+                    _,
+                ),
+                BinarySegmentType::Float,
+            ) if float_segment_value(lit).is_some() => {
+                leaf::float_lit(float_segment_value(lit).unwrap_or_default())
             }
             _ => self.generate_pattern(&seg.value)?,
         };

@@ -364,3 +364,28 @@ TestCase subclass: BinaryConstructionTest
       <<"é"/utf16, 1:8, (w size):8, w:8>>
     ] on: Error do: [:e | e message]
     self assert: message2 equals: "binary construction: segment 4 of type 'integer': expected an integer but got: ""hi"""
+
+  // --- Integer literals beyond i64 (BT-5239) ---
+  testBignumSegmentRoundTrip =>
+    // 10^20 needs 67 bits.
+    bin := <<100000000000000000000:72>>
+    self assert: bin toBytes size equals: 9
+    result := bin match: [
+      <<100000000000000000000:72>> -> #matched;
+      _ -> #other
+    ]
+    self assert: result equals: #matched
+    self assert: (bin match: [<<v:72>> -> v; _ -> nil]) equals: 100000000000000000000
+
+  testNegativeBignumSegmentRoundTrip =>
+    bin := <<-100000000000000000000:72/signed>>
+    self assert: (bin match: [<<v:72/signed>> -> v; _ -> nil]) equals: -100000000000000000000
+
+  testHexBignumSegment =>
+    bin := <<16rFFFFFFFFFFFFFFFFFF:72>>
+    self assert: bin toBytes equals: #(255, 255, 255, 255, 255, 255, 255, 255, 255)
+
+  testBignumSegmentWithVariableSize =>
+    n := 72
+    bin := <<100000000000000000000:n>>
+    self assert: (bin match: [<<v:72>> -> v; _ -> nil]) equals: 100000000000000000000

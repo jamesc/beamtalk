@@ -216,7 +216,7 @@ fn decimal_magnitude_bits(digits: &str) -> (u64, bool) {
     let digits = digits.strip_prefix('-').unwrap_or(digits);
     // Little-endian base-2^32 limbs: multiply by 10, add each digit.
     let mut limbs: Vec<u32> = Vec::new();
-    for digit in digits.bytes().map(|b| u64::from(b - b'0')) {
+    for digit in digits.chars().filter_map(|c| c.to_digit(10)).map(u64::from) {
         let mut carry = digit;
         for limb in &mut limbs {
             let value = u64::from(*limb) * 10 + carry;
@@ -375,13 +375,18 @@ impl Parser {
                 // is far past any binary (BT-5239).
                 if let Expression::Literal(Literal::BigInteger(digits), span) = expr.unwrap_parens()
                 {
-                    self.diagnostics.push(Diagnostic::error(
+                    let message = if digits.starts_with('-') {
+                        format!(
+                            "binary segment sizes must be non-negative, got {}",
+                            abbreviate_digits(digits)
+                        )
+                    } else {
                         format!(
                             "binary segment size {} is too large",
                             abbreviate_digits(digits)
-                        ),
-                        *span,
-                    ));
+                        )
+                    };
+                    self.diagnostics.push(Diagnostic::error(message, *span));
                     return None;
                 }
                 match &expr {
@@ -795,6 +800,7 @@ impl Parser {
                 value_span,
                 seg_type,
                 size_lit,
+                size.is_some(),
                 seg.signedness,
                 unit,
                 direction,
@@ -935,6 +941,7 @@ impl Parser {
         value_span: crate::source_analysis::Span,
         seg_type: BinarySegmentType,
         size_lit: Option<(i64, crate::source_analysis::Span)>,
+        has_size: bool,
         signedness: Option<BinarySignedness>,
         unit: Option<usize>,
         direction: BinaryDirection,
@@ -959,8 +966,10 @@ impl Parser {
                 // Default integer size is 8 bits (same as codegen); with a
                 // unit the effective size is size × unit (`<<4660:2/unit:8>>`
                 // is a clean 16-bit match).
+                // A variable size (`<<1000:n>>`) is checked at run time.
                 let size_bits = match size_lit {
                     Some((n, _)) => n.saturating_mul(unit_multiplier(unit)),
+                    None if has_size => return,
                     None => 8,
                 };
                 let signed = signedness == Some(BinarySignedness::Signed);
@@ -1358,7 +1367,11 @@ impl Parser {
                 ));
                 None
             }
-            Ok(_) => None,
+            Ok(_) => {
+                self.diagnostics
+                    .push(Diagnostic::error("Expected an integer unit", span));
+                None
+            }
             Err(e) => {
                 self.diagnostics.push(Diagnostic::error(e, span));
                 None

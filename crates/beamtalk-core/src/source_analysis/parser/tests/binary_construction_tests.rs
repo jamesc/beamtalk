@@ -874,3 +874,25 @@ fn very_long_bignum_is_elided_in_diagnostics() {
         diagnostics[0].1
     );
 }
+
+#[test]
+fn bignum_with_a_variable_size_is_not_checked_statically() {
+    // The size is only known at run time, so there is nothing to warn about
+    // (it used to be read as the default 8 bits).
+    for source in [
+        format!("n := 72. <<{BIG}:n>>"),
+        format!("n := 72. x match: [<<{BIG}:n>> -> 1]"),
+        "n := 72. <<1000:n>>".to_string(),
+    ] {
+        assert!(diagnostics_of(&source).is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn negative_bignum_size_is_a_negative_size_error() {
+    assert_one(
+        &format!("<<1:-{BIG}>>"),
+        Severity::Error,
+        &format!("binary segment sizes must be non-negative, got -{BIG}"),
+    );
+}
