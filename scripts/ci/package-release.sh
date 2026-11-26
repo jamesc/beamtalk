@@ -22,11 +22,6 @@ set -euo pipefail
 VERSION="${1:?Usage: package-release.sh <version> <platform>}"
 PLATFORM="${2:?Usage: package-release.sh <version> <platform>}"
 
-case "${PLATFORM}" in
-    linux-x86_64 | macos-x86_64 | macos-arm64 | windows-x86_64) ;;
-    *) echo "❌ Unknown platform '${PLATFORM}' (linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64)."; exit 1 ;;
-esac
-
 BINARIES=(beamtalk beamtalk-compiler-port beamtalk-lsp beamtalk-mcp beamtalk-exec)
 
 if [ "${PLATFORM}" = "windows-x86_64" ]; then
