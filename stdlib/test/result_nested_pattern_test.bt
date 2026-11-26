@@ -8,20 +8,46 @@ TestCase subclass: ResultNestedPatternTest
 
   testOkTuplePattern =>
     r := Result ok: {3, 4}
-    self assert: (r match: [Result ok: {a, b} -> a + b; Result error: _ -> 0]) equals: 7
+    self
+      assert: (r match: [
+        Result ok: {a, b} -> a + b;
+        Result error: _ -> 0
+      ])
+      equals: 7
 
   testErrorTuplePattern =>
     r := Result error: {1, 2}
-    self assert: (r match: [Result ok: _ -> 0; Result error: {a, b} -> a + b]) equals: 3
+    self
+      assert: (r match: [
+        Result ok: _ -> 0;
+        Result error: {a, b} -> a + b
+      ])
+      equals: 3
 
   testOkMapPattern =>
     r := Result ok: #{#k => 9}
-    self assert: (r match: [Result ok: #{#k => v} -> v; _ -> 0]) equals: 9
+    self
+      assert: (r match: [
+        Result ok: #{#k => v} -> v;
+        _ -> 0
+      ])
+      equals: 9
 
   testRefutableNestedFallsThrough =>
     r := Result ok: {1, 2, 3}
-    self assert: (r match: [Result ok: {a, b} -> a; Result ok: _ -> -1; Result error: _ -> -2]) equals: -1
+    self
+      assert: (r match: [
+        Result ok: {a, b} -> a;
+        Result ok: _ -> -1;
+        Result error: _ -> -2
+      ])
+      equals: -1
 
   testMatchExhaustiveResult =>
     r := Result ok: 5
-    self assert: (r matchExhaustive: [Result ok: v -> v; Result error: _ -> 0]) equals: 5
+    self
+      assert: (r matchExhaustive: [
+        Result ok: v -> v;
+        Result error: _ -> 0
+      ])
+      equals: 5
