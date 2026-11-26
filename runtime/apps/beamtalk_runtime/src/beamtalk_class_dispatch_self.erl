@@ -19,6 +19,7 @@ class-self send makes the same number of calls as before the split.
 -include_lib("kernel/include/logger.hrl").
 -export([
     class_self_dispatch_chain/5,
+    class_self_dispatch_chain/6,
     class_self_dispatch_local/4,
     class_self_protocol_fallthrough/4
 ]).
@@ -43,6 +44,24 @@ lookup first, then applies the lookup result here, or falls through to the class
     #beamtalk_object{}
 ) -> term() | no_return().
 class_self_dispatch_chain(ClassName, Selector, Args, Found, ClassSelf) ->
+    class_self_dispatch_chain(ClassName, Selector, Args, Found, ClassSelf, true).
+
+-doc """
+`class_self_dispatch_chain/5` with `Forward` (BT-5270): whether a selector no
+class method or `Class` protocol method answers goes to the receiving class's
+class-side `doesNotUnderstand:args:` override. A class-side `super` send passes
+`false`: it never consults the receiving class itself, so an override that
+sends `super` of the unknown selector cannot be re-entered.
+""".
+-spec class_self_dispatch_chain(
+    beamtalk_class_dispatch:class_name(),
+    beamtalk_class_dispatch:selector(),
+    list(),
+    {ok, beamtalk_class_dispatch:class_name(), atom()} | not_found,
+    #beamtalk_object{},
+    boolean()
+) -> term() | no_return().
+class_self_dispatch_chain(ClassName, Selector, Args, Found, ClassSelf, Forward) ->
     case Found of
         {ok, DefiningClass, DefiningModule} ->
             %% Route through the same internal helper the gen_server path uses
@@ -63,7 +82,7 @@ class_self_dispatch_chain(ClassName, Selector, Args, Found, ClassSelf) ->
                 )
             );
         not_found ->
-            class_self_protocol_fallthrough(ClassName, Selector, Args, ClassSelf)
+            class_self_protocol_fallthrough(ClassName, Selector, Args, ClassSelf, Forward)
     end.
 
 -doc """
@@ -112,13 +131,24 @@ own). Raises the structured
 ) ->
     term() | no_return().
 class_self_protocol_fallthrough(ClassName, Selector, Args, ClassSelf) ->
+    class_self_protocol_fallthrough(ClassName, Selector, Args, ClassSelf, true).
+
+-spec class_self_protocol_fallthrough(
+    beamtalk_class_dispatch:class_name(),
+    beamtalk_class_dispatch:selector(),
+    list(),
+    #beamtalk_object{},
+    boolean()
+) ->
+    term() | no_return().
+class_self_protocol_fallthrough(ClassName, Selector, Args, ClassSelf, Forward) ->
     case ClassSelf of
         #beamtalk_object{pid = ReceiverPid} when not is_pid(ReceiverPid) ->
             raise_class_self_dnu(ClassName, Selector);
         #beamtalk_object{pid = ReceiverPid} ->
             try beamtalk_class_dispatch:try_class_chain_fallthrough(ClassSelf, Selector, Args) of
                 {ok, Result} -> Result;
-                not_found -> raise_class_self_dnu(ClassName, Selector)
+                not_found -> class_self_unknown(ClassName, Selector, Args, ClassSelf, Forward)
             catch
                 %% A protocol method that messages the receiving class (`doc`'s
                 %% `gen_server:call(ClassPid, get_doc)`, or a Beamtalk body
@@ -254,6 +284,41 @@ raise_test_spawn_self_dispatch_unsupported(ClassName, Selector) ->
     ),
     Error = beamtalk_error:new(does_not_understand, ClassName, Selector, Hint),
     beamtalk_error:raise(Error).
+
+%% BT-5270: nothing answers `Selector`. The receiving class's class-side
+%% `doesNotUnderstand:args:` override (own or inherited) gets it, as an external
+%% send to the class object does (`beamtalk_class_dispatch:class_chain_send/5`);
+%% else the structured `does_not_understand`. Never forwards the override's own
+%% selector, so a missing override cannot recurse.
+-spec class_self_unknown(
+    beamtalk_class_dispatch:class_name(),
+    beamtalk_class_dispatch:selector(),
+    list(),
+    #beamtalk_object{},
+    boolean()
+) -> term() | no_return().
+class_self_unknown(ClassName, Selector, Args, ClassSelf, true) when
+    Selector =/= 'doesNotUnderstand:args:'
+->
+    case
+        beamtalk_class_dispatch:find_class_side_method_from_class(
+            'doesNotUnderstand:args:', ClassName
+        )
+    of
+        {method, Owner, Module} ->
+            class_self_dispatch_chain(
+                ClassName,
+                'doesNotUnderstand:args:',
+                [Selector, Args],
+                {ok, Owner, Module},
+                ClassSelf,
+                true
+            );
+        not_found ->
+            raise_class_self_dnu(ClassName, Selector)
+    end;
+class_self_unknown(ClassName, Selector, _Args, _ClassSelf, _Forward) ->
+    raise_class_self_dnu(ClassName, Selector).
 
 -spec raise_class_self_dnu(
     beamtalk_class_dispatch:class_name(), beamtalk_class_dispatch:selector()

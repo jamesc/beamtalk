@@ -649,7 +649,7 @@ selector_provider(Recv, Selector) ->
             Name = beamtalk_primitive:class_name_from_tag(element(2, Recv)),
             case beamtalk_primitive:class_responds_to(Name, Selector) of
                 true -> {Name, user};
-                false -> {Name, none}
+                false -> {Name, class_dnu_provider(Name)}
             end;
         false ->
             Class = beamtalk_primitive:class_of(Recv),
@@ -666,6 +666,16 @@ selector_provider(Recv, Selector) ->
 -spec dnu_provider(atom()) -> dnu | none.
 dnu_provider(Class) ->
     case beamtalk_behaviour_intrinsics:overridesDoesNotUnderstandFromName(Class) of
+        true -> dnu;
+        false -> none
+    end.
+
+%% BT-5270: the class-object counterpart of `dnu_provider/1`. A class-side
+%% `doesNotUnderstand:args:` (own or a superclass's) receives the unknown message
+%% on the pure send. The class-side tables exclude the `ProtoObject` default.
+-spec class_dnu_provider(atom()) -> dnu | none.
+class_dnu_provider(Name) ->
+    case beamtalk_class_dispatch:class_dnu_override(Name) of
         true -> dnu;
         false -> none
     end.
