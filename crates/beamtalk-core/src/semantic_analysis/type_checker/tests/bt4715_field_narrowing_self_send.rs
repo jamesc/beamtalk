@@ -216,6 +216,6 @@ fn known_gap_loop_body_self_send_not_seen_by_earlier_statement() {
 #[test]
 fn self_send_in_diverging_on_do_handler_keeps_narrowing() {
     assert_clean(
-        "  run -> Integer =>\n    self.f isNil ifTrue: [^0]\n    [1 + 1] on: Error do: [:e | self reset. ^nil]\n    self need: self.f",
+        "  run -> Integer =>\n    self.f isNil ifTrue: [^0]\n    [1 + 1] on: Error do: [:e | self reset. ^0]\n    self need: self.f",
     );
 }

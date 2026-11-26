@@ -1173,10 +1173,9 @@ sealed typed Object subclass: SystemNavigation
 
   /// Raise the shared malformed-spec error for `ffiSitesFor:` / `parseFfiSpec:`.
   ///
-  /// Always raises (kind `#user_error`); `error:` returns `Never`, so this
-  /// still type-checks as returning a value when its result is used in an
-  /// expression position (e.g. inside `ifTrue:` of `parseFfiSpec:`).
-  class raiseFfiSpecError: aSpec :: String -> Object =>
+  /// Always raises (kind `#user_error`); declared `-> Never` so `^self
+  /// raiseFfiSpecError:` in `parseFfiSpec:` is not an `Object` return.
+  class raiseFfiSpecError: aSpec :: String -> Never =>
     self
       error: "SystemNavigation ffiSitesFor: expects a spec of the form ""module:function"" or ""module:function/arity"", got: "
         ++ aSpec
