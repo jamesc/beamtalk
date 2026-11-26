@@ -360,8 +360,8 @@ impl CoreErlangGenerator {
         Ok(ThreadedValue { prelude, value })
     }
 
-    /// The receiver-prelude splice: a conditional (producer or not) whose
-    /// receiver's prelude rebinds a threaded family
+    /// The receiver-prelude splice: a conditional or `match:` (producer or not)
+    /// whose receiver's (scrutinee's) prelude rebinds a threaded family
     /// ([`Self::conditional_receiver_is_sequenced`]) sequences the receiver
     /// ahead, so that prelude lands in the caller's frame instead of a closed
     /// document, and then lowers the conditional over the sequenced receiver
@@ -376,13 +376,15 @@ impl CoreErlangGenerator {
     ///   the conditional's `State` extraction read a version no `Bind` of the
     ///   loop frame produced (`UnboundVersion`), and the loop's recursive call
     ///   carried the pre-statement `State`, dropping the self-send's change.
+    /// - BT-5289: a `match:` scrutinee whose evaluation advances `State` (the
+    ///   construct's [`Self::sequenced_construct_operand`]), for the same reason.
     fn conditional_receiver_operand(
         &mut self,
         expr: &Expression,
         frame: FrameId,
     ) -> Result<Option<ThreadedValue>> {
         let inner = expr.unwrap_parens();
-        let Some(receiver) = Self::conditional_send_receiver(inner)
+        let Some(receiver) = Self::sequenced_construct_operand(inner)
             .filter(|r| self.conditional_receiver_is_sequenced(r))
         else {
             return Ok(None);
@@ -832,8 +834,9 @@ impl CoreErlangGenerator {
         Ok(None)
     }
 
-    /// Whether a conditional's `receiver` is sequenced ahead of the
-    /// conditional by [`Self::conditional_receiver_operand`], its prelude
+    /// Whether a conditional's `receiver` (or a `match:`'s scrutinee,
+    /// BT-5289: [`Self::sequenced_construct_operand`]) is sequenced ahead of
+    /// the construct by [`Self::conditional_receiver_operand`], its prelude
     /// spliced into the caller's frame: it holds a value-position local
     /// assignment (BT-3910), or, in an actor instance method, its evaluation
     /// advances the `State` family (an actor self-send anywhere in its
@@ -864,14 +867,44 @@ impl CoreErlangGenerator {
         self.in_actor_instance_context() && self.subexpr_needs_prelude(receiver)
     }
 
-    /// Whether `expr` is a conditional send whose receiver is sequenced ahead
-    /// of it ([`Self::conditional_receiver_is_sequenced`], BT-3910 / BT-4000).
-    pub(in crate::core_erlang) fn is_conditional_with_sequenced_receiver(
+    /// Whether `expr` is a conditional send or a `match:` whose
+    /// [`Self::sequenced_construct_operand`] is sequenced ahead of it
+    /// ([`Self::conditional_receiver_is_sequenced`], BT-3910 / BT-4000 /
+    /// BT-5289).
+    pub(in crate::core_erlang) fn is_construct_with_sequenced_operand(
         &self,
         expr: &Expression,
     ) -> bool {
-        Self::conditional_send_receiver(expr.unwrap_parens())
+        Self::sequenced_construct_operand(expr.unwrap_parens())
             .is_some_and(|r| self.conditional_receiver_is_sequenced(r))
+    }
+
+    /// The operand an inline-lowered construct evaluates first and
+    /// unconditionally, ahead of choosing an arm: a conditional send's
+    /// receiver ([`Self::conditional_send_receiver`]) or a `match:`'s
+    /// scrutinee. The one operand [`Self::conditional_receiver_operand`]
+    /// sequences into the caller's frame when its prelude advances a threaded
+    /// family.
+    ///
+    /// BT-5289: a `match:` scrutinee is that operand too. Compiled inside the
+    /// `match:`'s own tuple document (`generate_match`), a scrutinee whose
+    /// evaluation advances `State` (a send run in a `SyncedCall` window, a
+    /// self-send) bound that version where `verify()` could not see it, so
+    /// the frame's `State` extraction off the tuple read a version no `Bind`
+    /// of the frame produced (`UnboundVersion` / `NonLinearVersion`). In a
+    /// conditional arm the emitted code was still right; in a `Letrec` loop
+    /// body the recursive call carried the pre-statement `State`, dropping the
+    /// scrutinee's and the arms' field writes.
+    pub(super) fn sequenced_construct_operand(expr: &Expression) -> Option<&Expression> {
+        match expr {
+            // Test-only fault injection: the pre-BT-5289 routing, so a
+            // producer `match:` compiles its own scrutinee and
+            // `SeedBeforeScrutinee` can seed ahead of it
+            // (`tests/match_scrutinee_state_corpus.rs`).
+            Expression::Match { .. } if fault!(SeedBeforeScrutinee) => None,
+            Expression::Match { value, .. } => Some(value.as_ref()),
+            _ => Self::conditional_send_receiver(expr),
+        }
     }
 
     /// The receiver of a conditional send (`ifTrue:`, `and:`, ...), the one
@@ -988,9 +1021,10 @@ impl CoreErlangGenerator {
     /// already unwrapped (paren-unwrapped `expr`), restricted to those `probe`
     /// counts: an inline-threaded conditional or `match:` (ADR 0118 phase 4;
     /// not a field-write producer), an `on:do:`/`ensure:` producer (ADR 0131
-    /// Phase 3b), an evaluated literal block (BT-3841), or a conditional whose
-    /// receiver's prelude is spliced into the caller's frame (BT-3910 /
-    /// BT-4000, `conditional_receiver_operand`).
+    /// Phase 3b), an evaluated literal block (BT-3841), or a conditional or
+    /// `match:` whose receiver's (scrutinee's) prelude is spliced into the
+    /// caller's frame (BT-3910 / BT-4000 / BT-5289,
+    /// `conditional_receiver_operand`).
     ///
     /// Both [`Self::thread_ahead_unwraps`] (at [`PreludeProbe::Sequencing`])
     /// and [`Self::subexpr_needs_prelude_with`] read this one function, so
@@ -1002,7 +1036,7 @@ impl CoreErlangGenerator {
     fn unwrapped_producer_under(&self, expr: &Expression, probe: PreludeProbe) -> bool {
         let inner = expr.unwrap_parens();
         self.inline_producer_construct_under(inner, probe)
-            || self.is_conditional_with_sequenced_receiver(inner)
+            || self.is_construct_with_sequenced_operand(inner)
     }
 
     /// The inline-threaded constructs of [`Self::unwrapped_producer_under`]

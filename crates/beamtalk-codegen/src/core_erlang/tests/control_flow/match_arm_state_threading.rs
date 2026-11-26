@@ -809,3 +809,26 @@ fn test_match_arm_field_write_on_private_scratch_is_reported() {
         );
     }
 }
+
+/// BT-5289: a `match:` whose scrutinee advances `State` (a send run in a
+/// `SyncedCall` window, a self-send) and whose arm writes a field, as a
+/// statement of a conditional arm (the issue's repro, and the two-guard form
+/// BT-4415 nests the same way) and of a loop body. Its scrutinee is sequenced
+/// into the statement's frame (`sequenced_construct_operand`), so each is
+/// `verify()`-clean and compiles through erlc. The generated corpus is
+/// `tests/match_scrutinee_frame_corpus.rs`.
+#[test]
+fn test_match_with_state_advancing_scrutinee_in_nested_frames_compiles() {
+    let header = "Actor subclass: MatchSentScrutinee\n  state: total = 0\n\n  bump =>\n    self.total := self.total + 1\n    self.total\n\n";
+    for body in [
+        "    items isNil ifTrue: [nil] ifFalse: [items first match: [_ -> items > 0 ifTrue: [self.total := items]]]\n    self.total\n",
+        "    items isNil ifTrue: [^nil]\n    items isNil ifTrue: [^nil]\n    items first match: [_ -> items > 0 ifTrue: [self.total := items]]\n    self.total\n",
+        "    1 to: 3 do: [:i | self bump match: [k :: Integer -> self.total := self.total + k; _ -> nil]]\n    self.total\n",
+    ] {
+        let src = format!("{header}  classify: items =>\n{body}");
+        assert_parses(&src);
+        assert_eq!(verifier_report(&src, None), None, "{src}");
+        let code = codegen_named(&src, "matchsentscrutinee");
+        assert_compiles_through_erlc("matchsentscrutinee", &code);
+    }
+}

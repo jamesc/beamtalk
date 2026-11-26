@@ -253,7 +253,8 @@ mod registry {
         /// sequenced ahead, as before BT-4000: its prelude is rendered into
         /// the conditional's own tuple document, out of the frame's sight, so
         /// in a loop body the conditional's `State` extraction reads a version
-        /// the frame never binds (`UnboundVersion`).
+        /// the frame never binds (`UnboundVersion`). Also covers a `match:`
+        /// scrutinee, as before BT-5289.
         ReceiverPreludeInTuple,
         /// BT-4015: a `whileTrue:`/`whileFalse:` condition's outer-local (in
         /// the REPL, binding) write is not a carried effect, as before BT-4015,
@@ -284,7 +285,10 @@ mod registry {
         /// BT-4206: a `match:` producer reads its base `State` and seeds its
         /// scratch map before compiling its scrutinee, as before BT-4196, so
         /// the arms thread from the `State` the scrutinee's spliced prelude
-        /// has already stepped past (`StaleConstructSeed`).
+        /// has already stepped past (`StaleConstructSeed`). Since BT-5289 an
+        /// actor `match:`'s state-advancing scrutinee is sequenced ahead of
+        /// the producer, so this fault also restores the pre-BT-5289 routing
+        /// that let the producer compile it.
         SeedBeforeScrutinee,
         /// BT-4178: a tuple-accumulator fold does not capture its entry
         /// state for its body, as before BT-4178, so a field read there
