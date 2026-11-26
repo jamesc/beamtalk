@@ -554,9 +554,9 @@ impl CoreErlangGenerator {
             // Instance methods
             let instance_methods: Vec<_> = class.methods.iter().collect();
 
-            // Class-side primary methods (used for both the signature/source maps
+            // Class-side methods (used for both the signature/source maps
             // below and the xref index).
-            let class_methods_primary: Vec<_> = class.class_methods.iter().collect();
+            let class_method_refs: Vec<_> = class.class_methods.iter().collect();
 
             // ADR 0087 Phase 2: per-method cross-reference
             // index. The standard `register_class/0` path bakes this for every
@@ -567,7 +567,7 @@ impl CoreErlangGenerator {
             // fallback. Bake the same `methodXref` list here so native classes
             // are indexed like the rest.
             let method_xref_doc =
-                self.build_method_xref_list(class, &instance_methods, &class_methods_primary);
+                self.build_method_xref_list(class, &instance_methods, &class_method_refs);
 
             // Method source
             let mut method_source_docs: Vec<Document<'static>> = Vec::new();

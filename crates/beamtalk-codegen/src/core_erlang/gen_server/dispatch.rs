@@ -22,28 +22,28 @@ use beamtalk_core::source_analysis::Span;
 /// A primary method of a module: its selector, arity and source span, and
 /// whether it is a class-definition method (a script `name := [block]` method
 /// is not).
-struct PrimaryMethod {
+struct DispatchMethod {
     name: String,
     arity: usize,
     span: Span,
     in_class: bool,
 }
 
-/// Collects all primary methods from a module.
+/// Collects all dispatchable methods from a module.
 ///
 /// Walks two sources in order:
 /// 1. Expression-based script/workspace methods — top-level `name := [block]`
 ///    assignments compiled as the module's methods (LIVE compilation mode,
 ///    exercised by the test-package-compiler snapshot cases). Not dead code:
 ///    removing this strips methods from every compiled script.
-/// 2. Class definition primary methods — entries from
+/// 2. Class definition methods — entries from
 ///    every class in the module.
 ///
 /// `generate_method_table`, `generate_has_method` and
 /// `generate_method_lines` share this traversal, so they cannot disagree
 /// about which methods exist.
-fn collect_primary_methods(module: &Module) -> Vec<PrimaryMethod> {
-    let mut methods: Vec<PrimaryMethod> = module
+fn collect_dispatch_methods(module: &Module) -> Vec<DispatchMethod> {
+    let mut methods: Vec<DispatchMethod> = module
         .expressions
         .iter()
         .filter_map(|stmt| {
@@ -51,7 +51,7 @@ fn collect_primary_methods(module: &Module) -> Vec<PrimaryMethod> {
                 && let (Expression::Identifier(id), Expression::Block(block)) =
                     (target.as_ref(), value.as_ref())
             {
-                return Some(PrimaryMethod {
+                return Some(DispatchMethod {
                     name: id.name.to_string(),
                     arity: block.arity(),
                     span: stmt.expression.span(),
@@ -63,7 +63,7 @@ fn collect_primary_methods(module: &Module) -> Vec<PrimaryMethod> {
         .collect();
     for class in &module.classes {
         for method in &class.methods {
-            methods.push(PrimaryMethod {
+            methods.push(DispatchMethod {
                 name: method.selector.name().to_string(),
                 arity: method.selector.arity(),
                 span: method.span,
@@ -74,9 +74,9 @@ fn collect_primary_methods(module: &Module) -> Vec<PrimaryMethod> {
     methods
 }
 
-/// Primary method names and arities of a module (see [`collect_primary_methods`]).
-fn collect_primary_method_names_and_arities(module: &Module) -> Vec<(String, usize)> {
-    collect_primary_methods(module)
+/// Dispatchable method names and arities of a module (see [`collect_dispatch_methods`]).
+fn collect_dispatch_method_names_and_arities(module: &Module) -> Vec<(String, usize)> {
+    collect_dispatch_methods(module)
         .into_iter()
         .map(|m| (m.name, m.arity))
         .collect()
@@ -99,7 +99,7 @@ impl CoreErlangGenerator {
         &self,
         module: &Module,
     ) -> Document<'static> {
-        let methods = collect_primary_method_names_and_arities(module);
+        let methods = collect_dispatch_method_names_and_arities(module);
 
         // ADR 0006 Phase 1b: Reflection methods (class, respondsTo:, fieldNames,
         // fieldAt:, fieldAt:put:, perform:, perform:withArguments:) are now
@@ -166,7 +166,7 @@ impl CoreErlangGenerator {
             }
         };
         let own_path = self.source_path.as_deref();
-        for method in collect_primary_methods(module) {
+        for method in collect_dispatch_methods(module) {
             let selector = method.name;
             let flattened = method
                 .in_class
@@ -263,7 +263,7 @@ impl CoreErlangGenerator {
     /// ```
     #[allow(clippy::unused_self)] // method on impl for API consistency with its siblings
     pub(in crate::core_erlang) fn generate_has_method(&self, module: &Module) -> Document<'static> {
-        let own_methods: Vec<String> = collect_primary_method_names_and_arities(module)
+        let own_methods: Vec<String> = collect_dispatch_method_names_and_arities(module)
             .into_iter()
             .map(|(name, _)| name)
             .collect();
@@ -945,7 +945,7 @@ mod tests {
     #[test]
     fn generate_method_table_expression_module() {
         // Covers the script/workspace expression-based path in
-        // collect_primary_method_names_and_arities: top-level `name := [block]`
+        // collect_dispatch_method_names_and_arities: top-level `name := [block]`
         // assignments are collected as method entries.
         let assignment = ExpressionStatement::bare(Expression::Assignment {
             target: Box::new(Expression::Identifier(Identifier::new("add", s()))),

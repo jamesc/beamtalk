@@ -440,7 +440,7 @@ fn generate_class_method_spec(
 /// Generates all spec attributes for methods in a class definition.
 ///
 /// Returns a vector of spec attribute Documents, one per annotated method.
-/// Only primary methods generate specs.
+/// Every method generates a spec.
 /// Includes both instance methods and class-side methods.
 ///
 /// For actor classes (`is_value_type: false`), instance method specs
