@@ -19,7 +19,7 @@
 
 use super::gen_server::extract_package_from_module_name;
 use super::value_accessors::has_opaque_native_representation;
-use super::{CodeGenContext, CoreErlangGenerator, Result};
+use super::{CodeGenContext, CoreErlangGenerator};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{
@@ -129,22 +129,22 @@ impl CoreErlangGenerator {
         &mut self,
         module: &Module,
         synthesize_supervision_spec: bool,
-    ) -> Result<Document<'static>> {
+    ) -> Document<'static> {
         // Skip only if there are no class definitions AND no protocols.
         // Protocol-only files still need register_class/0 for protocol
         // registration.
         if module.classes.is_empty() && module.protocols.is_empty() {
-            return Ok(Document::Nil);
+            return Document::Nil;
         }
 
         // Class-less module — generate register_class/0 with only protocol
         // registration calls, no class builder chain.
         if module.classes.is_empty() {
             let protocol_reg_doc = self.generate_protocol_registrations(module);
-            return Ok(Self::register_class_fn_doc(
+            return Self::register_class_fn_doc(
                 docvec![protocol_reg_doc, line(), "'ok'"],
                 Document::Str("of _ProtoRegResult -> _ProtoRegResult"),
-            ));
+            );
         }
 
         let mut class_docs = Vec::new();
@@ -327,7 +327,7 @@ impl CoreErlangGenerator {
             ]
         };
 
-        Ok(Self::register_class_fn_doc(try_body, of_clause))
+        Self::register_class_fn_doc(try_body, of_clause)
     }
 
     /// The `'register_class'/0` function shell shared by every shape of

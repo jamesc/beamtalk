@@ -429,7 +429,7 @@ impl CoreErlangGenerator {
 
         // Register value type class with the class system for dynamic dispatch
         // Value types never need supervisionSpec synthesis (they are not actors).
-        docs.push(self.generate_register_class(module, false)?);
+        docs.push(self.generate_register_class(module, false));
         docs.push(Document::Str("\n"));
 
         // Generate __beamtalk_meta/0 for zero-process reflection
