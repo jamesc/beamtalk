@@ -137,6 +137,16 @@ pub fn build_release(
     if output.is_some() {
         ensure_unprotected_output(&release_dir, &layout)?;
     }
+    // Refuse an obviously unacceptable existing output before creating a lock
+    // file beside it (`--output ~/Documents`). Skipped when a journal or
+    // parked copy exists: recovery must run first, under the lock.
+    if output.is_some()
+        && !journal_path(&release_dir).exists()
+        && !parked_path(&release_dir).exists()
+        && !parked_path(&tarball).exists()
+    {
+        ensure_clean_release_dir(&release_dir, true, force_output, &layout)?;
+    }
     let _output_lock = crate::commands::dir_lock::lock_file_announcing(
         output_lock_path(&release_dir).as_std_path(),
         "release output",
@@ -917,9 +927,14 @@ fn parked_path(path: &Utf8Path) -> Utf8PathBuf {
     Utf8PathBuf::from(format!("{path}{PREVIOUS_SUFFIX}"))
 }
 
-/// `<release_dir>.beamtalk-lock`, the [`OUTPUT_LOCK_SUFFIX`] lock file.
+/// `<release_dir>.beamtalk-lock`, the [`OUTPUT_LOCK_SUFFIX`] lock file. Keyed
+/// by the symlink-resolved location, so `/shared/rel` and `/link/rel` (a
+/// symlink to `/shared`) name one lock.
 fn output_lock_path(release_dir: &Utf8Path) -> Utf8PathBuf {
-    Utf8PathBuf::from(format!("{release_dir}{OUTPUT_LOCK_SUFFIX}"))
+    let real = canonicalize_lenient(release_dir.as_std_path())
+        .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
+        .unwrap_or_else(|| release_dir.to_path_buf());
+    Utf8PathBuf::from(format!("{real}{OUTPUT_LOCK_SUFFIX}"))
 }
 
 /// `<release_dir>.beamtalk-swap`, the [`JOURNAL_SUFFIX`] journal.
@@ -1770,6 +1785,25 @@ mod tests {
                 assert!(err.to_string().contains("source directories"), "{err}");
             }
         }
+    }
+
+    /// BT-5230: two spellings of one output (through a symlink) share a lock.
+    #[cfg(unix)]
+    #[test]
+    fn output_lock_path_is_shared_by_symlink_aliases() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        fs::create_dir_all(root.join("shared").as_std_path()).unwrap();
+        std::os::unix::fs::symlink(root.join("shared"), root.join("link")).unwrap();
+        assert_eq!(
+            output_lock_path(&root.join("shared/rel")),
+            output_lock_path(&root.join("link/rel"))
+        );
+        assert!(
+            output_lock_path(&root.join("shared/rel"))
+                .as_str()
+                .ends_with("rel.beamtalk-lock")
+        );
     }
 
     /// `canonicalize_lenient` resolves a missing tail under an existing
