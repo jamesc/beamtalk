@@ -58,6 +58,7 @@ Read by shipped binaries and the runtime. Unset means the default behaviour.
 | `BEAMTALK_SPEC_MAPPING_STAMP` | Compile-time (`env!`) stamp for the type-spec mapping; set by a build script. |
 | `BEAMTALK_NIGHTLY` | `scripts/install.sh`: `1` installs the nightly build. |
 | `BEAMTALK_EDGE` | `scripts/install.sh`: `1` installs the edge build. |
+| `BEAMTALK_RETRY_DELAY` | `scripts/install.sh`: first retry delay in seconds for `--edge`/`--nightly` downloads (default `5`, doubled per retry, 4 attempts). Non-numeric values fall back to `5`. For tests. |
 | `BEAMTALK_PREFIX` | Install prefix for `scripts/install.sh` (default `~/.beamtalk`, same as `--prefix`) and `scripts/refresh-edge.sh` (default `/usr/local`). |
 | `BEAMTALK_INSTALLER_URL` | `scripts/refresh-edge.sh`: installer to run when the edge build is stale; its checksum is read from `<url>.sha256`. For tests; lifts the https-only rule for the installer fetches. Ignored with a warning when `CLAUDE_CODE_REMOTE=true`. |
 | `BEAMTALK_INSTALLER` | `scripts/refresh-edge.sh`: path of a local installer, run unverified; wins over the URL. Ignored with a warning when `CLAUDE_CODE_REMOTE=true`. |
