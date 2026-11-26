@@ -91,8 +91,6 @@ fn build_rejects_unknown_keys_in_the_project_manifest() {
 /// warning must still appear once per dependency and key.
 #[test]
 fn unknown_key_warning_is_emitted_once_per_dependency_per_build() {
-    register_unknown_key_callsite();
-
     #[derive(Clone, Default)]
     struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
     impl std::io::Write for Captured {
@@ -104,6 +102,8 @@ fn unknown_key_warning_is_emitted_once_per_dependency_per_build() {
             Ok(())
         }
     }
+
+    register_unknown_key_callsite();
 
     let temp = TempDir::new().unwrap();
     let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
