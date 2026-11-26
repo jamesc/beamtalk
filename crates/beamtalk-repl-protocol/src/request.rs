@@ -29,6 +29,17 @@ pub fn next_msg_id() -> String {
 #[derive(Debug)]
 pub struct RequestBuilder;
 
+/// The `ChangeEntry` kinds a `flush` can be scoped to (its `kind` param).
+/// `beamtalk_workspace_flush:kind_filters/0` is the one definition; a test in
+/// this crate reads that function and fails when this list differs.
+pub const FLUSH_KINDS: [&str; 5] = [
+    "new-class",
+    "remove-method",
+    "remove-class",
+    "rename-class",
+    "rename-method",
+];
+
 /// What a `flush` request is scoped to (BT-5204). The operation takes at most
 /// one of `class`, `file` and `kind`; this enum makes sending two impossible.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +52,38 @@ pub enum FlushScope<'a> {
     File(&'a str),
     /// One `ChangeEntry` kind, such as `new-class`.
     Kind(&'a str),
+}
+
+/// Whether a `ChangeLog`-recording request comes from a person or an agent
+/// (ADR 0082 `author_kind`). It is audit metadata, not a filter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthorKind {
+    /// A person at a REPL, editor or browser. What the workspace records when a
+    /// request names no author.
+    Human,
+    /// An agent, such as an MCP tool call.
+    Agent,
+}
+
+impl AuthorKind {
+    /// The wire value of the `author_kind` param.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Human => "human",
+            Self::Agent => "agent",
+        }
+    }
+}
+
+/// Who a `save-method` or `save-class` request is recorded as in the
+/// `ChangeLog` (ADR 0082): a name, such as the MCP tool, and a kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Author<'a> {
+    /// The audit author, for example `mcp:save_method`.
+    pub name: &'a str,
+    /// Human or agent.
+    pub kind: AuthorKind,
 }
 
 impl RequestBuilder {
@@ -293,6 +336,31 @@ impl RequestBuilder {
             "selector": selector,
             "source": source
         })
+    }
+
+    /// [`save_method`](Self::save_method), recorded in the `ChangeLog` as
+    /// `author` rather than as the connection's own (human) author.
+    #[must_use]
+    pub fn save_method_by(
+        class: &str,
+        selector: &str,
+        source: &str,
+        author: Author<'_>,
+    ) -> serde_json::Value {
+        Self::with_author(Self::save_method(class, selector, source), author)
+    }
+
+    /// [`save_class`](Self::save_class), recorded in the `ChangeLog` as
+    /// `author`.
+    #[must_use]
+    pub fn save_class_by(source: &str, path: &str, author: Author<'_>) -> serde_json::Value {
+        Self::with_author(Self::save_class(source, path), author)
+    }
+
+    fn with_author(mut req: serde_json::Value, author: Author<'_>) -> serde_json::Value {
+        req["author"] = author.name.into();
+        req["author_kind"] = author.kind.as_str().into();
+        req
     }
 
     /// Build a `save-class` request: create a class from `source` at `path`.
@@ -830,6 +898,67 @@ mod tests {
         assert_eq!(req["source"], body);
     }
 
+    /// `FLUSH_KINDS` is a copy of the Erlang list, so read the Erlang source and
+    /// compare, and check the protocol doc names each kind.
+    #[test]
+    fn flush_kinds_match_the_runtime_and_the_protocol_doc() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let erl = std::fs::read_to_string(
+            root.join("runtime/apps/beamtalk_workspace/src/beamtalk_workspace_flush.erl"),
+        )
+        .expect("read beamtalk_workspace_flush.erl");
+        let body = erl
+            .split("\nkind_filters() ->")
+            .nth(1)
+            .and_then(|rest| rest.split("\n\n").next())
+            .expect("kind_filters/0 definition");
+        let runtime: Vec<&str> = body.split('\'').skip(1).step_by(2).collect();
+        assert_eq!(
+            runtime, FLUSH_KINDS,
+            "kind_filters/0 and FLUSH_KINDS differ"
+        );
+        let doc = std::fs::read_to_string(root.join("docs/repl-protocol.md"))
+            .expect("read repl-protocol.md");
+        // Every other place that spells the kinds out: the op table note, and the
+        // MCP tool and param descriptions (attribute literals, so read the source).
+        let others = [
+            "runtime/apps/beamtalk_runtime/src/beamtalk_repl_op_table.erl",
+            "crates/beamtalk-mcp/src/server/tools/flush.rs",
+            "crates/beamtalk-mcp/src/server/params.rs",
+        ];
+        for kind in FLUSH_KINDS {
+            assert!(
+                doc.contains(&format!("`{kind}`")),
+                "docs/repl-protocol.md does not list the flush kind `{kind}`"
+            );
+            for file in others {
+                let text = std::fs::read_to_string(root.join(file)).expect(file);
+                assert!(
+                    text.contains(kind),
+                    "{file} does not name the flush kind `{kind}`"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn authored_saves_send_the_author_and_its_kind() {
+        let author = Author {
+            name: "mcp:save_method",
+            kind: AuthorKind::Agent,
+        };
+        let req = RequestBuilder::save_method_by("Counter", "inc", "1", author);
+        assert_eq!(req["op"], "save-method");
+        assert_eq!(req["author"], "mcp:save_method");
+        assert_eq!(req["author_kind"], "agent");
+        let req = RequestBuilder::save_class_by("Object subclass: G", "src/g.bt", author);
+        assert_eq!(req["op"], "save-class");
+        assert_eq!(req["author_kind"], "agent");
+        // The plain builders name no author: the workspace records its default.
+        let plain = RequestBuilder::save_class("Object subclass: G", "src/g.bt");
+        assert!(plain.get("author").is_none() && plain.get("author_kind").is_none());
+    }
+
     #[test]
     fn save_class_sends_source_and_path() {
         let req = RequestBuilder::save_class("Object subclass: Greeter", "src/greeter.bt");
@@ -1158,6 +1287,23 @@ mod tests {
             RequestBuilder::unload("m"),
             RequestBuilder::save_method("C", "s", "1"),
             RequestBuilder::save_class("Object subclass: C", "src/c.bt"),
+            RequestBuilder::save_method_by(
+                "C",
+                "s",
+                "1",
+                Author {
+                    name: "a",
+                    kind: AuthorKind::Agent,
+                },
+            ),
+            RequestBuilder::save_class_by(
+                "Object subclass: C",
+                "src/c.bt",
+                Author {
+                    name: "a",
+                    kind: AuthorKind::Agent,
+                },
+            ),
             RequestBuilder::flush(FlushScope::Class("C"), true),
             RequestBuilder::changes(),
             RequestBuilder::info(),

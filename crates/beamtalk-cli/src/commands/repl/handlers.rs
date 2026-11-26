@@ -13,7 +13,7 @@
 use super::display::{format_value, output_mode, print_help};
 use super::{
     ReplResponse, client::ReplClient, color, commands, display, display_eval_response,
-    eval_and_display,
+    eval_and_display, flush_and_display,
 };
 /// Result of handling a single REPL command line.
 ///
@@ -235,16 +235,17 @@ pub(super) fn handle_repl_command(line: &str, client: &mut ReplClient) -> Comman
         CommandAction::ShowCodegenUsage => eprintln!("Usage: :show-codegen <expression>"),
         CommandAction::ShowCodegen(code) => handle_show_codegen(code, client),
         CommandAction::Interrupt => handle_interrupt(client),
-        // ADR 0082 Phase 3: REPL alias for `Workspace flush`.
-        CommandAction::Flush => eval_and_display(client, "Workspace flush"),
-        // ADR 0082 Phase 3 (expression-building extracted to
-        // `beamtalk_cli::repl_meta_exprs`, matching
-        // `:remove-method`'s pattern): `:flush <selector>` desugars to
-        // `Workspace flush: <selector>`.
+        // `:flush [<scope>]` sends the `flush` operation (BT-5206), the one
+        // implementation the MCP `flush` tool and the LiveView "Save All to Disk"
+        // button share, instead of evaluating `Workspace flush`. The scope is a
+        // class, an entry kind or `#{ #file => "path" }`.
+        CommandAction::Flush => {
+            flush_and_display(client, beamtalk_repl_protocol::FlushScope::All, false);
+        }
         CommandAction::FlushArg(selector) => {
-            match beamtalk_cli::repl_meta_exprs::flush_expr_for(selector) {
-                Some(expr) => eval_and_display(client, &expr),
-                None => eprintln!("Usage: :flush [<Class>|#kind|#{{ #file => \"path\" }}]"),
+            match beamtalk_cli::repl_meta_exprs::flush_scope_for(selector) {
+                Some(scope) => flush_and_display(client, scope.as_scope(), false),
+                None => eprintln!("{FLUSH_USAGE}"),
             }
         }
         // ADR 0082 Phase 3: REPL alias for `Workspace changes`.
@@ -342,40 +343,39 @@ fn handle_remove_class(arg: &str, client: &mut ReplClient) {
     }
 }
 
-/// Bare `:flush-destructive` (ADR 0113 Phase 4): prompts `y/N`
-/// before evaluating the unscoped `Workspace flushIncludingDestructive`,
-/// which deletes every pending `.bt` file the workspace's `ChangeLog` has a
-/// `remove-class` entry for.
+const FLUSH_USAGE: &str = "Usage: :flush [<Class>|#kind|#{ #file => \"path\" }]";
+const FLUSH_DESTRUCTIVE_USAGE: &str =
+    "Usage: :flush-destructive [<Class>|#kind|#{ #file => \"path\" }]";
+
+/// Bare `:flush-destructive` (ADR 0113 Phase 4): prompts `y/N` before sending
+/// the unscoped `flush` with `confirm_destructive`, which deletes every pending
+/// `.bt` file the workspace's `ChangeLog` has a `remove-class` entry for.
 fn handle_flush_destructive(client: &mut ReplClient) {
     if confirm_destructive_action(
         "This permanently deletes the source file for every pending class removal in the workspace. Continue?",
     ) {
-        eval_and_display(
-            client,
-            beamtalk_cli::repl_meta_exprs::FLUSH_INCLUDING_DESTRUCTIVE_EXPR,
-        );
+        flush_and_display(client, beamtalk_repl_protocol::FlushScope::All, true);
     } else {
         println!("Aborted: no files were deleted.");
     }
 }
 
-/// `:flush-destructive <selector>` (ADR 0113 Phase 4): prompts
-/// `y/N` before evaluating the scoped `Workspace flush: <selector>
-/// confirmDestructive: true`.
+/// `:flush-destructive <scope>` (ADR 0113 Phase 4): prompts `y/N` before
+/// sending the scoped `flush` with `confirm_destructive`. After
+/// `:remove-class Gone` scope it by `#Gone`: the name no longer resolves, and
+/// the `ChangeLog` matches the class by name.
 fn handle_flush_destructive_arg(selector: &str, client: &mut ReplClient) {
-    match beamtalk_cli::repl_meta_exprs::flush_destructive_expr_for(selector) {
-        Some(expr) => {
+    match beamtalk_cli::repl_meta_exprs::flush_scope_for(selector) {
+        Some(scope) => {
             if confirm_destructive_action(&format!(
                 "This permanently deletes the source file for the pending class removal matching `{selector}`. Continue?"
             )) {
-                eval_and_display(client, &expr);
+                flush_and_display(client, scope.as_scope(), true);
             } else {
                 println!("Aborted: no files were deleted.");
             }
         }
-        None => {
-            eprintln!("Usage: :flush-destructive [<Class>|#kind|#{{ #file => \"path\" }}]");
-        }
+        None => eprintln!("{FLUSH_DESTRUCTIVE_USAGE}"),
     }
 }
 
@@ -1100,14 +1100,13 @@ mod tests {
         fn flush_changes_dirty_recheck_commands_all_dispatch() {
             // ADR 0082 Phase 3 aliases: each desugars to a fixed
             // `Workspace ...` eval expression via `eval_and_display` — assert
-            // all four reach the server and are handled, one fake server per
+            // all three reach the server and are handled, one fake server per
             // command since each expects a different `code`. The comparison
             // happens on the main thread (via shared state), not inside the
             // handler's background thread, which `spawn_auth_ok_server` never
             // joins — an `assert_eq!` there would be silently swallowed on
             // failure instead of failing the test.
             for (line, expected_code) in [
-                (":flush", "Workspace flush"),
                 (":changes", "Workspace changes"),
                 (":dirty", "Workspace changes dirtyMethods"),
                 (":recheck image", "Workspace recheckImage"),
@@ -1139,6 +1138,83 @@ mod tests {
                     "line {line:?} sent unexpected eval code"
                 );
             }
+        }
+
+        /// BT-5206: `:flush` and `:flush-destructive`'s scope go to the node as
+        /// the `flush` operation (the MCP tool's and LiveView's implementation),
+        /// never as an evaluated `Workspace flush` expression.
+        #[test]
+        fn flush_lines_send_the_flush_operation() {
+            for (line, expected) in [
+                (":flush", serde_json::json!({"op": "flush"})),
+                (
+                    ":flush Counter",
+                    serde_json::json!({"op": "flush", "class": "Counter"}),
+                ),
+                (
+                    ":flush #'new-class'",
+                    serde_json::json!({"op": "flush", "kind": "new-class"}),
+                ),
+                (
+                    ":flush #{ #file => \"src/a.bt\" }",
+                    serde_json::json!({"op": "flush", "file": "src/a.bt"}),
+                ),
+            ] {
+                let received = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+                let writer = Arc::clone(&received);
+                let port = spawn_auth_ok_server(move |req, ws| {
+                    let op = req.get("op").and_then(|v| v.as_str()).unwrap_or_default();
+                    if op == "flush" || op == "eval" {
+                        writer.lock().unwrap().push(req.clone());
+                        let _ = ws.send(Message::Text(
+                            serde_json::json!({
+                                "status": ["done"],
+                                "value": {"flushed": 0, "files": [], "skipped": [], "conflicts": []}
+                            })
+                            .to_string()
+                            .into(),
+                        ));
+                    }
+                });
+                let mut client = connect_to(port);
+                assert_eq!(
+                    handle_repl_command(line, &mut client),
+                    CommandResult::Handled,
+                    "line {line:?} should be handled"
+                );
+                let sent = received.lock().unwrap().clone();
+                assert_eq!(
+                    sent.len(),
+                    1,
+                    "line {line:?}: expected one request: {sent:?}"
+                );
+                let mut got = sent[0].clone();
+                got.as_object_mut().unwrap().remove("id");
+                assert_eq!(got, expected, "line {line:?}");
+            }
+        }
+
+        /// An unreadable scope is a usage error, never an unscoped flush.
+        #[test]
+        fn flush_with_an_unreadable_scope_sends_nothing() {
+            let contacted = Arc::new(AtomicBool::new(false));
+            let contacted_writer = Arc::clone(&contacted);
+            let port = spawn_auth_ok_server(move |req, _ws| {
+                if matches!(
+                    req.get("op").and_then(|v| v.as_str()),
+                    Some("flush" | "eval")
+                ) {
+                    contacted_writer.store(true, Ordering::SeqCst);
+                }
+            });
+            let mut client = connect_to(port);
+            for line in [":flush two words", ":flush #{ #file => \"\" }"] {
+                assert_eq!(
+                    handle_repl_command(line, &mut client),
+                    CommandResult::Handled
+                );
+            }
+            assert!(!contacted.load(Ordering::SeqCst));
         }
 
         #[test]
@@ -1310,53 +1386,38 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // ADR 0082 Phase 3 — `:flush`, `:flush <sel>`, `:changes`,
-    // `:dirty` meta-command dispatch. The aliases compile to Beamtalk
-    // expressions; the surface-parity contract (and the Erlang side) treats
-    // them as `evaluate` of a known string. These tests pin the translation.
+    // ADR 0082 Phase 3 — `:flush`, `:flush <scope>`, `:changes`, `:dirty`
+    // meta-command dispatch. `:changes`/`:dirty` compile to Beamtalk
+    // expressions; `:flush` sends the `flush` operation (BT-5206), so its scope
+    // parser (`repl_meta_exprs::flush_scope_for`) is tested there and the
+    // dispatch in `flush_lines_send_the_flush_operation` above.
     // -----------------------------------------------------------------------
 
-    /// Construct the Beamtalk expression a `:flush <selector>` line
-    /// dispatches to: `commands::FLUSH.arg` extracts the selector exactly as
-    /// `classify_command` does, and `repl_meta_exprs::flush_expr_for` — the
-    /// same shared function `handle_repl_command`'s real dispatch and
-    /// `tests/repl_protocol.rs` call — builds the expression, so this test
-    /// can only drift from production behaviour if that shared function's
-    /// own contract changes.
-    fn flush_expr_for(line: &str) -> Option<String> {
-        beamtalk_cli::repl_meta_exprs::flush_expr_for(commands::FLUSH.arg(line).unwrap_or(""))
+    /// `commands::FLUSH.arg` extracts the scope exactly as `classify_command`
+    /// does, and `flush_scope_for` — the function the real dispatch calls —
+    /// parses it.
+    fn flush_scope_for(line: &str) -> Option<beamtalk_cli::repl_meta_exprs::ReplFlushScope> {
+        beamtalk_cli::repl_meta_exprs::flush_scope_for(commands::FLUSH.arg(line).unwrap_or(""))
     }
 
     #[test]
-    fn flush_class_selector_translates_to_workspace_flush_message() {
+    fn flush_lines_parse_to_their_scope() {
+        use beamtalk_cli::repl_meta_exprs::ReplFlushScope as S;
         assert_eq!(
-            flush_expr_for(":flush Counter"),
-            Some("Workspace flush: Counter".to_string())
+            flush_scope_for(":flush Counter"),
+            Some(S::Class("Counter".into()))
         );
-    }
-
-    #[test]
-    fn flush_symbol_kind_selector_translates_verbatim() {
         assert_eq!(
-            flush_expr_for(":flush #'new-class'"),
-            Some("Workspace flush: #'new-class'".to_string())
+            flush_scope_for(":flush   Counter   "),
+            Some(S::Class("Counter".into()))
         );
-    }
-
-    #[test]
-    fn flush_dictionary_selector_translates_verbatim() {
         assert_eq!(
-            flush_expr_for(":flush #{ #file => \"src/foo.bt\" }"),
-            Some("Workspace flush: #{ #file => \"src/foo.bt\" }".to_string())
+            flush_scope_for(":flush #'new-class'"),
+            Some(S::Kind("new-class".into()))
         );
-    }
-
-    #[test]
-    fn flush_with_trailing_whitespace_in_selector_is_trimmed() {
-        // `extract_command_arg` trims — selectors don't end with stray space.
         assert_eq!(
-            flush_expr_for(":flush   Counter   "),
-            Some("Workspace flush: Counter".to_string())
+            flush_scope_for(":flush #{ #file => \"src/foo.bt\" }"),
+            Some(S::File("src/foo.bt".into()))
         );
     }
 
@@ -1368,7 +1429,6 @@ mod tests {
     /// match already forbids).
     fn bare_alias_expr(line: &str) -> Option<&'static str> {
         match classify_command(line)? {
-            CommandAction::Flush => Some("Workspace flush"),
             CommandAction::Changes => Some("Workspace changes"),
             CommandAction::Dirty => Some("Workspace changes dirtyMethods"),
             CommandAction::RecheckImage => Some("Workspace recheckImage"),
@@ -1376,9 +1436,12 @@ mod tests {
         }
     }
 
+    /// `:flush` is not an evaluated expression (BT-5206): it sends the `flush`
+    /// operation (`flush_lines_send_the_flush_operation`).
     #[test]
-    fn bare_flush_translates_to_workspace_flush() {
-        assert_eq!(bare_alias_expr(":flush"), Some("Workspace flush"));
+    fn bare_flush_is_not_an_alias_expression() {
+        assert_eq!(classify_command(":flush"), Some(CommandAction::Flush));
+        assert_eq!(bare_alias_expr(":flush"), None);
     }
 
     #[test]
@@ -1404,9 +1467,9 @@ mod tests {
 
     #[test]
     fn flush_with_empty_selector_reports_no_expression() {
-        // `:flush ` (trailing space only) is a usage error, not an eval.
-        assert_eq!(flush_expr_for(":flush "), None);
-        assert_eq!(flush_expr_for(":flush     "), None);
+        // `:flush ` (trailing space only) is a usage error, not a flush.
+        assert_eq!(flush_scope_for(":flush "), None);
+        assert_eq!(flush_scope_for(":flush     "), None);
     }
 
     // -----------------------------------------------------------------------
@@ -1438,8 +1501,7 @@ mod tests {
     // ADR 0113 Phase 4 — `:remove-class <Class>` and
     // `:flush-destructive [<selector>]` meta-command dispatch, matching the
     // `:remove-method`/`:flush` alias pattern. The expression-building logic
-    // (`remove_class_expr_for`, `flush_destructive_expr_for`,
-    // `FLUSH_INCLUDING_DESTRUCTIVE_EXPR`) lives in
+    // (`remove_class_expr_for`; `flush_scope_for` for the flush scope) lives in
     // `beamtalk_cli::repl_meta_exprs` — shared with, and tested by,
     // `tests/repl_protocol.rs` — so only dispatch classification is tested
     // here; the terminal `y/N` confirmation gate is interactive and not unit

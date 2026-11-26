@@ -805,11 +805,17 @@ defmodule BtAttachWeb.WorkspaceLive do
   def handle_async(:test_discover, result, socket),
     do: TestRunner.handle_async(:test_discover, result, socket)
 
+  # Every exit-path unsubscribe goes through the injectable workspace client, so
+  # a test (and a stub client) sees them (BT-5206).
+  defp ws_client, do: Application.get_env(:bt_attach, :workspace_client, Workspace)
+
   @impl true
   def terminate(_reason, socket) do
-    # Best-effort: drop our Transcript + bindings subscriptions so the workspace
-    # doesn't keep pushing to this (now-dead) pid. The event server also
-    # auto-removes dead subscribers via its monitor, so this is belt-and-braces.
+    # Best-effort: drop every live push-stream subscription (transcript, actors,
+    # classes, bindings, flush, reload_check) so the workspace doesn't keep pushing
+    # to this (now-dead) pid. The bus also auto-removes dead subscribers via its
+    # monitor, so this is belt-and-braces (BT-5206: it named only two streams and
+    # left `classes` and `reload_check` to the monitor's `net_ticktime` lag).
     #
     # Then hand the session to the registry's grace window rather than closing it
     # outright. A LiveView `terminate/2` fires on BOTH a real tab close AND a
@@ -823,15 +829,14 @@ defmodule BtAttachWeb.WorkspaceLive do
     # LiveView process), so it does NOT go away just because we exit — the
     # registry's reap is what actually reclaims it.
     if socket.assigns[:connected] do
-      Workspace.unsubscribe_transcript(self())
-      Workspace.unsubscribe_bindings(self())
+      ws_client().unsubscribe_all(self())
 
       # Also drop any live per-object change subscription (BT-2492) so the watch
       # server stops pushing to this dead pid. Belt-and-braces: the watch server
       # monitors subscribers and auto-removes dead ones, same as the streams above.
       case socket.assigns[:inspect_watch] do
         {:beamtalk_object, _c, _m, pid} = term when is_pid(pid) ->
-          Workspace.unsubscribe_object_changes(term, self())
+          ws_client().unsubscribe_object_changes(term, self())
 
         _ ->
           :ok
@@ -842,7 +847,7 @@ defmodule BtAttachWeb.WorkspaceLive do
       # per distinct watched pid suffices even if several windows share an actor —
       # `Enum.uniq` over the watched terms avoids a redundant (harmless) RPC.
       for term <- Inspector.window_watched_terms(socket.assigns[:windows]) do
-        Workspace.unsubscribe_object_changes(term, self())
+        ws_client().unsubscribe_object_changes(term, self())
       end
 
       case socket.assigns[:token] do

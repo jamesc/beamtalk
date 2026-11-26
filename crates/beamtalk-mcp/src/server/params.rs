@@ -478,7 +478,7 @@ pub struct FlushParams {
     pub file: Option<String>,
     /// Optional change-kind symbol (e.g. `"new-class"`) to scope the flush.
     #[schemars(
-        description = "Optional change-kind symbol to scope the flush, e.g. \"new-class\" (compiles to 'Workspace flush: #'new-class'). Mutually exclusive with 'class' and 'file'."
+        description = "Optional change-kind to scope the flush: one of \"new-class\", \"remove-method\", \"remove-class\", \"rename-class\" or \"rename-method\" (compiles to 'Workspace flush: #'new-class'). Mutually exclusive with 'class' and 'file'."
     )]
     pub kind: Option<String>,
     /// Required-when-applicable Tier-2 confirmation (ADR 0113 Phase 2/4).

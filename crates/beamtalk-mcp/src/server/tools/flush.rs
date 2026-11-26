@@ -24,7 +24,7 @@ impl BeamtalkMcp {
     /// `file`, and `kind` filters are mutually exclusive; at most one may be
     /// supplied.
     #[tool(
-        description = "Write pending durable ChangeLog entries to disk via byte-span splice + atomic rename, with external-edit conflict detection. With no arguments, flushes every pending durable Tier-1 change ('Workspace flush'). At most one of 'class', 'file', or 'kind' may be supplied: 'class' scopes to one class ('Workspace flush: ClassName'), 'file' scopes to one source file ('Workspace flush: #{ #file => \"path\" }'), and 'kind' scopes to a ChangeEntry kind such as \"new-class\" ('Workspace flush: #'new-class'). DESTRUCTIVE when 'confirm_destructive' is true: pending 'remove-class' entries (from 'remove_class') delete their .bt file from disk — see 'confirm_destructive's own description for the required-argument gate. Returns a FlushResult summary listing files written and any conflicts; a skipped destructive entry is reported distinctly as 'skipped: destructive', not applied. (ADR 0082 Phase 3 / ADR 0113 Phase 2, BT-2288/BT-3207.)",
+        description = "Write pending durable ChangeLog entries to disk via byte-span splice + atomic rename, with external-edit conflict detection. With no arguments, flushes every pending durable Tier-1 change ('Workspace flush'). At most one of 'class', 'file', or 'kind' may be supplied: 'class' scopes to one class ('Workspace flush: ClassName'), 'file' scopes to one source file ('Workspace flush: #{ #file => \"path\" }'), and 'kind' scopes to one ChangeEntry kind: \"new-class\", \"remove-method\", \"remove-class\", \"rename-class\" or \"rename-method\" ('Workspace flush: #'new-class'). An empty string for any of the three is refused, not read as unscoped. DESTRUCTIVE when 'confirm_destructive' is true: pending 'remove-class' entries (from 'remove_class') delete their .bt file from disk — see 'confirm_destructive's own description for the required-argument gate. Returns a FlushResult summary listing files written and any conflicts; a skipped destructive entry is reported distinctly as 'skipped: destructive', not applied. (ADR 0082 Phase 3 / ADR 0113 Phase 2, BT-2288/BT-3207.)",
         annotations(read_only_hint = false, destructive_hint = true)
     )]
     pub(crate) async fn flush(
@@ -32,6 +32,20 @@ impl BeamtalkMcp {
         Parameters(params): Parameters<FlushParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::start_quiet("flush");
+        // An empty filter is refused, not read as "no filter": flushing every
+        // pending change because a scope came through blank would widen it.
+        for (name, value) in [
+            ("class", params.class.as_deref()),
+            ("file", params.file.as_deref()),
+            ("kind", params.kind.as_deref()),
+        ] {
+            if value.is_some_and(str::is_empty) {
+                return Err(rmcp::ErrorData::invalid_params(
+                    format!("flush: '{name}' must not be empty — omit it to flush everything."),
+                    None,
+                ));
+            }
+        }
         // Mutual exclusivity: at most one filter.
         let provided = [
             params.class.as_deref(),
@@ -39,7 +53,7 @@ impl BeamtalkMcp {
             params.kind.as_deref(),
         ]
         .into_iter()
-        .filter(|v| v.is_some_and(|s| !s.is_empty()))
+        .flatten()
         .count();
         if provided > 1 {
             return Err(rmcp::ErrorData::invalid_params(
@@ -58,9 +72,9 @@ impl BeamtalkMcp {
         );
 
         let scope = match (
-            params.class.as_deref().filter(|s| !s.is_empty()),
-            params.file.as_deref().filter(|s| !s.is_empty()),
-            params.kind.as_deref().filter(|s| !s.is_empty()),
+            params.class.as_deref(),
+            params.file.as_deref(),
+            params.kind.as_deref(),
         ) {
             (Some(class), None, None) => {
                 validate_class_name(class)?;
