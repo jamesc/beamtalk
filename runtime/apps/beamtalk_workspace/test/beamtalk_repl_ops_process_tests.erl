@@ -79,7 +79,7 @@ pid_text(Pid) -> list_to_binary(pid_to_list(Pid)).
 
 children_by_live_pid_and_by_text_test() ->
     with_supervisor(fun(Sup) ->
-        Expected = fun({value, #{<<"children">> := [Row], <<"truncated">> := false}}) ->
+        Expected = fun({children, #{<<"children">> := [Row], <<"truncated">> := false}}) ->
             ?assertMatch(
                 #{
                     <<"kind">> := <<"otpProcess">>,
@@ -99,7 +99,7 @@ children_of_a_worker_is_empty_test() ->
     with_supervisor(fun(Sup) ->
         [{_, Worker, _, _}] = supervisor:which_children(Sup),
         ?assertEqual(
-            {value, #{<<"children">> => [], <<"truncated">> => false}},
+            {children, #{<<"children">> => [], <<"truncated">> => false}},
             request(<<"children">>, #{<<"supervisor">> => Worker})
         )
     end).
@@ -110,7 +110,7 @@ children_never_calls_a_non_supervisor_test() ->
     {ok, Server} = gen_server:start(?MODULE, crash_on_call, []),
     try
         ?assertEqual(
-            {value, #{<<"children">> => [], <<"truncated">> => false}},
+            {children, #{<<"children">> => [], <<"truncated">> => false}},
             request(<<"children">>, #{<<"supervisor">> => Server})
         ),
         ?assert(is_process_alive(Server))
@@ -155,7 +155,7 @@ children_caps_the_row_count_test() ->
     {ok, Sup} = supervisor:start_link(?MODULE, many),
     try
         [{ok, _} = supervisor:start_child(Sup, []) || _ <- lists:seq(1, 520)],
-        {value, #{<<"children">> := Rows, <<"truncated">> := Truncated}} =
+        {children, #{<<"children">> := Rows, <<"truncated">> := Truncated}} =
             request(<<"children">>, #{<<"supervisor">> => Sup}),
         ?assertEqual(500, length(Rows)),
         ?assertEqual(true, Truncated)
@@ -164,25 +164,29 @@ children_caps_the_row_count_test() ->
         exit(Sup, shutdown)
     end.
 
-%% The WebSocket edge cannot carry a tuple holding a pid: a live handle is
-%% sent as its stable id, and `null` stays `null`.
-wire_projects_live_handles_to_stable_ids_test() ->
-    Pid = beamtalk_test_proc:spawn_idle(),
+%% The WebSocket cannot carry a tuple holding a pid. Every WebSocket reply goes
+%% `dispatch` -> `handle_term` -> `beamtalk_repl_ops:encode/2` (the module's own
+%% `handle/4` is not on that path), so the projection lives in `encode/2`: a live
+%% handle is sent as its stable id, and `null` stays `null`.
+encode_projects_live_handles_to_stable_ids_test() ->
+    Pid = list_to_pid("<0.201.0>"),
     Rows = [
         #{<<"label">> => <<"Counter">>, <<"handle">> => {beamtalk_object, 'Counter', counter, Pid}},
         #{<<"label">> => <<"Sup">>, <<"handle">> => {beamtalk_supervisor, 'Sup', sup, Pid}},
         #{<<"label">> => <<"process">>, <<"handle">> => null}
     ],
-    {value, #{<<"children">> := Wired}} =
-        beamtalk_repl_ops_process:wire(
-            {value, #{<<"children">> => Rows, <<"truncated">> => false}}
-        ),
-    Text = pid_text(Pid),
+    Msg = {protocol_msg, <<"children">>, <<"m1">>, <<"s1">>, #{}},
+    Json = beamtalk_repl_ops:encode(
+        {children, #{<<"children">> => Rows, <<"truncated">> => false}}, Msg
+    ),
+    #{<<"value">> := #{<<"children">> := Wired}} = json:decode(Json),
     ?assertMatch(
         [
             #{
                 <<"handle">> := #{
-                    <<"kind">> := <<"actor">>, <<"class">> := <<"Counter">>, <<"pid">> := Text
+                    <<"kind">> := <<"actor">>,
+                    <<"class">> := <<"Counter">>,
+                    <<"pid">> := <<"<0.201.0>">>
                 }
             },
             #{<<"handle">> := #{<<"kind">> := <<"supervisor">>, <<"class">> := <<"Sup">>}},
@@ -191,10 +195,12 @@ wire_projects_live_handles_to_stable_ids_test() ->
         Wired
     ).
 
-children_encodes_as_json_at_the_edge_test() ->
+%% The path a WebSocket client takes (`beamtalk_repl_server:handle_op/4`), not
+%% this module's `handle/4`: a supervisor with a foreign child answers JSON.
+children_over_the_websocket_path_test() ->
     with_supervisor(fun(Sup) ->
         Msg = {protocol_msg, <<"children">>, <<"m1">>, <<"s1">>, #{}},
-        Json = beamtalk_repl_ops_process:handle(
+        Json = beamtalk_repl_server:handle_op(
             <<"children">>, #{<<"supervisor">> => pid_text(Sup)}, Msg, self()
         ),
         #{<<"value">> := #{<<"children">> := [#{<<"handle">> := null}]}} = json:decode(Json)

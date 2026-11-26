@@ -395,6 +395,19 @@ not_a_repo() ->
         beamtalk_test_fs:rm_rf(Dir)
     end.
 
+%% A side that ends inside a multi-byte character loses those bytes, and says so:
+%% the panel warns on `truncated`. Valid text, and text read as Latin-1, is whole.
+bounded_text_reports_every_cut_test() ->
+    ?assertEqual({<<"abc">>, false}, beamtalk_repl_ops_git:bounded_text(<<"abc">>)),
+    ?assertEqual({<<"ab">>, true}, beamtalk_repl_ops_git:bounded_text(<<"ab", 195>>)),
+    ?assertEqual(
+        {<<"caf", 195, 169, "\n">>, false},
+        beamtalk_repl_ops_git:bounded_text(<<"caf", 233, "\n">>)
+    ),
+    Big = binary:copy(<<"é"/utf8>>, 600000),
+    {Cut, true} = beamtalk_repl_ops_git:bounded_text(Big),
+    ?assert(byte_size(Cut) =< 1048576).
+
 %%% Fixtures
 
 make_dir() ->

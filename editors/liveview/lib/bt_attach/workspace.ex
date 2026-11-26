@@ -1763,7 +1763,7 @@ defmodule BtAttach.Workspace do
   @spec supervisor_children(pid()) :: {:ok, [map()]} | {:error, term()}
   def supervisor_children(sup_pid) when is_pid(sup_pid) do
     case dispatch_simple("children", %{"supervisor" => sup_pid}) do
-      {:value, %{"children" => rows}} when is_list(rows) -> {:ok, rows}
+      {:children, %{"children" => rows}} when is_list(rows) -> {:ok, rows}
       {:error, reason} -> {:error, reason}
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
       other -> {:error, {:unexpected_reply, other}}

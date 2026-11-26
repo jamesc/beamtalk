@@ -41,7 +41,8 @@ The reply is bounded: `git-diff` returns at most 1 MiB per side
 (`truncated` is `true` when it cut), `git-log` at most 500 commits (the
 `limit` it applied is in the reply) and `git-status` at most 5000 files
 (`truncated`). The cap is on the reply, not on what git prints: `beamtalk_git`
-still buffers git's output (bounded in time by its 30 s timeout). Diff text is
+still buffers git's output (bounded in time by its 30 s timeout). A diff read as
+Latin-1 is longer than the bytes git printed, so a side can take up to 2 MiB. Diff text is
 always valid UTF-8; bytes that are not are read as Latin-1. A commit message
 is at most 64 KiB.
 
@@ -59,6 +60,11 @@ is at most 64 KiB.
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -export([handle/4, handle_term/4, describe_ops/0]).
+
+%% Exported for white-box tests of the reply bound.
+-ifdef(TEST).
+-export([bounded_text/1]).
+-endif.
 
 -define(MAX_DIFF_BYTES, 1048576).
 -define(MAX_LOG_COUNT, 500).
@@ -227,7 +233,9 @@ status(#{files := Files} = Status) ->
 bounded_text(Bin) when byte_size(Bin) > ?MAX_DIFF_BYTES ->
     {utf8(binary:part(Bin, 0, ?MAX_DIFF_BYTES)), true};
 bounded_text(Bin) ->
-    {utf8(Bin), false}.
+    Text = utf8(Bin),
+    %% Whole characters only: bytes dropped from an incomplete tail are a cut too.
+    {Text, byte_size(Text) < byte_size(Bin)}.
 
 -spec utf8(binary()) -> binary().
 utf8(Bin) ->

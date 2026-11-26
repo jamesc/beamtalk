@@ -1586,7 +1586,7 @@ defmodule BtAttach.WorkspaceRpcTest do
       mock_rpc(
         decode_asserting(
           fn req -> assert req == %{"op" => "children", "supervisor" => pid} end,
-          {:value, %{"children" => [row], "truncated" => false}}
+          {:children, %{"children" => [row], "truncated" => false}}
         )
       )
 

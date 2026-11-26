@@ -997,7 +997,7 @@ contract; the table gives the shape per operation family.
 | Loading | `load-source`, `load-project`, `save-section`, `save-native-source`, `save-method`, `save-class`, `revert-method`, `reload-file` | `{loaded, Classes, Warnings}` · `{load_project, Classes, Errors, Summary, Warnings}` · `{value, Map}` |
 | Workspace state | `flush`, `changes`, `info` | `{value, Map}`: a `FlushResult` summary · `#{entries}` · `#{version, node, workspace_id, settings}`, wire-shaped (binary keys, `null` for absent) |
 | Git | `git-status`, `git-diff`, `git-log`, `git-stage`, `git-unstage`, `git-commit`, `git-revert-file` | `{value, Map}`, wire-shaped: a status, a diff pair, a commit list, or the path / `committed` echoed back |
-| Process navigation | `children`, `process-info` | `{value, #{children, truncated}}` (rows keep a live `handle` over distribution) · `{value, #{pid, alive, ...}}` |
+| Process navigation | `children`, `process-info` | `{children, #{children, truncated}}` (rows keep a live `handle` over distribution; `encode/2` sends its stable id) · `{value, #{pid, alive, ...}}` |
 | Developer reads | `complete`, `erlang-complete`, `hover`, `erlang-help`, `diagnostics`, `describe`, `methods`, `inherited-methods`, `list-classes`, `show-codegen`, `test`, `test-all`, `list-tests`, `load-tests` | `{completions, [binary()]}` · `{docs, binary()}` · `{diagnostics, [map()]}` · `{describe, Ops, Versions}` · `{methods, Methods, StateVars}` · `{inherited_methods, Methods}` · `{class_list, [ClassInfo]}` · `{codegen, CoreErlang, Warnings}` · `{test_results, map()}` · `{value, JsonValue}` |
 | Browse and navigation | `browse-*`, `nav-query`, `nav-symbols`, `reload-findings`, `export-traces` | `{value, JsonValue}` |
 

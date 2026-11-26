@@ -25,13 +25,13 @@ process (a future, a bare pid).
 
 ## `children`
 
-Param `supervisor`. `{value, #{<<"children">> => [Row]}}`, in `which_children`
+Param `supervisor`. `{children, #{<<"children">> => [Row], <<"truncated">> => boolean()}}`, in `which_children`
 order, at most 500 rows (`truncated` says whether it cut). A row is
 `label`, `className`, `kind`, `pid`, `registeredName`, `childCount`,
 `isSupervisor` and `handle`. `handle` is the live
 `{beamtalk_supervisor | beamtalk_object, Class, Module, Pid}` term the
 Inspector follows into the child, or `null` for a foreign or restarting child
-(shown, not drillable). On the wire (`handle/4`) a handle is a stable id:
+(shown, not drillable). On the wire (`beamtalk_repl_ops:encode/2`) a handle is a stable id:
 `#{<<"kind">>, <<"class">>, <<"pid">>}`, with `pid` the node-local text. A
 dead supervisor is `{error, #beamtalk_error{}}` (`stale_handle`).
 
@@ -45,22 +45,17 @@ was live a moment ago.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
--export([handle/4, handle_term/4, describe_ops/0]).
-
-%% Exported for white-box tests of the wire projection.
--ifdef(TEST).
--export([wire/1]).
--endif.
+-export([handle/4, handle_term/4, describe_ops/0, wire_children/1]).
 
 -define(MAX_CHILDREN, 500).
 
 -doc """
-WebSocket-edge wrapper: encodes the term result to JSON. A live child
-`handle` becomes its stable id first.
+WebSocket-edge wrapper: encodes the term result to JSON. A `children` result's
+live child `handles` become stable ids inside `beamtalk_repl_ops:encode/2`.
 """.
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(Op, Params, Msg, SessionPid) ->
-    beamtalk_repl_ops:encode(wire(handle_term(Op, Params, Msg, SessionPid)), Msg).
+    beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
 
 -doc "Term-returning handler for `children` and `process-info`.".
 -spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
@@ -71,7 +66,7 @@ handle_term(<<"children">>, Params, _Msg, _SessionPid) ->
             case beamtalk_process_navigation:child_handles(PidBin) of
                 {ok, Rows} ->
                     {Kept, Truncated} = cap(Rows),
-                    {value, #{<<"children">> => Kept, <<"truncated">> => Truncated}};
+                    {children, #{<<"children">> => Kept, <<"truncated">> => Truncated}};
                 {error, Reason} ->
                     {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
             end;
@@ -120,12 +115,12 @@ read_process_info(Pid, PidBin) ->
     end.
 
 %% The wire form of a `children` result: each live handle becomes its stable
-%% id, since JSON cannot carry a tuple holding a pid.
--spec wire(beamtalk_repl_ops:op_result()) -> beamtalk_repl_ops:op_result().
-wire({value, #{<<"children">> := Rows} = Result}) ->
-    {value, Result#{<<"children">> := [wire_row(Row) || Row <- Rows]}};
-wire(Other) ->
-    Other.
+%% id, since JSON cannot carry a tuple holding a pid. Called by
+%% `beamtalk_repl_ops:encode/2`.
+-doc false.
+-spec wire_children(map()) -> map().
+wire_children(#{<<"children">> := Rows} = Result) ->
+    Result#{<<"children">> := [wire_row(Row) || Row <- Rows]}.
 
 -spec wire_row(map()) -> map().
 wire_row(#{<<"handle">> := {Tag, Class, _Module, Pid}} = Row) when is_pid(Pid) ->

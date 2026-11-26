@@ -54,6 +54,7 @@ leak compiler/runtime internals.
 | trace | `{trace, Steps, Output, Warnings}` | `eval` (trace mode) |
 | script_exit | `{script_exit, Code, Output, Warnings}` | `eval` (connected `Program exit:`) |
 | actors | `{actors, [ActorMeta]}` | `actors` |
+| children | `{children, #{<<"children">> => [Row], <<"truncated">> => boolean()}}` | `children` |
 | inspect | `{inspect, map() \| binary()}` | `inspect` |
 | status | `{status, ok}` | `kill`, `interrupt`, `close`, `shutdown` |
 | value | `{value, JsonValue}` | `nav-query`, `nav-symbols`, `export-traces`, `list-tests`, `reload-findings` |
@@ -124,6 +125,7 @@ tagged terms; `encode/2` is the only thing that turns them into JSON.
     | {script_exit, Code :: non_neg_integer(), Output :: binary(),
         Warnings :: [beamtalk_repl_protocol:warning()]}
     | {actors, [map()]}
+    | {children, map()}
     | {inspect, map() | binary()}
     | {status, ok}
     | {value, JsonValue :: term()}
@@ -399,6 +401,11 @@ encode({script_exit, Code, Output, Warnings}, Msg) ->
     beamtalk_repl_protocol:encode_script_exit(Code, Msg, Output, Warnings);
 encode({actors, Actors}, Msg) ->
     beamtalk_repl_protocol:encode_actors(Actors, Msg, fun beamtalk_repl_json:term_to_json/1);
+encode({children, Result}, Msg) ->
+    %% Rows hold live `{beamtalk_supervisor | beamtalk_object, ...}` handles for
+    %% a distribution client; JSON cannot carry them, so each becomes its stable
+    %% id here, at the one seam every WebSocket reply passes through (BT-5205).
+    encode({value, beamtalk_repl_ops_process:wire_children(Result)}, Msg);
 encode({inspect, Map}, Msg) when is_map(Map) ->
     beamtalk_repl_protocol:encode_inspect(Map, Msg, fun beamtalk_repl_json:term_to_json/1);
 encode({inspect, Bin}, Msg) when is_binary(Bin) ->

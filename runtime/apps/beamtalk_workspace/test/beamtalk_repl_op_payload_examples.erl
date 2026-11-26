@@ -419,10 +419,10 @@ examples() ->
             }}},
         {<<"git-stage">>, <<"git-stage">>, {value, #{<<"path">> => <<"src/counter.bt">>}}},
         {<<"git-commit">>, <<"git-commit">>, {value, #{<<"committed">> => true}}},
-        %% BT-5205: process navigation (`beamtalk_repl_ops_process`). On the wire a
-        %% child `handle` is its stable id; a foreign child's is `null`.
+        %% BT-5205: process navigation (`beamtalk_repl_ops_process`). The term holds a
+        %% live `handle`; `encode/2` sends its stable id, and a foreign child's is `null`.
         {<<"children">>, <<"children">>,
-            {value, #{
+            {children, #{
                 <<"children">> => [
                     #{
                         <<"label">> => <<"Counter">>,
@@ -432,11 +432,8 @@ examples() ->
                         <<"registeredName">> => null,
                         <<"childCount">> => 0,
                         <<"isSupervisor">> => false,
-                        <<"handle">> => #{
-                            <<"kind">> => <<"actor">>,
-                            <<"class">> => <<"Counter">>,
-                            <<"pid">> => <<"<0.201.0>">>
-                        }
+                        <<"handle">> =>
+                            {beamtalk_object, 'Counter', counter, list_to_pid("<0.201.0>")}
                     },
                     #{
                         <<"label">> => <<"process">>,

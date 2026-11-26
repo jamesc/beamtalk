@@ -213,8 +213,10 @@ git_commit(_Message) ->
 
 -doc """
 Discard a working-tree change for a single path (`git restore -- <path>`).
-A path that names a directory is refused: one call must not discard every
-change under it.
+Anything but one tracked file is refused (a directory, an untracked path): one
+call must not discard every change under a directory. The check and the
+restore are two git invocations, so a change to the index in between is not
+seen (best-effort).
 
 The human counterpart to the agent ChangeLog `revert:`. Returns `{ok, nil}`.
 """.
