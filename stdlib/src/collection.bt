@@ -392,10 +392,11 @@ abstract typed Value subclass: Collection(E)
 
   /// Return the largest element.
   ///
-  /// Compares using the runtime's native total ordering (intended for
-  /// `Integer`/`Float`) — it does *not* dispatch a Beamtalk `>` message, so a
-  /// custom `>` method on the element type is not honoured. Raises a
-  /// `#beamtalk_error` on an empty collection — there is no maximum of nothing.
+  /// All numbers, all Strings or all Symbols compare natively. Any other
+  /// mix is folded pairwise with a dispatched `>` (as `Number>>max:`), so a
+  /// user type's `>` and `greaterThanFromNumber:` hooks are honoured and
+  /// `#(3, nil) max` raises as `3 max: nil` does. Raises a `#beamtalk_error`
+  /// on an empty collection — there is no maximum of nothing.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -405,9 +406,10 @@ abstract typed Value subclass: Collection(E)
 
   /// Return the smallest element.
   ///
-  /// Compares using the runtime's native total ordering (intended for
-  /// `Integer`/`Float`) — it does *not* dispatch a Beamtalk `<` message. Raises
-  /// a `#beamtalk_error` on an empty collection.
+  /// All numbers, all Strings or all Symbols compare natively. Any other
+  /// mix is folded pairwise with a dispatched `<` (as `Number>>min:`), so a
+  /// user type's `<` and `lessThanFromNumber:` hooks are honoured. Raises a
+  /// `#beamtalk_error` on an empty collection.
   ///
   /// ## Examples
   /// ```beamtalk

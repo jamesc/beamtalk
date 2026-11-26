@@ -1,0 +1,54 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5214: Collection `max` / `min` honour comparison hooks. All-number,
+// all-String and all-Symbol collections keep the native order; any other mix
+// folds pairwise with a dispatched `>` / `<` (ADR 0116 comparison addendum).
+// Fixture: `fixtures/money.bt` (`<`, `>` and the four `...FromNumber:` hooks).
+
+TestCase subclass: CollectionMaxMinTest
+
+  money: cents => (Money new) withCents: cents
+
+  /// `{n, aMoney}` without a literal-array expression element; the result is
+  /// untyped on purpose (it mixes Integer and Money).
+  mixed: n with: m => #(0, 1) collect: [:i | (i < 1) ifTrue: [n] ifFalse: [m]]
+
+  testNumbersUnchanged =>
+    self assert: #(3, 1, 4, 1, 5) max equals: 5
+    self assert: #(3, 1, 4, 1, 5) min equals: 1
+    self assert: #(3, 2.5, 1) max equals: 3
+    self assert: #(3, 2.5, 1) min equals: 1
+
+  testMixedNumberAndNilRaises =>
+    self should: [#(3, nil) max] raise: #does_not_understand
+    self should: [#(3, nil) min] raise: #does_not_understand
+
+  testNilErrorMatchesPairwiseMax =>
+    e := [#(3, nil) max] on: Error do: [:x | x]
+    @expect type
+    expected := [3 max: nil] on: Error do: [:x | x]
+    self assert: e message equals: expected message
+    self assert: e hint equals: expected hint
+
+  testValueTypeUsesDispatchedOrdering =>
+    m := #(100, 900, 500) collect: [:c | self money: c]
+    self assert: m max cents equals: 900
+    self assert: m min cents equals: 100
+
+  testValueTypeMixedWithNumbersUsesHooks =>
+    m := self money: 500
+    self assert: (self mixed: 3 with: m) max equals: m
+    self assert: (self mixed: 3 with: m) min equals: 3
+    self assert: (self mixed: 900 with: m) max equals: 900
+    self assert: (self mixed: 900 with: m) min equals: m
+
+  testEmptyStillRaises =>
+    self should: [#() max] raise: #empty_collection
+    self should: [#() min] raise: #empty_collection
+
+  testStringsAndSymbolsKeepNativeOrder =>
+    self assert: #("b", "c", "a") max equals: "c"
+    self assert: #("b", "c", "a") min equals: "a"
+    self assert: #(#b, #c, #a) max equals: #c
+    self assert: #(#b, #c, #a) min equals: #a

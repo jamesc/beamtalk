@@ -87,31 +87,70 @@ sum(Self) ->
     lists:foldl(fun(Elem, Acc) -> Acc + Elem end, 0, to_list(Self)).
 
 -doc """
-Return the largest element using Erlang's native term ordering (`>`), not a
-dispatched Beamtalk `>` message.
+Return the largest element.
 
 Backs `@primitive "max"` on Collection. Raises `empty_collection` on an empty
 collection — there is no sensible maximum of nothing.
+
+When every element is a number, or every element is a String, or every
+element is a Symbol, this is `lists:max/1` (native order; for Strings and
+Symbols that is today's behaviour). Any other mix is folded pairwise with a
+dispatched `>`, exactly as `Number>>max:` does (`Acc > Elem` keeps `Acc`,
+otherwise `Elem`), so a user type's `>` and the `greaterThanFromNumber:`
+hooks are honoured and `#(3, nil) max` raises what `3 max: nil` raises.
 """.
 -spec maximum(term()) -> term().
 maximum(Self) ->
     case to_list(Self) of
-        [] -> raise_empty('max');
-        List -> lists:max(List)
+        [] ->
+            raise_empty('max');
+        [First | Rest] = List ->
+            case native_orderable(List) of
+                true -> lists:max(List);
+                false -> fold_dispatched(Rest, First, '>')
+            end
     end.
 
 -doc """
-Return the smallest element using Erlang's native term ordering (`<`), not a
-dispatched Beamtalk `<` message.
+Return the smallest element.
 
 Backs `@primitive "min"` on Collection. Raises `empty_collection` on an empty
-collection.
+collection. Same strategy as `maximum/1`, with a dispatched `<`
+(`Acc < Elem` keeps `Acc`, otherwise `Elem`, as `Number>>min:`).
 """.
 -spec minimum(term()) -> term().
 minimum(Self) ->
     case to_list(Self) of
-        [] -> raise_empty('min');
-        List -> lists:min(List)
+        [] ->
+            raise_empty('min');
+        [First | Rest] = List ->
+            case native_orderable(List) of
+                true -> lists:min(List);
+                false -> fold_dispatched(Rest, First, '<')
+            end
+    end.
+
+%% True when native term order is the right answer: all numbers, all
+%% Strings (binaries) or all Symbols (atoms). One pass, stops at the first
+%% element of a different kind.
+-spec native_orderable([term(), ...]) -> boolean().
+native_orderable([First | Rest]) ->
+    Kind =
+        if
+            is_number(First) -> fun erlang:is_number/1;
+            is_binary(First) -> fun erlang:is_binary/1;
+            is_atom(First) -> fun erlang:is_atom/1;
+            true -> undefined
+        end,
+    Kind =/= undefined andalso lists:all(Kind, Rest).
+
+-spec fold_dispatched(list(), term(), '>' | '<') -> term().
+fold_dispatched([], Acc, _Op) ->
+    Acc;
+fold_dispatched([Elem | Rest], Acc, Op) ->
+    case beamtalk_message_dispatch:send(Acc, Op, [Elem]) of
+        true -> fold_dispatched(Rest, Acc, Op);
+        _ -> fold_dispatched(Rest, Elem, Op)
     end.
 
 -doc """
