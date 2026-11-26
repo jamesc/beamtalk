@@ -552,6 +552,11 @@ pub fn analyse_package(
         beamtalk_core::ffi_type_specs::collect_installed_erlang_modules,
         beamtalk_core::ffi_type_specs::collect_known_erlang_modules,
     );
+    // BT-5251: `native/test/` helpers are known to files under `test/` only.
+    let test_helper_modules = package_root
+        .as_deref()
+        .map(beamtalk_core::ffi_type_specs::collect_project_test_helper_modules)
+        .unwrap_or_default();
     // BT-4377: the package's `[diagnostics]` table, via the loader the
     // compiler port (REPL) and LSP use.
     let diagnostics_overrides = package_root
@@ -572,6 +577,14 @@ pub fn analyse_package(
         let is_stub_file = package_root.as_deref().is_some_and(|root| {
             package::is_under_stubs_dir(root.as_std_path(), target.path.as_std_path())
         });
+        let mut file_known_modules = known_erlang_modules.clone();
+        if !test_helper_modules.is_empty()
+            && package_root.as_deref().is_some_and(|root| {
+                beamtalk_core::ffi_type_specs::is_project_test_file(root, &target.path)
+            })
+        {
+            file_known_modules.extend_modules(test_helper_modules.clone());
+        }
         let (diags, class_hierarchy, type_map) = analyse_file_with_types(
             &target.module,
             &target.source,
@@ -589,7 +602,7 @@ pub fn analyse_package(
                 is_stub_file,
                 file_stem: target.path.file_stem(),
                 stdlib_mode: package::is_under_stdlib_src_dir(target.path.as_std_path()),
-                known_erlang_modules: known_erlang_modules.clone(),
+                known_erlang_modules: file_known_modules,
                 diagnostics_overrides: Some(&diagnostics_overrides),
             },
         );
@@ -847,5 +860,51 @@ mod tests {
         );
         assert_eq!(sources.scope.knowledge_scope, KnowledgeScope::ModuleOnly);
         assert_eq!(sources.targets.len(), 1);
+    }
+
+    /// BT-5251: a `native/test/` helper is known to `test/*.bt` but not to
+    /// `src/*.bt`, in lint.
+    #[test]
+    fn test_helpers_known_to_test_files_only() {
+        if !beamtalk_core::ffi_type_specs::collect_installed_erlang_modules().check_enabled() {
+            return; // no OTP: the unresolved_ffi check is off
+        }
+        let call = "Object subclass: Probe\n  run => (Erlang bt5251_helper) ping\n";
+        let (_temp, root) = package_with(&[("probe.bt", call)]);
+        std::fs::create_dir_all(root.join("test")).unwrap();
+        std::fs::write(
+            root.join("test").join("probe_test.bt"),
+            call.replace("Probe", "ProbeTest"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("native").join("test")).unwrap();
+        std::fs::write(
+            root.join("native").join("test").join("bt5251_helper.erl"),
+            "-module(bt5251_helper).\n",
+        )
+        .unwrap();
+
+        let targets = vec![
+            root.join("src").join("probe.bt"),
+            root.join("test").join("probe_test.bt"),
+        ];
+        let sources = parse_package_sources(&root, &targets, |f, _, e| panic!("{f}: {e}"));
+        let mut flagged = Vec::new();
+        analyse_package(sources, DependencyMetadata::default(), None, |lint| {
+            let hit = lint
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("bt5251_helper"));
+            flagged.push((lint.path.file_name().unwrap().to_string(), hit));
+        });
+        flagged.sort();
+        assert_eq!(
+            flagged,
+            vec![
+                ("probe.bt".to_string(), true),
+                ("probe_test.bt".to_string(), false)
+            ],
+            "src/ must still flag the helper; test/ must not"
+        );
     }
 }
