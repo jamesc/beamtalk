@@ -80,7 +80,7 @@ use std::sync::Arc;
 /// let source = "x := 42";
 /// let tokens = lex_with_eof(source);
 /// let (module, _) = parse(tokens);
-/// let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+/// let hierarchy = ClassHierarchy::build(&module).0;
 ///
 /// let hover = compute_hover(&module, source, Position::new(0, 0), &hierarchy, None, None, None);
 /// assert!(hover.is_some());
@@ -1586,7 +1586,7 @@ mod tests {
     fn hover_at(source: &str, position: Position) -> Option<HoverInfo> {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         compute_hover(&module, source, position, &hierarchy, None, None, None)
     }
 
@@ -1727,7 +1727,7 @@ mod tests {
         let tokens = lex_with_eof(src);
         let (module, parse_diags) = parse(tokens);
         assert!(parse_diags.is_empty(), "parse failed: {parse_diags:?}");
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         let protocol_registry = ProtocolRegistry::new();
         let mut registry = AliasRegistry::new();
         let diags = registry.register_module(&module, &hierarchy, &protocol_registry);
@@ -1816,7 +1816,7 @@ mod tests {
         let source = "Object subclass: Counter\n  increment => 1\n\nCounter new increment";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let selector_offset = source.rfind("increment").unwrap();
         let pos = pos_at(source, selector_offset);
@@ -1846,7 +1846,7 @@ mod tests {
         let source = "Object subclass: Counter\n  increment => 1\n\nCounter new";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         let pos = pos_at(source, source.rfind("Counter").unwrap());
         let hover = compute_hover(&module, source, pos, &hierarchy, None, None, None).unwrap();
         assert_eq!(
@@ -1863,7 +1863,7 @@ mod tests {
         let source = "Object subclass: Counter\n  increment => 1\n\nCounter new increment";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         let pos = pos_at(source, source.rfind("increment").unwrap());
         let hover = compute_hover(&module, source, pos, &hierarchy, None, None, None).unwrap();
         assert_eq!(
@@ -1991,7 +1991,7 @@ mod tests {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         // "self" appears at offset 59 in the method body
         // Find the exact offset of "self" in the source
@@ -2012,7 +2012,7 @@ mod tests {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  class withInitial: n => self new: #{count => n}\n\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         // Find "self" in the class method body
         let class_method_self = source.find("self new:").unwrap();
@@ -2036,7 +2036,7 @@ mod tests {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\nCounter spawn";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         // Find the position of the top-level "Counter" reference
         let counter_pos = source.rfind("Counter").unwrap();
@@ -2066,7 +2066,7 @@ mod tests {
         let source = "Object subclass: Counter\n  /// The current count\n  state: count :: Integer = 0\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let offset = source.find("count ::").unwrap();
         let pos = pos_at(source, offset);
@@ -2104,7 +2104,7 @@ mod tests {
         let source = "Object subclass: Counter\n  state: count = 0\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let offset = source.find("count =").unwrap();
         let pos = pos_at(source, offset);
@@ -2141,7 +2141,7 @@ mod tests {
             "Actor subclass: CodexClient\n  late state: proc :: Subprocess\n  launch => self.proc";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let offset = source.find("proc ::").unwrap();
         let pos = pos_at(source, offset);
@@ -2179,7 +2179,7 @@ mod tests {
         let source = "self doSomething";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let hover = compute_hover(
             &module,
@@ -2228,7 +2228,7 @@ mod tests {
         let source = "x :: Symbol := #other\n(x =:= #foo) ifFalse: [x]";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         // Position at the `x` inside the `ifFalse:` block, not the
         // declaration or the guard.
@@ -2268,7 +2268,7 @@ mod tests {
         let source = "x := \"hello\"\nx";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let hover = compute_hover(
             &module,
@@ -2293,7 +2293,7 @@ mod tests {
         let source = "Counter >> increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let self_offset = source.find("self.count").unwrap();
         let pos = pos_at(source, self_offset);
@@ -2315,7 +2315,7 @@ mod tests {
         let source = "Counter class >> withInitial: n => self new: #{count => n}";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let self_offset = source.find("self new:").unwrap();
         let pos = pos_at(source, self_offset);
@@ -2337,7 +2337,7 @@ mod tests {
         let source = "Object subclass: Counter\n  state: value = 0\n\n  increment => self.value := self.value + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let selector_offset = source.find("increment =>").unwrap();
         let pos = pos_at(source, selector_offset);
@@ -2358,7 +2358,7 @@ mod tests {
         // carries the keyword; an open class's plain method does not.
         let hover_meta = |source: &str, needle: &str| {
             let (module, _) = parse(lex_with_eof(source));
-            let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+            let hierarchy = ClassHierarchy::build(&module).0;
             let pos = pos_at(source, source.find(needle).unwrap());
             let hover = compute_hover(&module, source, pos, &hierarchy, None, None, None);
             let hover = hover.expect("hover on declaration");
@@ -2376,7 +2376,7 @@ mod tests {
         let source = "Object subclass: Counter\n  at: index put: value => value";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let selector_offset = source.find("at:").unwrap();
         let pos = pos_at(source, selector_offset);
@@ -2396,7 +2396,7 @@ mod tests {
         let source = "Object subclass: Boolean\n  and: aBlock :: Block -> Boolean => self ifTrue: aBlock ifFalse: [false]";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let param_offset = source.find("aBlock ::").unwrap();
         let pos = pos_at(source, param_offset);
@@ -2416,7 +2416,7 @@ mod tests {
         let source = "Object subclass: Boolean\n  and: aBlock :: Block -> Boolean => self ifTrue: aBlock ifFalse: [false]";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let param_type_offset = source.find("Block ->").unwrap();
         let param_type_pos = pos_at(source, param_type_offset);
@@ -2466,7 +2466,7 @@ mod tests {
         let source = "Object subclass: Counter\n  /// Increments the counter by one\n  increment -> Integer => 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let selector_offset = source.find("increment ->").unwrap();
         let pos = pos_at(source, selector_offset);
@@ -2495,7 +2495,7 @@ mod tests {
         let source = "Object subclass: Counter\n  increment => 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let object_offset = source.find("Object").unwrap();
         let pos = pos_at(source, object_offset);
@@ -2515,7 +2515,7 @@ mod tests {
         let source = "Object subclass: Counter\n  increment => 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let class_offset = source.find("Counter").unwrap();
         let pos = pos_at(source, class_offset);
@@ -2752,7 +2752,7 @@ mod tests {
         let source = "Object subclass: Box\n  value -> Integer => 42\n\nb := Box new\nb value";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let selector_offset = source.rfind("value").unwrap();
         let pos = pos_at(source, selector_offset);
@@ -2775,7 +2775,7 @@ mod tests {
         let source = "Object subclass: Box\n  value => 42\n\nb := Box new\nb value";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let selector_offset = source.rfind("value").unwrap();
         let pos = pos_at(source, selector_offset);
@@ -2928,7 +2928,7 @@ mod tests {
         let source = "Object subclass: Foo internal\n  helper => 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         // Hover over "Foo" (class name declaration at offset 17)
         let pos = Position::new(0, 17);
@@ -2947,7 +2947,7 @@ mod tests {
         let source = "Object subclass: Foo\n  internal helper => 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         // Hover over "helper" method selector
         let helper_offset = source.find("helper").unwrap();
@@ -2974,7 +2974,7 @@ mod tests {
         let source = "Erlang lists reverse: #(1, 2, 3)";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let mut registry = NativeTypeRegistry::new();
         registry.register_module(
@@ -3046,7 +3046,7 @@ mod tests {
             y := Erlang lists reverse: #(1, 2, 3)\n    y";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let mut registry = NativeTypeRegistry::new();
         registry.register_module(
@@ -3090,7 +3090,7 @@ mod tests {
         let source = "Erlang lists reverse: #(1, 2, 3)";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         // Hover over "reverse:" — no registry provided
         let reverse_offset = source.find("reverse").unwrap();
@@ -3110,7 +3110,7 @@ mod tests {
         let source = "Object subclass: Foo\n  doSomething: x => x";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         // Hover over the `x` in the method body (the return expression)
         let body_x_offset = source.rfind('x').unwrap();
@@ -3130,7 +3130,7 @@ mod tests {
         let source = "Object subclass: Foo\n  doSomething: x :: Integer => x";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         // Hover over the `x` in the method body
         let body_x_offset = source.rfind('x').unwrap();
@@ -3172,7 +3172,7 @@ mod tests {
                        Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         let alias_registry = alias_registry_for(&module, &hierarchy);
 
         // Hover over `policy` in the method body (the return expression).
@@ -3208,7 +3208,7 @@ mod tests {
                        Object subclass: Supervisor\n  restart: policy :: RestartStrategy => policy\n";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let offset = source.rfind("=> policy").unwrap() + "=> ".len();
         let pos = pos_at(source, offset);
@@ -3234,7 +3234,7 @@ mod tests {
                        (policy =:= #temporary) ifFalse: [policy]";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         let alias_registry = alias_registry_for(&module, &hierarchy);
 
         // Position at `policy` inside the `ifFalse:` block, not the
@@ -3274,7 +3274,7 @@ mod tests {
         let source = "type RestartStrategy = #temporary | #transient | #permanent\n";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let offset = source.find("RestartStrategy").unwrap() + 3;
         let pos = pos_at(source, offset);
@@ -3300,7 +3300,7 @@ mod tests {
         let source = "internal type JsonKey = #a | #b\n";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let offset = source.find("JsonKey").unwrap() + 2;
         let pos = pos_at(source, offset);
@@ -3328,7 +3328,7 @@ mod tests {
                        currentPolicy => self.policy\n";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         let alias_registry = alias_registry_for(&module, &hierarchy);
 
         // Hover over `policy` in `self.policy` (the field access, not the
@@ -3366,7 +3366,7 @@ mod tests {
                        currentPolicy => self.policy\n";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let offset = source.rfind("self.policy").unwrap() + "self.".len();
         let pos = pos_at(source, offset);
@@ -3494,7 +3494,7 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, diags) = parse(tokens);
         assert!(diags.is_empty(), "Parse errors: {diags:?}");
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let assert_options_hover = |hover: Option<HoverInfo>, expected_signature: &str| {
             let hover = hover.expect("hover on method with ## Options docs");

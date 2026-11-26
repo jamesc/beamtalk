@@ -99,59 +99,9 @@ pub(crate) fn no_extra(_selector: &str, _params: &[String]) -> Option<Document<'
     None
 }
 
-/// Future primitive implementations.
-///
-/// Futures are BEAM processes returned by async actor message sends.
-/// Each instance method delegates to the `beamtalk_future` runtime module.
-/// Note: `await`, `awaitForever`, and `await:` are also compiler intrinsics
-/// (intercepted by `dispatch_codegen` before reaching here), so these BIFs
-/// serve dynamic-dispatch use cases (e.g., `perform:`).
-pub(crate) fn generate_future_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
-    let p0 = param(params, 0, "_Arg0");
-    match selector {
-        "await" => Some(Document::Str("call 'beamtalk_future':'await'(Self)")),
-        "awaitForever" => Some(Document::Str(
-            "call 'beamtalk_future':'await_forever'(Self)",
-        )),
-        "await:" => Some(docvec![
-            "call 'beamtalk_future':'await'(Self, ",
-            leaf::var(p0.to_string()),
-            ")"
-        ]),
-        "whenResolved:" => Some(docvec![
-            "call 'beamtalk_future':'when_resolved'(Self, ",
-            leaf::var(p0.to_string()),
-            ")"
-        ]),
-        "whenRejected:" => Some(docvec![
-            "call 'beamtalk_future':'when_rejected'(Self, ",
-            leaf::var(p0.to_string()),
-            ")"
-        ]),
-        "printString" => Some(super::PRINT_STRING),
-        _ => None,
-    }
-}
-
-/// `FileHandle` primitive implementations.
-///
-/// `FileHandles` are tagged maps produced by `File open:do:`. Instance methods
-/// delegate to the `beamtalk_file` runtime module.
-pub(crate) fn generate_file_handle_bif(
-    selector: &str,
-    _params: &[String],
-) -> Option<Document<'static>> {
-    match selector {
-        "lines" => Some(Document::Str("call 'beamtalk_file':'handle_lines'(Self)")),
-        "printString" => Some(super::PRINT_STRING),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::doc_to_string;
-    use super::super::{assert_bif_none_table, assert_bif_table};
     use super::*;
 
     // Registry wrapper entry points: assert each wrapper threads the
@@ -241,89 +191,5 @@ mod tests {
             no_extra,
         ));
         assert_eq!(result, Some("call 'erlang':'/='(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn generate_future_bif_table() {
-        assert_bif_table(
-            generate_future_bif,
-            &[
-                // generate_future_bif tests
-                (
-                    "test_future_await",
-                    "await",
-                    &[],
-                    "call 'beamtalk_future':'await'(Self)",
-                ),
-                (
-                    "test_future_await_forever",
-                    "awaitForever",
-                    &[],
-                    "call 'beamtalk_future':'await_forever'(Self)",
-                ),
-                (
-                    "test_future_await_with_timeout",
-                    "await:",
-                    &["Timeout"],
-                    "call 'beamtalk_future':'await'(Self, Timeout)",
-                ),
-                (
-                    "test_future_when_resolved",
-                    "whenResolved:",
-                    &["Block"],
-                    "call 'beamtalk_future':'when_resolved'(Self, Block)",
-                ),
-                (
-                    "test_future_when_rejected",
-                    "whenRejected:",
-                    &["Block"],
-                    "call 'beamtalk_future':'when_rejected'(Self, Block)",
-                ),
-                (
-                    "test_future_print_string",
-                    "printString",
-                    &[],
-                    "call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_primitive':'print_string'(Self))",
-                ),
-            ],
-        );
-    }
-
-    #[test]
-    fn generate_future_bif_none_table() {
-        assert_bif_none_table(
-            generate_future_bif,
-            &[("test_future_unknown_returns_none", "unknown", &[])],
-        );
-    }
-
-    #[test]
-    fn generate_file_handle_bif_table() {
-        assert_bif_table(
-            generate_file_handle_bif,
-            &[
-                // generate_file_handle_bif tests
-                (
-                    "test_file_handle_lines",
-                    "lines",
-                    &[],
-                    "call 'beamtalk_file':'handle_lines'(Self)",
-                ),
-                (
-                    "test_file_handle_print_string",
-                    "printString",
-                    &[],
-                    "call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_primitive':'print_string'(Self))",
-                ),
-            ],
-        );
-    }
-
-    #[test]
-    fn generate_file_handle_bif_none_table() {
-        assert_bif_none_table(
-            generate_file_handle_bif,
-            &[("test_file_handle_unknown_returns_none", "unknown", &[])],
-        );
     }
 }

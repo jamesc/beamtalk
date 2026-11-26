@@ -1547,10 +1547,9 @@ mod tests {
     #[serial]
     fn command_loop_runs_a_child_to_completion() {
         let (port, capture) = test_port();
-        let (reader, mut writer) = io::pipe().expect("pipe");
+        let (mut reader, mut writer) = io::pipe().expect("pipe");
         let loop_port = port.clone();
         let handle = thread::spawn(move || {
-            let mut reader = reader;
             run_command_loop(&mut reader, &loop_port);
         });
         writer

@@ -44,7 +44,7 @@ Actor subclass: Counter
 Counter spawn; spawnWith: #{#cuont => 0}
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let diags = key_diags(&diags);
     assert_eq!(
@@ -70,7 +70,7 @@ Actor subclass: Counter
 Counter spawn; spawnWith: #{#count => 0}
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         key_diags(&diags).is_empty(),
@@ -91,7 +91,7 @@ Actor subclass: Counter
     self spawn; spawnWith: #{#cuont => 0}
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let diags = key_diags(&diags);
     assert_eq!(
@@ -118,7 +118,7 @@ Actor subclass: Counter
     self spawn; spawnWith: #{#count => 0}
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         key_diags(&diags).is_empty(),
@@ -139,7 +139,7 @@ Actor subclass: Counter
 Counter spawnWith: #{#cuont => 0}; yourself
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let diags = key_diags(&diags);
     assert_eq!(

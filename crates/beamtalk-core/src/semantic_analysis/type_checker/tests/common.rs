@@ -119,7 +119,7 @@ pub(super) fn run_with_expect(module: &Module, hierarchy: &ClassHierarchy) -> Ve
 /// Panics if the hierarchy cannot be built. Use [`diags`] to skip suppression.
 pub(super) fn diags_with_expect(source: &str) -> Vec<Diagnostic> {
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     run_with_expect(&module, &hierarchy)
 }
 
@@ -127,7 +127,7 @@ pub(super) fn diags_with_expect(source: &str) -> Vec<Diagnostic> {
 /// hierarchy, type check. No `@expect` suppression (BT-4678).
 pub(super) fn diags(source: &str) -> Vec<Diagnostic> {
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let mut checker = TypeChecker::new();
     checker.check_module(&module, &hierarchy);
     checker.take_diagnostics()
@@ -143,9 +143,7 @@ pub(super) fn diags_parse_ok_with_expect(source: &str) -> Vec<Diagnostic> {
 
 /// The hierarchy of a module holding only `class`. Panics if it cannot be built.
 pub(super) fn build_class_hierarchy(class: ClassDefinition) -> ClassHierarchy {
-    ClassHierarchy::build(&make_module_with_classes(vec![], vec![class]))
-        .0
-        .unwrap()
+    ClassHierarchy::build(&make_module_with_classes(vec![], vec![class])).0
 }
 
 /// Asserts `diags` is empty; `context` (the case name and/or source) names the
@@ -395,7 +393,7 @@ pub(super) fn refine_narrowing(
 pub(super) fn run_with_protocols(source: &str) -> Vec<Diagnostic> {
     let module = parse_source(source);
     let mut hierarchy = ClassHierarchy::with_builtins();
-    let user_hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let user_hierarchy = ClassHierarchy::build(&module).0;
     hierarchy.merge(&user_hierarchy);
 
     let mut checker = check_with_protocols(
@@ -410,7 +408,7 @@ pub(super) fn run_with_protocols(source: &str) -> Vec<Diagnostic> {
 pub(super) fn typed_class_hierarchy(class_name: &str) -> ClassHierarchy {
     let source = format!("typed Object subclass: {class_name}\n");
     let module = parse_source(&source);
-    ClassHierarchy::build(&module).0.unwrap()
+    ClassHierarchy::build(&module).0
 }
 
 /// The return-type mismatch diagnostics `checker` has collected.

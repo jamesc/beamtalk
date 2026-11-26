@@ -1,0 +1,80 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5236: an inlined writing fold (`collect:`, `inject:into:`) or counted loop
+// (`to:do:`, `to:by:do:`) on a receiver whose class overrides
+// `doesNotUnderstand:args:` raises `stateful_block_dispatch`: the pure send
+// reaches the override, which the fold cannot stand in for. A receiver with no
+// override still raises `does_not_understand`, as the pure send does.
+// Also pins the guard's assumption that only `Integer` (and its subclasses)
+// defines `to:do:` / `to:by:do:` among the stdlib classes.
+
+TestCase subclass: WritingFoldDnuOverrideTest
+
+  writingCollect: r =>
+    n := 0
+    r collect: [:e | n := n + 1]
+
+  writingInject: r =>
+    n := 0
+    r inject: 0 into: [:a :e | n := n + 1]
+
+  writingToDo: r =>
+    n := 0
+    r to: 3 do: [:i | n := n + i]
+    n
+
+  writingToByDo: r =>
+    n := 0
+    r
+      to: 3
+      by: 1
+      do: [:i | n := n + i]
+    n
+
+  testPureSendReachesOverride =>
+    self assert: (Bt5236DnuProxy spawn collect: [:e | e]) equals: #forwarded
+    self assert: (Bt5236DnuProxy spawn to: 3 do: [:i | i]) equals: #forwarded
+
+  testWritingCollectRefuses =>
+    self should: [
+      self writingCollect: Bt5236DnuProxy spawn
+    ] raise: #stateful_block_dispatch
+
+  testWritingInjectRefuses =>
+    self should: [
+      self writingInject: Bt5236DnuProxy spawn
+    ] raise: #stateful_block_dispatch
+
+  testWritingToDoRefuses =>
+    self should: [
+      self writingToDo: Bt5236DnuProxy spawn
+    ] raise: #stateful_block_dispatch
+
+  testWritingToByDoRefuses =>
+    self should: [
+      self writingToByDo: Bt5236DnuProxy spawn
+    ] raise: #stateful_block_dispatch
+
+  testSubclassOfProxyInheritsOverride =>
+    self should: [
+      self writingCollect: Bt5236DnuProxySub spawn
+    ] raise: #stateful_block_dispatch
+
+  testNoOverrideStillDoesNotUnderstand =>
+    self should: [self writingCollect: #sym] raise: #does_not_understand
+    self should: [self writingToDo: nil] raise: #does_not_understand
+
+  // The counted-loop start guard answers `ok` for a stdlib provider, safe only
+  // while Integer is the one stdlib class defining these. If this fails, the
+  // loop must stand in for the new method (see BT-5235).
+  testOnlyIntegerDefinesCountedLoopSelectors =>
+    definers := Object allSubclasses
+      select: [:c |
+        c sourceFile isNil and: [
+          (c includesSelector: #to:do:) or: [c includesSelector: #to:by:do:]
+        ]
+      ]
+    self assert: (definers reject: [:c |
+      c == Integer or: [c inheritsFrom: Integer]
+    ]) isEmpty

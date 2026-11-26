@@ -417,7 +417,6 @@ mod tests {
         let src = "Actor subclass: MyActor native: my_mod\n  getValue => self delegate";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_native_delegate_return_type(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -435,7 +434,6 @@ mod tests {
         let src = "Actor subclass: MyActor native: my_mod\n  getValue -> Integer => self delegate";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_native_delegate_return_type(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -450,7 +448,6 @@ mod tests {
         let src = "Actor subclass: Counter\n  state: count = 0\n  getValue => self delegate";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_native_delegate_return_type(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -465,7 +462,6 @@ mod tests {
         let src = "Actor subclass: MyActor native: my_mod\n  version => 1";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_native_delegate_return_type(&module, &hierarchy, &mut diagnostics);
         assert!(

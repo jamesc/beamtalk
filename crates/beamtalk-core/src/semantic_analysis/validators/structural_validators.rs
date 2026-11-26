@@ -656,7 +656,6 @@ mod tests {
     fn test_unresolved_class_warns_on_unknown() {
         let module = empty_module_with_exprs(vec![class_ref("NonExistent")]);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
         check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &mut diags);
@@ -676,7 +675,6 @@ mod tests {
             class_ref("False"),
         ]);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
         check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &mut diags);
@@ -689,7 +687,6 @@ mod tests {
         // Object, Integer, String, etc. are builtins in the hierarchy
         let module = empty_module_with_exprs(vec![class_ref("Object"), class_ref("Integer")]);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
         check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &mut diags);
@@ -706,7 +703,6 @@ mod tests {
         // and should not trigger unresolved class warnings.
         let module = empty_module_with_exprs(vec![class_ref("Printable")]);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        let hierarchy = hierarchy.unwrap();
         let mut registry = ProtocolRegistry::new();
         registry.register_test_protocol(crate::semantic_analysis::ProtocolInfo {
             name: "Printable".into(),
@@ -1382,7 +1378,6 @@ mod tests {
         module.classes.push(class_def);
 
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
         check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &mut diags);
@@ -1412,7 +1407,6 @@ mod tests {
         module.classes.push(class_def);
 
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
         check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &mut diags);

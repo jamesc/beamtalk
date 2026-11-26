@@ -326,9 +326,7 @@ fn test_keyword_constructor_anchor_agrees_with_emission() {
             .first()
             .expect("fixture should declare a class");
         let hierarchy =
-            beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
-                .0
-                .expect("fixture hierarchy should build");
+            beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
         let anchor = hierarchy
             .get_class(class.name.name.as_str())
             .expect("class should be present")

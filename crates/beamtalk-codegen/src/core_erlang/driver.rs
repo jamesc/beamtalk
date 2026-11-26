@@ -103,7 +103,7 @@ pub fn generate_module_with_warnings(
         mut driver_method_return_types,
         protocol_registry,
         mut self_flattened,
-    } = derive_analysis_basis(module, options.analysis.take(), &mut generator)?;
+    } = derive_analysis_basis(module, options.analysis.take(), &mut generator);
 
     // BT-4151: before the pre-loaded entries are folded into `hierarchy`
     // (which keeps one entry per name), record which class names more than
@@ -360,7 +360,7 @@ fn derive_analysis_basis(
     module: &Module,
     analysis: Option<beamtalk_core::semantic_analysis::AnalysisResult>,
     generator: &mut CoreErlangGenerator,
-) -> Result<AnalysisBasis> {
+) -> AnalysisBasis {
     // Consume the driver's already-computed analysis when supplied
     // (`CodegenOptions::with_analysis`) instead of re-deriving semantic facts,
     // the class hierarchy, and inferred method return types from scratch —
@@ -424,12 +424,10 @@ fn derive_analysis_basis(
                 beamtalk_core::semantic_analysis::compute_semantic_facts(flattened_module);
 
             // Build hierarchy once for the entire generation (ADR 0006)
-            let (hierarchy_result, _) =
+            let (mut hierarchy, _) =
                 beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(
                     flattened_module,
                 );
-            let mut hierarchy = hierarchy_result
-                .map_err(|e| CodeGenError::Internal(format!("hierarchy: {e:?}")))?;
             // Stamp `MethodInfo::origin` for flattened provisions, exactly as
             // `analyse_full` does for the driver-handoff path (BT-3626).
             beamtalk_core::semantic_analysis::trait_expansion::apply_origins(
@@ -438,13 +436,13 @@ fn derive_analysis_basis(
             );
             (hierarchy, false, None)
         };
-    Ok(AnalysisBasis {
+    AnalysisBasis {
         hierarchy,
         analysis_handed_off,
         driver_method_return_types,
         protocol_registry,
         self_flattened,
-    })
+    }
 }
 
 /// The module generation reads: as the driver prepared it when its hand-off

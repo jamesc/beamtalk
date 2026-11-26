@@ -932,9 +932,7 @@ fn test_meta_synthesized_value_methods_agree_with_hierarchy() {
         let module = beamtalk_core::test_helpers::test_support::parse_bt(src);
         let class = module.classes.first().expect("fixture declares a class");
         let hierarchy =
-            beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
-                .0
-                .expect("fixture hierarchy should build");
+            beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
         let info = hierarchy
             .get_class(class.name.name.as_str())
             .expect("class should be present");

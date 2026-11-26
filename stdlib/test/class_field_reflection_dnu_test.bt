@@ -9,8 +9,9 @@
 // replacement for `performLocally:` and still answers.
 //
 // The removed selectors are sent with `perform:` so they are not a
-// compile-time warning; the four field selectors are also sent directly,
-// since `Object` (an ancestor of `Class`) still declares them for instances.
+// compile-time warning; the four field selectors are also sent directly to
+// class literals, which the type checker reports as does-not-understand
+// (BT-5241), so those sends carry `@expect dnu`.
 //
 // Fixtures: fixtures/guarded_diff_class_root.bt, fixtures/guarded_diff_class_leaf.bt,
 // fixtures/class_field_reflection_probe.bt, fixtures/class_field_at_owner.bt.
@@ -23,26 +24,35 @@ TestCase subclass: ClassFieldReflectionDnuTest
   dynamicOwner -> Dynamic => ClassFieldAtOwner
 
   testFieldAtOnAClassIsDoesNotUnderstand =>
+    @expect dnu
     self should: [GuardedDiffClassRoot fieldAt: #x] raise: #does_not_understand
     self should: [self dynamicClass fieldAt: #x] raise: #does_not_understand
+    @expect dnu
     self should: [GuardedDiffClassLeaf fieldAt: #x] raise: #does_not_understand
 
   testFieldAtPutOnAClassIsDoesNotUnderstand =>
-    self should: [
-      GuardedDiffClassRoot fieldAt: #x put: 1
-    ] raise: #does_not_understand
+    self
+      should: [
+        @expect dnu
+        GuardedDiffClassRoot fieldAt: #x put: 1
+      ]
+      raise: #does_not_understand
     self should: [
       self dynamicClass fieldAt: #x put: 1
     ] raise: #does_not_understand
 
   testHasFieldOnAClassIsDoesNotUnderstand =>
+    @expect dnu
     self should: [GuardedDiffClassRoot hasField: #x] raise: #does_not_understand
     self should: [self dynamicClass hasField: #x] raise: #does_not_understand
 
   testClearFieldOnAClassIsDoesNotUnderstand =>
-    self should: [
-      GuardedDiffClassRoot clearField: #x
-    ] raise: #does_not_understand
+    self
+      should: [
+        @expect dnu
+        GuardedDiffClassRoot clearField: #x
+      ]
+      raise: #does_not_understand
     self should: [self dynamicClass clearField: #x] raise: #does_not_understand
 
   // From inside a class method: a `self` send compiles as an ordinary
@@ -60,9 +70,11 @@ TestCase subclass: ClassFieldReflectionDnuTest
   // From the class's own process (a process-bound class method).
   testFieldReflectionFromTheClassProcessIsDoesNotUnderstand =>
     cls := ClassFieldReflectionProbe
+    @expect dnu
     self should: [
       cls run: [ClassFieldReflectionProbe hasField: #x]
     ] raise: #does_not_understand
+    @expect dnu
     self should: [
       cls run: [ClassFieldReflectionProbe fieldAt: #x]
     ] raise: #does_not_understand
@@ -79,6 +91,7 @@ TestCase subclass: ClassFieldReflectionDnuTest
     self assert: (cls hasField: #anything)
     self assert: (cls respondsTo: #fieldAt:)
     self assert: (cls respondsTo: #hasField:)
+    @expect dnu
     self should: [cls clearField: #k] raise: #does_not_understand
     self deny: (cls respondsTo: #clearField:)
 
@@ -98,6 +111,7 @@ TestCase subclass: ClassFieldReflectionDnuTest
     ] raise: #does_not_understand
 
   testDoesNotUnderstandNamesTheClassAndSelector =>
+    @expect dnu
     err := [GuardedDiffClassRoot fieldAt: #x] on: Error do: [:e | e]
     self assert: err kind equals: #does_not_understand
     self assert: err selector equals: #fieldAt:

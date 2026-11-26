@@ -1339,7 +1339,7 @@ fn generic_state_default_dnu_diagnosed_once_not_twice() {
     )];
     let class = counter_class_with_typed_state(vec![], state);
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let registry = ProtocolRegistry::new();
     let checker = check_with_protocols(&module, &hierarchy, &registry);
 

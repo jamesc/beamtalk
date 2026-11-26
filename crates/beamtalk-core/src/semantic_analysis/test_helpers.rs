@@ -21,6 +21,6 @@ pub fn test_span() -> Span {
 /// a broken test fixture, not a bug under test.
 pub fn parse_and_build(src: &str) -> (Module, ClassHierarchy) {
     let module = crate::test_helpers::test_support::parse_ok(src);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     (module, hierarchy)
 }
