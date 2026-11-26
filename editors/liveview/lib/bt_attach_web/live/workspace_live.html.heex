@@ -2269,6 +2269,12 @@
                     Inspecting <strong>{@inspect_target.label}</strong>
                     <span class="ps-header">{@inspect_target.header}</span>
                   </div>
+                  <p
+                    :if={Inspector.children_cut_notice(@inspect_target)}
+                    class="muted-note children-truncated"
+                  >
+                    {Inspector.children_cut_notice(@inspect_target)}
+                  </p>
                   <%!-- class/pid chips plus the live pid-stats chips (BT-2492):
                        process status, mailbox depth, reductions — read via the
                        `pid_stats` op and refreshed on every change push, the
