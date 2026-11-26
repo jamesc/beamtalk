@@ -40,6 +40,11 @@ state_ops_test_() ->
         fun(_Ctx) ->
             {"flush scopes are mutually exclusive", fun flush_scopes_exclusive/0}
         end,
+        fun(Ctx) ->
+            {"flush refuses a mistyped scope instead of widening it", fun() ->
+                flush_rejects_mistyped_scope(Ctx)
+            end}
+        end,
         fun(_Ctx) ->
             {"flush with an unknown kind is a structured error", fun flush_unknown_kind/0}
         end,
@@ -208,13 +213,43 @@ flush_scopes_exclusive() ->
     ),
     ?assertMatch(
         {error, #beamtalk_error{kind = invalid_argument}},
-        request(<<"flush">>, #{<<"file">> => <<"a.bt">>, <<"kind">> => <<"instance">>})
+        request(<<"flush">>, #{<<"file">> => <<"a.bt">>, <<"kind">> => <<"new-class">>})
     ).
+
+%% A wrongly typed scope must not widen a scoped flush into an unscoped one.
+flush_rejects_mistyped_scope(#{proj_dir := ProjDir}) ->
+    {File, _Seq} = seed_remove_class(ProjDir, <<"Gone">>),
+    lists:foreach(
+        fun(Key) ->
+            lists:foreach(
+                fun(Bad) ->
+                    ?assertMatch(
+                        {error, #beamtalk_error{kind = invalid_argument}},
+                        request(<<"flush">>, #{Key => Bad, <<"confirm_destructive">> => true})
+                    )
+                end,
+                [123, null, [<<"Gone">>], #{}]
+            )
+        end,
+        [<<"class">>, <<"file">>, <<"kind">>]
+    ),
+    ?assert(filelib:is_regular(File)).
 
 flush_unknown_kind() ->
     ?assertMatch(
         {error, #beamtalk_error{kind = invalid_argument}},
         request(<<"flush">>, #{<<"kind">> => <<"no-such-kind-bt5204">>})
+    ),
+    %% An atom that exists but is no entry kind (a class name, `ok`, a selector
+    %% such as `instance`) is not read as a class or selector scope.
+    lists:foreach(
+        fun(Name) ->
+            ?assertMatch(
+                {error, #beamtalk_error{kind = invalid_argument}},
+                request(<<"flush">>, #{<<"kind">> => Name})
+            )
+        end,
+        [<<"Object">>, <<"ok">>, <<"instance">>]
     ).
 
 %%% changes

@@ -127,50 +127,85 @@ run_flush({kind, Kind}, Confirm) ->
 -spec scope(map()) ->
     {ok, none | {class | file | kind, term()}} | {error, #beamtalk_error{}}.
 scope(Params) ->
-    Class = beamtalk_repl_params:nonempty_or_undefined(maps:get(<<"class">>, Params, undefined)),
-    File = beamtalk_repl_params:nonempty_or_undefined(maps:get(<<"file">>, Params, undefined)),
-    Kind = beamtalk_repl_params:nonempty_or_undefined(maps:get(<<"kind">>, Params, undefined)),
-    Given = [
-        {Name, V}
-     || {Name, V} <- [{class, Class}, {file, File}, {kind, Kind}], V =/= undefined
-    ],
-    case Given of
-        [] ->
-            {ok, none};
-        [{class, Class}] ->
-            {ok, {class, Class}};
-        [{file, File}] ->
-            {ok, {file, File}};
-        [{kind, Kind}] ->
-            kind_atom(Kind);
-        _ ->
-            {error,
-                beamtalk_repl_errors:make(
-                    invalid_argument,
-                    'Workspace',
-                    <<"flush: class, file and kind are mutually exclusive">>,
-                    <<"Pass at most one of class, file or kind.">>
-                )}
+    case
+        {
+            scope_param(<<"class">>, maps:get(<<"class">>, Params, undefined)),
+            scope_param(<<"file">>, maps:get(<<"file">>, Params, undefined)),
+            scope_param(<<"kind">>, maps:get(<<"kind">>, Params, undefined))
+        }
+    of
+        {{error, _} = Err, _, _} ->
+            Err;
+        {_, {error, _} = Err, _} ->
+            Err;
+        {_, _, {error, _} = Err} ->
+            Err;
+        {{ok, Class}, {ok, File}, {ok, Kind}} ->
+            case
+                [{N, V} || {N, V} <- [{class, Class}, {file, File}, {kind, Kind}], V =/= undefined]
+            of
+                [] ->
+                    {ok, none};
+                [{class, V}] ->
+                    {ok, {class, V}};
+                [{file, V}] ->
+                    {ok, {file, V}};
+                [{kind, V}] ->
+                    kind_atom(V);
+                _ ->
+                    {error,
+                        invalid_scope(
+                            <<"flush: class, file and kind are mutually exclusive">>,
+                            <<"Pass at most one of class, file or kind.">>
+                        )}
+            end
     end.
 
-%% A kind is a selector Symbol (`new-class`): resolved to an existing atom so
-%% request text never creates one. A name that is no atom cannot match any
-%% entry kind, so it is an invalid argument, as the Beamtalk form would fail.
+%% A scope param is a String or absent (missing or ""). Any other type is
+%% refused: reading it as absent would widen a scoped flush into an unscoped
+%% one.
+-spec scope_param(binary(), term()) -> {ok, binary() | undefined} | {error, #beamtalk_error{}}.
+scope_param(_Key, undefined) ->
+    {ok, undefined};
+scope_param(_Key, <<>>) ->
+    {ok, undefined};
+scope_param(_Key, Bin) when is_binary(Bin) ->
+    {ok, Bin};
+scope_param(Key, _Other) ->
+    {error,
+        invalid_scope(
+            iolist_to_binary([<<"flush: ">>, Key, <<" must be a String">>]),
+            iolist_to_binary([<<"Pass ">>, Key, <<" as a non-empty String, or omit it.">>])
+        )}.
+
+-spec invalid_scope(binary(), binary()) -> #beamtalk_error{}.
+invalid_scope(Message, Hint) ->
+    beamtalk_repl_errors:make(invalid_argument, 'Workspace', Message, Hint).
+
+%% A kind is one of the entry kinds `flush` selects by kind (see
+%% `beamtalk_workspace_flush:is_kind_filter/1`), resolved to an existing atom so
+%% request text never creates one. Anything else is refused: another name would
+%% be read as a class or a method selector.
 -spec kind_atom(binary()) -> {ok, {kind, atom()}} | {error, #beamtalk_error{}}.
 kind_atom(Kind) ->
     Bare = string:trim(Kind, both, "#'"),
     case beamtalk_text:to_existing_atom(Bare) of
         {ok, Atom} ->
-            {ok, {kind, Atom}};
+            case beamtalk_workspace_flush:is_kind_filter(Atom) of
+                true -> {ok, {kind, Atom}};
+                false -> unknown_kind(Kind)
+            end;
         error ->
-            {error,
-                beamtalk_repl_errors:make(
-                    invalid_argument,
-                    'Workspace',
-                    iolist_to_binary([<<"flush: unknown kind ">>, Kind]),
-                    <<"Use an entry kind such as new-class, instance or class.">>
-                )}
+            unknown_kind(Kind)
     end.
+
+-spec unknown_kind(binary()) -> {error, #beamtalk_error{}}.
+unknown_kind(Kind) ->
+    {error,
+        invalid_scope(
+            iolist_to_binary([<<"flush: unknown kind ">>, Kind]),
+            <<"Use new-class, remove-class, remove-method, rename-class or rename-method.">>
+        )}.
 
 %% Exactly `true` confirms. Absent is `false`; anything else is refused so a
 %% malformed value can neither silently skip nor silently apply the
