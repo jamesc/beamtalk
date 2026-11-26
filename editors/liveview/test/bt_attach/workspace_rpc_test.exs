@@ -1529,27 +1529,21 @@ defmodule BtAttach.WorkspaceRpcTest do
     test "an object handle inspects its instance fields" do
       pid = self()
 
-      mock_rpc(
-        decode_ok({:beamtalk_repl_ops, :request}, {:inspect, %{"count" => 1}})
-      )
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:inspect, %{"count" => 1}}))
 
       assert Workspace.inspect_value({:beamtalk_object, "Counter", Counter, pid}) ==
                {:ok, %{"count" => 1}}
     end
 
     test "an object handle wraps a non-map inspect payload" do
-      mock_rpc(
-        decode_ok({:beamtalk_repl_ops, :request}, {:inspect, "raw state"})
-      )
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:inspect, "raw state"}))
 
       assert Workspace.inspect_value({:beamtalk_object, "Counter", Counter, self()}) ==
                {:ok, "raw state"}
     end
 
     test "an object handle propagates an inspect error" do
-      mock_rpc(
-        decode_ok({:beamtalk_repl_ops, :request}, {:error, :boom})
-      )
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, :boom}))
 
       assert Workspace.inspect_value({:beamtalk_object, "Counter", Counter, self()}) ==
                {:error, :boom}
@@ -1577,9 +1571,7 @@ defmodule BtAttach.WorkspaceRpcTest do
     end
 
     test "an object handle whose inspect dispatch reply is wholly unrecognised" do
-      mock_rpc(
-        decode_ok({:beamtalk_repl_ops, :request}, :odd)
-      )
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
 
       assert Workspace.inspect_value({:beamtalk_object, "Counter", Counter, self()}) ==
                {:error, {:unexpected_reply, :odd}}
@@ -1647,7 +1639,10 @@ defmodule BtAttach.WorkspaceRpcTest do
 
     test "a bare pid handle degrades to an empty snapshot for a dead process" do
       mock_rpc(
-        decode_ok({:beamtalk_repl_ops, :request}, {:value, %{"pid" => "<0.1.0>", "alive" => false}})
+        decode_ok(
+          {:beamtalk_repl_ops, :request},
+          {:value, %{"pid" => "<0.1.0>", "alive" => false}}
+        )
       )
 
       assert Workspace.inspect_value(self()) == {:ok, %{}}
@@ -1664,18 +1659,14 @@ defmodule BtAttach.WorkspaceRpcTest do
     end
 
     test "pid_stats/1 returns the metrics map for an object handle" do
-      mock_rpc(
-        decode_ok({:beamtalk_repl_ops, :request}, {:value, %{"memory" => 1024}})
-      )
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:value, %{"memory" => 1024}}))
 
       assert Workspace.pid_stats({:beamtalk_object, "Counter", Counter, self()}) ==
                {:ok, %{"memory" => 1024}}
     end
 
     test "pid_stats/1 propagates an error from the pid-stats op" do
-      mock_rpc(
-        decode_ok({:beamtalk_repl_ops, :request}, {:error, :dead})
-      )
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, :dead}))
 
       assert Workspace.pid_stats({:beamtalk_object, "Counter", Counter, self()}) ==
                {:error, :dead}
@@ -1703,9 +1694,7 @@ defmodule BtAttach.WorkspaceRpcTest do
     end
 
     test "pid_stats/1 degrades a wholly unrecognised dispatch reply to unexpected_reply" do
-      mock_rpc(
-        decode_ok({:beamtalk_repl_ops, :request}, :odd)
-      )
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
 
       assert Workspace.pid_stats({:beamtalk_object, "Counter", Counter, self()}) ==
                {:error, {:unexpected_reply, :odd}}
