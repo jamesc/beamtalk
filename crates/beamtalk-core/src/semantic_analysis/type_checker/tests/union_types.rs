@@ -1154,12 +1154,12 @@ fn bt2679_singleton_binary_send_bypasses_symbol_redirect() {
 /// rejects anything else; narrowing is covered by `bt4638_*`.
 #[test]
 fn integer_or_false_assignability_is_plain_union() {
-    let accepts = |expr: &str| {
+    let accepts = |param: &str, expr: &str| {
         type_diags(&format!(
-            "typed Object subclass: Repro\n  class go -> Integer | False => {expr}\n"
+            "typed Object subclass: Repro\n  class go: x :: {param} -> Integer | False => {expr}\n"
         ))
     };
-    assert_clean_diags(&accepts("3"), "Integer member");
-    assert_clean_diags(&accepts("false"), "False member");
-    assert_has_diags(&accepts("\"text\""), "String is not a member");
+    assert_clean_diags(&accepts("Integer", "x"), "Integer member");
+    assert_clean_diags(&accepts("False", "x"), "False member");
+    assert_has_diags(&accepts("String", "x"), "String is not a member");
 }
