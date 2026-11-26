@@ -1,0 +1,95 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+#
+# TEMPORARY (BT-5307 evidence, removed before merge): install the macos-arm64
+# edge package built by edge.yml run 45883932138 on this branch through the
+# real `install.sh --edge` path (real uname on macos-15), then run it.
+name: TMP BT-5307 macOS edge install
+
+on:
+  push:
+    branches: [jamesc000/bt-5307-beamtalk-publish-a-macos-arm64-edge-asset]
+    paths: ['.github/workflows/tmp-bt5307-macos-verify.yml']
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Erlang
+        uses: ./.github/actions/setup-beamtalk
+        with:
+          rust: 'false'
+          rust-cache: 'false'
+          just: 'false'
+
+      - name: Download the branch-built macOS edge package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: beamtalk-edge-macos-arm64
+          path: release
+          run-id: 45883932138
+          github-token: ${{ github.token }}
+
+      - name: install.sh --edge (real uname, curl serving the package)
+        run: |
+          set -euo pipefail
+          uname -sm
+          ls -l release
+          mkdir -p fakebin
+          cat > fakebin/curl <<'FAKE'
+          #!/bin/sh
+          echo "curl $*" >&2
+          out=""; url=""
+          while [ $# -gt 0 ]; do
+              case "$1" in
+                  -o) out="$2"; shift 2 ;;
+                  --proto|--proto-redir) shift 2 ;;
+                  -*) shift ;;
+                  *) url="$1"; shift ;;
+              esac
+          done
+          case "$url" in https://github.com/jamesc/beamtalk/releases/download/edge/*) ;; *) exit 22 ;; esac
+          cp "$GITHUB_WORKSPACE/release/$(basename "$url")" "$out"
+          FAKE
+          chmod +x fakebin/curl
+          PATH="$PWD/fakebin:$PATH" sh scripts/install.sh --edge --prefix "$RUNNER_TEMP/bt"
+          BEAMTALK_EDGE=1 PATH="$PWD/fakebin:$PATH" sh scripts/install.sh --prefix "$RUNNER_TEMP/bt2"
+          cat "$RUNNER_TEMP/bt/.beamtalk-build.sha256"
+
+      - name: Run the installed edge build
+        run: |
+          set -euo pipefail
+          B="$RUNNER_TEMP/bt/bin/beamtalk"
+          "$B" --version
+          cd "$RUNNER_TEMP"
+          "$B" new smoke_project
+          printf '%s\n' \
+            'Object subclass: SmokeTest' \
+            '  class run =>' \
+            '    d := (Dictionary new at: #a put: 20) at: #b put: 22' \
+            '    Console printLine: "smoke=" ++ (d values inject: 0 into: [:acc :x | acc + x]) printString' \
+            > smoke_project/src/SmokeTest.bt
+          out="$(cd smoke_project && "$B" run SmokeTest run)"
+          echo "$out"
+          grep -qx 'smoke=42' <<<"$out"
+
+      - name: Other macOS targets are refused
+        run: |
+          set -uo pipefail
+          mkdir -p fakeuname
+          printf '#!/bin/sh\ncase "$1" in -s) echo Darwin ;; *) echo x86_64 ;; esac\n' > fakeuname/uname
+          chmod +x fakeuname/uname
+          if PATH="$PWD/fakeuname:$PATH" sh scripts/install.sh --edge --prefix "$RUNNER_TEMP/bt3" > out.txt 2>&1; then
+            cat out.txt; exit 1
+          fi
+          cat out.txt
+          grep -q "edge is not built for macos-x86_64" out.txt
