@@ -1896,7 +1896,7 @@ defmodule BtAttach.Workspace do
     # `wire_params/1` would turn into the string "nil".
     params =
       %{"class" => class, "selector" => selector}
-      |> maybe_put_param("side", side)
+      |> maybe_put_param("side", side_param(side))
 
     case dispatch_browse("revert-method", params) do
       {:value, %{"class" => class_bin}} -> {:ok, to_string(class_bin)}
@@ -1955,6 +1955,11 @@ defmodule BtAttach.Workspace do
         {:error, {:unexpected_reply, other}}
     end
   end
+
+  # The runtime accepts `:instance` / `:class` as well as the wire binaries.
+  defp side_param(side) when is_nil(side), do: nil
+  defp side_param(side) when is_atom(side), do: Atom.to_string(side)
+  defp side_param(side), do: side
 
   # An editing operation's non-success reply. Its `{:error, reason}` is already a
   # structured `#beamtalk_error{}` (the operation structures it), or

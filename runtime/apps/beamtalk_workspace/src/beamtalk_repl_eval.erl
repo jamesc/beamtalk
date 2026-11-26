@@ -691,8 +691,8 @@ etc.). `Path` is a project-relative `.bt` path (the same form git restored).
 """.
 -spec reload_file(string()) -> {ok, [binary()]} | {error, term()}.
 reload_file(Path) ->
-    %% Called over RPC from the LiveView client, bypassing the REPL op seam,
-    %% so it consults the capability check itself (ADR 0125 §1.5).
+    %% The `reload-file` op's chokepoint. The op seam already gates it, but the
+    %% function keeps its own check so a direct caller is gated too (ADR 0125 §1.5).
     case beamtalk_capability:check(reload, 'Workspace', <<"Reloading a file">>) of
         ok -> do_reload_file(Path);
         {error, _} = Refusal -> Refusal

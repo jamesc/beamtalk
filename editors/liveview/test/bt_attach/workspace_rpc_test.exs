@@ -935,6 +935,17 @@ defmodule BtAttach.WorkspaceRpcTest do
       assert Workspace.revert("Counter", "increment", "class") == {:error, err}
     end
 
+    test "revert/3 sends an atom side as its wire string" do
+      mock_rpc(
+        decode_asserting(
+          fn request -> assert request["side"] == "instance" end,
+          {:value, %{"class" => "Counter", "selector" => "increment"}}
+        )
+      )
+
+      assert Workspace.revert("Counter", "increment", :instance) == {:ok, "Counter"}
+    end
+
     test "revert/3 surfaces a badrpc as unreachable" do
       mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
       assert Workspace.revert("Counter", "increment") == {:error, {:unreachable, :mock_scripted}}

@@ -33,6 +33,8 @@ edit_ops_test_() ->
             fun revert_nothing_to_revert/0},
         {"save-class refuses a path outside the project", fun save_class_bad_path/0},
         {"reload-file reloads a file's classes", fun reload_file_reloads/0},
+        {"revert-method rejects an unrecognised side", fun revert_bad_side/0},
+        {"reload-file refuses absolute, escaping and non-.bt paths", fun reload_file_bad_paths/0},
         {"reload-file of a missing file is a structured error", fun reload_file_missing/0}
     ]}.
 
@@ -239,3 +241,23 @@ reload_file_missing() ->
         {error, #beamtalk_error{}},
         request(<<"reload-file">>, #{<<"path">> => <<"no/such/file.bt">>})
     ).
+
+revert_bad_side() ->
+    [
+        ?assertMatch(
+            {error, #beamtalk_error{kind = invalid_argument}},
+            request(<<"revert-method">>, #{
+                <<"class">> => <<"C">>, <<"selector">> => <<"v">>, <<"side">> => Side
+            })
+        )
+     || Side <- [<<"Instance">>, <<>>, <<"meta">>]
+    ].
+
+reload_file_bad_paths() ->
+    [
+        ?assertMatch(
+            {error, #beamtalk_error{kind = invalid_argument}},
+            request(<<"reload-file">>, #{<<"path">> => Path})
+        )
+     || Path <- [<<"/etc/passwd">>, <<"../x.bt">>, <<"src/../../x.bt">>, <<"src/Counter.erl">>]
+    ].

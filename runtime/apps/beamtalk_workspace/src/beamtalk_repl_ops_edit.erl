@@ -93,12 +93,18 @@ handle_term(<<"revert-method">>, Params, _Msg, _SessionPid) ->
         ])
     of
         {ok, [Class, Selector]} ->
-            Side = maps:get(<<"side">>, Params, undefined),
-            case beamtalk_workspace_interface_primitives:revert_method(Class, Selector, Side) of
-                {ok, _ClassObject} ->
-                    {value, #{<<"class">> => Class, <<"selector">> => Selector}};
-                {error, Reason} ->
-                    {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
+            case revert_side(maps:get(<<"side">>, Params, undefined)) of
+                {ok, Side} ->
+                    case
+                        beamtalk_workspace_interface_primitives:revert_method(Class, Selector, Side)
+                    of
+                        {ok, _ClassObject} ->
+                            {value, #{<<"class">> => Class, <<"selector">> => Selector}};
+                        {error, Reason} ->
+                            {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
+                    end;
+                {error, _} = Err ->
+                    Err
             end;
         {missing, Key} ->
             missing_param(<<"revert-method">>, Key)
@@ -106,17 +112,61 @@ handle_term(<<"revert-method">>, Params, _Msg, _SessionPid) ->
 handle_term(<<"reload-file">>, Params, _Msg, _SessionPid) ->
     case fields([{<<"path">>, beamtalk_repl_params:nonempty_binary(Params, <<"path">>)}]) of
         {ok, [Path]} ->
-            case beamtalk_repl_eval:reload_file(binary_to_list(Path)) of
-                {ok, ClassNames} ->
-                    {value, #{<<"classes">> => ClassNames}};
-                {error, Reason} ->
-                    {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
+            case project_relative_bt_path(Path) of
+                ok ->
+                    case beamtalk_repl_eval:reload_file(binary_to_list(Path)) of
+                        {ok, ClassNames} ->
+                            {value, #{<<"classes">> => ClassNames}};
+                        {error, Reason} ->
+                            {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
+                    end;
+                {error, _} = Err ->
+                    Err
             end;
         {missing, Key} ->
             missing_param(<<"reload-file">>, Key)
     end.
 
 %%% Internal helpers
+
+%% `side` is absent (side-agnostic: the highest-seq entry wins) or exactly
+%% `instance` / `class`. Anything else is refused rather than silently widened
+%% to side-agnostic, which could revert the other side's patch.
+-spec revert_side(term()) -> {ok, binary() | undefined} | {error, #beamtalk_error{}}.
+revert_side(undefined) ->
+    {ok, undefined};
+revert_side(Side) when Side =:= <<"instance">>; Side =:= <<"class">> ->
+    {ok, Side};
+revert_side(_Other) ->
+    {error,
+        beamtalk_repl_errors:make(
+            invalid_argument,
+            'Workspace',
+            <<"revert-method: side must be \"instance\" or \"class\"">>,
+            <<"Omit side to revert the newest entry for the selector.">>
+        )}.
+
+%% `reload-file` takes the project-relative `.bt` path a git operation just
+%% restored: no absolute path, no `..` segment, `.bt` only.
+-spec project_relative_bt_path(binary()) -> ok | {error, #beamtalk_error{}}.
+project_relative_bt_path(Path) ->
+    Segments = binary:split(Path, [<<"/">>, <<"\\">>], [global]),
+    case
+        filename:pathtype(binary_to_list(Path)) =:= relative andalso
+            not lists:member(<<"..">>, Segments) andalso
+            filename:extension(Path) =:= <<".bt">>
+    of
+        true ->
+            ok;
+        false ->
+            {error,
+                beamtalk_repl_errors:make(
+                    invalid_argument,
+                    'Workspace',
+                    <<"reload-file requires a project-relative .bt path">>,
+                    <<"Pass a path such as src/Counter.bt, without '..'.">>
+                )}
+    end.
 
 -spec save_method(binary(), binary(), binary(), map()) -> beamtalk_repl_ops:op_result().
 save_method(Class, Selector, Source, Params) ->
