@@ -7802,7 +7802,7 @@ argument and result is walked and classified:
 |----------------|---------------------|
 | Numbers, Strings, Symbols, `Value` subclasses, `Node` | Copied, `Value` instances enveloped (version-tagged, ADR 0123/0125) |
 | Actors, `Pid` | Allowed — pids are node-qualified natively; a registered-name reference is rewritten to carry its origin node |
-| A class object (e.g. `Counter`) | Rewritten to a by-name reference, resolved against the **receiving** node's own class registry — a class object never crosses as a remote process reference |
+| A class object (e.g. `Counter`) | Rewritten to a by-name reference, resolved against the **receiving** node's own class registry — a class object never crosses as a remote process reference. One that skips the wire (an FFI or `rpc`/`erpc` result, a raw Erlang message) is resolved the same way: at the FFI boundary (the result itself, or an `{ok, _}` payload), or, nested deeper, when it is sent a message (BT-5274); until then a nested one is not `==` to this node's class. A class not registered on the receiving node raises `class_not_found` |
 | Blocks (closures) | Allowed, like Erlang funs — see the caveat below |
 | `Port`, `FileHandle` (`HandleScoped(#process)`) | **Rejected** at encode time: `kind = not_serialisable` |
 | `Ets`, `AtomicCounter`, `Timer`, `Subscription` (`HandleScoped(#node)`) | **Rejected** at encode time: `kind = not_serialisable` — a handle that names a resource on *this* node is meaningless on another |
