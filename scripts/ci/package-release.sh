@@ -22,6 +22,11 @@ set -euo pipefail
 VERSION="${1:?Usage: package-release.sh <version> <platform>}"
 PLATFORM="${2:?Usage: package-release.sh <version> <platform>}"
 
+case "${PLATFORM}" in
+    linux-x86_64 | macos-x86_64 | macos-arm64 | windows-x86_64) ;;
+    *) echo "❌ Unknown platform '${PLATFORM}' (linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64)."; exit 1 ;;
+esac
+
 BINARIES=(beamtalk beamtalk-compiler-port beamtalk-lsp beamtalk-mcp beamtalk-exec)
 
 if [ "${PLATFORM}" = "windows-x86_64" ]; then
@@ -41,7 +46,8 @@ if [ "${PLATFORM}" = "windows-x86_64" ]; then
     scripts/install-otp-apps.sh "${STAGING}/lib/beamtalk/lib"
 
     # OTP application include directories (for native Erlang compilation)
-    for app in beamtalk_runtime; do
+    HEADER_APPS=(beamtalk_runtime)
+    for app in "${HEADER_APPS[@]}"; do
         INC_SRC="runtime/apps/${app}/include"
         if [ ! -d "${INC_SRC}" ] || ! ls "${INC_SRC}"/*.hrl 1>/dev/null 2>&1; then
             echo "❌ No .hrl headers found in ${INC_SRC}. Run 'just build-erlang' first."
