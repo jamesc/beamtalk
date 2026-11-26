@@ -620,7 +620,7 @@ release-candidate breach blocks promotion.
 | Trigger | Artifact | Layers | Targets / OTP | Blocks |
 |---------|----------|--------|---------------|--------|
 | Every `edge` publish (merge to `main`) | edge bundle | **edge-fast**: contracts, J1, J2, J4, adversarial fast subset | linux-x86_64 / min | Nothing. Posts a `uat-edge` status on the merged commit. A red files a Bug. Superseded runs cancel. |
-| **Hourly**, if edge moved | latest edge | **edge-hourly**: J3, J6, J9 on linux; the macOS fast set (contracts, J1, J2, J4 including TLS, adversarial fast subset) on macos-arm64 | linux-x86_64, macos-arm64 / min | Nothing. A red files a Bug within the hour (owner decision 3, coalesced). |
+| **Hourly**, if edge moved | latest edge | **edge-hourly**: J3, J6, J9 on linux; the macOS fast set (contracts, J1, J2, J4 including TLS, adversarial fast subset) on macos-arm64 | linux-x86_64 / min; macos-arm64 / max (as § 3: brew installs the newest) | Nothing. A red files a Bug within the hour (owner decision 3, coalesced). |
 | `nightly` publish | nightly bundles | all four layers (perf gates on linux and macos-arm64, report elsewhere) | all 4 / per § 3 | Nothing. Reds file Bugs. |
 | Weekly | `latest` | all four layers, plus J9 on macOS and Windows, plus perf report on macos-x86_64 and Windows | all 4 | Nothing. Catches drift in OS images, the registry and GitHub. |
 | Tagged release candidate | `vX.Y.Z` pre-release assets + candidate IDE image | all four layers | all 4 / per § 3 | **Promotion**, see below. |
