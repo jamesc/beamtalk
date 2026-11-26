@@ -343,7 +343,9 @@ metadata map built at all. With them on it also emits
 is enabled, sets the causal span id (and the trace id, for a root span) in
 the process dictionary and records a trace event.
 """.
--spec dispatch_span(pid(), atom(), atom(), sync | async | cast, fun(() -> {term(), atom()})) ->
+-spec dispatch_span(
+    pid() | {atom(), node()}, atom(), atom(), sync | async | cast, fun(() -> {term(), atom()})
+) ->
     term().
 dispatch_span(Pid, Class, Selector, Mode, Fun) ->
     case dispatch_events_enabled() andalso erlang:function_exported(telemetry, execute, 3) of

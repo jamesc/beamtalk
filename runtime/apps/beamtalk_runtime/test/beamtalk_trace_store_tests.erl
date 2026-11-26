@@ -2148,7 +2148,7 @@ non_pid_metadata_is_dropped_test_() ->
                         ok,
                         beamtalk_trace_store:record_dispatch(Bad, increment, 1, ok, sync, 'Counter')
                     )
-                 || Bad <- [not_a_pid, {some_name, node()}, 42]
+                 || Bad <- [not_a_pid, {some_name, 42}, {<<"name">>, node()}, 42]
                 ],
                 Live = idle_process(),
                 ?assertEqual(
@@ -2162,6 +2162,32 @@ non_pid_metadata_is_dropped_test_() ->
                 Live ! stop,
                 ?assertEqual(#{}, beamtalk_trace_store:get_stats()),
                 ?assertEqual(StorePid, whereis(beamtalk_trace_store))
+            end)}
+    ]}.
+
+remote_name_dest_test_() ->
+    {foreach, fun churn_setup/0, fun cleanup/1, [
+        {"a `{Name, Node}` target (BT-5271) counts in the class aggregate only",
+            ?_test(begin
+                Dest = {bt5271_some_name, 'bt5271_peer@localhost'},
+                ?assertEqual(
+                    ok, beamtalk_trace_store:record_dispatch(Dest, increment, 1, ok, sync, unknown)
+                ),
+                #{{beamtalk_string, <<"methods">>} := Methods} = class_entry(<<"unknown">>),
+                ?assertMatch(
+                    #{{beamtalk_string, <<"calls">>} := 1},
+                    maps:get({beamtalk_string, <<"increment">>}, Methods)
+                ),
+                %% Its trace event names the target.
+                ok = beamtalk_trace_store:enable(),
+                ok = beamtalk_trace_store:record_trace_event(
+                    Dest, unknown, increment, sync, 1000, ok, #{}, stop
+                ),
+                [Event] = beamtalk_trace_store:get_traces(),
+                ?assertEqual(
+                    {beamtalk_string, <<"{bt5271_some_name,bt5271_peer@localhost}">>},
+                    maps:get({beamtalk_string, <<"actor">>}, Event)
+                )
             end)}
     ]}.
 

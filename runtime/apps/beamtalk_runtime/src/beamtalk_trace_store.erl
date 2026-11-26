@@ -135,6 +135,13 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
 -endif.
 
 %% Atomics slot offsets (per aggregate key: {Class, Selector} or {Pid, Selector})
+%% A `{Name, Node}` dispatch target: a send to a node-qualified registered
+%% ref that addresses the name directly (BT-5271), with no pid to key by.
+-define(IS_REMOTE_NAME_DEST(D),
+    (is_tuple(D) andalso tuple_size(D) =:= 2 andalso is_atom(element(1, D)) andalso
+        is_atom(element(2, D)))
+).
+
 -define(SLOT_CALLS, 1).
 -define(SLOT_OK, 2).
 -define(SLOT_ERRORS, 3).
@@ -276,12 +283,19 @@ gen_server), for lock-free performance. Class comes from the dispatch
 metadata — the authoritative source.
 """.
 -spec record_dispatch(term(), term(), non_neg_integer(), atom(), atom(), term()) -> ok.
-record_dispatch(Pid, Selector, _Duration, _Outcome, _Mode, Class) when
-    not is_pid(Pid); not is_atom(Selector); not is_atom(Class)
+record_dispatch(_Pid, Selector, _Duration, _Outcome, _Mode, Class) when
+    not is_atom(Selector); not is_atom(Class)
 ->
     %% Malformed metadata (the function is exported and any code can emit the
-    %% event): per-actor rows are keyed by pid, and a non-atom class or
-    %% selector would poison the stats readers. Drop the sample.
+    %% event): a non-atom class or selector would poison the stats readers.
+    %% Drop the sample.
+    ok;
+record_dispatch(Pid, _Selector, _Duration, _Outcome, _Mode, _Class) when
+    not is_pid(Pid), not ?IS_REMOTE_NAME_DEST(Pid)
+->
+    %% A target that is neither a pid nor a `{Name, Node}` send to a
+    %% node-qualified ref (BT-5271): per-actor rows are keyed by pid, so
+    %% nothing can be recorded for it. Drop the sample.
     ok;
 record_dispatch(Pid, Selector, Duration, Outcome, Mode, Class) ->
     %% A missing table (the gen_server mid-restart, or a hot upgrade whose new
@@ -303,7 +317,8 @@ do_record_dispatch(Pid, Selector, Duration, Outcome, _Mode, Class) ->
     %% remote actor's liveness is not observable without a node round-trip.
     %% Remote actors still count in the per-class aggregate above; their
     %% per-actor detail belongs to the node that hosts them.
-    case is_enabled() andalso node(Pid) =:= node() of
+    %% A `{Name, Node}` target (BT-5271) is always remote: aggregate only.
+    case is_enabled() andalso is_pid(Pid) andalso node(Pid) =:= node() of
         true ->
             maybe_add_sample(ensure_pid_slot(Pid, Selector, Class), Duration, Outcome);
         false ->
@@ -1628,7 +1643,7 @@ trace_event_to_map({
     S = fun(Bin) -> beamtalk_primitive:string_from_binary(Bin) end,
     Base = #{
         S(<<"timestamp_us">>) => WallClockUs,
-        S(<<"actor">>) => S(list_to_binary(pid_to_list(Pid))),
+        S(<<"actor">>) => S(actor_text(Pid)),
         S(<<"class">>) => S(atom_to_binary(Class, utf8)),
         S(<<"selector">>) => S(atom_to_binary(Selector, utf8)),
         S(<<"mode">>) => S(atom_to_binary(Mode, utf8)),
@@ -1647,7 +1662,7 @@ trace_event_to_map({
     S = fun(Bin) -> beamtalk_primitive:string_from_binary(Bin) end,
     Base = #{
         S(<<"timestamp_us">>) => MonotonicNs div 1000,
-        S(<<"actor">>) => S(list_to_binary(pid_to_list(Pid))),
+        S(<<"actor">>) => S(actor_text(Pid)),
         S(<<"class">>) => S(atom_to_binary(Class, utf8)),
         S(<<"selector">>) => S(atom_to_binary(Selector, utf8)),
         S(<<"mode">>) => S(atom_to_binary(Mode, utf8)),
@@ -1659,6 +1674,12 @@ trace_event_to_map({
         %% Base wins on key collisions (metadata cannot override core fields)
         _ -> maps:merge(tag_metadata_keys(sanitize_metadata(Metadata)), Base)
     end.
+
+%% A trace event's target as text: a pid, or the `{Name, Node}` a send to a
+%% node-qualified registered ref addresses (BT-5271).
+-spec actor_text(pid() | {atom(), node()}) -> binary().
+actor_text(Pid) when is_pid(Pid) -> list_to_binary(pid_to_list(Pid));
+actor_text(Dest) -> beamtalk_error:chars_to_binary(io_lib:format("~tp", [Dest])).
 
 -doc """
 Sanitize metadata map values for JSON serialization.
