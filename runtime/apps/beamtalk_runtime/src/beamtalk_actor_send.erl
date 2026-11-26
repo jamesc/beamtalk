@@ -174,15 +174,21 @@ async_send_impl(ActorPid, isAlive, [], FuturePid, ClassHint) when node(ActorPid)
     %% timeout). Ask from a separate process so an async send hands back its
     %% future at once instead of blocking the sender on the round trip; the
     %% future's own orphan cap is far longer than that bound.
-    Class =
-        case ClassHint of
-            undefined -> unknown;
-            Hint -> Hint
-        end,
+    Class = class_label(ClassHint),
     _ = spawn(fun() ->
-        case beamtalk_pid:ask_alive(ActorPid, Class, isAlive) of
+        %% Settle the future on every path, so a raise here never leaves an
+        %% awaiting caller hanging until the future's orphan cap.
+        try beamtalk_pid:ask_alive(ActorPid, Class, isAlive) of
             {ok, Alive} -> beamtalk_future:resolve(FuturePid, Alive);
             {error, Error} -> beamtalk_future:reject(FuturePid, Error)
+        catch
+            ErrClass:Reason ->
+                beamtalk_future:reject(
+                    FuturePid,
+                    beamtalk_pid:unexpected_answer_error(
+                        Class, isAlive, node(ActorPid), {ErrClass, Reason}
+                    )
+                )
         end
     end),
     ok;
@@ -276,6 +282,11 @@ async_send_impl(ActorPid, Selector, Args, FuturePid, ClassHint) ->
     end),
     ok.
 
+%% The class an error names for a send whose class hint may be absent.
+-spec class_label(atom() | undefined) -> atom().
+class_label(undefined) -> unknown;
+class_label(Class) -> Class.
+
 -spec remote_async_unsupported_error(atom(), atom() | undefined) -> #beamtalk_error{}.
 
 remote_async_unsupported_error(Selector, ClassHint) ->
@@ -351,6 +362,12 @@ every other message through the Layer 1 self-send check. `ClassHint` is the
 caller's class, or `undefined` to look it up (see `resolve_class/2`).
 """.
 -spec sync_send_pid(pid(), atom(), list(), atom() | undefined) -> term().
+sync_send_pid(ActorPid, isAlive, [], Class) ->
+    %% The class labels a remote isAlive error, as on the async path.
+    case beamtalk_pid:ask_alive(ActorPid, class_label(Class), isAlive) of
+        {ok, Alive} -> Alive;
+        {error, Error} -> beamtalk_exception_handler:reraise(Error)
+    end;
 sync_send_pid(ActorPid, Selector, Args, _Class) when ?IS_LOCAL_LIFECYCLE(Selector, Args) ->
     case local_lifecycle(ActorPid, Selector, Args) of
         {value, Value} -> Value;
@@ -843,8 +860,10 @@ lifecycle_exit_error(ActorPid, Selector, Reason) ->
 %% What a failed stop's exit `Reason` says, via `beamtalk_call_failure:classify/2`.
 %% Only a remote actor's node can be unreachable: a local actor that itself
 %% exited with `noconnection` (say, linked to a process on a lost node) is
-%% simply dead. And only `beamtalk_stop:stop/3`'s own bare `timeout` means the
-%% wait ran out; an actor that exited with `{timeout, _}` is dead.
+%% simply dead. And only a bare `timeout` is read as the stop's wait running
+%% out; an actor that exited with `{timeout, _}` is dead. (`beamtalk_stop:stop/3`
+%% re-raises an actor's own exit reason unchanged, so an actor that itself
+%% exits with the bare atom `timeout` mid-stop also reads as a timed-out stop.)
 -spec stop_failure(pid(), term()) -> unreachable | timeout | exited.
 stop_failure(ActorPid, Reason) ->
     case beamtalk_call_failure:classify(exit, Reason) of
@@ -881,6 +900,8 @@ resolve_remote_registered(Name, Node) ->
     case beamtalk_call_failure:erpc(Node, erlang, whereis, [Name], ?BT_REMOTE_CALL_TIMEOUT) of
         {ok, Pid} when is_pid(Pid) -> Pid;
         {ok, undefined} -> undefined;
+        %% BT-5192: a name registered to a port names no actor.
+        {ok, _NotAPid} -> undefined;
         {error, _} -> node_down
     end.
 

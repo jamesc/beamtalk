@@ -431,8 +431,8 @@ abstract Object subclass: Supervisor
 
   /// Is this supervisor running?
   ///
-  /// A supervisor on another node answers `true` (as an actor does); the
-  /// next call to it reports `#stale_handle` or `#node_down`. Sealed, like
+  /// A supervisor on another node is asked through its node (as an actor
+  /// is), and raises `#node_down` when that node cannot answer. Sealed, like
   /// `stop` (BT-3984): the runtime answers both without a method lookup.
   ///
   /// WARNING: check-then-act is racy; the supervisor can stop right after.

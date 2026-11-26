@@ -824,9 +824,9 @@ Object subclass: Actor
   /// Equivalent to `stopWith: #normal`. Idempotent: stopping an
   /// already-stopped actor succeeds silently. Raises `timeout` if the actor
   /// has not finished stopping within 5 seconds, and `node_down` if it is on
-  /// another node that cannot be reached (the actor may still be running). Sent to `self` from inside one of the
-  /// actor's own methods, the stop takes effect after the current message
-  /// has been handled.
+  /// another node that cannot be reached (the actor may still be running).
+  /// Sent to `self` from inside one of the actor's own methods, the stop
+  /// takes effect after the current message has been handled.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -866,8 +866,9 @@ Object subclass: Actor
   ///
   /// Same semantics as `stopWith:`; raises `timeout` if the actor has not
   /// terminated within `timeout` (it may still stop in the background), and
-  /// `node_down` if it is on another node that cannot be reached. Sent to `self`, the timeout is ignored —
-  /// the stop is deferred until the current message has been handled.
+  /// `node_down` if it is on another node that cannot be reached. Sent to
+  /// `self`, the timeout is ignored — the stop is deferred until the current
+  /// message has been handled.
   ///
   /// ## Examples
   /// ```beamtalk

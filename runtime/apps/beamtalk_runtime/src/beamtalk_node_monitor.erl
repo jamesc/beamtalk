@@ -786,7 +786,8 @@ check_one_peer_class(PeerNode, Gen, Stamp, ClassName, LocalEntry) ->
             beamtalk_release_shapes,
             class_shape_entry,
             [ClassName],
-            ?BT_REMOTE_CALL_TIMEOUT
+            ?BT_REMOTE_CALL_TIMEOUT,
+            fun(Entry) -> Entry =:= undefined orelse is_map(Entry) end
         )
     of
         {ok, undefined} ->

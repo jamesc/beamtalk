@@ -30,6 +30,8 @@ place. Each test checks after healing that the actor really did survive, so
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
+-export([hold_registered_port/2]).
+
 setup() ->
     {ok, Peer, PeerNode} = beamtalk_dist_test_helper:start_peer("bt5192_partition"),
     {ok, _Started} = beamtalk_test_boot:start_app(beamtalk_runtime),
@@ -67,6 +69,9 @@ partition_test_() ->
                 end},
                 {"remote supervisor isAlive asks the node", fun() ->
                     supervisor_is_alive_asks_remote_node(PeerNode)
+                end},
+                {"a send to a remote name registered to a port is no_such_process", fun() ->
+                    remote_name_registered_to_port(PeerNode)
                 end},
                 {"remote lookups whose target answers outside its contract are errors", fun() ->
                     unexpected_remote_results_are_errors(PeerNode)
@@ -295,4 +300,32 @@ unexpected_remote_results_are_errors(PeerNode) ->
         rpc:call(PeerNode, meck, unload, [?BT_ACTOR_WIRE_MODULE]),
         rpc:call(PeerNode, meck, unload, [beamtalk_release]),
         rpc:call(PeerNode, meck, unload, [beamtalk_process_navigation])
+    end.
+
+%%====================================================================
+%% 5. A remote name that names a port
+%%====================================================================
+
+remote_name_registered_to_port(PeerNode) ->
+    Name = list_to_atom("bt5192_port_" ++ beamtalk_test_unique:id()),
+    Holder = rpc:call(PeerNode, erlang, spawn, [?MODULE, hold_registered_port, [Name, self()]]),
+    ?awaitMessage({port_registered, Holder}),
+    try
+        ?assertBtError(
+            no_such_process, beamtalk_actor:sync_send({registered, Name, PeerNode}, getValue, [])
+        )
+    after
+        Holder ! stop
+    end.
+
+-doc "Runs on the peer: registers a port under `Name` until told to stop.".
+-spec hold_registered_port(atom(), pid()) -> ok.
+hold_registered_port(Name, Collector) ->
+    %% A UDP socket is a port on every platform, with no external program.
+    {ok, Port} = gen_udp:open(0, [{inet_backend, inet}]),
+    true = is_port(Port),
+    true = register(Name, Port),
+    Collector ! {port_registered, self()},
+    receive
+        stop -> gen_udp:close(Port)
     end.

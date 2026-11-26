@@ -105,9 +105,10 @@ erpc(Node, M, F, A, Timeout) ->
 `erpc/5`, plus the target's answer contract (BT-5192): an answer for which
 `IsValid` is false becomes `{error, {other, {unexpected_result, Value}}}`, so a
 call site's `{ok, _}` clauses never meet an answer outside the contract and
-its `{other, _}` error builder reports one. Every remote-call site whose
-target has a fixed answer shape uses this rather than an `{ok, Other}` arm of
-its own.
+its `{other, _}` error builder reports one. A remote-call site whose target
+has a fixed answer shape uses this rather than an `{ok, Other}` arm of its
+own; `erpc/5` stays for targets whose answer is passed on as it is (remote
+introspection) or matched with a catch-all.
 """.
 -spec erpc(node(), module(), atom(), [term()], timeout(), fun((term()) -> boolean())) ->
     {ok, term()} | {error, erpc_error()}.
