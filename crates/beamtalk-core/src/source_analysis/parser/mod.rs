@@ -2609,6 +2609,42 @@ impl Parser {
         }
     }
 
+    /// Whether the `#[` / `#{` at the cursor opens an array or map pattern
+    /// that carries a `::` annotation and is followed by `:=` (BT-5284).
+    ///
+    /// Scans to the matching close, counting every bracket kind. Only a
+    /// literal that holds a `::` at some depth qualifies, so unannotated
+    /// array/map destructuring keeps its existing expression-then-convert
+    /// path unchanged.
+    pub(super) fn leading_collection_is_typed_destructure(&self) -> bool {
+        let mut depth: usize = 0;
+        let mut saw_annotation = false;
+        let mut offset = 0;
+        loop {
+            match self.peek_at(offset) {
+                None | Some(TokenKind::Eof) => return false,
+                Some(TokenKind::DoubleColon) => saw_annotation = true,
+                Some(
+                    TokenKind::LeftBrace
+                    | TokenKind::MapOpen
+                    | TokenKind::ArrayOpen
+                    | TokenKind::LeftBracket
+                    | TokenKind::LeftParen
+                    | TokenKind::ListOpen,
+                ) => depth += 1,
+                Some(TokenKind::RightBrace | TokenKind::RightBracket | TokenKind::RightParen) => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return saw_annotation
+                            && matches!(self.peek_at(offset + 1), Some(TokenKind::Assign));
+                    }
+                }
+                Some(_) => {}
+            }
+            offset += 1;
+        }
+    }
+
     /// Checks if the current token is a specific binary selector, and consumes it if so.
     pub(super) fn match_binary_selector(&mut self, expected: &str) -> bool {
         if let TokenKind::BinarySelector(s) = self.current_kind()
