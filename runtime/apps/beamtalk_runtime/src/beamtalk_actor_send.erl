@@ -835,7 +835,10 @@ the classification `sync_call/5` applies to a send:
 - anything else (the actor exited with another reason first) → `actor_dead`,
   with the exit reason in `details`.
 
-`noproc` never reaches here: an already-dead actor counts as stopped.
+`noproc` never reaches here: an already-dead actor counts as stopped. A
+remote actor that itself exits with `noconnection` mid-stop (linked to a
+process on a third node that dropped) cannot be told apart from a lost stop,
+so it reads as `node_down`: the conservative answer, since the caller retries.
 """.
 -spec lifecycle_exit_error(pid(), atom(), term()) -> #beamtalk_error{}.
 lifecycle_exit_error(ActorPid, Selector, Reason) ->

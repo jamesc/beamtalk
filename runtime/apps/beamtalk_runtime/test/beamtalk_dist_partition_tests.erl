@@ -61,6 +61,9 @@ partition_test_() ->
                 end},
                 {"remote isAlive asks the node: true for a live actor, false for a dead one",
                     fun() -> is_alive_asks_remote_node(PeerNode) end},
+                {"remote isAlive of a pid from an earlier node incarnation is false", fun() ->
+                    is_alive_of_earlier_node_incarnation_is_false(PeerNode)
+                end},
                 {"remote isAlive across a partition raises node_down", fun() ->
                     is_alive_across_partition(PeerNode)
                 end},
@@ -184,6 +187,30 @@ is_alive_asks_remote_node(PeerNode) ->
     ?assertEqual(true, beamtalk_actor:sync_send(Pid, isAlive, [])),
     ok = rpc:call(PeerNode, gen_server, stop, [Pid]),
     ?assertEqual(false, beamtalk_actor:sync_send(Pid, isAlive, [])).
+
+%% A pid from an earlier incarnation of the peer node (the node restarted
+%% under the same name) is dead: `isAlive` answers `false`. On the supported
+%% OTP releases (28, 29) the far side's `erlang:is_process_alive/1` answers
+%% `false` for such a pid rather than raising `badarg`; this pins that.
+is_alive_of_earlier_node_incarnation_is_false(PeerNode) ->
+    Live = start_remote_counter(PeerNode),
+    try
+        Stale = with_other_creation(Live),
+        ?assertEqual(PeerNode, node(Stale)),
+        ?assertNotEqual(Live, Stale),
+        ?assertEqual(false, beamtalk_actor:sync_send(Stale, isAlive, []))
+    after
+        rpc:call(PeerNode, erlang, exit, [Live, kill])
+    end.
+
+%% `Pid` with the creation (node incarnation) number changed: the same node
+%% name and process id, but from a different life of that node. The creation
+%% is the last 4 bytes of a NEW_PID_EXT encoding.
+with_other_creation(Pid) ->
+    <<131, 88, Rest/binary>> = term_to_binary(Pid, [{minor_version, 2}]),
+    Size = byte_size(Rest) - 4,
+    <<Head:Size/binary, Creation:32>> = Rest,
+    binary_to_term(<<131, 88, Head/binary, (Creation + 1):32>>).
 
 is_alive_across_partition(PeerNode) ->
     Pid = start_remote_counter(PeerNode),
