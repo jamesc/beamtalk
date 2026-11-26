@@ -255,11 +255,18 @@ impl CoreErlangGenerator {
         failure_doc: &Document<'static>,
         already_bound: &mut HashSet<String>,
     ) -> Result<Document<'static>> {
-        let core_var = if binding.name == "_" {
+        let discard = binding.name == "_";
+        let core_var = if discard {
             self.fresh_temp_var("TypeElem")
         } else {
             Self::to_core_erlang_var(&binding.name)
         };
+        // A repeated name needs an equality check against its first binding
+        // (array arms allow duplicates), so extract into a fresh variable.
+        let duplicate = !discard && already_bound.contains(binding.name.as_str());
+        if !discard && !duplicate {
+            already_bound.insert(binding.name.to_string());
+        }
         let next = self.build_array_arm_body(
             array_var,
             elements,
@@ -268,10 +275,30 @@ impl CoreErlangGenerator {
             failure_doc,
             already_bound,
         )?;
-        let tested = self.dispatch_type_pattern_strategy(&core_var, &class.name, next, failure_doc);
+        let (elem_var, next) = if duplicate {
+            let dup_var = self.fresh_temp_var("TypeDup");
+            let mismatch_var = self.fresh_temp_var("Mismatch");
+            let check = docvec![
+                "case call 'erlang':'=:='(",
+                leaf::var(core_var),
+                ", ",
+                leaf::var(dup_var.clone()),
+                ") of <'true'> when 'true' -> ",
+                next,
+                " <",
+                leaf::var(mismatch_var),
+                "> when 'true' -> ",
+                failure_doc.clone(),
+                " end"
+            ];
+            (dup_var, check)
+        } else {
+            (core_var, next)
+        };
+        let tested = self.dispatch_type_pattern_strategy(&elem_var, &class.name, next, failure_doc);
         Ok(docvec![
             "let ",
-            leaf::var(core_var),
+            leaf::var(elem_var),
             " = ",
             self.runtime_send_call(
                 leaf::var(array_var.to_string()),

@@ -185,6 +185,8 @@ impl CoreErlangGenerator {
                     match elem {
                         // `x :: T` binds like `x`: the annotation is a trusted declared type
                         // for the type checker, not a runtime test (BT-5284).
+                        // `_ :: T` (BT-5294) binds nothing, like `_` below.
+                        Pattern::Type { binding, .. } if binding.name == "_" => {}
                         Pattern::Variable(id) | Pattern::Type { binding: id, .. } => {
                             let core_var = Self::to_core_erlang_var(&id.name);
                             self.bind_var(&id.name, &core_var);
@@ -301,6 +303,8 @@ impl CoreErlangGenerator {
                     match elem {
                         // `x :: T` binds like `x`: the annotation is a trusted declared type
                         // for the type checker, not a runtime test (BT-5284).
+                        // `_ :: T` (BT-5294) binds nothing, like `_` below.
+                        Pattern::Type { binding, .. } if binding.name == "_" => {}
                         Pattern::Variable(id) | Pattern::Type { binding: id, .. } => {
                             let core_var = Self::to_core_erlang_var(&id.name);
                             self.bind_var(&id.name, &core_var);
@@ -369,6 +373,8 @@ impl CoreErlangGenerator {
                     match &pair.value {
                         // `x :: T` binds like `x`: the annotation is a trusted declared type
                         // for the type checker, not a runtime test (BT-5284).
+                        // `_ :: T` (BT-5294) binds nothing, like `_` below.
+                        Pattern::Type { binding, .. } if binding.name == "_" => {}
                         Pattern::Variable(id) | Pattern::Type { binding: id, .. } => {
                             let core_var = Self::to_core_erlang_var(&id.name);
                             self.bind_var(&id.name, &core_var);
