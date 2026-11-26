@@ -635,7 +635,7 @@ pub struct TypeChecker {
     /// `check_method_body_inner` checks each distinct type against the
     /// declared return type on its own. Cleared at method entry (and before
     /// top-level module expressions, whose `^`s are never read).
-    pub(super) collected_returns: Vec<InferredType>,
+    pub(super) collected_returns: Vec<CollectedReturn>,
     /// BT-4636: set while a send's arguments are being inferred, so a block
     /// argument's writes to outer locals are collected in
     /// [`Self::deferred_block_widenings`] and joined into the environment once
@@ -956,6 +956,16 @@ struct TypeOrigin {
     span: Span,
 }
 
+/// BT-5283: one `^expr` collected while checking a method body.
+#[derive(Debug, Clone)]
+pub(super) enum CollectedReturn {
+    /// An ordinary return of the value's inferred type.
+    Value(InferredType),
+    /// BT-5290: `^x` where the local `x` is known to be a `Result`'s error
+    /// variant, recorded as `Result(Never, E)`.
+    ResultErrorVariant(InferredType),
+}
+
 /// Type environment for tracking variable → type mappings.
 ///
 /// Keyed by [`EnvKey`] so that `self.field` bindings used by
@@ -987,6 +997,16 @@ struct TypeEnv {
     /// `set` too, so they drop the aliases that mention the refined variable
     /// (safe: only precision is lost).
     cond_aliases: HashMap<EnvKey, narrowing::facts::AliasFacts>,
+    /// BT-5290: locals whose `Result(T, E)` value is known to be the error
+    /// variant here — inside `x isError ifTrue:`, `x isOk ifFalse:`, the
+    /// error block of `x ifError:` / `x ifOk:ifError:`. The binding keeps its
+    /// full `Result(T, E)` type, so sends on `x` (`valueOr:`, `value`, …) are
+    /// typed exactly as before; only a `^x` reads this fact, recording the
+    /// return as [`TypeChecker::result_error_variant`]. A narrowing refinement
+    /// to the error variant of the local's current binding lands here (see
+    /// [`TypeEnv::push_refinement`]); any write to the binding, including one
+    /// in a block (`apply_deferred_block_widenings`), clears it.
+    result_error_variants: std::collections::HashSet<EnvKey>,
 }
 
 impl TypeEnv {
@@ -998,6 +1018,7 @@ impl TypeEnv {
             known_remote: HashMap::new(),
             raw_binary: std::collections::HashSet::new(),
             cond_aliases: HashMap::new(),
+            result_error_variants: std::collections::HashSet::new(),
         }
     }
 
@@ -1018,6 +1039,7 @@ impl TypeEnv {
 
     fn set(&mut self, key: EnvKey, ty: InferredType) {
         self.raw_binary.remove(&key);
+        self.result_error_variants.remove(&key);
         self.invalidate_cond_aliases(&key);
         self.bindings.insert(key, ty);
     }
@@ -1032,7 +1054,25 @@ impl TypeEnv {
         self.origins.remove(key);
         self.known_remote.remove(key);
         self.raw_binary.remove(key);
+        self.result_error_variants.remove(key);
         self.invalidate_cond_aliases(key);
+    }
+
+    /// BT-5290: whether `key`'s `Result` value is known to be the error
+    /// variant here (see [`TypeEnv::result_error_variants`]).
+    fn is_result_error_variant(&self, key: &EnvKey) -> bool {
+        self.result_error_variants.contains(key)
+    }
+
+    /// BT-5290: whether any variable is known to be a `Result`'s error
+    /// variant here.
+    fn has_result_error_variants(&self) -> bool {
+        !self.result_error_variants.is_empty()
+    }
+
+    /// BT-5290: forget that `key` is known to be a `Result`'s error variant.
+    fn clear_result_error_variant(&mut self, key: &EnvKey) {
+        self.result_error_variants.remove(key);
     }
 
     /// BT-4714: `key` was written. Forget the alias held *by* `key` and every
@@ -1105,6 +1145,7 @@ impl TypeEnv {
             },
         );
         self.raw_binary.remove(&key);
+        self.result_error_variants.remove(&key);
         self.invalidate_cond_aliases(&key);
         self.bindings.insert(key, ty);
     }
@@ -1153,6 +1194,31 @@ impl TypeEnv {
         // the field here keeps the intent visible and silences dead-code
         // warnings without an `#[allow]`.
         let _scope = layer.scope;
+        // BT-5290: a narrowing of a local `Result(T, E)` to its error variant
+        // (`Result(Never, E)`, from `refine_result_narrowing` or
+        // `infer_args_for_result_branches`) is kept as a flow fact, not
+        // written to the binding: the binding stays `Result(T, E)`, so
+        // `x valueOr: d` still answers `T` and no send that returns normally
+        // is typed `Never`. Recognised against the current binding, so a
+        // refinement to a `Result(Never, E)` the user declared is an ordinary
+        // narrowing. A join of the error variant with the binding itself
+        // (`(x isError or: [...x...])`) narrows nothing.
+        if let Some(current) = self.bindings.get(&layer.variable)
+            && matches!(layer.variable, EnvKey::Local(_))
+            && TypeChecker::result_type_args(current)
+                .is_some_and(|(success, _)| !matches!(success, InferredType::Never))
+        {
+            let error_variant = TypeChecker::result_error_variant(current);
+            if layer.ty == error_variant {
+                self.result_error_variants.insert(layer.variable);
+                return;
+            }
+            if let InferredType::Union { members, .. } = &layer.ty
+                && members.iter().all(|m| m == current || *m == error_variant)
+            {
+                return;
+            }
+        }
         self.set(layer.variable, layer.ty);
     }
 }
