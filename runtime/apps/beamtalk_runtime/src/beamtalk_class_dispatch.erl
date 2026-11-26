@@ -1027,14 +1027,33 @@ class_chain_send(ClassPid, ClassName, Module, Selector, Args) ->
         {ok, Result} ->
             Result;
         not_found ->
-            Error = beamtalk_error:new(
-                does_not_understand,
-                ClassName,
-                Selector,
-                <<"Class does not understand this message">>
-            ),
-            beamtalk_error:raise(Error)
+            case class_dnu_override(ClassName) of
+                true ->
+                    %% BT-5270: the class (or a superclass's class side) defines
+                    %% `class doesNotUnderstand:args:`; the unknown message goes
+                    %% there, as an instance-side unknown message does. Not
+                    %% process-bound, so it runs in the caller like any class method.
+                    class_send(ClassPid, 'doesNotUnderstand:args:', [Selector, Args]);
+                false ->
+                    Error = beamtalk_error:new(
+                        does_not_understand,
+                        ClassName,
+                        Selector,
+                        <<"Class does not understand this message">>
+                    ),
+                    beamtalk_error:raise(Error)
+            end
     end.
+
+-doc """
+Does the class side of `ClassName` define `doesNotUnderstand:args:` (BT-5270),
+on the class itself or a superclass's class side? Reads the class-method
+tables only, so the instance-side default on `ProtoObject` (which `Class`
+inherits) is not an override.
+""".
+-spec class_dnu_override(class_name()) -> boolean().
+class_dnu_override(ClassName) ->
+    class_understands_class_selector(ClassName, 'doesNotUnderstand:args:').
 
 -doc "Ask the class process to run a class method (`class_method_call`).".
 -spec class_method_call(pid(), selector(), list(), call_timeout()) -> term().

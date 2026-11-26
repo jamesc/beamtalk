@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5270: inherits the class-side `doesNotUnderstand:args:` override of its superclass.
+
+Bt5270ClassDnuProxy subclass: Bt5270ClassDnuProxySub

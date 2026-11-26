@@ -1,0 +1,88 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5270: an unknown message sent to a class object reaches a class-side
+// `doesNotUnderstand:args:` override (own or inherited), as the language
+// features doc says. An inlined writing fold (`collect:`, `inject:into:`) or
+// counted loop (`to:do:`, `to:by:do:`) sent to such a class raises
+// `stateful_block_dispatch`: the pure send reaches the override, which the fold
+// cannot stand in for. A class without an override (the inherited `ProtoObject`
+// default does not count) still raises `does_not_understand`.
+// Class-object counterpart of writing_fold_dnu_override_test.bt (BT-5236).
+
+TestCase subclass: WritingFoldClassDnuOverrideTest
+
+  writingCollect: r =>
+    n := 0
+    r collect: [:e | n := n + 1]
+
+  writingInject: r =>
+    n := 0
+    r inject: 0 into: [:a :e | n := n + 1]
+
+  writingToDo: r =>
+    n := 0
+    r to: 3 do: [:i | n := n + i]
+    n
+
+  writingToByDo: r =>
+    n := 0
+    r
+      to: 3
+      by: 1
+      do: [:i | n := n + i]
+    n
+
+  sendUnary: r => r zork
+
+  sendKeyword: r => r zork: 1 with: 2
+
+  // === Class-side dispatch ===
+  testDirectSendReachesOverride =>
+    self assert: (self sendUnary: Bt5270ClassDnuProxy) equals: #zork
+    self assert: (self sendKeyword: Bt5270ClassDnuProxy) equals: #zork:with:
+
+  testPerformReachesOverride =>
+    self assert: (Bt5270ClassDnuProxy perform: #zork) equals: #zork
+    self assert: (Bt5270ClassDnuProxy perform: #zork: withArguments: #(1)) equals: #zork:
+
+  testInheritedOverrideReachesSubclass =>
+    self assert: (self sendUnary: Bt5270ClassDnuProxySub) equals: #zork
+
+  testPureCollectReachesOverride =>
+    self assert: (Bt5270ClassDnuProxy collect: [:e | e]) equals: #collect:
+
+  testNoOverrideStillDoesNotUnderstand =>
+    self should: [self sendUnary: Object] raise: #does_not_understand
+    self should: [Object perform: #zork] raise: #does_not_understand
+
+  // === Writing-fold guard ===
+  testWritingCollectRefuses =>
+    self should: [
+      self writingCollect: Bt5270ClassDnuProxy
+    ] raise: #stateful_block_dispatch
+
+  testWritingInjectRefuses =>
+    self should: [
+      self writingInject: Bt5270ClassDnuProxy
+    ] raise: #stateful_block_dispatch
+
+  testWritingToDoRefuses =>
+    self should: [
+      self writingToDo: Bt5270ClassDnuProxy
+    ] raise: #stateful_block_dispatch
+
+  testWritingToByDoRefuses =>
+    self should: [
+      self writingToByDo: Bt5270ClassDnuProxy
+    ] raise: #stateful_block_dispatch
+
+  testSubclassInheritsOverrideInGuard =>
+    self should: [
+      self writingCollect: Bt5270ClassDnuProxySub
+    ] raise: #stateful_block_dispatch
+
+  testInheritedDefaultIsNotAnOverrideInGuard =>
+    self should: [self writingCollect: Object] raise: #does_not_understand
+    self should: [self writingInject: Object] raise: #does_not_understand
+    self should: [self writingToDo: Object] raise: #does_not_understand
