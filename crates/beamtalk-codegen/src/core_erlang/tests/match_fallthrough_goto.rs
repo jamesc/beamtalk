@@ -382,15 +382,15 @@ fn type_chain_gotos_answer_every_arm() {
 #[test]
 fn binary_and_array_gotos_answer_every_arm() {
     let src = methods(&[
-        "<<a:(4 / q), rest/binary>> -> 1",
+        "<<a:(q * 4), rest/binary>> -> 1",
         "<<k:8, a:k/binary, rest/binary>> -> 2",
         "#[p, q2] -> 3",
         "{#ok, <<1, r/binary>>} -> 4",
         "{#ok, other} -> 5",
         "_ -> 6",
     ])
-    .replace("    x match:", "    q := 0\n    x match:")
-    .replace("    t := x match:", "    q := 0\n    t := x match:");
+    .replace("    x match:", "    q := nil\n    x match:")
+    .replace("    t := x match:", "    q := nil\n    t := x match:");
     assert_goto_match(
         &src,
         &[
