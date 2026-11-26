@@ -31,10 +31,12 @@ TestCase subclass: ClassFieldReflectionDnuTest
     self should: [GuardedDiffClassLeaf fieldAt: #x] raise: #does_not_understand
 
   testFieldAtPutOnAClassIsDoesNotUnderstand =>
-    self should: [
-      @expect dnu
-      GuardedDiffClassRoot fieldAt: #x put: 1
-    ] raise: #does_not_understand
+    self
+      should: [
+        @expect dnu
+        GuardedDiffClassRoot fieldAt: #x put: 1
+      ]
+      raise: #does_not_understand
     self should: [
       self dynamicClass fieldAt: #x put: 1
     ] raise: #does_not_understand
@@ -45,10 +47,12 @@ TestCase subclass: ClassFieldReflectionDnuTest
     self should: [self dynamicClass hasField: #x] raise: #does_not_understand
 
   testClearFieldOnAClassIsDoesNotUnderstand =>
-    self should: [
-      @expect dnu
-      GuardedDiffClassRoot clearField: #x
-    ] raise: #does_not_understand
+    self
+      should: [
+        @expect dnu
+        GuardedDiffClassRoot clearField: #x
+      ]
+      raise: #does_not_understand
     self should: [self dynamicClass clearField: #x] raise: #does_not_understand
 
   // From inside a class method: a `self` send compiles as an ordinary
