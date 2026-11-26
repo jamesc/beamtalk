@@ -628,17 +628,13 @@ defmodule BtAttach.WorkspaceRpcTest do
       assert Workspace.close_session(self()) == {:error, {:unreachable, :mock_scripted}}
     end
 
-    test "kill_actor/1 formats the pid on the workspace and dispatches `kill`" do
+    test "kill_actor/1 dispatches `kill` with the live pid, formatting nothing client-side" do
       pid = self()
 
       mock_rpc(
-        Map.put(
-          decode_asserting(
-            fn req -> assert req == %{"op" => "kill", "actor" => "<0.99.0>"} end,
-            {:status, :ok}
-          ),
-          {:erlang, :pid_to_list},
-          ~c"<0.99.0>"
+        decode_asserting(
+          fn req -> assert req == %{"op" => "kill", "actor" => pid} end,
+          {:status, :ok}
         )
       )
 
@@ -646,31 +642,64 @@ defmodule BtAttach.WorkspaceRpcTest do
     end
 
     test "kill_actor/1 passes a refusal through and rejects a non-actor term" do
-      mock_rpc(
-        Map.put(
-          decode_ok({:beamtalk_repl_ops, :request}, {:error, :system_actor}),
-          {:erlang, :pid_to_list},
-          ~c"<0.99.0>"
-        )
-      )
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, :system_actor}))
 
       assert Workspace.kill_actor({:beamtalk_object, :T, :t, self()}) == {:error, :system_actor}
       assert Workspace.kill_actor(42) == {:error, :not_inspectable}
     end
 
-    test "actors/0 and sessions/0 unwrap their op terms" do
-      actor = %{pid: self(), class: :Counter}
+    test "kill_actor/1 surfaces a badrpc as unreachable" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
+
+      assert Workspace.kill_actor({:beamtalk_object, :T, :t, self()}) ==
+               {:error, {:unreachable, :mock_scripted}}
+    end
+
+    test "actors/0 and sessions/0 unwrap their op terms; the pid text comes from the op" do
+      actor = %{pid: self(), class: :Counter, pid_text: "<0.77.0>"}
 
       mock_rpc(
         decode_ok({:beamtalk_repl_ops, :request}, fn
           ["actors", _, _] -> {:actors, [actor]}
           ["sessions", _, _] -> {:sessions, [%{id: "s1"}]}
         end)
-        |> Map.put({:lists, :map}, fn [_fun, [_pid]] -> [~c"<0.77.0>"] end)
       )
 
-      assert Workspace.actors() == {:ok, [Map.put(actor, :pid_text, "<0.77.0>")]}
+      assert Workspace.actors() == {:ok, [actor]}
       assert Workspace.sessions() == {:ok, [%{id: "s1"}]}
+    end
+
+    test "actors/0 makes one operation call and no pid formatting call" do
+      test_pid = self()
+
+      :meck.expect(:erpc, :call, fn _node, mod, fun, args, _timeout ->
+        send(test_pid, {:called, mod, fun, List.first(args)})
+        {:actors, [%{pid: self(), pid_text: "<0.1.0>"}]}
+      end)
+
+      assert {:ok, [_]} = Workspace.actors()
+      assert_received {:called, :beamtalk_repl_ops, :request, "actors"}
+      refute_received {:called, _, _, _}
+    end
+
+    test "subscribe_actors/1 and unsubscribe_actors/1 use the `actors` stream (BT-5205)" do
+      pid = self()
+
+      mock_rpc(%{
+        {:beamtalk_repl_subscriptions, :subscribe} => fn [stream, ^pid] ->
+          send(pid, {:subscribed, stream})
+          :ok
+        end,
+        {:beamtalk_repl_subscriptions, :unsubscribe} => fn [stream, ^pid] ->
+          send(pid, {:unsubscribed, stream})
+          :ok
+        end
+      })
+
+      assert Workspace.subscribe_actors(pid) == :ok
+      assert_received {:subscribed, :actors}
+      assert Workspace.unsubscribe_actors(pid) == :ok
+      assert_received {:unsubscribed, :actors}
     end
   end
 
@@ -1234,106 +1263,149 @@ defmodule BtAttach.WorkspaceRpcTest do
     end
   end
 
-  describe "git-surface success paths (ADR 0082, BT-2586)" do
-    test "git_status/0 returns the status map on success" do
-      mock_rpc(%{{:beamtalk_git, :git_status} => {:ok, %{branch: "main"}}})
-      assert Workspace.git_status() == {:ok, %{branch: "main"}}
+  describe "git operations (ADR 0082, BT-2586, BT-5205)" do
+    @git_file %{"path" => "src/a.bt", "index" => "unmodified", "worktree" => "modified"}
+
+    test "git_status/0 dispatches `git-status` and reads the files into atom-keyed maps" do
+      mock_rpc(
+        decode_asserting(
+          fn req -> assert req == %{"op" => "git-status"} end,
+          {:value,
+           %{
+             "branch" => "main",
+             "upstream" => :null,
+             "ahead" => 1,
+             "behind" => 0,
+             "truncated" => false,
+             "files" => [@git_file, %{@git_file | "path" => "x.bt", "worktree" => "weird_new"}]
+           }}
+        )
+      )
+
+      assert Workspace.git_status() ==
+               {:ok,
+                %{
+                  branch: "main",
+                  upstream: nil,
+                  ahead: 1,
+                  behind: 0,
+                  truncated: false,
+                  files: [
+                    %{path: "src/a.bt", index: :unmodified, worktree: :modified},
+                    # A status word this node does not know stays text: no atom is made.
+                    %{path: "x.bt", index: :unmodified, worktree: "weird_new"}
+                  ]
+                }}
     end
 
-    test "git_status/0 structures a raw error" do
-      mock_rpc(%{
-        {:beamtalk_git, :git_status} => {:error, :not_a_repo},
-        {:beamtalk_repl_ops, :render} => {{:beamtalk_error, :not_a_repo}, "structured"}
-      })
-
-      assert Workspace.git_status() == {:error, {:beamtalk_error, :not_a_repo}}
+    test "git_status/0 passes an operation error through" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, :not_a_repo}))
+      assert Workspace.git_status() == {:error, :not_a_repo}
     end
 
-    test "git_status/0 degrades an unrecognised reply to unexpected_reply" do
-      mock_rpc(%{{:beamtalk_git, :git_status} => :odd})
+    test "git_status/0 surfaces a badrpc as unreachable and a bad reply as unexpected_reply" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
+      assert Workspace.git_status() == {:error, {:unreachable, :mock_scripted}}
+
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
       assert Workspace.git_status() == {:error, {:unexpected_reply, :odd}}
+
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:value, %{"nope" => 1}}))
+      assert Workspace.git_status() == {:error, {:unexpected_reply, {:value, %{"nope" => 1}}}}
     end
 
-    test "git_diff/1 returns the diff map on success" do
-      mock_rpc(%{{:beamtalk_git, :git_diff} => {:ok, %{worktree: "", staged: ""}}})
-      assert Workspace.git_diff("src/foo.bt") == {:ok, %{worktree: "", staged: ""}}
+    test "git_diff/1 dispatches `git-diff` with the path as a structured param" do
+      mock_rpc(
+        decode_asserting(
+          fn req -> assert req == %{"op" => "git-diff", "path" => "src/foo.bt"} end,
+          {:value,
+           %{"path" => "src/foo.bt", "worktree" => "w", "staged" => "s", "truncated" => true}}
+        )
+      )
+
+      assert Workspace.git_diff("src/foo.bt") ==
+               {:ok, %{worktree: "w", staged: "s", truncated: true}}
     end
 
-    # git_diff/1 has its own copy of the {:ok,_}/{:error,_}/{:badrpc,_}/other
-    # case (it does not share git_mutate/2's helper), so the success test above
-    # does not exercise its error/other branches — each needs its own test.
-    test "git_diff/1 structures a raw error" do
-      mock_rpc(%{
-        {:beamtalk_git, :git_diff} => {:error, :not_a_repo},
-        {:beamtalk_repl_ops, :render} => {{:beamtalk_error, :not_a_repo}, "structured"}
-      })
+    test "git_diff/1 passes a refused path through, and degrades odd replies" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, :invalid_argument}))
+      assert Workspace.git_diff("../x") == {:error, :invalid_argument}
 
-      assert Workspace.git_diff("src/foo.bt") == {:error, {:beamtalk_error, :not_a_repo}}
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
+      assert Workspace.git_diff("a.bt") == {:error, {:unexpected_reply, :odd}}
+
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
+      assert Workspace.git_diff("a.bt") == {:error, {:unreachable, :mock_scripted}}
     end
 
-    test "git_diff/1 degrades an unrecognised reply to unexpected_reply" do
-      mock_rpc(%{{:beamtalk_git, :git_diff} => :odd})
-      assert Workspace.git_diff("src/foo.bt") == {:error, {:unexpected_reply, :odd}}
+    test "git_log/1 dispatches `git-log` with the count and reads commits into atom keys" do
+      mock_rpc(
+        decode_asserting(
+          fn req -> assert req == %{"op" => "git-log", "count" => 5} end,
+          {:value,
+           %{
+             "limit" => 5,
+             "commits" => [
+               %{
+                 "sha" => "abc123",
+                 "short_sha" => "abc",
+                 "subject" => "s",
+                 "author" => "a",
+                 "ts" => "t",
+                 "extra" => 1
+               }
+             ]
+           }}
+        )
+      )
+
+      assert Workspace.git_log(5) ==
+               {:ok, [%{sha: "abc123", short_sha: "abc", subject: "s", author: "a", ts: "t"}]}
     end
 
-    test "git_log/1 returns the commit list on success" do
-      mock_rpc(%{{:beamtalk_git, :git_log} => {:ok, [%{sha: "abc123"}]}})
-      assert Workspace.git_log(5) == {:ok, [%{sha: "abc123"}]}
-    end
+    test "git_log/1 passes errors through and degrades odd replies" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, :not_a_repo}))
+      assert Workspace.git_log(5) == {:error, :not_a_repo}
 
-    # Likewise git_log/1 has its own copy of the case, distinct from git_diff/1
-    # and git_status/0's.
-    test "git_log/1 structures a raw error" do
-      mock_rpc(%{
-        {:beamtalk_git, :git_log} => {:error, :not_a_repo},
-        {:beamtalk_repl_ops, :render} => {{:beamtalk_error, :not_a_repo}, "structured"}
-      })
-
-      assert Workspace.git_log(5) == {:error, {:beamtalk_error, :not_a_repo}}
-    end
-
-    test "git_log/1 degrades an unrecognised reply to unexpected_reply" do
-      mock_rpc(%{{:beamtalk_git, :git_log} => :odd})
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
       assert Workspace.git_log(5) == {:error, {:unexpected_reply, :odd}}
     end
 
-    # Each wrapper is scripted ALONE (not alongside its three siblings): if
-    # `git_unstage/1` ever called through to `:git_stage` (a copy/paste
-    # routing mistake), only `:git_stage` would be scripted here and the
-    # misrouted call would `flunk/1` as unscripted rather than quietly
-    # succeeding off a neighboring stub.
-    test "git_stage/1 normalizes an :ok reply to {:ok, nil}" do
-      mock_rpc(%{{:beamtalk_git, :git_stage} => {:ok, :ignored}})
-      assert Workspace.git_stage("a.bt") == {:ok, nil}
-    end
+    # Each wrapper sends ITS OWN op and params: a copy/paste routing mistake
+    # (unstage calling `git-stage`) fails the request assertion.
+    for {fun, op, arg, param} <- [
+          {:git_stage, "git-stage", "a.bt", "path"},
+          {:git_unstage, "git-unstage", "a.bt", "path"},
+          {:git_revert_file, "git-revert-file", "a.bt", "path"},
+          {:git_commit, "git-commit", "wip; $(rm -rf /)", "message"}
+        ] do
+      test "#{fun}/1 sends `#{op}` with `#{param}` and answers {:ok, nil}" do
+        arg = unquote(arg)
+        op = unquote(op)
+        param = unquote(param)
 
-    test "git_unstage/1 normalizes an :ok reply to {:ok, nil}" do
-      mock_rpc(%{{:beamtalk_git, :git_unstage} => {:ok, :ignored}})
-      assert Workspace.git_unstage("a.bt") == {:ok, nil}
-    end
+        mock_rpc(
+          decode_asserting(
+            fn req -> assert req == %{"op" => op, param => arg} end,
+            {:value, %{"path" => arg}}
+          )
+        )
 
-    test "git_commit/1 normalizes an :ok reply to {:ok, nil}" do
-      mock_rpc(%{{:beamtalk_git, :git_commit} => {:ok, :ignored}})
-      assert Workspace.git_commit("wip") == {:ok, nil}
-    end
+        assert apply(Workspace, unquote(fun), [arg]) == {:ok, nil}
+      end
 
-    test "git_revert_file/1 normalizes an :ok reply to {:ok, nil}" do
-      mock_rpc(%{{:beamtalk_git, :git_revert_file} => {:ok, :ignored}})
-      assert Workspace.git_revert_file("a.bt") == {:ok, nil}
-    end
+      test "#{fun}/1 passes an error through and degrades an unrecognised reply" do
+        mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, :nothing_staged}))
+        assert apply(Workspace, unquote(fun), ["a.bt"]) == {:error, :nothing_staged}
 
-    test "git_commit/1 structures a raw mutation error" do
-      mock_rpc(%{
-        {:beamtalk_git, :git_commit} => {:error, :nothing_staged},
-        {:beamtalk_repl_ops, :render} => {{:beamtalk_error, :nothing_staged}, "structured"}
-      })
+        mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
+        assert apply(Workspace, unquote(fun), ["a.bt"]) == {:error, {:unexpected_reply, :odd}}
 
-      assert Workspace.git_commit("wip") == {:error, {:beamtalk_error, :nothing_staged}}
-    end
+        mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
 
-    test "git_stage/1 degrades an unrecognised mutation reply to unexpected_reply" do
-      mock_rpc(%{{:beamtalk_git, :git_stage} => :odd})
-      assert Workspace.git_stage("a.bt") == {:error, {:unexpected_reply, :odd}}
+        assert apply(Workspace, unquote(fun), ["a.bt"]) ==
+                 {:error, {:unreachable, :mock_scripted}}
+      end
     end
   end
 
@@ -1459,10 +1531,33 @@ defmodule BtAttach.WorkspaceRpcTest do
     test "an object handle inspects its instance fields" do
       pid = self()
 
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:inspect, %{"count" => 1}}))
+
+      assert Workspace.inspect_value({:beamtalk_object, "Counter", Counter, pid}) ==
+               {:ok, %{"count" => 1}}
+    end
+
+    test "an object handle wraps a non-map inspect payload" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:inspect, "raw state"}))
+
+      assert Workspace.inspect_value({:beamtalk_object, "Counter", Counter, self()}) ==
+               {:ok, "raw state"}
+    end
+
+    test "an object handle propagates an inspect error" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, :boom}))
+
+      assert Workspace.inspect_value({:beamtalk_object, "Counter", Counter, self()}) ==
+               {:error, :boom}
+    end
+
+    test "an object handle sends the live pid to `inspect`, formatting nothing client-side" do
+      pid = self()
+
       mock_rpc(
-        Map.merge(
-          %{{:erlang, :pid_to_list} => ~c"<0.99.0>"},
-          decode_ok({:beamtalk_repl_ops, :request}, {:inspect, %{"count" => 1}})
+        decode_asserting(
+          fn req -> assert req == %{"op" => "inspect", "actor" => pid} end,
+          {:inspect, %{"count" => 1}}
         )
       )
 
@@ -1470,104 +1565,74 @@ defmodule BtAttach.WorkspaceRpcTest do
                {:ok, %{"count" => 1}}
     end
 
-    test "an object handle wraps a non-map inspect payload" do
-      mock_rpc(
-        Map.merge(
-          %{{:erlang, :pid_to_list} => ~c"<0.99.0>"},
-          decode_ok({:beamtalk_repl_ops, :request}, {:inspect, "raw state"})
-        )
-      )
-
-      assert Workspace.inspect_value({:beamtalk_object, "Counter", Counter, self()}) ==
-               {:ok, "raw state"}
-    end
-
-    test "an object handle propagates an inspect error" do
-      mock_rpc(
-        Map.merge(
-          %{{:erlang, :pid_to_list} => ~c"<0.99.0>"},
-          decode_ok({:beamtalk_repl_ops, :request}, {:error, :boom})
-        )
-      )
-
-      assert Workspace.inspect_value({:beamtalk_object, "Counter", Counter, self()}) ==
-               {:error, :boom}
-    end
-
-    test "an object handle whose pid_to_list itself badrpcs is unreachable" do
-      mock_rpc(%{{:erlang, :pid_to_list} => {:badrpc, :mock_scripted}})
+    test "an object handle whose inspect dispatch badrpcs is unreachable" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
 
       assert Workspace.inspect_value({:beamtalk_object, "Counter", Counter, self()}) ==
                {:error, {:unreachable, :mock_scripted}}
     end
 
     test "an object handle whose inspect dispatch reply is wholly unrecognised" do
-      mock_rpc(
-        Map.merge(
-          %{{:erlang, :pid_to_list} => ~c"<0.99.0>"},
-          decode_ok({:beamtalk_repl_ops, :request}, :odd)
-        )
-      )
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
 
       assert Workspace.inspect_value({:beamtalk_object, "Counter", Counter, self()}) ==
                {:error, {:unexpected_reply, :odd}}
     end
 
-    test "a supervisor handle lists its children" do
+    test "a supervisor handle lists its children through the `children` op" do
       pid = self()
       row = %{"label" => "worker", "className" => "Widget", "handle" => nil}
 
-      mock_rpc(%{
-        {:erlang, :pid_to_list} => ~c"<0.99.0>",
-        {:beamtalk_process_navigation, :child_handles} => {:ok, [row]}
-      })
+      mock_rpc(
+        decode_asserting(
+          fn req -> assert req == %{"op" => "children", "supervisor" => pid} end,
+          {:children, %{"children" => [row], "truncated" => false}}
+        )
+      )
 
       assert Workspace.inspect_value({:beamtalk_supervisor, "Sup", Sup, pid}) ==
                {:ok, {:supervisor_children, [row]}}
     end
 
     test "a supervisor handle propagates a children error" do
-      mock_rpc(%{
-        {:erlang, :pid_to_list} => ~c"<0.99.0>",
-        {:beamtalk_process_navigation, :child_handles} => {:error, :dead}
-      })
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, :dead}))
 
       assert Workspace.inspect_value({:beamtalk_supervisor, "Sup", Sup, self()}) ==
                {:error, :dead}
     end
 
-    test "supervisor_children/1 surfaces a badrpc from child_handles as unreachable" do
-      mock_rpc(%{
-        {:erlang, :pid_to_list} => ~c"<0.99.0>",
-        {:beamtalk_process_navigation, :child_handles} => {:badrpc, :mock_scripted}
-      })
-
+    test "supervisor_children/1 surfaces a badrpc as unreachable" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
       assert Workspace.supervisor_children(self()) == {:error, {:unreachable, :mock_scripted}}
     end
 
-    test "supervisor_children/1 degrades an unrecognised child_handles reply" do
-      mock_rpc(%{
-        {:erlang, :pid_to_list} => ~c"<0.99.0>",
-        {:beamtalk_process_navigation, :child_handles} => :odd
-      })
-
+    test "supervisor_children/1 degrades an unrecognised reply" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
       assert Workspace.supervisor_children(self()) == {:error, {:unexpected_reply, :odd}}
     end
 
-    test "a future handle degrades to a minimal process-info snapshot" do
-      mock_rpc(%{
-        {:erlang, :process_info} => [
-          status: :waiting,
-          message_queue_len: 0,
-          memory: 100,
-          reductions: 5
-        ]
-      })
+    test "a future handle degrades to a minimal process-info snapshot (`process-info` op)" do
+      pid = self()
 
-      assert Workspace.inspect_value({:beamtalk_future, self()}) ==
+      mock_rpc(
+        decode_asserting(
+          fn req -> assert req == %{"op" => "process-info", "pid" => pid} end,
+          {:value,
+           %{
+             "pid" => "<0.1.0>",
+             "alive" => true,
+             "status" => "waiting",
+             "message_queue_len" => 0,
+             "memory" => 100,
+             "reductions" => 5
+           }}
+        )
+      )
+
+      assert Workspace.inspect_value({:beamtalk_future, pid}) ==
                {:ok,
                 %{
-                  "status" => :waiting,
+                  "status" => "waiting",
                   "message_queue_len" => 0,
                   "memory" => 100,
                   "reductions" => 5
@@ -1575,7 +1640,18 @@ defmodule BtAttach.WorkspaceRpcTest do
     end
 
     test "a bare pid handle degrades to an empty snapshot for a dead process" do
-      mock_rpc(%{{:erlang, :process_info} => :undefined})
+      mock_rpc(
+        decode_ok(
+          {:beamtalk_repl_ops, :request},
+          {:value, %{"pid" => "<0.1.0>", "alive" => false}}
+        )
+      )
+
+      assert Workspace.inspect_value(self()) == {:ok, %{}}
+    end
+
+    test "a bare pid handle degrades to an empty snapshot when the workspace is unreachable" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
       assert Workspace.inspect_value(self()) == {:ok, %{}}
     end
 
@@ -1585,43 +1661,42 @@ defmodule BtAttach.WorkspaceRpcTest do
     end
 
     test "pid_stats/1 returns the metrics map for an object handle" do
-      mock_rpc(
-        Map.merge(
-          %{{:erlang, :pid_to_list} => ~c"<0.99.0>"},
-          decode_ok({:beamtalk_repl_ops, :request}, {:value, %{"memory" => 1024}})
-        )
-      )
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:value, %{"memory" => 1024}}))
 
       assert Workspace.pid_stats({:beamtalk_object, "Counter", Counter, self()}) ==
                {:ok, %{"memory" => 1024}}
     end
 
     test "pid_stats/1 propagates an error from the pid-stats op" do
-      mock_rpc(
-        Map.merge(
-          %{{:erlang, :pid_to_list} => ~c"<0.99.0>"},
-          decode_ok({:beamtalk_repl_ops, :request}, {:error, :dead})
-        )
-      )
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, :dead}))
 
       assert Workspace.pid_stats({:beamtalk_object, "Counter", Counter, self()}) ==
                {:error, :dead}
     end
 
-    test "pid_stats/1 surfaces a badrpc pid_to_list as unreachable" do
-      mock_rpc(%{{:erlang, :pid_to_list} => {:badrpc, :mock_scripted}})
+    test "pid_stats/1 sends the live pid to `pid-stats`" do
+      pid = self()
+
+      mock_rpc(
+        decode_asserting(
+          fn req -> assert req == %{"op" => "pid-stats", "actor" => pid} end,
+          {:value, %{"memory" => 1}}
+        )
+      )
+
+      assert Workspace.pid_stats({:beamtalk_object, "Counter", Counter, pid}) ==
+               {:ok, %{"memory" => 1}}
+    end
+
+    test "pid_stats/1 surfaces a badrpc as unreachable" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
 
       assert Workspace.pid_stats({:beamtalk_object, "Counter", Counter, self()}) ==
                {:error, {:unreachable, :mock_scripted}}
     end
 
     test "pid_stats/1 degrades a wholly unrecognised dispatch reply to unexpected_reply" do
-      mock_rpc(
-        Map.merge(
-          %{{:erlang, :pid_to_list} => ~c"<0.99.0>"},
-          decode_ok({:beamtalk_repl_ops, :request}, :odd)
-        )
-      )
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
 
       assert Workspace.pid_stats({:beamtalk_object, "Counter", Counter, self()}) ==
                {:error, {:unexpected_reply, :odd}}
@@ -1651,7 +1726,6 @@ defmodule BtAttach.WorkspaceRpcTest do
 
         case {mod, fun} do
           {:beamtalk_repl_ops, :request} -> {:ok, 2, "", []}
-          {:erlang, :pid_to_list} -> ~c"<0.1.0>"
         end
       end)
 

@@ -221,7 +221,8 @@ every_op_is_pinned_or_explained_test() ->
 %%%   (or the message) are passed to, at that argument position;
 %%% * a literal key is read by `maps:get/find/is_key/take(<<"k">>, P, …)`, by a
 %%%   map pattern on the params, `binary_param(<<"k">>, P)`, and by the
-%%%   `beamtalk_repl_params` helpers (`nonempty_binary(P, <<"k">>)`, `actor_pid(P)`).
+%%%   `beamtalk_repl_params` helpers (`nonempty_binary(P, <<"k">>)`,
+%%%   `process_pid(P, <<"k">>)`, `actor_pid(P)`).
 %%%
 %%% Any other use that hands the params out of the scan's sight (a computed key,
 %%% `maps:with/2`, a remote call it does not know) is reported as `opaque`: the
@@ -562,10 +563,10 @@ call_use({atom, _, binary_param}, [K, P], #{is_params := IsParams}) ->
         false -> []
     end;
 call_use(
-    {remote, _, {atom, _, beamtalk_repl_params}, {atom, _, nonempty_binary}},
+    {remote, _, {atom, _, beamtalk_repl_params}, {atom, _, Reader}},
     [P, K],
     #{is_params := IsParams}
-) ->
+) when Reader =:= nonempty_binary; Reader =:= process_pid ->
     case IsParams(P) of
         true -> [{read, Key} || Key <- literal_key(K)];
         false -> []

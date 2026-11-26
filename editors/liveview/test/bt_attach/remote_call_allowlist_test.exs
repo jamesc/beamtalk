@@ -58,23 +58,8 @@ defmodule BtAttach.RemoteCallAllowlistTest do
     {:beamtalk_repl_ops, :attach_session, :operation_layer, :permanent},
     {:beamtalk_repl_ops, :session_bindings, :operation_layer, :permanent},
     {:beamtalk_repl_ops, :session_alive, :operation_layer, :permanent},
-    {:beamtalk_repl_ops, :session_count, :operation_layer, :permanent},
-
-    # Git and process navigation.
-    {:beamtalk_git, :git_status, :capability, "BT-5205"},
-    {:beamtalk_git, :git_diff, :capability, "BT-5205"},
-    {:beamtalk_git, :git_log, :capability, "BT-5205"},
-    {:beamtalk_git, :git_stage, :capability, "BT-5205"},
-    {:beamtalk_git, :git_unstage, :capability, "BT-5205"},
-    {:beamtalk_git, :git_commit, :capability, "BT-5205"},
-    {:beamtalk_git, :git_revert_file, :capability, "BT-5205"},
-    {:beamtalk_process_navigation, :child_handles, :capability, "BT-5205"},
-    {:erlang, :process_info, :capability, "BT-5205"},
-    {:erlang, :pid_to_list, :encoding, "BT-5205"},
-    {:lists, :map, :encoding, "BT-5205"}
+    {:beamtalk_repl_ops, :session_count, :operation_layer, :permanent}
   ]
-
-  @dynamic_function_modules [:beamtalk_git]
 
   @lib Path.expand("../../lib", __DIR__)
   @inventory Path.expand("../../../../docs/development/surface-parity.md", __DIR__)
@@ -87,11 +72,10 @@ defmodule BtAttach.RemoteCallAllowlistTest do
   describe "remote calls from lib/" do
     test "every remote call targets an allowlisted module:function" do
       allowed = MapSet.new(@allowlist, fn {m, f, _class, _issue} -> {m, f} end)
-      allowed_modules = MapSet.new(@allowlist, fn {m, _f, _class, _issue} -> m end)
 
       violations =
         for {file, {kind, target, line}} <- remote_calls(),
-            not permitted?(kind, target, allowed, allowed_modules) do
+            not permitted?(kind, target, allowed) do
           "#{Path.relative_to(file, @lib)}:#{line}  #{explain(kind, target)}"
         end
 
@@ -113,8 +97,8 @@ defmodule BtAttach.RemoteCallAllowlistTest do
           acc -> MapSet.put(acc, {m, f})
         end
 
-      # A `:dynamic` call (git_mutate/2) covers every entry of its module, so
-      # no `beamtalk_git` entry can be reported stale until BT-5205 removes it.
+      # A `:dynamic` call covers every entry of its module, so no entry of a
+      # module with such a call can be reported stale.
       dynamic_modules =
         for {_file, {:call, {m, :dynamic}, _line}} <- remote_calls(), into: MapSet.new(), do: m
 
@@ -240,13 +224,10 @@ defmodule BtAttach.RemoteCallAllowlistTest do
     end
   end
 
-  # A variable function name is accepted only where a module opts in: the git
-  # mutators share one transport (`git_mutate/2`) until BT-5205 migrates them.
-  defp permitted?(:call, {m, :dynamic}, _allowed, allowed_modules),
-    do: m in @dynamic_function_modules and MapSet.member?(allowed_modules, m)
-
-  defp permitted?(:call, {m, f}, allowed, _allowed_modules), do: MapSet.member?(allowed, {m, f})
-  defp permitted?(_kind, _target, _allowed, _allowed_modules), do: false
+  # A call whose function is a variable has no allowlist entry: a target the
+  # allowlist cannot read is not vouched for (BT-5205 removed the last such call).
+  defp permitted?(:call, {m, f}, allowed), do: MapSet.member?(allowed, {m, f})
+  defp permitted?(_kind, _target, _allowed), do: false
 
   defp explain(:call, {m, f}), do: "#{m}:#{f} is not on the allowlist"
   defp explain(:dynamic_module, _), do: "remote call to a module that is not a literal atom"

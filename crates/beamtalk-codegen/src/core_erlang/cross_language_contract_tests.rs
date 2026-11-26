@@ -173,20 +173,21 @@ fn every_liveview_rpc_target_is_exported() {
         .unwrap_or_else(|e| panic!("read {LIVEVIEW_WORKSPACE}: {e}"));
     let (calls, open) = elixir_rpc_calls(&src, LIVEVIEW_WORKSPACE);
     // Floors against the scan silently finding nothing (a renamed helper, a
-    // changed call style). The issue counts about 40 `:rpc` calls, 22 of them
-    // into beamtalk modules; this is a floor, not a number to keep.
+    // changed call style). The epic (BT-5200) moves LiveView's direct runtime calls
+    // onto the operation layer, so the count only shrinks; this is a floor, not a
+    // number to keep.
     assert!(
-        calls.len() >= 20,
+        calls.len() >= 10,
         "found only {} beamtalk rpc calls in {LIVEVIEW_WORKSPACE}: {calls:#?}",
         calls.len()
     );
     // The named sites must be read with their arity, so a parsing regression
     // cannot turn the check into a name-only one.
     for (module, function, arity) in [
-        ("beamtalk_process_navigation", "child_handles", 1),
         ("beamtalk_repl_ops", "start_session", 2),
         ("beamtalk_repl_ops", "request", 3),
-        ("beamtalk_git", "git_stage", 1),
+        ("beamtalk_repl_ops", "session_alive", 1),
+        ("beamtalk_repl_subscriptions", "subscribe", 2),
     ] {
         assert!(
             calls
