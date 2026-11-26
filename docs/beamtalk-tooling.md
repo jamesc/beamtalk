@@ -608,6 +608,8 @@ for the full model.
 | `:flush` | `flush` operation (as `Workspace flush`) | Write every durable + flushable Tier 1 entry back to its source file |
 | `:flush Counter` | `flush` operation, class scope | Flush entries targeting one class |
 | `:flush #'new-class'` | `flush` operation, kind scope (`new-class`, `remove-method`, `remove-class`, `rename-class`, `rename-method`) | Flush only entries of one kind |
+| `:flush #increment` | `flush` operation, selector scope | Flush entries for one method selector in every class |
+| `:flush Counter>>#increment` | `flush` operation, class + selector scope | Flush entries for one method of one class |
 | `:flush #{ #file => "path" }` | `flush` operation, file scope | Flush entries against one file |
 | `:flush-destructive` | `flush` operation with `confirm_destructive` | Flush all pending entries including Tier 2 (`remove-class` — file deletion); prompts `y/N` |
 | `:flush-destructive Counter` | `flush` operation, class scope, `confirm_destructive` | Destructive flush scoped to one class; prompts `y/N` |

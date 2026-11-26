@@ -377,6 +377,7 @@ set. A pending `'remove-class'` entry left out of the applied set because
     %% `confirmDestructive:` keyword to).
     flush/2,
     flush_including_destructive/0,
+    flush_method/3,
     flush_kinds/1,
     flush_kinds/2
 ]).
@@ -400,6 +401,7 @@ set. A pending `'remove-class'` entry left out of the applied set because
     any
     | {class, binary()}
     | {selector, atom()}
+    | {method, binary() | any, binary()}
     | {file, binary()}
     | {kinds, [atom()], [atom()]}.
 
@@ -467,6 +469,20 @@ flush(Filter, ConfirmDestructive) when is_boolean(ConfirmDestructive) ->
 flush(_Filter, _Other) ->
     {error,
         filter_error(<<"flush:confirmDestructive: expects a Boolean for confirmDestructive:">>)}.
+
+-doc """
+Flush the ChangeEntries for one method selector (BT-5297), optionally limited
+to one class: `Class` is a class name binary, or `any` for every class's entry
+with that selector. `Selector` is the method selector as text (`<<"increment">>`,
+`<<"at:put:">>`), compared as written, so request text never creates an atom.
+`ConfirmDestructive` has the same meaning as in `flush/2`.
+""".
+-spec flush_method(binary() | any, binary(), boolean()) ->
+    {ok, map()} | {error, #beamtalk_error{}}.
+flush_method(Class, Selector, ConfirmDestructive) when
+    (Class =:= any orelse is_binary(Class)), is_binary(Selector), is_boolean(ConfirmDestructive)
+->
+    do_flush({method, Class, Selector}, ConfirmDestructive).
 
 -doc """
 Flush every pending durable+flushable ChangeEntry, Tier 1 *and* Tier 2
@@ -728,6 +744,13 @@ filter_entries(Entries, {selector, Sel}) ->
             SelBin = atom_to_binary(Sel, utf8),
             [E || E <- Entries, beamtalk_workspace_changelog:entry_selector(E) =:= SelBin]
     end;
+filter_entries(Entries, {method, Class, SelBin}) ->
+    [
+        E
+     || E <- Entries,
+        beamtalk_workspace_changelog:entry_selector(E) =:= SelBin,
+        Class =:= any orelse beamtalk_workspace_changelog:entry_class(E) =:= Class
+    ];
 filter_entries(Entries, {file, FileBin}) ->
     [E || E <- Entries, beamtalk_workspace_changelog:entry_source_file(E) =:= FileBin];
 filter_entries(Entries, {kinds, EntryKinds, AuthorKinds}) ->

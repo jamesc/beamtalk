@@ -48,6 +48,16 @@ state_ops_test_() ->
         fun(Ctx) ->
             {"flush refuses an empty-string scope", fun() -> flush_rejects_empty_scope(Ctx) end}
         end,
+        fun(Ctx) ->
+            {"flush scoped by selector, alone and with a class", fun() ->
+                flush_selector_scope(Ctx)
+            end}
+        end,
+        fun(Ctx) ->
+            {"flush selector refuses file/kind and an empty selector", fun() ->
+                flush_selector_refusals(Ctx)
+            end}
+        end,
         fun(_Ctx) ->
             {"flush with an unknown kind is a structured error", fun flush_unknown_kind/0}
         end,
@@ -250,6 +260,49 @@ flush_rejects_empty_scope(#{proj_dir := ProjDir}) ->
             )
         end,
         [<<"class">>, <<"file">>, <<"kind">>]
+    ),
+    ?assert(filelib:is_regular(File)).
+
+%% BT-5297: a selector scope flushes that method only; with a class it flushes
+%% that class's method only.
+flush_selector_scope(#{proj_dir := ProjDir}) ->
+    File = seed_patch(ProjDir, "sel.bt"),
+    %% Another selector, or the same selector in another class: nothing flushed.
+    {value, S1} = request(<<"flush">>, #{<<"selector">> => <<"other">>}),
+    ?assertEqual(0, maps:get(<<"flushed">>, S1)),
+    {value, S2} = request(<<"flush">>, #{
+        <<"selector">> => <<"value">>, <<"class">> => <<"Elsewhere">>
+    }),
+    ?assertEqual(0, maps:get(<<"flushed">>, S2)),
+    {ok, Before} = file:read_file(File),
+    ?assertNotEqual(nomatch, binary:match(Before, <<"value => 0">>)),
+    %% `#value` is the same selector as `value`.
+    {value, S3} = request(<<"flush">>, #{
+        <<"selector">> => <<"#value">>, <<"class">> => <<"Counter">>
+    }),
+    ?assertEqual(1, maps:get(<<"flushed">>, S3)),
+    {ok, After} = file:read_file(File),
+    ?assertNotEqual(nomatch, binary:match(After, <<"value => 42">>)),
+    %% Selector alone matches too.
+    _ = seed_patch(ProjDir, "sel2.bt"),
+    {value, S4} = request(<<"flush">>, #{<<"selector">> => <<"value">>}),
+    ?assertEqual(1, maps:get(<<"flushed">>, S4)).
+
+flush_selector_refusals(#{proj_dir := ProjDir}) ->
+    {File, _} = seed_remove_class(ProjDir, <<"GoneSel">>),
+    lists:foreach(
+        fun(Params) ->
+            ?assertMatch(
+                {error, #beamtalk_error{kind = invalid_argument}},
+                request(<<"flush">>, Params#{<<"confirm_destructive">> => true})
+            )
+        end,
+        [
+            #{<<"selector">> => <<"value">>, <<"file">> => <<"a.bt">>},
+            #{<<"selector">> => <<"value">>, <<"kind">> => <<"new-class">>},
+            #{<<"selector">> => <<>>},
+            #{<<"selector">> => 42}
+        ]
     ),
     ?assert(filelib:is_regular(File)).
 

@@ -153,7 +153,9 @@ them takes a Beamtalk expression assembled from user text.
 
 Workspace state (BT-5204) goes through three operations in
 `beamtalk_repl_ops_state` plus an existing one. `flush` (optional `class` /
-`file` / `kind`, mutually exclusive, and `confirm_destructive`) is the one
+`file` / `kind`, mutually exclusive, a `selector` that scopes it to one method
+alone or with a `class` (BT-5297; REPL `:flush #sel` / `:flush Class>>#sel`, MCP
+`selector`), and `confirm_destructive`) is the one
 flush implementation: MCP's `flush` tool and LiveView's "Save All to Disk" and
 per-row "Delete file" actions all dispatch it, and the destructive tier is
 applied only for a boolean `true` (anything else is refused, never read as

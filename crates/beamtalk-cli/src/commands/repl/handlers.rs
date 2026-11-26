@@ -343,9 +343,10 @@ fn handle_remove_class(arg: &str, client: &mut ReplClient) {
     }
 }
 
-const FLUSH_USAGE: &str = "Usage: :flush [<Class>|#kind|#{ #file => \"path\" }]";
+const FLUSH_USAGE: &str =
+    "Usage: :flush [<Class>|#kind|#selector|<Class>>>#selector|#{ #file => \"path\" }]";
 const FLUSH_DESTRUCTIVE_USAGE: &str =
-    "Usage: :flush-destructive [<Class>|#kind|#{ #file => \"path\" }]";
+    "Usage: :flush-destructive [<Class>|#kind|#selector|<Class>>>#selector|#{ #file => \"path\" }]";
 
 /// Bare `:flush-destructive` (ADR 0113 Phase 4): prompts `y/N` before sending
 /// the unscoped `flush` with `confirm_destructive`, which deletes every pending

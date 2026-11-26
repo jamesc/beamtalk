@@ -670,12 +670,12 @@ defmodule BtAttach.Facade do
   defp invoke(:load_tests, _params, _ctx), do: client().load_tests()
 
   # BT-5204: `flush` dispatches the `flush` operation. The optional scope
-  # (`:class`, `:file` or `:kind`) and `:confirm_destructive` ride through as the
+  # (`:class`, `:file`, `:kind` or `:selector`) and `:confirm_destructive` ride through as the
   # operation's own params; an absent key is not sent. The confirmation rule is
   # the operation's: only a boolean `true` applies the destructive tier.
   defp invoke(:flush, params, _ctx),
     do:
-      client().flush(Keyword.new(Map.take(params, [:class, :file, :kind, :confirm_destructive])))
+      client().flush(Keyword.new(Map.take(params, [:class, :file, :kind, :selector, :confirm_destructive])))
 
   # BT-5204: the workspace's version, node, workspace id and settings, through
   # the `info` operation.

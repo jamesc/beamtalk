@@ -54,6 +54,10 @@ pub enum ReplFlushScope {
     Kind(String),
     /// A source file (`#{ #file => "path" }`).
     File(String),
+    /// A method selector in every class (`#increment`, `#at:put:`) (BT-5297).
+    Selector(String),
+    /// One method of one class (`Counter>>#increment`): `(class, selector)`.
+    ClassSelector(String, String),
 }
 
 impl ReplFlushScope {
@@ -64,6 +68,8 @@ impl ReplFlushScope {
             Self::Class(c) => beamtalk_repl_protocol::FlushScope::Class(c),
             Self::Kind(k) => beamtalk_repl_protocol::FlushScope::Kind(k),
             Self::File(f) => beamtalk_repl_protocol::FlushScope::File(f),
+            Self::Selector(s) => beamtalk_repl_protocol::FlushScope::Selector(s),
+            Self::ClassSelector(c, s) => beamtalk_repl_protocol::FlushScope::ClassSelector(c, s),
         }
     }
 }
@@ -76,6 +82,10 @@ impl ReplFlushScope {
 /// naming one of the five entry kinds is a kind scope; any other Symbol names a
 /// class, which `:flush-destructive #Class` needs after `:remove-class` has
 /// unbound the name.
+///
+/// A method selector (`#increment`, `#at:put:`) scopes the flush to that
+/// method in every class, and `Class>>#selector` to one method of one class
+/// (BT-5297).
 ///
 /// Returns `None` for an empty (or whitespace-only) argument and for one in
 /// none of those forms, so the caller prints a usage hint instead of sending an
@@ -92,6 +102,12 @@ pub fn flush_scope_for(arg: &str) -> Option<ReplFlushScope> {
         return (!path.is_empty() && !path.contains('"'))
             .then(|| ReplFlushScope::File(path.to_string()));
     }
+    if let Some((class, selector)) = arg.split_once(">>") {
+        let class = class.trim();
+        let selector = selector.trim().strip_prefix('#')?.trim().trim_matches('\'');
+        return (is_class_name(class) && is_selector(selector))
+            .then(|| ReplFlushScope::ClassSelector(class.to_string(), selector.to_string()));
+    }
     if let Some(symbol) = arg.strip_prefix('#') {
         let name = symbol.trim().trim_matches('\'');
         if name.is_empty() {
@@ -100,9 +116,24 @@ pub fn flush_scope_for(arg: &str) -> Option<ReplFlushScope> {
         if beamtalk_repl_protocol::FLUSH_KINDS.contains(&name) {
             return Some(ReplFlushScope::Kind(name.to_string()));
         }
-        return is_class_name(name).then(|| ReplFlushScope::Class(name.to_string()));
+        if is_class_name(name) {
+            return Some(ReplFlushScope::Class(name.to_string()));
+        }
+        return is_selector(name).then(|| ReplFlushScope::Selector(name.to_string()));
     }
     is_class_name(arg).then(|| ReplFlushScope::Class(arg.to_string()))
+}
+
+/// A unary, keyword (`at:put:`) or binary (`+`) method selector.
+fn is_selector(name: &str) -> bool {
+    let first = name.chars().next();
+    match first {
+        Some(c) if c.is_ascii_lowercase() || c == '_' => name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':'),
+        Some(_) => name.chars().all(|c| "+-*/\\<>=~@%|&?,".contains(c)),
+        None => false,
+    }
 }
 
 fn is_class_name(name: &str) -> bool {
@@ -283,7 +314,7 @@ mod tests {
 
     #[test]
     fn flush_scope_for_cases() {
-        use ReplFlushScope::{Class, File, Kind};
+        use ReplFlushScope::{Class, ClassSelector, File, Kind, Selector};
         let class = |c: &str| Some(Class(c.to_string()));
         let kind = |k: &str| Some(Kind(k.to_string()));
         for (arg, want) in [
@@ -317,9 +348,27 @@ mod tests {
             ("two words", None),
             ("new-class", None),
             ("9Lives", None),
-            // A selector is not a class: a lowercase name would match no entry
-            // and report `Flushed 0`, so it is a usage error.
-            ("#increment", None),
+            // BT-5297: a Symbol that is not a class or kind is a selector scope,
+            // alone or after `Class>>`.
+            ("#increment", Some(Selector("increment".to_string()))),
+            ("#'at:put:'", Some(Selector("at:put:".to_string()))),
+            ("#+", Some(Selector("+".to_string()))),
+            (
+                "Counter>>#increment",
+                Some(ClassSelector(
+                    "Counter".to_string(),
+                    "increment".to_string(),
+                )),
+            ),
+            (
+                " Counter >> #at:put: ",
+                Some(ClassSelector("Counter".to_string(), "at:put:".to_string())),
+            ),
+            ("Counter>>increment", None),
+            ("counter>>#increment", None),
+            ("Counter>>#", None),
+            ("Counter>>#9", None),
+            // A bare lowercase word is neither: still a usage error.
             ("counter", None),
         ] {
             assert_eq!(flush_scope_for(arg), want, "{arg:?}");
@@ -342,6 +391,14 @@ mod tests {
         assert_eq!(
             ReplFlushScope::File("a.bt".into()).as_scope(),
             FlushScope::File("a.bt")
+        );
+        assert_eq!(
+            ReplFlushScope::Selector("inc".into()).as_scope(),
+            FlushScope::Selector("inc")
+        );
+        assert_eq!(
+            ReplFlushScope::ClassSelector("C".into(), "inc".into()).as_scope(),
+            FlushScope::ClassSelector("C", "inc")
         );
     }
 

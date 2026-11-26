@@ -129,7 +129,7 @@ pub(crate) const INTERRUPT: ReplCommandSpec = ReplCommandSpec {
 pub(crate) const FLUSH: ReplCommandSpec = ReplCommandSpec {
     name: ":flush",
     aliases: &[],
-    help: "Write pending ChangeLog entries to disk: `:flush [<Class>|#kind|#{#file => \"path\"}]`",
+    help: "Write pending ChangeLog entries to disk: `:flush [<Class>|#kind|#selector|<Class>>>#selector|#{#file => \"path\"}]`",
     takes_class_expr_arg: true,
 };
 
@@ -171,7 +171,7 @@ pub(crate) const REMOVE_CLASS: ReplCommandSpec = ReplCommandSpec {
 pub(crate) const FLUSH_DESTRUCTIVE: ReplCommandSpec = ReplCommandSpec {
     name: ":flush-destructive",
     aliases: &[],
-    help: "Flush pending destructive (class-removal) ChangeLog entries to disk, deleting files (prompts for confirmation): `:flush-destructive [<Class>|#kind|#{#file => \"path\"}]`",
+    help: "Flush pending destructive (class-removal) ChangeLog entries to disk, deleting files (prompts for confirmation): `:flush-destructive [<Class>|#kind|#selector|<Class>>>#selector|#{#file => \"path\"}]`",
     takes_class_expr_arg: true,
 };
 

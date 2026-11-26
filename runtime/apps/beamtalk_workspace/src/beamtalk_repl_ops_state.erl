@@ -29,7 +29,10 @@ session yet (LiveView's readiness probe).
 
 ## `flush`
 
-Optional params: at most one of `class`, `file`, `kind` (scope), and
+Optional params: at most one of `class`, `file`, `kind` (scope) or a
+`selector` (a method selector such as `increment` or `at:put:`, which may be
+combined with `class` to flush one method of one class; with `file` or `kind`
+it is refused), and
 `confirm_destructive` (a JSON boolean, default `false`). The destructive tier
 (ADR 0113) is only ever applied when `confirm_destructive` is exactly `true`;
 a non-boolean value is refused, never read as false or true, and no setting
@@ -111,7 +114,9 @@ handle_flush(Params) ->
 %% Unscoped: Tier 1 only, or Tier 1 and Tier 2 when confirmed. Scoped: the
 %% filter form each surface already used (`Workspace flush: aClass`, a
 %% Symbol, `#{ #file => ... }`).
--spec run_flush(none | {class | file | kind, term()}, boolean()) ->
+-spec run_flush(
+    none | {class | file | kind, term()} | {method, binary() | any, binary()}, boolean()
+) ->
     {ok, map()} | {error, term()}.
 run_flush(none, false) ->
     beamtalk_workspace_flush:flush();
@@ -119,28 +124,47 @@ run_flush(none, true) ->
     beamtalk_workspace_flush:flush_including_destructive();
 run_flush({class, Class}, Confirm) ->
     beamtalk_workspace_flush:flush(Class, Confirm);
+run_flush({method, Class, Selector}, Confirm) ->
+    beamtalk_workspace_flush:flush_method(Class, Selector, Confirm);
 run_flush({file, File}, Confirm) ->
     beamtalk_workspace_flush:flush(#{file => File}, Confirm);
 run_flush({kind, Kind}, Confirm) ->
     beamtalk_workspace_flush:flush(Kind, Confirm).
 
 -spec scope(map()) ->
-    {ok, none | {class | file | kind, term()}} | {error, #beamtalk_error{}}.
+    {ok, none | {class | file | kind, term()} | {method, binary() | any, binary()}}
+    | {error, #beamtalk_error{}}.
 scope(Params) ->
     case
         {
             scope_param(<<"class">>, maps:get(<<"class">>, Params, undefined)),
             scope_param(<<"file">>, maps:get(<<"file">>, Params, undefined)),
-            scope_param(<<"kind">>, maps:get(<<"kind">>, Params, undefined))
+            scope_param(<<"kind">>, maps:get(<<"kind">>, Params, undefined)),
+            scope_param(<<"selector">>, maps:get(<<"selector">>, Params, undefined))
         }
     of
-        {{error, _} = Err, _, _} ->
+        {{error, _} = Err, _, _, _} ->
             Err;
-        {_, {error, _} = Err, _} ->
+        {_, {error, _} = Err, _, _} ->
             Err;
-        {_, _, {error, _} = Err} ->
+        {_, _, {error, _} = Err, _} ->
             Err;
-        {{ok, Class}, {ok, File}, {ok, Kind}} ->
+        {_, _, _, {error, _} = Err} ->
+            Err;
+        {{ok, Class}, {ok, File}, {ok, Kind}, {ok, Selector}} when Selector =/= undefined ->
+            %% A selector narrows a class (or all classes); a file or kind is
+            %% a different axis, so combining them is refused, not ignored.
+            case {File, Kind} of
+                {undefined, undefined} ->
+                    {ok, {method, selector_class(Class), bare_selector(Selector)}};
+                _ ->
+                    {error,
+                        invalid_scope(
+                            <<"flush: selector combines only with class">>,
+                            <<"Pass selector alone, or with class; not with file or kind.">>
+                        )}
+            end;
+        {{ok, Class}, {ok, File}, {ok, Kind}, {ok, undefined}} ->
             case
                 [{N, V} || {N, V} <- [{class, Class}, {file, File}, {kind, Kind}], V =/= undefined]
             of
@@ -160,6 +184,15 @@ scope(Params) ->
                         )}
             end
     end.
+
+-spec selector_class(binary() | undefined) -> binary() | any.
+selector_class(undefined) -> any;
+selector_class(Class) -> Class.
+
+%% `#increment`, `#'at:put:'` and `increment` all name the selector as written.
+-spec bare_selector(binary()) -> binary().
+bare_selector(Selector) ->
+    string:trim(Selector, both, "#'").
 
 %% A scope param is a non-empty String or absent. Any other type, and the empty
 %% String, is refused: reading it as absent would widen a scoped flush into an
