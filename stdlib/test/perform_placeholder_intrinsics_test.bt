@@ -44,6 +44,7 @@ TestCase subclass: PerformPlaceholderIntrinsicsTest
     self should: [
       ValuePoint perform: #hasField: withArguments: #(#x)
     ] raise: #does_not_understand
+    @expect dnu
     self should: [ValuePoint hasField: #x] raise: #does_not_understand
 
   testPerformViaPerformOnValueInstance =>

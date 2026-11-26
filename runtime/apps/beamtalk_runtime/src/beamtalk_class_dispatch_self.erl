@@ -80,7 +80,10 @@ object does after its class-method lookup misses
 the runtime by construction — one lookup, no selector list. The exception is
 the instance-field reflection selectors (`fieldAt:` etc.): `Object` declares
 them, but `try_class_chain_fallthrough/3` refuses them for a class object
-(ADR 0153 decision 7), which the type checker does not yet model (BT-5241).
+(ADR 0153 decision 7), so the checker treats them as absent from `Class` and
+warns unless the class defines a class method of that name (BT-5241). Its list
+(`WellKnownSelector::is_field_reflection`) is pinned to
+`beamtalk_object_class:is_field_reflection_selector/1` by a Rust test.
 
 The receiver is the calling method's own `ClassSelf`, so a subclass receiver
 answers for itself: `super name` from a `Base` class method inherited by `C`
