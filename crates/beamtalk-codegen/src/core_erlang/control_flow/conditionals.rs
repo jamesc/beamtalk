@@ -766,9 +766,10 @@ impl CoreErlangGenerator {
     /// (`arm_is_frame`: the arm is a `BranchArm` frame of a producer), rather
     /// than as a raw `{Value, State}` tuple the arm unpacks: a local-threading
     /// producer of a `BranchArm` frame or a REPL arm (ADR 0131 Phase 3,
-    /// BT-3823), and (BT-4000) a conditional whose receiver is sequenced ahead
-    /// ([`Self::conditional_receiver_is_sequenced`]) in any arm, so the
-    /// receiver's `Bind`s are the arm's own statements. The one predicate for
+    /// BT-3823), and (BT-4000) a conditional whose receiver, or (BT-5289) a
+    /// `match:` whose scrutinee, is sequenced ahead
+    /// ([`Self::is_construct_with_sequenced_operand`]) in any arm, so the
+    /// operand's `Bind`s are the arm's own statements. The one predicate for
     /// the conditional arm and the `on:do:`/`ensure:` arm.
     pub(in crate::core_erlang::control_flow) fn arm_statement_is_producer(
         &self,
@@ -776,7 +777,7 @@ impl CoreErlangGenerator {
         arm_is_frame: bool,
     ) -> bool {
         ((arm_is_frame || self.is_repl_mode()) && self.local_producer_locals(expr).is_some())
-            || self.is_conditional_with_sequenced_receiver(expr)
+            || self.is_construct_with_sequenced_operand(expr)
             // BT-3982: an actor evaluated block that threads `State` is a
             // producer in every arm.
             || self

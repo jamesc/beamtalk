@@ -25,6 +25,14 @@ TestCase subclass: Bt5281MatchPrivateScratchTest
     self assert: (a classify: #[(Result ok: -3)]) equals: 6
     self assert: (a classify: #[(Result error: #bad)]) equals: 6
 
+  testSentScrutineeMatchAfterGuardsWritesField =>
+    a := Bt5281MatchPrivateScratchActor spawn
+    self assert: (a classifySent: nil) equals: #none
+    self assert: (a classifySent: #[]) equals: #empty
+    self assert: (a classifySent: #[(Result ok: 3)]) equals: 6
+    self assert: (a classifySent: #[(Result ok: -3)]) equals: 6
+    self assert: (a classifySent: #[(Result error: #bad)]) equals: 6
+
   testMatchInNonBooleanFallbackClosureWritesField =>
     a := Bt5281MatchPrivateScratchActor spawn
     self assert: (a nested: NonBooleanCondCalling new with: 4) equals: #[#ifTrueIfFalse, 4]
