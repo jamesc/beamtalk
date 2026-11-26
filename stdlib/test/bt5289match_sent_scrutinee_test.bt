@@ -25,3 +25,9 @@ TestCase subclass: Bt5289MatchSentScrutineeTest
     self assert: (a loop: 3) equals: {3, 6}
     self assert: a bumps equals: 3
     self assert: a total equals: 6
+
+  testLocalAssignmentScrutineeKeepsTheAssignedValue =>
+    a := Bt5289MatchSentScrutineeActor spawn
+    self assert: (a localScrutinee: 1) equals: {3, 10}
+    self assert: (a localScrutinee: 5) equals: {7, 20}
+    self assert: (a localScrutinee: nil) equals: {2, 0}

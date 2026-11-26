@@ -315,7 +315,7 @@ fn the_verifier_reports_a_seed_read_before_the_scrutinee() {
 
 /// Class headers whose `run` is lowered on the inline path: no actor
 /// instance `State` to splice into.
-const INLINE_HEADERS: &[&str] = &[
+pub(super) const INLINE_HEADERS: &[&str] = &[
     // A class method: the scrutinee's `self bump` is a class-side self-send.
     "Object subclass: Ctr\n  class bump => 1\n\n  class run =>\n",
     // A value-type method and a plain-object method.

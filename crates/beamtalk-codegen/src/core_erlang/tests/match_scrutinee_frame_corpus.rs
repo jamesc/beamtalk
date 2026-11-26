@@ -25,16 +25,23 @@
 //! `on:do:`/`ensure:` arm alike.
 //!
 //! [`match_scrutinee_frame_corpus_compiles`] proves it over scrutinee x arms x
-//! arm write x position x frame x actor context: every row passes the debug verifier and
-//! compiles through `erlc`.
+//! arm write x position x frame x actor context: every row passes the debug
+//! verifier and compiles through `erlc`.
+//! [`local_assignment_scrutinee_corpus_compiles`] and
+//! [`repl_local_assignment_scrutinee_matches_verify`] cover the other trigger
+//! of the same splice (a scrutinee holding a local assignment, BT-3910) in
+//! every context: actor, class, value-type and plain-object methods and the
+//! REPL.
 //! [`match_scrutinee_frame_corpus_reports_the_pre_fix_lowering`] shows the
 //! verifier catches the pre-fix lowering ([`Fault::ReceiverPreludeInTuple`])
 //! over the same rows.
 
-use super::assert_parses;
 use super::loop_body_conditional_receiver_corpus::{
     ARMS, HELPERS, LOOPS, PRELUDES, RECEIVERS, passes, phase0_rejects,
 };
+use super::match_scrutinee_state_corpus::INLINE_HEADERS;
+use super::while_condition_binding_corpus::repl_report;
+use super::{assert_all_compile_through_erlc, assert_parses, codegen};
 #[cfg(debug_assertions)]
 use crate::core_erlang::fault::Fault;
 
@@ -178,5 +185,89 @@ fn match_scrutinee_frame_corpus_reports_the_pre_fix_lowering() {
         "{} row(s) where the verifier missed the pre-fix lowering:\n{}",
         missed.len(),
         missed.join("\n")
+    );
+}
+
+/// Scrutinees holding a local assignment (BT-3910's trigger of the splice,
+/// context-independent): alone, as an operand, and assigning a second local.
+const LOCAL_ASSIGNMENT_SCRUTINEES: &[&str] = &[
+    "(t := t + 1)",
+    "((t := t + 1) + u)",
+    "((u := t + 5) max: 0)",
+];
+
+/// `match:` shapes over a local-assignment scrutinee `{R}` whose arms write
+/// no field (so they run in every context): a value-answering literal arm
+/// and a nested conditional arm.
+const VALUE_MATCHES: &[&str] = &[
+    "{R} match: [1 -> 10; _ -> 20]",
+    "{R} match: [k :: Integer -> k > 0 ifTrue: [k] ifFalse: [0]; _ -> 0]",
+];
+
+/// The frames of a local-assignment scrutinee's `match:` statement `{S}`: the
+/// method root, a conditional arm, a `Letrec` loop body, a fold body and an
+/// `on:do:` body.
+const LOCAL_FRAMES: &[&str] = &[
+    "{S}",
+    "(t >= 0) ifTrue: [{S}] ifFalse: [nil]",
+    "1 to: 2 do: [:i | {S}]",
+    "#(1, 2) do: [:e | {S}]",
+    "[{S}] on: Error do: [:err | 0]",
+];
+
+/// BT-5289: a `match:` whose scrutinee holds a local assignment is sequenced
+/// into its statement's frame in every context, not only an actor instance
+/// method. Every scrutinee x shape x position x frame x context row passes
+/// the debug verifier and compiles through `erlc`.
+#[test]
+fn local_assignment_scrutinee_corpus_compiles() {
+    let actor = "Actor subclass: Ctr\n  state: f = 0\n\n  bump => 1\n\n  run =>\n";
+    let mut rows = Vec::new();
+    for header in std::iter::once(&actor).chain(INLINE_HEADERS) {
+        for scrutinee in LOCAL_ASSIGNMENT_SCRUTINEES {
+            for shape in VALUE_MATCHES {
+                let m = shape.replace("{R}", scrutinee);
+                for position in ["{M}", "r := {M}"] {
+                    for frame in LOCAL_FRAMES {
+                        let stmt = frame.replace("{S}", &position.replace("{M}", &m));
+                        let src = format!(
+                            "{header}    t := 0\n    u := 0\n    r := 0\n    {stmt}\n    {{t, u, r}}\n"
+                        );
+                        assert_parses(&src);
+                        if phase0_rejects(&src) {
+                            continue;
+                        }
+                        rows.push((src.clone(), codegen(&src)));
+                    }
+                }
+            }
+        }
+    }
+    assert!(rows.len() >= 200, "only {} rows", rows.len());
+    assert_all_compile_through_erlc(&rows);
+}
+
+/// BT-5289: the REPL form of [`local_assignment_scrutinee_corpus_compiles`]:
+/// a `match:` over a local-assignment scrutinee lowers with a silent verifier.
+#[test]
+fn repl_local_assignment_scrutinee_matches_verify() {
+    let failures: Vec<String> = LOCAL_ASSIGNMENT_SCRUTINEES
+        .iter()
+        .flat_map(|scrutinee| {
+            VALUE_MATCHES.iter().flat_map(move |shape| {
+                let m = shape.replace("{R}", scrutinee);
+                [
+                    format!("t := 0. u := 0. {m}"),
+                    format!("t := 0. u := 0. r := {m}"),
+                ]
+            })
+        })
+        .filter_map(|row| repl_report(&row, None).map(|r| format!("{row}: {r}")))
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "{} REPL local-assignment scrutinee row(s) fail:\n{}",
+        failures.len(),
+        failures.join("\n")
     );
 }
