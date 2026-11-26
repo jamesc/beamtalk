@@ -188,35 +188,28 @@ defmodule BtAttach.WorkspaceRpcTest do
     end
   end
 
-  describe "session_alive?/1 and session_count/0 (the sessions operation, BT-5202)" do
-    test "session_alive?/1 is true only when the pid is among the listed sessions" do
-      other = spawn(fn -> :ok end)
-      sessions = {:sessions, [%{id: "a", pid: self()}, %{id: "b", pid: other}]}
-      mock_rpc(%{{:beamtalk_repl_ops, :request} => fn ["sessions", %{}, _pid] -> sessions end})
-      assert Workspace.session_alive?(self()) == true
+  describe "session_alive?/1 and session_count/0 (the session API, BT-5202)" do
+    test "session_alive?/1 returns the boolean the workspace reports for that pid" do
+      pid = self()
+      mock_rpc(%{{:beamtalk_repl_ops, :session_alive} => fn [^pid] -> true end})
+      assert Workspace.session_alive?(pid) == true
 
-      mock_rpc(%{{:beamtalk_repl_ops, :request} => {:sessions, [%{id: "b", pid: other}]}})
+      mock_rpc(%{{:beamtalk_repl_ops, :session_alive} => false})
+      assert Workspace.session_alive?(pid) == false
+    end
+
+    test "session_alive?/1 treats a badrpc as not-alive" do
+      mock_rpc(%{{:beamtalk_repl_ops, :session_alive} => {:badrpc, :mock_scripted}})
       assert Workspace.session_alive?(self()) == false
     end
 
-    test "session_alive?/1 treats a badrpc or an error as not-alive" do
-      mock_rpc(%{{:beamtalk_repl_ops, :request} => {:badrpc, :mock_scripted}})
-      assert Workspace.session_alive?(self()) == false
-
-      mock_rpc(%{{:beamtalk_repl_ops, :request} => {:error, :boom}})
-      assert Workspace.session_alive?(self()) == false
-    end
-
-    test "session_count/0 counts the listed sessions" do
-      mock_rpc(%{
-        {:beamtalk_repl_ops, :request} => {:sessions, [%{id: "a"}, %{id: "b"}, %{id: "c"}]}
-      })
-
+    test "session_count/0 reads the active session count" do
+      mock_rpc(%{{:beamtalk_repl_ops, :session_count} => 3})
       assert Workspace.session_count() == 3
     end
 
     test "session_count/0 surfaces a badrpc as an unreachable error" do
-      mock_rpc(%{{:beamtalk_repl_ops, :request} => {:badrpc, :mock_scripted}})
+      mock_rpc(%{{:beamtalk_repl_ops, :session_count} => {:badrpc, :mock_scripted}})
       assert Workspace.session_count() == {:error, {:unreachable, :mock_scripted}}
     end
   end

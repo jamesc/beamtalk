@@ -137,7 +137,17 @@ handle_term(<<"interrupt">>, _Params, Msg, SessionPid) ->
         {status, ok}
     catch
         exit:{noproc, _} ->
-            {status, ok}
+            {status, ok};
+        exit:{timeout, _} ->
+            %% The shell did not answer in 5 s: it is alive but wedged. Say so
+            %% rather than letting the exit crash the caller.
+            {error,
+                beamtalk_repl_errors:make(
+                    session_busy,
+                    'REPL',
+                    <<"Session did not answer">>,
+                    <<"The session is busy; try again.">>
+                )}
     end.
 
 %% BT-5199: reply only once the actor is gone, so a client that reads `actors`

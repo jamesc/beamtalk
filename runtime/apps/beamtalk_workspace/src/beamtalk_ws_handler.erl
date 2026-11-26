@@ -1047,6 +1047,7 @@ create_session(SessionId, Meta, State) ->
     case beamtalk_repl_ops:start_session(SessionId, Meta) of
         {ok, SessionPid} ->
             MonRef = erlang:monitor(process, SessionPid),
+            beamtalk_session_table:insert(SessionId, SessionPid),
             ?LOG_INFO("WebSocket auth succeeded, session created", #{
                 session => SessionId,
                 session_pid => SessionPid,

@@ -341,14 +341,15 @@ defmodule BtAttach.Workspace do
   process actually exists — the workspace could have restarted between the
   disconnect and the reconnect, leaving the registry entry stale.
 
-  Answered by the `sessions` operation (BT-5202): a session is alive when its
-  shell pid is among the sessions the workspace lists, which is evaluated **on the
-  workspace node** where the pid is local. Returns a boolean; an unreachable or
-  erroring workspace counts as not-alive (resume falls back to a fresh session).
+  Answered on the workspace node by `beamtalk_repl_ops:session_alive/1`
+  (BT-5202), where the pid is local: one check of the session supervisor's
+  children that does not depend on any other session answering. Returns a
+  boolean; an unreachable workspace counts as not-alive (resume falls back to a
+  fresh session).
   """
   def session_alive?(session_pid) when is_pid(session_pid) do
-    case sessions_op() do
-      {:sessions, sessions} -> Enum.any?(sessions, &(Map.get(&1, :pid) == session_pid))
+    case rpc(:beamtalk_repl_ops, :session_alive, [session_pid]) do
+      alive when is_boolean(alive) -> alive
       _ -> false
     end
   end
@@ -356,22 +357,19 @@ defmodule BtAttach.Workspace do
   @doc """
   Count the workspace-supervised sessions currently alive (BT-2410 Wave 4).
 
-  A read-only count of the `sessions` operation's rows (BT-5202), used by the
-  session-teardown tests to assert that closing a LiveView (after the resume
-  grace window) leaves no orphaned session. Returns the active-child count for a
+  A read-only count of the session supervisor's active children
+  (`beamtalk_repl_ops:session_count/0`, BT-5202), used by the session-teardown
+  tests to assert that closing a LiveView (after the resume grace window) leaves
+  no orphaned session, even one whose shell is wedged. Returns the count for a
   reachable workspace, or `{:error, {:unreachable, _}}` otherwise.
   """
   def session_count do
-    case sessions_op() do
-      {:sessions, sessions} -> length(sessions)
+    case rpc(:beamtalk_repl_ops, :session_count, []) do
+      count when is_integer(count) -> count
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
-      {:error, reason} -> {:error, reason}
       other -> {:error, {:unexpected_reply, other}}
     end
   end
-
-  # The `sessions` op with the short lookup timeout the pid probes always had.
-  defp sessions_op, do: request_op("sessions", %{}, self(), @rpc_timeout)
 
   @doc """
   Evaluate a Beamtalk expression in `session_pid` through the curated op layer's

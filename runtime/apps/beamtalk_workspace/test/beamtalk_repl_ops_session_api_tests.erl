@@ -20,14 +20,16 @@ timeout semantics both transports share.
 
 session_api_test_() ->
     {foreach, fun setup/0, fun cleanup/1, [
-        fun start_registers_the_session_and_normalises_kind/1,
+        fun start_normalises_kind/1,
         fun two_sessions_are_independent_shells/1,
         fun lifecycle_start_eval_interrupt_bindings_close/1,
         fun attach_reports_ok_gone_and_timeout/1,
         fun interrupt_frees_a_busy_session/1,
         fun interrupt_of_a_dead_session_is_ok/1,
         fun bindings_of_a_dead_session_is_a_structured_error/1,
-        fun sessions_op_carries_the_shell_pid/1
+        fun alive_and_count_do_not_depend_on_other_sessions/1,
+        fun interrupt_of_a_wedged_session_is_a_structured_error/1,
+        fun liveview_sessions_are_not_registered_by_id/1
     ]}.
 
 setup() ->
@@ -63,10 +65,11 @@ park_busy(Session) ->
     end),
     Worker.
 
-start_registers_the_session_and_normalises_kind(_) ->
-    {"start_session registers the id in the session table and normalises `kind`", fun() ->
+start_normalises_kind(_) ->
+    {"start_session starts a supervised shell and normalises `kind`", fun() ->
         {ok, Session} = beamtalk_repl_ops:start_session(<<"api-start">>, #{kind => <<"LiveView">>}),
-        ?assertEqual({ok, Session}, beamtalk_session_table:lookup(<<"api-start">>)),
+        %% Not registered by id: other clients cannot resume or close it by guessing.
+        ?assertEqual(error, beamtalk_session_table:lookup(<<"api-start">>)),
         ?assertMatch(
             {ok, <<"api-start">>, #{kind := <<"liveview">>}},
             beamtalk_repl_shell:get_session_meta(Session)
@@ -100,15 +103,16 @@ lifecycle_start_eval_interrupt_bindings_close(_) ->
             ),
             %% bindings: the live value, not a printed string
             ?assertMatch({ok, #{x := 42}}, beamtalk_repl_ops:session_bindings(Session)),
-            %% sessions lists it, with its pid
-            {sessions, Sessions} = beamtalk_repl_ops:request(<<"sessions">>, #{}, self()),
-            ?assert(lists:member(#{id => <<"api-life">>, pid => Session}, Sessions)),
+            %% the session probes see it
+            ?assert(beamtalk_repl_ops:session_alive(Session)),
+            ?assertEqual(1, beamtalk_repl_ops:session_count()),
             %% close stops it and removes the row
             ?assertEqual(
                 {status, ok}, beamtalk_repl_ops:request(<<"close">>, #{}, Session)
             ),
             beamtalk_test_wait:dead(Session),
-            ?assertEqual(error, beamtalk_session_table:lookup(<<"api-life">>)),
+            ?assertNot(beamtalk_repl_ops:session_alive(Session)),
+            ?assertEqual(0, beamtalk_repl_ops:session_count()),
             Owner ! stop
         end}}.
 
@@ -156,13 +160,40 @@ bindings_of_a_dead_session_is_a_structured_error(_) ->
         )
     end}.
 
-sessions_op_carries_the_shell_pid(_) ->
-    {"the sessions op lists the shell pid for a term caller; the wire encoding drops it", fun() ->
-        {ok, Session} = beamtalk_repl_ops:start_session(<<"api-pid">>, #{}),
-        {sessions, Sessions} = beamtalk_repl_ops:request(<<"sessions">>, #{}, self()),
-        ?assert(lists:member(#{id => <<"api-pid">>, pid => Session}, Sessions)),
-        Msg = beamtalk_test_repl:make_msg(<<"sessions">>, <<"s-1">>, undefined),
-        Json = json:decode(beamtalk_repl_ops:encode({sessions, Sessions}, Msg)),
-        #{<<"sessions">> := Rows} = Json,
-        ?assert(lists:member(#{<<"id">> => <<"api-pid">>}, Rows))
+alive_and_count_do_not_depend_on_other_sessions(_) ->
+    {"session_alive/session_count stay exact while another shell is wedged",
+        {timeout, 30, fun() ->
+            {ok, Live} = beamtalk_repl_ops:start_session(<<"api-alive-1">>, #{}),
+            {ok, Wedged} = beamtalk_repl_ops:start_session(<<"api-alive-2">>, #{}),
+            ok = sys:suspend(Wedged),
+            %% A pid that is not a session of this workspace is not alive as one.
+            Stranger = new_owner(),
+            ?assert(beamtalk_repl_ops:session_alive(Live)),
+            ?assert(beamtalk_repl_ops:session_alive(Wedged)),
+            ?assertNot(beamtalk_repl_ops:session_alive(Stranger)),
+            ?assertEqual(2, beamtalk_repl_ops:session_count()),
+            ok = sys:resume(Wedged),
+            Stranger ! stop
+        end}}.
+
+interrupt_of_a_wedged_session_is_a_structured_error(_) ->
+    {"interrupt of a shell that does not answer is session_busy, not a crash",
+        {timeout, 30, fun() ->
+            {ok, Session} = beamtalk_repl_ops:start_session(<<"api-wedged">>, #{}),
+            ok = sys:suspend(Session),
+            ?assertMatch(
+                {error, #beamtalk_error{kind = session_busy}},
+                beamtalk_repl_ops:request(<<"interrupt">>, #{}, Session)
+            ),
+            ok = sys:resume(Session)
+        end}}.
+
+liveview_sessions_are_not_registered_by_id(_) ->
+    {"a session started for LiveView cannot be closed by id from another client", fun() ->
+        {ok, Session} = beamtalk_repl_ops:start_session(<<"phoenix-1">>, #{kind => <<"liveview">>}),
+        Msg = beamtalk_test_repl:make_msg(<<"close">>, <<"c-1">>, <<"phoenix-1">>),
+        ?assertEqual(
+            {status, ok}, beamtalk_repl_ops:dispatch(<<"close">>, #{}, Msg, self())
+        ),
+        ?assert(is_process_alive(Session))
     end}.
