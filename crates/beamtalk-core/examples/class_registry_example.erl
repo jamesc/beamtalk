@@ -26,8 +26,7 @@ run() ->
             class => #{arity => 0},
             '==' => #{arity => 1}
         },
-        instance_variables => [],
-        class_variables => #{}
+        instance_variables => []
     },
     ok = beamtalk_classes:register_class('Object', ObjectInfo),
     io:format("   ✓ Object registered~n~n"),
@@ -42,8 +41,7 @@ run() ->
             'spawn:' => #{arity => 1},
             send => #{arity => 1}
         },
-        instance_variables => [],
-        class_variables => #{}
+        instance_variables => []
     },
     ok = beamtalk_classes:register_class('Actor', ActorInfo),
     io:format("   ✓ Actor registered (subclass of Object)~n~n"),
@@ -59,7 +57,6 @@ run() ->
             value => #{arity => 0}
         },
         instance_variables => [count],
-        class_variables => #{},
         source_file => "Counter.bt"
     },
     ok = beamtalk_classes:register_class('Counter', CounterInfo),
@@ -75,8 +72,7 @@ run() ->
             x => #{arity => 0},
             y => #{arity => 0}
         },
-        instance_variables => [x, y],
-        class_variables => #{}
+        instance_variables => [x, y]
     },
     ok = beamtalk_classes:register_class('Point', PointInfo),
     io:format("   ✓ Point registered (subclass of Object)~n~n"),

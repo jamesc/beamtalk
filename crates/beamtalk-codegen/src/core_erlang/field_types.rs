@@ -26,12 +26,11 @@
 //!   general guard instead, which dispatches `nil` to a
 //!   `does_not_understand` (BT-3924). Every other shape
 //!   (generic, singleton, false-or, …) is an object type and is guarded.
-//! * An **untyped** field — `state:`, `field:` or `classState:`, of any class
+//! * An **untyped** field — `state:` or `field:`, of any class
 //!   kind, whatever its default — is always guarded
 //!   ([`FieldTypeFact::Untyped`]). A field's writers are not all in its class
 //!   source: `spawnWith:`, a Value's keyword constructor, `fieldAt:put:`, a
-//!   subclass assigning an inherited field, an inherited class method running
-//!   over a redeclared `classState:` (ADR 0130) or a class-side extension can
+//!   subclass assigning an inherited field, or a class-side extension can
 //!   each store an object in a field whose default is `0` (BT-3925). The
 //!   guard is a type test on the hot path and measured no slower than the
 //!   bare BIF on the Actor counter benchmark
@@ -203,7 +202,7 @@ fn is_nil_type(ty: &DeclaredType) -> bool {
     matches!(ty, DeclaredType::Simple(name) if name == "Nil" || name == "UndefinedObject")
 }
 
-/// Classifies every field in `decls` (`state:`/`field:` or `classState:`) by
+/// Classifies every field in `decls` (`state:`/`field:`) by
 /// its declaration alone: an annotated field records its declared type, an
 /// untyped one is [`FieldTypeFact::Untyped`] (BT-3925).
 pub(in crate::core_erlang) fn classify_fields(

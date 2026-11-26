@@ -114,9 +114,6 @@ a table deleted between an existence check and the op (teardown/shutdown).
     lookup_method_return_type/2,
     lookup_class_method_return_type/2,
     flatten_ancestor_map/2,
-    class_var_kinds/1,
-    inherited_class_var_kinds/1,
-    class_var_kinds_or_unknown/1,
     read_meta/1,
     read_meta_detailed/1,
     read_meta_autoload/1,
@@ -997,72 +994,13 @@ flatten_ancestor_map(ClassAtom, ReadOwnMapFun) ->
     end.
 
 -doc """
-The class-variable (`classState:`) kinds `Name` itself declares (ADR 0013 §1,
-ADR 0130, BT-3801): variable name -> `eager | late`, read from the class's own
-compiled `__beamtalk_meta/0` (`class_field_kinds`) via the module this table
-records for it. Class variables are per class and **not inherited**, so an
-ancestor's declarations are deliberately not merged in; a subclass redeclares
-the variables its inherited methods touch. See `inherited_class_var_kinds/1`
-for the diagnostic-only ancestor view.
-
-Returns `#{}` for a class with no metadata row (never registered, or removed),
-and for a class whose module exports no readable `__beamtalk_meta/0` (a
-ClassBuilder or hand-written Erlang class). Callers that must tell "unknown"
-from "declares none" use `class_var_kinds_or_unknown/1`, which this wraps.
-""".
--spec class_var_kinds(class_name()) -> #{atom() => eager | late}.
-class_var_kinds(Name) ->
-    own_class_var_kinds(Name).
-
--doc """
-`class_var_kinds/1` that tells "unknown" from "declares none" in a single
-`__beamtalk_meta/0` read (BT-3808): `unknown` for a class with no registered
-module or whose module exports no readable `__beamtalk_meta/0` (a ClassBuilder
-or hand-written Erlang class, or no live class), else the class's own declared
-kinds, which may be `#{}` (the set is KNOWN empty). One read answers both
-questions, so a hot reload between two reads cannot make them disagree. Kept
-here, in the metadata leaf, so that `beamtalk_class_vars` (the class-variable
-access leaf, `undeclared_class_variable`; to be deleted by BT-5163) does not
-call up into the class gen_server or the reflection intrinsics.
-""".
--spec class_var_kinds_or_unknown(class_name()) -> unknown | #{atom() => eager | late}.
-class_var_kinds_or_unknown(Name) ->
-    case lookup_module(Name) of
-        {ok, Module} ->
-            case read_meta(Module) of
-                {ok, Meta} -> maps:get(class_field_kinds, Meta, #{});
-                not_available -> unknown
-            end;
-        not_found ->
-            unknown
-    end.
-
--doc """
-The class-variable kinds declared by the strict ancestors of `Name`, closer
-levels winning. Diagnostic-only (BT-3801): it never makes a variable accessible
-to `Name`; `beamtalk_class_vars` uses it to tell "this class declares no class
-variables" from "an ancestor declares it and this class forgot to redeclare it".
-""".
--spec inherited_class_var_kinds(class_name()) -> #{atom() => eager | late}.
-inherited_class_var_kinds(Name) ->
-    flatten_ancestor_map(Name, fun own_class_var_kinds/1).
-
-%% One level's own `class_field_kinds`; `#{}` when it cannot be read.
--spec own_class_var_kinds(class_name()) -> #{atom() => eager | late}.
-own_class_var_kinds(Name) ->
-    case class_var_kinds_or_unknown(Name) of
-        unknown -> #{};
-        Kinds -> Kinds
-    end.
-
--doc """
 Read a compiled class module's `__beamtalk_meta/0`.
 
 Returns `{ok, Meta}` when `Module` exports `__beamtalk_meta/0` and the call
 returns a map; `not_available` when it is not exported (a ClassBuilder or
 hand-written Erlang class), crashes, or returns a non-map. This is the shared
 guarded meta read for callers that treat every failure as "no metadata"
-(`beamtalk_behaviour_intrinsics:meta_for_module/1`, `class_var_kinds/1`, and the
+(`beamtalk_behaviour_intrinsics:meta_for_module/1` and the
 thin `#{}`-fallback wrappers in `beamtalk_object_class`, `beamtalk_shape_migration`
 and the REPL ops/loader). It is the only place that calls `__beamtalk_meta/0`
 behind an export guard. A caller that must tell the failures apart uses
@@ -1081,7 +1019,7 @@ Read a compiled class module's `__beamtalk_meta/0`, keeping why it failed.
 Returns `{ok, Meta}` for a map; `none` when `Module` is not an atom or does not
 export `__beamtalk_meta/0`; `{invalid, {not_a_map, Other}}` or
 `{invalid, {crashed, Class, Reason}}` when the export exists but is unusable.
-`beamtalk_class_var_abi` reports the `invalid` cases as an `abi_mismatch`
+`beamtalk_module_abi` reports the `invalid` cases as an `abi_mismatch`
 distinct from a module compiled before the ABI existed.
 """.
 -spec read_meta_detailed(term()) -> {ok, map()} | {invalid, term()} | none.

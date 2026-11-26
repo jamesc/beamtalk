@@ -3,12 +3,12 @@
 
 %%% **DDD Context:** Object System Context
 
--module(beamtalk_class_var_abi).
+-module(beamtalk_module_abi).
 -moduledoc """
-The `class_var_abi` load gate (ADR 0130 §3, Implementation Phase 3).
+The `module_abi` load gate (ADR 0130 §3, moved here by ADR 0153 Phase 3).
 
 A compiled Beamtalk class module declares, in `__beamtalk_meta/0`, the
-class-method calling convention it was compiled for (`class_var_abi`). Class
+runtime ABI it was compiled for (`module_abi`). Class
 registration (`beamtalk_object_class:start/2`) and hot reload
 (`beamtalk_object_class:update_class/2`) call `check_class_info_abi/2` before
 installing anything and refuse a module whose value is not exactly `abi/0`.
@@ -16,16 +16,23 @@ The release preflight (`beamtalk_release_shapes:extract_shapes/2`) wraps its
 module loads in `collect_abi_refusals/1` to turn a refusal into a failed
 preflight.
 
-This is module-loading policy, kept apart from `beamtalk_class_vars` (the leaf
-that owns the class-variable key and every access). The accepted value comes
-from `?BT_CLASS_VAR_ABI` in `beamtalk_class_vars_keys.hrl`, which must equal the
-`CLASS_VAR_ABI` codegen emits into every module's meta (`class_meta.rs`); the
-Rust test `class_var_abi_matches_the_runtime_header` enforces that.
+The accepted value comes from `?BT_MODULE_ABI` in `beamtalk_module_abi.hrl`,
+which must equal the `MODULE_ABI` codegen emits into every module's meta
+(`class_meta.rs`); the Rust test `module_abi_matches_the_runtime_header`
+enforces that.
+
+This is the backstop behind the build stamp. A normal build is invalidated
+when `BEAMTALK_VERSION` changes (`build_stamp.rs`, ADR 0098), so a BEAM built
+by an older compiler does not reach a runtime in practice. A module that does
+get here anyway (a hand-copied BEAM, a release assembled from stale parts)
+declares no `module_abi`; it is refused with a clear message instead of
+failing with `undef` at its first `on:do:`, which called the since-deleted
+class-variable snapshot (ADR 0153).
 """.
 
 -include_lib("kernel/include/logger.hrl").
 -include("beamtalk.hrl").
--include("beamtalk_class_vars_keys.hrl").
+-include("beamtalk_module_abi.hrl").
 
 -export([
     abi/0,
@@ -36,15 +43,13 @@ Rust test `class_var_abi_matches_the_runtime_header` enforces that.
 -define(ABI_REFUSALS_TABLE, beamtalk_abi_refusals).
 
 -doc """
-The `class_var_abi` value this runtime accepts: the calling convention of
-compiled class methods (`class_<sel>(ClassSelf, Args...)`; the class process
-no longer installs a class-variable home since ADR 0153, BT-5160, and BT-5163
-deletes this gate). Must equal codegen's `CLASS_VAR_ABI`
-(`class_meta.rs`), which it emits into every module's `__beamtalk_meta/0`;
-the Rust test `class_var_abi_matches_the_runtime_header` enforces that.
+The `module_abi` value this runtime accepts. Must equal codegen's
+`MODULE_ABI` (`class_meta.rs`), which it emits into every module's
+`__beamtalk_meta/0`; the Rust test `module_abi_matches_the_runtime_header`
+enforces that.
 """.
 -spec abi() -> pos_integer().
-abi() -> ?BT_CLASS_VAR_ABI.
+abi() -> ?BT_MODULE_ABI.
 
 -doc """
 Run `Fun` while collecting the ABI refusals `check_class_info_abi/2` records,
@@ -80,8 +85,8 @@ collect_abi_refusals(Fun) ->
     end.
 
 -doc """
-Refuse a compiled Beamtalk class module whose `class_var_abi` is not exactly
-`abi/0` (ADR 0130 §3, Implementation Phase 3): `{error, #beamtalk_error{kind =
+Refuse a compiled Beamtalk class module whose `module_abi` is not exactly
+`abi/0` (ADR 0130 §3, ADR 0153 Phase 3): `{error, #beamtalk_error{kind =
 abi_mismatch}}` naming the module and saying to recompile.
 
 Called by `beamtalk_object_class:start/2` (registration) and
@@ -95,12 +100,11 @@ them, by `__beamtalk_meta/0`:
   still running, when `erlang:function_exported/3` is `false`), or
 - an exported `__beamtalk_meta/0` on `ClassInfo`'s `module`.
 
-Among those, a missing `class_var_abi` key (every module compiled before the
-flip) or any value other than `abi/0` is refused: the check is "equal to the
+Among those, a missing `module_abi` key (every module compiled before ADR 0153)
+or any value other than `abi/0` is refused: the check is "equal to the
 current value", never "present and unequal". A module without
 `__beamtalk_meta/0` (a hand-written Erlang class module, an EUnit fixture, a
-ClassBuilder class) is outside the gate; its obligation is the FFI rule (use
-`beamtalk_class_vars`, never return `class_var_result`).
+ClassBuilder class) is outside the gate.
 """.
 -spec check_class_info_abi(atom(), map()) -> ok | {error, #beamtalk_error{}}.
 check_class_info_abi(ClassName, ClassInfo) ->
@@ -110,11 +114,11 @@ check_class_info_abi(ClassName, ClassInfo) ->
             ok;
         {invalid, Why} ->
             %% A crashing or non-map `__beamtalk_meta/0` is a different failure
-            %% from "compiled before ADR 0130": report it as such.
+            %% from "compiled before ADR 0153": report it as such.
             refuse_abi(ClassName, Module, abi_mismatch_error(ClassName, Module, {invalid, Why}));
         {ok, Meta} ->
-            case maps:find(class_var_abi, Meta) of
-                {ok, ?BT_CLASS_VAR_ABI} ->
+            case maps:find(module_abi, Meta) of
+                {ok, ?BT_MODULE_ABI} ->
                     ok;
                 Found ->
                     refuse_abi(ClassName, Module, abi_mismatch_error(ClassName, Module, Found))
@@ -165,13 +169,13 @@ abi_mismatch_error(ClassName, Module, Found) ->
     {Reported, Declared} =
         case Found of
             {ok, Value} ->
-                {Value, io_lib:format("class_var_abi ~p", [Value])};
+                {Value, io_lib:format("module_abi ~p", [Value])};
             error ->
-                {missing, "no class_var_abi entry (compiled before ADR 0130)"};
+                {missing, "no module_abi entry (compiled by an older beamtalk compiler)"};
             {invalid, Why} ->
                 {invalid_meta,
                     io_lib:format(
-                        "an invalid __beamtalk_meta/0 (~0p), so its class_var_abi is unknown", [
+                        "an invalid __beamtalk_meta/0 (~0p), so its module_abi is unknown", [
                             Why
                         ]
                     )}
@@ -179,21 +183,20 @@ abi_mismatch_error(ClassName, Module, Found) ->
     Message = beamtalk_error:chars_to_binary(
         io_lib:format(
             "Module ~ts (class ~ts) was compiled with ~ts, but this runtime requires "
-            "class_var_abi ~tp",
-            [Module, ClassName, Declared, ?BT_CLASS_VAR_ABI]
+            "module_abi ~tp",
+            [Module, ClassName, Declared, ?BT_MODULE_ABI]
         )
     ),
     Error0 = beamtalk_error:new(abi_mismatch, ClassName),
     Error1 = beamtalk_error:with_message(Error0, Message),
     Error2 = beamtalk_error:with_details(Error1, #{
-        module => Module, expected => ?BT_CLASS_VAR_ABI, found => Reported
+        module => Module, expected => ?BT_MODULE_ABI, found => Reported
     }),
     beamtalk_error:with_hint(
         Error2,
         <<
-            "Recompile the package with the current beamtalk compiler. The class-variable "
-            "calling convention changed (ADR 0130), so a module compiled by an older compiler "
-            "cannot be loaded."
+            "Recompile the package with the current beamtalk compiler. Class variables were "
+            "removed (ADR 0153), so a module compiled by an older compiler cannot be loaded."
         >>
     ).
 

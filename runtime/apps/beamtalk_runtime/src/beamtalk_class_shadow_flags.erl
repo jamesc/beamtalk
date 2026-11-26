@@ -17,8 +17,8 @@ flag, so the guard in `beamtalk_class_dispatch:class_self_direct_ok/4` is one
 constant-time term read with no ETS access (BT-3700 folded the reads; see below).
 
 One kind, `runtime_fun`, keyed by the class name: set while the class has
-runtime-installed class-method funs. (ADR 0153 removed the second kind,
-`class_vars`, with class variables.)
+runtime-installed class-method funs. (ADR 0153 removed the second kind with
+class variables.)
 
 The flags are conservative: a stale `true` only costs the slow path (the
 hierarchy walk is always correct); `runtime_fun` writers set the flag *before* making the

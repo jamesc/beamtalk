@@ -227,7 +227,7 @@ reload_reads_one_class_entry_not_full_manifest_test_() ->
             setup(),
             ok = meck:new(beamtalk_release, [passthrough, no_link]),
             ok = meck:expect(beamtalk_release, project_class_shape_entry, fun(_) ->
-                #{version => 1, fields => #{}, migrations => #{}, class_var_abi => null}
+                #{version => 1, fields => #{}, migrations => #{}, module_abi => null}
             end)
         end,
         fun(X) ->

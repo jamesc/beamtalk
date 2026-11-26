@@ -1,11 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! ADR 0153 Phase 2: nothing the compiler emits calls `beamtalk_class_vars`.
-//! Every compiled `on:do:` used to take a class-variable snapshot before its
-//! `try` and restore it in the catch arm; each row here compiles a module that
-//! uses `on:do:` (and an FFI call with a retrying argument, which used to read
-//! the same snapshot) in every method context and checks the call is gone.
+//! ADR 0153: a compiled `on:do:` is a plain `try`/`catch` with no snapshot or
+//! restore around it. Each row here compiles a module that uses `on:do:` (and
+//! an FFI call with a retrying argument) in every method context, checks the
+//! catch arm filters through `matches_class`, and that the result compiles
+//! through erlc.
 
 use super::*;
 
@@ -37,7 +37,7 @@ const ROWS: &[(&str, &str)] = &[
 ];
 
 #[test]
-fn no_compiled_on_do_calls_beamtalk_class_vars() {
+fn compiled_on_do_is_a_plain_try_catch_in_every_method_context() {
     let mut compiled = Vec::new();
     for (label, src) in ROWS {
         let code = codegen(src);
@@ -46,7 +46,6 @@ fn no_compiled_on_do_calls_beamtalk_class_vars() {
             &code,
             &["'beamtalk_exception_handler':'matches_class'("],
         );
-        assert_lacks(label, &code, &["beamtalk_class_vars", "'$bt_class_vars"]);
         compiled.push((*label, code));
     }
     assert_all_compile_through_erlc(&compiled);
@@ -55,7 +54,7 @@ fn no_compiled_on_do_calls_beamtalk_class_vars() {
 /// Class-side reflection in an `Actor` class method (`self fieldAt:`,
 /// `fieldAt:put:`, `hasField:`, `clearField:`) is an ordinary send to the
 /// class: it never takes the actor-instance fast path, which would read the
-/// `State` a class method does not bind, and never calls `beamtalk_class_vars`.
+/// `State` a class method does not bind.
 #[test]
 fn class_side_reflection_in_an_actor_class_method_is_a_plain_send() {
     let src = "Actor subclass: P\n  state: n = 0\n\n  \
@@ -80,7 +79,7 @@ fn class_side_reflection_in_an_actor_class_method_is_a_plain_send() {
     assert_lacks(
         "class-side reflection",
         &code,
-        &["'beamtalk_primitive':'send'(State", "beamtalk_class_vars"],
+        &["'beamtalk_primitive':'send'(State"],
     );
     assert_all_compile_through_erlc(&[("actor class-side reflection", code)]);
 }

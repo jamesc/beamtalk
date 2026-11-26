@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3407: Worker actor for the supervisor configuration visibility test — see
-// stdlib/test/fixtures/class_state_sup_app.bt for the Supervisor and full
+// stdlib/test/fixtures/named_config_sup_app.bt for the Supervisor and full
 // context.
 
-Actor subclass: ClassStateSupWorker
+Actor subclass: NamedConfigSupWorker
   state: label :: String = ""
 
-  class start: label :: String -> ClassStateSupWorker =>
+  class start: label :: String -> NamedConfigSupWorker =>
     self spawnWith: #{#label => label}
 
   label -> String => self.label

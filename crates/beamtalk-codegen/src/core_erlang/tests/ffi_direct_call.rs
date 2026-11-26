@@ -245,7 +245,6 @@ fn string_arg_is_direct_behind_is_binary_guard() {
         code.contains("'stock', _FfiSite@") && !code.contains("FfiSnap"),
         "no snapshot is handed to ffi_call_raised:\n{code}"
     );
-    assert!(!code.contains("beamtalk_class_vars"), "{code}");
     // No proxy hop on the happy path: the only `direct_call` is the guard's
     // fallback arm.
     assert_eq!(
@@ -487,7 +486,6 @@ fn dictionary_arg_is_direct_behind_is_map_guard() {
         code.contains("'stock', _FfiSite@") && !code.contains("FfiSnap"),
         "no snapshot is handed to ffi_call_raised:\n{code}"
     );
-    assert!(!code.contains("beamtalk_class_vars"), "{code}");
     // No proxy hop on the happy path and no dynamic send.
     assert_eq!(
         code.matches("'direct_call'(").count(),

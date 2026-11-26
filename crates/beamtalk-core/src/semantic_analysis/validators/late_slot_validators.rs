@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Semantic Analysis
 //!
-//! `late` is a declaration-level modifier on `state:`/`classState:` marking a
+//! `late` is a declaration-level modifier on `state:` marking a
 //! slot that is legitimately unassigned after `initialize`. This module
 //! covers the four Errors that are new to B1:
 //! - `late field:` on a Value (`late` has no meaning for a fully-constructed,
@@ -27,8 +27,7 @@ use crate::semantic_analysis::{AliasRegistry, ProtocolRegistry};
 use crate::source_analysis::Diagnostic;
 
 /// Runs every `late`-declaration check (ADR 0124 §1, §5) over a module's
-/// instance (`state`/`field`) and class-variable (`classState`)
-/// declarations.
+/// instance (`state`/`field`) declarations.
 pub(crate) fn check_late_slot_declarations(
     module: &Module,
     hierarchy: &ClassHierarchy,
@@ -365,8 +364,6 @@ mod tests {
         assert_eq!(diagnostics[0].severity, Severity::Error);
         assert!(diagnostics[0].message.contains("has a default value"));
     }
-
-    // ── late classState: ──────────────────────────────────────────────────
 
     // ── eager declarations are untouched ──────────────────────────────────
 

@@ -580,7 +580,7 @@ pub struct ProtocolMethodSignature {
 ///
 /// Grammar: `uses: [package@]ProtocolName[(TypeArgs)] [excluding: #(#sel, …)]
 /// [overriding: #(#sel, …)]`. `uses:` lines must appear immediately after
-/// the class header, before any `state:`/`field:`/`classState:` or method
+/// the class header, before any `state:`/`field:` or method
 /// declaration.
 ///
 /// This node only carries the *syntax* — composing these into the using
@@ -724,7 +724,7 @@ impl DeclaredKeyword {
 
 /// Whether a slot is eagerly initialised or declared `late` (ADR 0124 §1).
 ///
-/// `late` is a declaration-level modifier on `state:`/`classState:` marking a
+/// `late` is a declaration-level modifier on `state:` marking a
 /// slot that is legitimately unassigned after `initialize` — absent from the
 /// state map until assigned, and exempt from ADR 0078's post-`initialize`
 /// check. This is the parser/AST half (ADR 0124 B1); the exemption itself is

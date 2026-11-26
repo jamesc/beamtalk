@@ -319,7 +319,6 @@ fn dictionary_param_delegate_is_guarded_by_is_map() {
     let body = function_body(&code, "class_size:");
     assert!(body.contains("try call 'probe_native':'size'("), "{body}");
     assert!(body.contains("call 'erlang':'is_map'(_"), "{body}");
-    assert!(!body.contains("beamtalk_class_vars"), "{body}");
     assert!(body.contains("{'Probe', 'size:'}"), "{body}");
     assert!(!body.contains("'is_binary'"), "{body}");
     // `Dynamic`-valued `Result` through the same map parameter.

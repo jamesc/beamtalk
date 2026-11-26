@@ -144,7 +144,6 @@ init([]) ->
 
 A class has no state of its own (ADR 0153): there are no class variables, and compiled code never reads or writes them. A class method implemented directly in hand-written Erlang (rather than compiled from `.bt` source) takes `(ClassSelf, Args...)` and returns the **bare result**. Keep state in an Actor, `AtomicCounter`, `Ets` or `PersistentTerm`, not in the class (the migration table is in the [CHANGELOG](../../CHANGELOG.md)).
 
-**Pending deletion (ADR 0153 Phase 3, BT-5162 and BT-5163).** The runtime still ships `beamtalk_class_vars`, `beamtalk_class_var_errors` and `beamtalk_class_var_abi` (the `class_var_abi` load gate; a hand-written class module with no `__beamtalk_meta/0` is outside it). The class process no longer installs a class-variable home (BT-5160). Nothing compiled calls them. Do not add callers; each Phase 3 issue deletes its piece.
 
 **Rules:**
 - **A runtime catch boundary needs no class-variable handling.** An Erlang `catch`/`try` that runs a Beamtalk block (`Result tryDo:`, `TestCase should:raise:`, Inspector `evaluate:`, the FFI `badarg` retry) catches and classifies the error with nothing to save or restore. Do not add calls to the `beamtalk_class_vars` API (`protect/1`, `snapshot/0`, `restore/1`, `with_snapshot/2`); the remaining Phase 3 issues delete it.

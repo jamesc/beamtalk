@@ -321,10 +321,6 @@ fn test_generate_primitive_on_do_structural_fallback() {
         "expected a Self Tier 1 check wrapping a plain try/catch, got: {rendered}"
     );
     assert!(
-        !rendered.contains("beamtalk_class_vars"),
-        "ADR 0153: no class-variable snapshot or restore, got: {rendered}"
-    );
-    assert!(
         rendered.contains("'beamtalk_exception_handler':'ensure_wrapped'"),
         "expected the exception to be wrapped via ensure_wrapped, got: {rendered}"
     );

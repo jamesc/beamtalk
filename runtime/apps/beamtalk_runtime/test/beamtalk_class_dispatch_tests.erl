@@ -1018,9 +1018,7 @@ invoke_class_method_errors_test_() ->
         {"connected Program exit: passes through the apply catch",
             fun test_invoke_script_exit_passthrough/0},
         {"multi-arg keyword selector dispatches correctly", fun test_invoke_two_arg_keyword/0},
-        {"NLR relay replies {error, Nlr}", fun test_invoke_nlr_relay_replies_nlr/0},
-        {"no class-variable home is installed while the method runs",
-            fun test_invoke_installs_no_home/0}
+        {"NLR relay replies {error, Nlr}", fun test_invoke_nlr_relay_replies_nlr/0}
     ]}.
 
 %% class method that calls a non-existent function internally → {error, undef}.
@@ -1091,18 +1089,6 @@ test_invoke_nlr_relay_replies_nlr() ->
         #{testNlrThrow => <<>>}
     ),
     ?assertEqual({reply, {error, {'$bt_nlr', bt3036_token, nlr_value, nlr_state}}}, Result).
-
-%% ADR 0153 (BT-5160): the method runs without a class-variable home: neither
-%% the class's key nor a live home entry is set while it runs.
-test_invoke_installs_no_home() ->
-    Result = beamtalk_class_dispatch:handle_class_method_call(
-        testObserveHome,
-        [],
-        'BT5160NoHomeDuringClass',
-        beamtalk_class_dispatch_test_helper,
-        #{testObserveHome => <<>>}
-    ),
-    ?assertEqual({reply, {ok, {undefined, undefined}}}, Result).
 
 %%% ============================================================================
 %%% 12. class_send instantiation variants
@@ -1862,7 +1848,7 @@ test_class_self_send_found() ->
     Result = beamtalk_class_dispatch:class_self_send(
         class_self('Bt3198SelfSendFound'), testSuccess, []
     ),
-    %% ADR 0130 §3: the bare result, no class_var_result wrapper.
+    %% ADR 0130 §3: the bare result, no wrapper.
     ?assertEqual(test_success_result, Result).
 
 %% A raising class method: `unwrap_self_dispatch_outcome/3` re-raises it

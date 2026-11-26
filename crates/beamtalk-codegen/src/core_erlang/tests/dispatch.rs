@@ -3087,18 +3087,18 @@ fn test_self_call_error_branch_threads_selector_class_breadcrumb() {
              breadcrumb map. Got:\n{code}"
         )
     });
-    let class_var = &captures[1];
+    let class_term = &captures[1];
 
     // The 'class' value must come from a runtime lookup, not a literal
     // 'Srv' atom — the actor's actual runtime class is resolved via
     // beamtalk_actor:lookup_class/1, fixing the inheritance mismatch.
     let lookup_binding = regex::Regex::new(&format!(
-        r"let {class_var} = call 'beamtalk_actor':'lookup_class'\(call 'erlang':'self'\(\)\) in"
+        r"let {class_term} = call 'beamtalk_actor':'lookup_class'\(call 'erlang':'self'\(\)\) in"
     ))
     .unwrap();
     assert!(
         lookup_binding.is_match(&code),
-        "Breadcrumb 'class' variable {class_var} must be bound from a \
+        "Breadcrumb 'class' variable {class_term} must be bound from a \
          runtime beamtalk_actor:lookup_class(self()) call. Got:\n{code}"
     );
 }
@@ -3762,10 +3762,9 @@ fn test_bt2276_class_methods_accepted_values_compile_table() {
     }
 }
 
-/// BT-4806: the former `test_class_method_self_send_{in_sealed_class_is_guarded,in_open_class_passes_and_rebinds_nothing,in_open_class_with_class_vars_has_no_unwrap}`
+/// BT-4806: the former `test_class_method_self_send_{in_sealed_class_is_guarded,in_open_class_passes_and_rebinds_nothing,in_open_class_with_fields_has_no_unwrap}`
 /// trio (ADR 0130 §3 / BT-4301). A class-side self-send is a guarded direct call plus a
-/// runtime walk, and passes nothing and rebinds nothing: no `ClassVars` argument, no
-/// `{class_var_result, ..}` unwrap.
+/// runtime walk, and passes nothing and rebinds nothing: no extra argument and no result unwrap.
 #[test]
 #[allow(clippy::type_complexity)] // a data table: one entry per former test
 fn test_class_method_self_send_shape_table() {
@@ -3795,7 +3794,7 @@ fn test_class_method_self_send_shape_table() {
                 "'class_self_send'(",
                 "'foo', [])",
             ],
-            &["ClassVars", "class_var_result"],
+            &["ClassVars"],
         ),
     ];
     for (label, src, function, has, lacks) in cases {
@@ -4479,7 +4478,7 @@ fn test_open_class_static_class_self_send_is_a_plain_direct_call() {
         assert_lacks(
             "static open-class call is a plain direct call",
             baz,
-            &["ClassVars", "class_var_result"],
+            &["ClassVars"],
         );
     }
 }

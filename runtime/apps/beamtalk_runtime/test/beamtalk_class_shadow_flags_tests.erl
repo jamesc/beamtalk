@@ -10,7 +10,7 @@ self-send fast path. Covers installed-fun transitions and concurrent access.
 
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
--include("beamtalk_class_vars_keys.hrl").
+-include("beamtalk_module_abi.hrl").
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 setup_runtime() ->
@@ -212,8 +212,8 @@ start_class_on(Name, Superclass, Module) ->
 load_raise_module(Module, CallerSafe) ->
     Body = io_lib:format(
         "class_testSelf(_ClassSelf) -> ok.~n"
-        "'__beamtalk_meta'() -> #{class_var_abi => ~p, caller_safe_class_primitives => ~p}.~n",
-        [?BT_CLASS_VAR_ABI, CallerSafe]
+        "'__beamtalk_meta'() -> #{module_abi => ~p, caller_safe_class_primitives => ~p}.~n",
+        [?BT_MODULE_ABI, CallerSafe]
     ),
     load_module_binary(
         Module, compile_module(Module, [{class_testSelf, 1}, {'__beamtalk_meta', 0}], Body)
@@ -234,8 +234,8 @@ start_raise_class(Name, Module, CallerSafe) ->
 load_constant_module(Module, Constants) ->
     Body = io_lib:format(
         "class_testSelf(_ClassSelf) -> 1.~n"
-        "'__beamtalk_meta'() -> #{class_var_abi => ~p, constant_class_methods => ~p}.~n",
-        [?BT_CLASS_VAR_ABI, Constants]
+        "'__beamtalk_meta'() -> #{module_abi => ~p, constant_class_methods => ~p}.~n",
+        [?BT_MODULE_ABI, Constants]
     ),
     load_module_binary(
         Module, compile_module(Module, [{class_testSelf, 1}, {'__beamtalk_meta', 0}], Body)

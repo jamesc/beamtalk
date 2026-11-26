@@ -676,7 +676,7 @@ class method's body is still lowered to a real `Vec<ThreadedStmt>` and
 verified in one method-level `verify()` call together with its `NlrCatch`,
 but class variables no longer appear in it: ADR 0130 deleted the `ClassVars`
 family, the shadow-write flag on `Bind`, `ShadowWriteMissing`, the
-`class_var_result` unwrap helpers and the isolated shadow-write check, so a
+result-unwrap helpers and the isolated shadow-write check, so a
 class-variable access needed no `Bind`. Since ADR 0153 Phase 2 codegen emits
 no class-variable code at all; the `on:do:` catch boundary
 (`ThreadedStmt::OnDoCatch`, see `CatchNlrNotPassedThrough` above) is a plain

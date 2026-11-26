@@ -538,7 +538,7 @@ fn resolve_open_heads(
             problems.push(format!(
                 "{}: the function called on {} is chosen at render time, and nothing \
                  enumerates it. Give its emitter a typed set of values with an `ALL` \
-                 list (like `class_var_fn`) and add it to `dynamic_calls`.",
+                 list (like `ALL` lists elsewhere) and add it to `dynamic_calls`.",
                 head.origin, head.module
             ));
         }
@@ -616,19 +616,6 @@ fn every_runtime_call_the_codegen_emits_is_exported() {
     let (direct, mut problems) = resolve_open_heads(&heads, &enumerated);
     calls.extend(direct);
     calls.extend(enumerated);
-    // ADR 0153 Phase 2: nothing the compiler emits may call
-    // `beamtalk_class_vars`, exported or not.
-    problems.extend(
-        calls
-            .iter()
-            .filter(|c| c.module == "beamtalk_class_vars")
-            .map(|c| {
-                format!(
-                    "{}: emits beamtalk_class_vars:{} (ADR 0153)",
-                    c.origin, c.function
-                )
-            }),
-    );
     problems.extend(unexported(&calls, &exports));
     assert!(
         problems.is_empty(),

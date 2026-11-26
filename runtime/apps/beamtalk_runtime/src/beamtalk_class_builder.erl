@@ -153,7 +153,7 @@ do_register(ClassName, ClassInfo) ->
             notify_class_loaded(ClassName),
             {ok, Pid};
         {error, _Phase, #beamtalk_error{kind = abi_mismatch} = Refused} ->
-            %% ADR 0130 `class_var_abi` gate (registration or hot reload):
+            %% ADR 0130 `module_abi` gate (registration or hot reload):
             %% already structured (it names the module and says to recompile);
             %% do not bury it in an internal_error.
             {error, Refused};
