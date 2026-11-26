@@ -100,8 +100,14 @@ defmodule BtAttach.Workspace do
   #     not keep the session busy.
   @rpc_timeout 10_000
   @rpc_interactive_timeout 5_000
+  # BT-5199: `close`'s decode/get_params prelude builds a no-param request; a
+  # workspace that cannot do that within a second is not going to close it.
+  @rpc_close_prelude_timeout 1_000
   @rpc_long_timeout 60_000
   @rpc_eval_timeout 35_000
+  # BT-5129: a whole test run is bounded by the suite, not by a lookup; the old
+  # unbounded call became a 60 s cut-off. Runs are off-process (`tests_running`).
+  @rpc_test_run_timeout 600_000
 
   @doc "The timeout (ms) an eval's workspace call waits."
   def rpc_eval_timeout, do: @rpc_eval_timeout
@@ -233,6 +239,9 @@ defmodule BtAttach.Workspace do
       # BT-5084: `attach` is a call; `gone` means the session stopped (its idle
       # period ran out) between the caller finding it and attaching.
       :gone -> {:error, :gone}
+      # BT-5129: a busy shell timed out answering; it is alive, so the caller
+      # must not treat it as gone and discard the live session.
+      :timeout -> {:error, :timeout}
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
       other -> {:error, {:unexpected_reply, other}}
     end
@@ -242,14 +251,88 @@ defmodule BtAttach.Workspace do
   Stop a workspace-supervised session started by `start_session/1`.
 
   The session is owned by the workspace's `beamtalk_session_sup`, so it does not
-  go away just because the LiveView process exits; we must ask the supervisor to
-  terminate it or it leaks one orphaned session per mount/reconnect. Idempotent
-  and best-effort: a session that is already gone returns `{:error, :not_found}`
-  and an unreachable workspace returns `{:badrpc, _}` — both are non-fatal at the
-  call site (the LiveView is terminating anyway).
+  go away just because the LiveView process exits; we must ask the workspace to
+  terminate it or it leaks one orphaned session per mount/reconnect. Goes
+  through the `close` operation (BT-5199) — the same runtime path VS Code and
+  the CLI REPL use — dispatched with `session_pid` as the session to close.
+  Idempotent and best-effort: a session that is already gone still answers
+  `:ok`, and an unreachable workspace returns `{:error, {:unreachable, _}}` —
+  non-fatal at the call site (the LiveView is terminating anyway).
   """
   def close_session(session_pid) when is_pid(session_pid) do
-    rpc(:beamtalk_session_sup, :stop_session, [session_pid])
+    case dispatch_simple("close", %{}, session_pid) do
+      {:status, :ok} -> :ok
+      {:error, reason} -> {:error, reason}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  @doc """
+  Kill the actor behind the inspected `term` through the `kill` operation
+  (BT-5199) — the Inspector's "Kill actor" action. Answers `:ok`, or
+  `{:error, reason}`: a `#beamtalk_error{}` when the workspace refuses (a
+  system actor such as `Transcript`, an actor that already stopped),
+  `{:error, :not_inspectable}` for a term that is not a pid-backed object.
+  """
+  def kill_actor({:beamtalk_object, _class, _module, pid} = _term) when is_pid(pid) do
+    case rpc(:erlang, :pid_to_list, [pid]) do
+      pid_chars when is_list(pid_chars) ->
+        case dispatch_simple("kill", %{"actor" => to_string(pid_chars)}) do
+          {:status, :ok} -> :ok
+          {:error, reason} -> {:error, reason}
+          {:badrpc, reason} -> {:error, {:unreachable, reason}}
+          other -> {:error, {:unexpected_reply, other}}
+        end
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+    end
+  end
+
+  def kill_actor(_term), do: {:error, :not_inspectable}
+
+  @doc """
+  List the running actors through the `actors` operation (BT-5199): one map per
+  actor (`pid`, `class`, `module`, `spawned_at`, and `system` for a
+  runtime-started one), plus `pid_text`, the pid as the workspace node prints
+  it (`<0.123.0>`, the form every other surface shows; formatted there in one
+  round-trip). Answers `{:ok, actors}` or `{:error, reason}`.
+  """
+  def actors do
+    case dispatch_simple("actors", %{}) do
+      {:actors, actors} when is_list(actors) -> {:ok, with_pid_text(actors)}
+      {:error, reason} -> {:error, reason}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  # Add each actor's workspace-local pid text. A failed formatting call leaves
+  # the rows without it; the caller falls back to the pid term.
+  defp with_pid_text([]), do: []
+
+  defp with_pid_text(actors) do
+    case rpc(:lists, :map, [&:erlang.pid_to_list/1, Enum.map(actors, & &1.pid)]) do
+      texts when is_list(texts) and length(texts) == length(actors) ->
+        Enum.zip_with(actors, texts, &Map.put(&1, :pid_text, to_string(&2)))
+
+      _ ->
+        actors
+    end
+  end
+
+  @doc """
+  List the workspace's resumable sessions through the `sessions` operation
+  (BT-5199). Answers `{:ok, [%{id: id}]}` or `{:error, reason}`.
+  """
+  def sessions do
+    case dispatch_simple("sessions", %{}) do
+      {:sessions, sessions} when is_list(sessions) -> {:ok, sessions}
+      {:error, reason} -> {:error, reason}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
+    end
   end
 
   @doc """
@@ -1081,21 +1164,46 @@ defmodule BtAttach.Workspace do
   defp stringify_detail(detail) when is_binary(detail), do: detail
   defp stringify_detail(detail), do: inspect(detail)
 
-  # Decode + dispatch a session-less term op (workspace-global: discovery,
-  # test runs). `self()` is passed as `dispatch/4`'s SessionPid only to satisfy
-  # its arity — these ops do not read session bindings — mirroring
+  # Decode + dispatch a term op (workspace-global: discovery, test runs, actors,
+  # sessions, kill; plus `close`, which names its session). For the global ops
+  # `self()` is passed as `dispatch/4`'s SessionPid only to satisfy its arity —
+  # they do not read session bindings — mirroring
   # `dispatch_browse/2`. Unlike `dispatch_browse/2`, which normalises everything
   # to `{:value, _} | {:error, _}`, this returns the op-result term VERBATIM (no
   # JSON edge): **callers own the op-specific term-shape match** (`list_tests/0`
   # matches `{:value, _}`, `run_tests/1` matches `{:test_results, _}`). A new
   # caller must match its op's own result tag, not assume browse-style normalising.
-  defp dispatch_simple(op, params) when is_binary(op) and is_map(params) do
+  # A whole test run is bounded by the suite, not a lookup (BT-5129); the other
+  # simple ops (list/load) stay on the long tier.
+  defp simple_op_timeout(op) when op in ["test", "test-all"], do: @rpc_test_run_timeout
+  # BT-5199: a session close runs from a terminating LiveView; against a hung
+  # workspace it must give up quickly, on every one of its three calls.
+  defp simple_op_timeout("close"), do: @rpc_interactive_timeout
+  defp simple_op_timeout(_op), do: @rpc_long_timeout
+
+  # The decode/get_params prelude is a lookup; `close` bounds it tighter still
+  # (so a close takes at most 1 + 1 + 5 s), every other op keeps the default.
+  defp simple_prelude_timeout("close"), do: @rpc_close_prelude_timeout
+  defp simple_prelude_timeout(_op), do: @rpc_timeout
+
+  # `session_pid` is `dispatch/4`'s SessionPid: `self()` for the workspace-global
+  # ops, the session to close for `close` (BT-5199).
+  defp dispatch_simple(op, params, session_pid \\ self())
+       when is_binary(op) and is_map(params) and is_pid(session_pid) do
     request = Map.put(params, "op", op)
 
-    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
+    prelude_timeout = simple_prelude_timeout(op)
+
+    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)], prelude_timeout) do
       {:ok, msg} ->
-        decoded_params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
-        rpc(:beamtalk_repl_ops, :dispatch, [op, decoded_params, msg, self()], @rpc_long_timeout)
+        decoded_params = rpc(:beamtalk_repl_protocol, :get_params, [msg], prelude_timeout)
+
+        rpc(
+          :beamtalk_repl_ops,
+          :dispatch,
+          [op, decoded_params, msg, session_pid],
+          simple_op_timeout(op)
+        )
 
       {:badrpc, reason} ->
         {:error, {:unreachable, reason}}
@@ -1299,8 +1407,21 @@ defmodule BtAttach.Workspace do
         Enum.map(jsons, &format_value/1)
 
       _failed ->
-        Enum.map(terms, &render_term/1)
+        render_terms_fallback(terms)
     end
+  end
+
+  # BT-5129: the per-term fallback used to cost up to one full RPC timeout per
+  # binding. Bound the whole fallback by one `@rpc_timeout` budget: once spent
+  # (an unreachable workspace), the rest degrade to `inspect/1` locally.
+  defp render_terms_fallback(terms) do
+    deadline = System.monotonic_time(:millisecond) + @rpc_timeout
+
+    Enum.map(terms, fn term ->
+      if System.monotonic_time(:millisecond) < deadline,
+        do: render_term(term),
+        else: inspect(term)
+    end)
   end
 
   @doc """
@@ -2377,7 +2498,12 @@ defmodule BtAttach.Workspace do
         # loser sees {:error, {:already_started, _}}, which is fine.
         # BT-5067: bind the distribution listener to loopback (ADR 0125/0126)
         # before it opens; the kernel reads this env at listener start.
-        :ok = :application.set_env(:kernel, :inet_dist_use_interface, {127, 0, 0, 1})
+        # BT-5127: unless the operator opted out with a non-loopback
+        # ERL_EPMD_ADDRESS (same rule as the Rust `loopback_dist_args/0`).
+        if loopback_dist?(System.get_env("ERL_EPMD_ADDRESS")) do
+          interface = loopback_interface(:init.get_argument(:proto_dist))
+          :ok = :application.set_env(:kernel, :inet_dist_use_interface, interface)
+        end
 
         case :net_kernel.start(name, dist_start_options()) do
           {:ok, _pid} -> :ok
@@ -2389,6 +2515,59 @@ defmodule BtAttach.Workspace do
       end
     end
   end
+
+  @doc """
+  Whether the distribution listener should be pinned to loopback, given the
+  operator's `ERL_EPMD_ADDRESS` (BT-5127, BT-5185).
+
+  The value is epmd's comma-separated address list. Each entry is trimmed and
+  blank entries are skipped. The pin is dropped only when some entry parses as
+  an IP address that is not loopback (strictly: an IPv6 `%zone` suffix is
+  ignored and an IPv4-mapped address counts as its IPv4 address); unset,
+  blank, loopback (`127.0.0.0/8`, `::1`, `localhost`) and unparseable values
+  pin, so a typo fails closed. Same rule as Rust
+  `beamtalk_workspace::loopback_dist_for/1`; both are pinned to
+  `tests/conformance/loopback_dist_conformance.json`.
+  """
+  def loopback_dist?(nil), do: true
+
+  def loopback_dist?(epmd_address) when is_binary(epmd_address) do
+    epmd_address
+    |> String.split(",")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.all?(&(not non_loopback_ip?(&1)))
+  end
+
+  defp non_loopback_ip?(entry) do
+    [address | _zone] = String.split(entry, "%", parts: 2)
+
+    case :inet.parse_strict_address(String.to_charlist(address)) do
+      {:ok, ip} -> not loopback_ip?(ip)
+      {:error, _} -> false
+    end
+  end
+
+  @doc """
+  The loopback address to pin the distribution listener to, given this VM's
+  `:init.get_argument(:proto_dist)`: IPv6 loopback for an IPv6 distribution
+  (`inet6_tcp`/`inet6_tls`, whose listener an IPv4 interface cannot bind),
+  else IPv4 loopback. Same rule as Rust `beamtalk_workspace::loopback_interface_for`;
+  both are pinned to the `interface_cases` of
+  `tests/conformance/loopback_dist_conformance.json`.
+  """
+  def loopback_interface({:ok, protos}) do
+    if Enum.any?(for(args <- protos, arg <- args, do: to_string(arg)), &(&1 =~ "inet6_")),
+      do: {0, 0, 0, 0, 0, 0, 0, 1},
+      else: {127, 0, 0, 1}
+  end
+
+  def loopback_interface(_), do: {127, 0, 0, 1}
+
+  defp loopback_ip?({127, _, _, _}), do: true
+  defp loopback_ip?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
+  defp loopback_ip?({0, 0, 0, 0, 0, 0xFFFF, hi, _lo}), do: Bitwise.bsr(hi, 8) == 127
+  defp loopback_ip?(_), do: false
 
   @doc """
   Options this front passes to `:net_kernel.start/2` when it lazily turns

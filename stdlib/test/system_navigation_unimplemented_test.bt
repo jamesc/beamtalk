@@ -84,16 +84,6 @@ TestCase subclass: SystemNavigationUnimplementedTest
   testHelperRecordSendIsDefined =>
     self assert: (SystemNavigation class includesSelector: #recordSend:line:recv:owner:methodSelector:handlesDnu:excluding:into:)
 
-  // The extension-scan helper is present (the `unimplementedSelectors` body
-  // delegates to it after the class-side walk). Behavioural coverage lives in
-  // the E2E suite (the compiler port is not running under BUnit).
-  testHelperCollectExtensionAllSendsIsDefined =>
-    self assert: (SystemNavigation class includesSelector: #collectExtensionAllSendsExcluding:into:)
-
-  // The class-tag resolver helper (shared with sendersOf:) is present.
-  testHelperResolveExtensionClassIsDefined =>
-    self assert: (SystemNavigation class includesSelector: #resolveExtensionClass:)
-
   // --- the index-backed helpers (BT-2303) must be defined ---
 
   // The defined set is built from indexed `defined_selectors_bt` rows via this

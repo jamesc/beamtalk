@@ -22,6 +22,7 @@ them, so the send path costs the same number of calls as before the split.
 -export([
     actor_dead_error_record/1,
     async_send_impl/5,
+    lifecycle_exit_error/3,
     cast_send_pid/4,
     get_otel_ctx/0,
     get_propagated_ctx/0,
@@ -72,7 +73,11 @@ them, so the send path costs the same number of calls as before the split.
 -spec local_lifecycle(pid(), atom(), list()) -> {value, term()} | {error, #beamtalk_error{}}.
 
 local_lifecycle(ActorPid, isAlive, []) ->
-    {value, beamtalk_pid:is_alive(ActorPid)};
+    %% BT-5192: a remote pid's node is asked (bounded); see beamtalk_pid:ask_alive/3.
+    case beamtalk_pid:ask_alive(ActorPid, unknown, isAlive) of
+        {ok, Alive} -> {value, Alive};
+        {error, _} = Err -> Err
+    end;
 local_lifecycle(ActorPid, kill, []) ->
     %% Telemetry, monitor-before-kill, and DOWN-wait are in kill_and_wait/1.
     %% If no DOWN is observed within 5 s we cannot claim success.
@@ -115,8 +120,6 @@ start_exit_watcher(ActorPid, Block) ->
         Caller ! {onExit_ready, Token},
         receive
             {'DOWN', Ref, process, ActorPid, Reason} ->
-                %% bt-catcher-audit: not-applicable-other-process - onExit block runs in the
-                %% spawned watcher, no home entry
                 try
                     Block(Reason)
                 catch
@@ -155,6 +158,17 @@ start_exit_watcher(ActorPid, Block) ->
 %% ADR 0079 / ADR 0126: name-resolving proxy fan-out. Name-only selectors
 %% answer from the proxy itself; other selectors resolve the name to the
 %% currently-registered pid and re-enter the pid-based clauses below.
+async_send_impl({registered, _Name, Node} = Ref, isAlive, [], FuturePid, ClassHint) when
+    Node =/= node()
+->
+    %% A node-qualified ref's isAlive resolves the name on `Node`: off the
+    %% sender, as for a remote pid (BT-5192).
+    ask_alive_async(FuturePid, class_label(ClassHint), Node, fun() ->
+        case proxy_route(Ref, isAlive, []) of
+            {answer, Alive} -> {ok, Alive};
+            {error, _} = Error -> Error
+        end
+    end);
 async_send_impl(Ref, Selector, Args, FuturePid, ClassHint) when ?IS_PROXY_REF(Ref) ->
     case proxy_route(Ref, Selector, Args) of
         {answer, Value} ->
@@ -166,6 +180,15 @@ async_send_impl(Ref, Selector, Args, FuturePid, ClassHint) when ?IS_PROXY_REF(Re
             beamtalk_future:reject(FuturePid, Error),
             ok
     end;
+async_send_impl(ActorPid, isAlive, [], FuturePid, ClassHint) when
+    is_pid(ActorPid), node(ActorPid) =/= node()
+->
+    %% BT-5192: a remote isAlive asks the actor's node (up to the remote-call
+    %% timeout), off the sender; see ask_alive_async/4.
+    Class = class_label(ClassHint),
+    ask_alive_async(FuturePid, Class, node(ActorPid), fun() ->
+        beamtalk_pid:ask_alive(ActorPid, Class, isAlive)
+    end);
 async_send_impl(ActorPid, Selector, Args, FuturePid, _ClassHint) when
     ?IS_LOCAL_LIFECYCLE(Selector, Args)
 ->
@@ -256,6 +279,34 @@ async_send_impl(ActorPid, Selector, Args, FuturePid, ClassHint) ->
     end),
     ok.
 
+%% Settle `FuturePid` with `Ask()`'s `{ok, Alive}` / `{error, Error}` from a
+%% separate process, so an async `isAlive` that has to ask another node hands
+%% back its future at once instead of blocking the sender on the round trip
+%% (bounded by the remote-call timeout; the future's orphan cap is far longer).
+%% The future is settled on every path, including a raise.
+-spec ask_alive_async(
+    pid(), atom(), node(), fun(() -> {ok, boolean()} | {error, #beamtalk_error{}})
+) -> ok.
+ask_alive_async(FuturePid, Class, Node, Ask) ->
+    _ = spawn(fun() ->
+        try Ask() of
+            {ok, Alive} -> beamtalk_future:resolve(FuturePid, Alive);
+            {error, Error} -> beamtalk_future:reject(FuturePid, Error)
+        catch
+            ErrClass:Reason ->
+                beamtalk_future:reject(
+                    FuturePid,
+                    beamtalk_pid:unexpected_answer_error(Class, isAlive, Node, {ErrClass, Reason})
+                )
+        end
+    end),
+    ok.
+
+%% The class an error names for a send whose class hint may be absent.
+-spec class_label(atom() | undefined) -> atom().
+class_label(undefined) -> unknown;
+class_label(Class) -> Class.
+
 -spec remote_async_unsupported_error(atom(), atom() | undefined) -> #beamtalk_error{}.
 
 remote_async_unsupported_error(Selector, ClassHint) ->
@@ -331,6 +382,12 @@ every other message through the Layer 1 self-send check. `ClassHint` is the
 caller's class, or `undefined` to look it up (see `resolve_class/2`).
 """.
 -spec sync_send_pid(pid(), atom(), list(), atom() | undefined) -> term().
+sync_send_pid(ActorPid, isAlive, [], Class) ->
+    %% The class labels a remote isAlive error, as on the async path.
+    case beamtalk_pid:ask_alive(ActorPid, class_label(Class), isAlive) of
+        {ok, Alive} -> Alive;
+        {error, Error} -> beamtalk_exception_handler:reraise(Error)
+    end;
 sync_send_pid(ActorPid, Selector, Args, _Class) when ?IS_LOCAL_LIFECYCLE(Selector, Args) ->
     case local_lifecycle(ActorPid, Selector, Args) of
         {value, Value} -> Value;
@@ -773,8 +830,6 @@ not implement it — so `isRemote` never crashes on a well-formed actor.
 -spec is_remote(pid(), fun(() -> term())) -> boolean().
 is_remote(ActorPid, AskNode) ->
     NodeName =
-        %% bt-catcher-audit: not-applicable-other-process - AskNode is a gen_server:call to the
-        %% actor
         try AskNode() of
             #{?BT_CLASS_TAG_KEY := 'Node', name := Name} when is_atom(Name) -> Name;
             _NotANode -> node(ActorPid)
@@ -785,6 +840,60 @@ is_remote(ActorPid, AskNode) ->
                 node(ActorPid)
         end,
     NodeName =/= node().
+
+-doc """
+The error for a stop of `ActorPid` (`stop`, `stopWith:`, `stopWith:timeout:`)
+that exited with `Reason` (BT-5192). Uses `beamtalk_call_failure:classify/2`,
+the classification `sync_call/5` applies to a send:
+
+- unreachable node (`nodedown`, `noconnection`) of a **remote** actor →
+  `node_down`: the stop request or its `'DOWN'` was lost, and the actor may
+  still be running;
+- the stop's own `timeout` → `timeout`: the actor has not finished stopping in
+  time (the terminate request was sent, so it may still stop in the
+  background);
+- anything else (the actor exited with another reason first) → `actor_dead`,
+  with the exit reason in `details`.
+
+`noproc` never reaches here: an already-dead actor counts as stopped. A
+remote actor that itself exits with `noconnection` mid-stop (linked to a
+process on a third node that dropped) cannot be told apart from a lost stop,
+so it reads as `node_down`: the conservative answer, since the caller retries.
+""".
+-spec lifecycle_exit_error(pid(), atom(), term()) -> #beamtalk_error{}.
+lifecycle_exit_error(ActorPid, Selector, Reason) ->
+    case stop_failure(ActorPid, Reason) of
+        unreachable ->
+            node_down_error_record(
+                beamtalk_call_failure:unreachable_node(Reason, node(ActorPid)), Selector
+            );
+        timeout ->
+            beamtalk_error:timeout(
+                unknown,
+                Selector,
+                <<
+                    "The actor did not finish stopping within the timeout; "
+                    "it may still stop in the background"
+                >>
+            );
+        exited ->
+            beamtalk_error:with_details(actor_dead_error_record(Selector), #{exit_reason => Reason})
+    end.
+
+%% What a failed stop's exit `Reason` says, via `beamtalk_call_failure:classify/2`.
+%% Only a remote actor's node can be unreachable: a local actor that itself
+%% exited with `noconnection` (say, linked to a process on a lost node) is
+%% simply dead. And only a bare `timeout` is read as the stop's wait running
+%% out; an actor that exited with `{timeout, _}` is dead. (`beamtalk_stop:stop/3`
+%% re-raises an actor's own exit reason unchanged, so an actor that itself
+%% exits with the bare atom `timeout` mid-stop also reads as a timed-out stop.)
+-spec stop_failure(pid(), term()) -> unreachable | timeout | exited.
+stop_failure(ActorPid, Reason) ->
+    case beamtalk_call_failure:classify(exit, Reason) of
+        {unreachable, _} when node(ActorPid) =/= node() -> unreachable;
+        timeout when Reason =:= timeout -> timeout;
+        _ -> exited
+    end.
 
 -doc "Construct a structured node_down error record for the given node and selector.".
 -spec node_down_error_record(node(), atom()) -> #beamtalk_error{}.
@@ -814,6 +923,8 @@ resolve_remote_registered(Name, Node) ->
     case beamtalk_call_failure:erpc(Node, erlang, whereis, [Name], ?BT_REMOTE_CALL_TIMEOUT) of
         {ok, Pid} when is_pid(Pid) -> Pid;
         {ok, undefined} -> undefined;
+        %% BT-5192: a name registered to a port names no actor.
+        {ok, _NotAPid} -> undefined;
         {error, _} -> node_down
     end.
 
@@ -848,7 +959,13 @@ how to deliver the outcome (resolve/reject a future, or raise).
 -spec proxy_route(proxy_ref(), atom(), list()) ->
     {answer, term()} | {pid, pid()} | {error, #beamtalk_error{}}.
 proxy_route(Ref, isAlive, []) ->
-    {answer, is_pid_result(resolve_proxy(Ref))};
+    %% BT-5192: an unreachable node cannot tell whether the name is registered,
+    %% so it is `node_down`, never `false`, as for a remote pid's isAlive.
+    case resolve_proxy(Ref) of
+        {ok, _Pid} -> {answer, true};
+        undefined -> {answer, false};
+        {node_down, Node} -> {error, node_down_error_record(Node, isAlive)}
+    end;
 proxy_route(_Ref, isRegistered, []) ->
     {answer, true};
 proxy_route({_Kind, Name}, registeredName, []) ->
@@ -876,11 +993,6 @@ resolve_or_error(Ref, Selector) ->
         undefined -> {error, no_such_process_error(Ref, Selector)};
         {node_down, Node} -> {error, node_down_error_record(Node, Selector)}
     end.
-
--spec is_pid_result({ok, pid()} | undefined | {node_down, node()}) -> boolean().
-
-is_pid_result({ok, _Pid}) -> true;
-is_pid_result(_) -> false.
 
 -doc "Sync half of `proxy_route/3`: answer, raise, or continue with the resolved pid.".
 -spec sync_send_proxy(proxy_ref(), atom(), list(), fun((pid()) -> term())) -> term().
@@ -930,8 +1042,15 @@ not yet processed the signal.  Waiting for `'DOWN'` guarantees the process
 is gone before this function returns.  If the process is already dead, the
 `'DOWN'` message arrives instantly.
 
-Returns `ok` on success, or `{error, Error}` if the `'DOWN'` message is not
-received within 5 000 ms.  The error is a structured `#beamtalk_error{}` with
+A `'DOWN'` whose reason says the actor's node could not be reached
+(`noconnection`, classified by `beamtalk_call_failure:classify/2` exactly as
+`sync_call/5` classifies a failed send) is not a kill: the signal was lost
+and the actor may still be running on the far side, so it answers
+`{error, node_down}` (BT-5192). Every other `'DOWN'` reason (`killed`, an
+earlier exit, `noproc` for an already-dead actor) means the actor is gone.
+
+Returns `ok` on success, or `{error, Error}` if the node was unreachable or
+the `'DOWN'` message is not received within 5 000 ms.  The error is a structured `#beamtalk_error{}` with
 kind `timeout` and the message `"Actor kill timed out: did not receive DOWN
 within 5000ms"`.  Building it here keeps the message in one place: callers
 pass the error directly to `beamtalk_future:reject/2` (async path) or wrap it
@@ -951,7 +1070,18 @@ kill_and_wait(ActorPid) ->
     Ref = erlang:monitor(process, ActorPid),
     exit(ActorPid, kill),
     receive
-        {'DOWN', Ref, process, ActorPid, _Reason} -> ok
+        {'DOWN', Ref, process, ActorPid, Reason} ->
+            %% Only a remote actor's kill signal can be lost; a local actor
+            %% that exited with `noconnection` is gone.
+            case beamtalk_call_failure:classify(exit, Reason) of
+                {unreachable, _} when node(ActorPid) =/= node() ->
+                    {error,
+                        node_down_error_record(
+                            beamtalk_call_failure:unreachable_node(Reason, node(ActorPid)), kill
+                        )};
+                _Gone ->
+                    ok
+            end
     after 5000 ->
         erlang:demonitor(Ref, [flush]),
         {error,

@@ -64,13 +64,6 @@ pub(crate) struct ClassIndexResult {
     /// dependency alike (ADR 0127 §3; BT-3625, BT-3663) — so a flattened
     /// dependency method maps its lines to the dependency's own file.
     pub(crate) all_protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
-    /// Project-wide standalone extension index from Pass 1, with every
-    /// dependency's extensions merged in (ADR 0070 WS3, BT-4608).
-    pub(crate) extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
-    /// Whether every dependency's extensions were loaded completely
-    /// (`dependency_extensions::merge_dependency_extensions`). Pass 2 lifts
-    /// the pre-WS3 dependency guard only when this holds.
-    pub(crate) dependency_extensions_complete: bool,
     /// Dependency registry for cross-package collision detection.
     pub(crate) dep_registry: beamtalk_core::semantic_analysis::DependencyRegistry,
     /// Cached ASTs from incremental Pass 1, keyed by source file path.
@@ -129,7 +122,6 @@ pub(crate) fn build_class_index(
         mut class_module_index,
         class_superclass_index,
         source_class_infos,
-        mut extension_index,
         cached_asts,
         force_pass2,
         source_hashes,
@@ -149,7 +141,6 @@ pub(crate) fn build_class_index(
             result.class_module_index,
             result.class_superclass_index,
             result.all_class_infos,
-            result.extension_index,
             result.cached_asts,
             result.manifest_invalidated,
             result.source_hashes,
@@ -160,7 +151,6 @@ pub(crate) fn build_class_index(
             HashMap::new(),
             HashMap::new(),
             Vec::new(),
-            beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
             HashMap::new(),
             false,
             HashMap::new(),
@@ -220,16 +210,6 @@ pub(crate) fn build_class_index(
         );
         dep_alias_infos.extend(dep.alias_infos.clone());
     }
-
-    // ADR 0070 WS3 (BT-4608): every dependency's extension methods join the
-    // project's cross-file extension index, so Pass 2's type checker sees
-    // them as part of their target classes' method surfaces. Pass 2 lifts
-    // the pre-WS3 dependency guard only when all of them were complete.
-    let dependency_extensions_complete =
-        beamtalk_project::dependency_extensions::merge_dependency_extensions(
-            dep_ctx.resolved_deps.iter().map(|dep| &dep.extensions),
-            &mut extension_index,
-        );
 
     // Single unified collection of all ClassInfo from all sources.
     // To add a new .bt source location, add its ClassInfo slice here.
@@ -315,18 +295,13 @@ pub(crate) fn build_class_index(
             env.source_root.as_deref(),
             pkg,
         );
-        (analysis_surface_hash, surface_keys) = analysis_surface(
-            &SurfaceInputs {
-                class_infos: &all_class_infos,
-                protocol_infos: &all_protocol_infos,
-                alias_infos: &all_alias_infos,
-                extension_index: &extension_index,
-                class_superclass_index: &class_superclass_index,
-                class_module_index: &class_module_index,
-            },
-            options,
-            dependency_extensions_complete,
-        );
+        (analysis_surface_hash, surface_keys) = analysis_surface(&SurfaceInputs {
+            class_infos: &all_class_infos,
+            protocol_infos: &all_protocol_infos,
+            alias_infos: &all_alias_infos,
+            class_superclass_index: &class_superclass_index,
+            class_module_index: &class_module_index,
+        });
     }
 
     // Taken after trait flattening, which rewrites only project classes'
@@ -342,8 +317,6 @@ pub(crate) fn build_class_index(
         all_protocol_infos,
         all_protocol_defs,
         all_protocol_sources,
-        extension_index,
-        dependency_extensions_complete,
         dep_registry,
         cached_asts,
         force_pass2,
@@ -359,49 +332,25 @@ struct SurfaceInputs<'a> {
     class_infos: &'a [beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     protocol_infos: &'a [beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo],
     alias_infos: &'a [beamtalk_core::semantic_analysis::AliasInfo],
-    extension_index: &'a beamtalk_core::compilation::extension_index::ExtensionIndex,
     class_superclass_index: &'a HashMap<String, String>,
     class_module_index: &'a HashMap<String, String>,
 }
 
 /// The analysis-surface hash and per-name surface keys for a package build,
-/// computed after trait flattening. See the comments below for what is folded
-/// in and why.
+/// computed after trait flattening.
 fn analysis_surface(
     inputs: &SurfaceInputs<'_>,
-    options: &beamtalk_core::CompilerOptions,
-    dependency_extensions_complete: bool,
 ) -> (String, Option<super::surface_key::SurfaceKeys>) {
     // BT-4336: hashed after flattening, over the cross-file context Pass 2
-    // hands `analyse_full` (pre-loaded classes, protocols, aliases and
-    // standalone extensions; the project-known Erlang modules are folded
-    // in by `execute_build_passes`), so any cross-file signature change
-    // re-checks every file instead of replaying stale diagnostics.
-    let mut analysis_surface_hash = crate::commands::util::analysis_surface_hash(
+    // hands `analyse_full` (pre-loaded classes, protocols and aliases; the
+    // project-known Erlang modules are folded in by `execute_build_passes`),
+    // so any cross-file signature change re-checks every file instead of
+    // replaying stale diagnostics.
+    let analysis_surface_hash = crate::commands::util::analysis_surface_hash(
         inputs.class_infos,
         inputs.protocol_infos,
         inputs.alias_infos,
-        inputs.extension_index,
     );
-    // The dependency guard's final value changes every file's
-    // diagnostics, and can flip without the extension index changing (a
-    // dependency file gains a parse error; diagnostics cached before
-    // dependency extensions were loaded at all), so for a package with
-    // dependencies it is part of the surface too. Folded as the value
-    // analysis will actually use (`beam_compiler` computes it the same
-    // way), so the two cannot drift apart.
-    let mut globals = String::new();
-    if options.dependency_extensions_unknown {
-        let guard = beamtalk_project::dependency_extensions::dependency_extensions_unknown(
-            options.dependency_extensions_unknown,
-            true,
-            dependency_extensions_complete,
-        );
-        analysis_surface_hash = beamtalk_package::content_hash::sha256_hex(
-            format!("{analysis_surface_hash}\ndependency-extensions-unknown:{guard}").as_bytes(),
-        );
-        globals = format!("dependency-extensions-unknown:{guard}");
-    }
     let surface_keys = if analysis_surface_hash.is_empty() {
         None
     } else {
@@ -409,14 +358,9 @@ fn analysis_surface(
             inputs.class_infos,
             inputs.protocol_infos,
             inputs.alias_infos,
-            inputs.extension_index,
             inputs.class_superclass_index,
             inputs.class_module_index,
         )
-        .map(|mut keys| {
-            keys.globals = globals;
-            keys
-        })
     };
     (analysis_surface_hash, surface_keys)
 }
@@ -603,6 +547,7 @@ fn check_stdlib_reservations(
 /// the cache state: if the winning file later drops the class or is deleted, the
 /// remaining declaration is still known (BT-3686).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[allow(clippy::struct_field_names)] // `class_*` names mirror `Pass1Index`/`ClassIndexResult`
 pub(crate) struct FileIndex {
     /// Classes declared in the file, mapped to its compiled module name.
     pub(crate) class_module_index: HashMap<String, String>,
@@ -610,12 +555,6 @@ pub(crate) struct FileIndex {
     pub(crate) class_superclass_index: HashMap<String, String>,
     /// Full `ClassInfo` of each declared class, package-stamped.
     pub(crate) class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-    /// Standalone extension definitions in the file, keyed by `(class, side, selector)`.
-    #[serde(default)]
-    pub(crate) extensions: Vec<(
-        beamtalk_core::compilation::extension_index::ExtensionKey,
-        Vec<beamtalk_core::compilation::extension_index::ExtensionLocation>,
-    )>,
 }
 
 /// A freshly scanned source file: its [`FileIndex`] and parsed AST.
@@ -634,7 +573,6 @@ pub(crate) struct Pass1Index {
     pub(crate) class_module_index: HashMap<String, String>,
     pub(crate) class_superclass_index: HashMap<String, String>,
     pub(crate) all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-    pub(crate) extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
 }
 
 impl Pass1Index {
@@ -642,12 +580,6 @@ impl Pass1Index {
     pub(crate) fn add_file(&mut self, file: &FileIndex) {
         self.all_class_infos
             .extend(file.class_infos.iter().cloned());
-        // Collect standalone extension definitions (`ClassName >> selector =>
-        // ...`) project-wide so Pass 2 can register them into every file's class
-        // hierarchy — a same-project cross-file extension then resolves instead
-        // of producing a false `Dnu` hint (ADR 0066 / ADR 0100 Rule 2 WS1).
-        self.extension_index
-            .add_entries(file.extensions.iter().cloned());
         for (class_name, module_name) in &file.class_module_index {
             if let Some(existing) = self.class_module_index.get(class_name)
                 && existing != module_name
@@ -716,10 +648,15 @@ pub(crate) fn scan_source_file(
         .iter()
         .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
     // A file is one compilation unit for its class (BT-4721): fold same-file
-    // extensions into the host class here, so the class index, the extension
-    // index and the cached AST Pass 2 compiles all see the folded class.
+    // extensions into the host class here, so the class index and the cached
+    // AST Pass 2 compiles both see the folded class.
     diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions(
         &mut module,
+    ));
+    // ADR 0152: a `>>` whose target this file does not define is an error. The
+    // diagnostics ride with the cached Pass 1 AST into the file's compile.
+    diagnostics.extend(beamtalk_core::compilation::reject_cross_file_extensions(
+        &module,
     ));
 
     // Extract full ClassInfo for cross-file hierarchy resolution.
@@ -741,9 +678,6 @@ pub(crate) fn scan_source_file(
         pkg_name,
     );
 
-    let mut extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
-    extensions.add_module(&module, file.as_std_path());
-
     let mut class_module_index = HashMap::new();
     let mut class_superclass_index = HashMap::new();
     for class in &module.classes {
@@ -762,7 +696,6 @@ pub(crate) fn scan_source_file(
             class_module_index,
             class_superclass_index,
             class_infos,
-            extensions: extensions.entries_for_file(file.as_std_path()),
         },
         ast: CachedAst {
             source,
@@ -794,7 +727,6 @@ pub(crate) fn build_class_module_index(
     HashMap<String, String>,
     HashMap<String, String>,
     Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-    beamtalk_core::compilation::extension_index::ExtensionIndex,
     HashMap<Utf8PathBuf, CachedAst>,
 )> {
     let mut index = Pass1Index::default();
@@ -813,7 +745,6 @@ pub(crate) fn build_class_module_index(
         index.class_module_index,
         index.class_superclass_index,
         index.all_class_infos,
-        index.extension_index,
         cached_asts,
     ))
 }

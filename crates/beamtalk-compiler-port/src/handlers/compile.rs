@@ -14,7 +14,7 @@ use crate::decode::{
     extract_protocol_registry,
 };
 use crate::diagnostics::{
-    DiagInfo, filter_error_diagnostics, partition_diagnostics, warnings_from_diag_infos,
+    filter_error_diagnostics, partition_diagnostics, warnings_from_diag_infos,
 };
 use crate::respond::{
     compile_ok_response, diagnostic_error_response, error_response, format_codegen_error,
@@ -107,6 +107,10 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     parse_diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions(
         &mut module,
     ));
+    // ADR 0152: a `>>` whose target this file does not define is an error.
+    parse_diagnostics.extend(beamtalk_core::compilation::reject_cross_file_extensions(
+        &module,
+    ));
 
     // Semantic analysis (also capturing `referenced_aliases`, shipped back in
     // the response so the Erlang side can populate `beamtalk_alias_xref`'s
@@ -142,29 +146,16 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     }
 
     let error_diags = filter_error_diagnostics(&all_diagnostics);
-    let (_, mut warnings) = partition_diagnostics(&all_diagnostics);
+    let (_, warnings) = partition_diagnostics(&all_diagnostics);
 
     if !error_diags.is_empty() {
         return diagnostic_error_response(&error_diags, &source);
     }
 
-    // Same-file extensions were folded above. A standalone method that still
-    // targets a class this module does not declare has no home in a REPL file
-    // compile: warn and drop it.
-    let had_standalone_method_definitions = !module.method_definitions.is_empty();
-    for method_def in std::mem::take(&mut module.method_definitions) {
-        let target_class = method_def.class_name.name.as_str();
-        warnings.push(DiagInfo {
-            message: format!(
-                "Standalone method targets unknown class `{target_class}` in this module"
-            ),
-            hint: None,
-            severity: "warning".to_string(),
-            category: None,
-            start: method_def.span.start(),
-            end: method_def.span.end(),
-        });
-    }
+    // Same-file extensions were folded above, and a standalone method whose
+    // target this file does not define was rejected with the other parse
+    // diagnostics (ADR 0152), so none remain here.
+    debug_assert!(module.method_definitions.is_empty());
 
     // Accept optional module_name override from caller.
     // When provided, use it directly instead of deriving from the class name.
@@ -241,16 +232,10 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
         .with_pre_loaded_aliases(pre_loaded_aliases)
         .with_source_path_opt(embedded_path.as_deref())
         .with_protocol_sources(codegen_protocol_sources);
-    // Only trust `analysis` (computed pre-merge) when nothing was
-    // merged into `module` afterward — see `had_standalone_method_definitions`'s
-    // doc above.
-    if !had_standalone_method_definitions {
-        // Prepare the AST at the driver boundary using the same
-        // still-trustworthy analysis handed off to codegen just below —
-        // codegen no longer schedules this writeback itself in that case.
-        beamtalk_core::semantic_analysis::lower_analysed_module_for_codegen(&mut module, &analysis);
-        codegen_options = codegen_options.with_analysis(analysis);
-    }
+    // Prepare the AST at the driver boundary using the same analysis handed off
+    // to codegen just below — codegen no longer schedules this writeback itself.
+    beamtalk_core::semantic_analysis::lower_analysed_module_for_codegen(&mut module, &analysis);
+    codegen_options = codegen_options.with_analysis(analysis);
     match beamtalk_codegen::core_erlang::generate_module_surfacing_verifier(
         &module,
         codegen_options,

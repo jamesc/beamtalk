@@ -15,7 +15,8 @@ The Beamtalk REPL uses a JSON-based message protocol over WebSocket for communic
 1. **TCP connect** to `127.0.0.1:{port}`
 2. **WebSocket upgrade** to `ws://127.0.0.1:{port}/ws`
 3. **Read auth-required** — server sends `{"op":"auth-required"}` (no session yet)
-4. **Send auth** — client sends `{"type":"auth","cookie":"<cookie>",...}` as first message (fields below)
+   - **Optional: identity check (BT-5188)** — a client that knows the workspace's port-file nonce (the second line of `~/.beamtalk/workspaces/<id>/port`) sends `{"type":"identify","challenge":"<16-256 bytes, fresh random hex>"}` first. The server replies `{"type":"identity","proof":"<hex>"}`, where `proof` is the lowercase hex SHA-256 of `beamtalk-workspace-identity\n<nonce>\n<challenge>`, and the connection stays unauthenticated. The client sends its cookie only if the proof matches. This way a process that took over a dead workspace's port never receives the cookie. The MCP server does this whenever it connects to a workspace by id or through auto-discovery, and its liveness probe ends the check without authenticating. The proof vector is pinned in `ws_auth_handshake_wire_corpus.json` for both the Erlang and the Rust implementation.
+4. **Send auth** — client sends `{"type":"auth","cookie":"<cookie>",...}` as first message (or right after the identity check; fields below)
 5. **Read auth response** — server replies `{"type":"auth_ok"}` on success, or `{"type":"auth_error","message":"..."}` + connection close on failure. A stale toolchain is rejected here (see Version lock).
 6. **Read session-started** — after auth_ok, server sends `{"op":"session-started","session":"<id>"}`
 7. **Version check** — client sends `{"op":"describe"}`, waits for the reply echoing its request `id` (actor-snapshot pushes may arrive first — correlate on `id`, do not trust the first frame), and refuses a version mismatch. Skipped only by `workspace stop`, which compiles nothing.
@@ -340,27 +341,18 @@ List all active REPL sessions in the workspace.
 {"id": "msg-012", "sessions": [{"id": "session_1234_5678"}, {"id": "session_2345_6789"}], "status": ["done"]}
 ```
 
-#### `clone` — Clone Session
-
-Create a new session (returns the new session ID).
-
-**Request:**
-```json
-{"op": "clone", "id": "msg-013"}
-```
-
-**Response:**
-```json
-{"id": "msg-013", "value": "session_1234_5678", "status": ["done"]}
-```
-
 #### `close` — Close Session
 
 Close the current session. Terminates the shell process, removes the session from the workspace, and closes the WebSocket connection (close code 1000). Detached sessions that are not resumed within the idle timeout (default 4 hours) are automatically cleaned up.
 
+With a `session` field, `close` ends that session instead of the sender's own (BT-5199). VS Code uses this to end the session of a REPL terminal it started once the terminal is gone; the sender's own connection stays open. An unknown `session` closes nothing and still answers `ok` — it never falls back to the sender's session. Like `interrupt` with a `session` field, this gives every client that holds the workspace cookie authority over every session of that workspace (`sessions` lists their ids); the cookie is the workspace's single trust boundary.
+
+Senders: the CLI REPL on `:exit` / Ctrl-D, VS Code when its workspace client is disposed (its own session) and when its REPL terminal ends (that REPL's session), and the LiveView IDE when a tab's session is torn down (dispatched through `beamtalk_repl_ops:dispatch/4` with the session as its SessionPid).
+
 **Request:**
 ```json
 {"op": "close", "id": "msg-014"}
+{"op": "close", "id": "msg-015", "session": "session_1234_5678"}
 ```
 
 **Response:**
@@ -429,7 +421,9 @@ Get the internal state of an actor process.
 
 #### `kill` — Kill Actor
 
-Terminate an actor process.
+Terminate an actor process. The reply comes once the process has exited. A system actor (one the runtime started, such as `Transcript`) is refused with a `system_actor` error; a pid that is not a live actor is refused (`unknown_actor` from the `actor` param check, or `actor_not_alive` / `not_an_actor` if it stopped or was never an actor by the time the kill runs).
+
+Senders: the "Kill Actor" action in the VS Code inspector and the "Kill actor" button in the LiveView Inspector (Owner role only), each after a confirmation and followed by a fresh actor list (BT-5199).
 
 **Request:**
 ```json
@@ -860,7 +854,6 @@ this table drifts from the fixture. To refresh it after editing the op table:
 | `save-native-source` | `module`, `source` | — | `workspace` | `beamtalk_repl_ops_load` |
 | `save-section` | `class`, `new_name` | `old_name`, `before_selector`, `before_side` | `workspace` | `beamtalk_repl_ops_load` |
 | `sessions` | — | — | `always` | `beamtalk_repl_ops_session` |
-| `clone` | — | — | `always` | `beamtalk_repl_ops_session` |
 | `close` | — | — | `always` | `beamtalk_repl_ops_session` |
 | `health` | — | — | `always` | `beamtalk_repl_ops_session` |
 | `shutdown` | `cookie` | — | `always` | `beamtalk_repl_ops_session` |
@@ -930,7 +923,7 @@ Text that is not valid UTF-8 (for example from `asStringUnchecked`) is pushed as
 
 ### Logs Channel
 
-Live OTP log events, started by `subscribe-logs` (optional `level`: `emergency`, `alert`, `critical`, `error`, `warning`, `notice`, `info` or `debug`; default `debug`) and stopped by `unsubscribe-logs`. Sending `subscribe-logs` again changes the level. An unknown `level` is answered with an `invalid_argument` error and leaves any existing subscription unchanged.
+Live OTP log events, started by `subscribe-logs` (optional `level`: `emergency`, `alert`, `critical`, `error`, `warning`, `notice`, `info` or `debug`; default `debug`) and stopped by `unsubscribe-logs`. Sending `subscribe-logs` again changes the level. VS Code sends `unsubscribe-logs` when `beamtalk.logs.level` is set to `off` and before it disconnects (BT-5199). An unknown `level` is answered with an `invalid_argument` error and leaves any existing subscription unchanged.
 
 ```json
 {"type": "push", "channel": "logs", "event": "entry", "data": {"level": "info", "time": "...", "msg": "..."}}

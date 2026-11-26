@@ -72,7 +72,6 @@ Additional keys for compiled classes (ADR 0038 Phase 3):
   - `moduleName`   — atom: compiled Erlang module name (default: className)
   - `classMethods` — map: class method specs (default: #{})
   - `methodSource`  — map: selector => binary source text (default: #{})
-  - `classState`   — map: class variable defaults (default: #{})
   - `classDoc`     — binary | none: class doc comment (default: none)
   - `methodDocs`   — map: selector => binary doc text (default: #{})
 
@@ -154,7 +153,7 @@ do_register(ClassName, ClassInfo) ->
             notify_class_loaded(ClassName),
             {ok, Pid};
         {error, _Phase, #beamtalk_error{kind = abi_mismatch} = Refused} ->
-            %% ADR 0130 `class_var_abi` gate (registration or hot reload):
+            %% ADR 0130 `module_abi` gate (registration or hot reload):
             %% already structured (it names the module and says to recompile);
             %% do not bury it in an internal_error.
             {error, Refused};
@@ -306,7 +305,7 @@ Build a ClassInfo map for beamtalk_object_class:start/2.
 
 Accepts the full builder state as the last argument to extract
 additional metadata for compiled classes (moduleName, classMethods,
-methodSource, classState, classDoc, methodDocs). All classes go through the
+methodSource, classDoc, methodDocs). All classes go through the
 compiled path regardless of whether moduleName is present.
 """.
 -spec build_class_info(atom(), atom(), map(), map(), list(), map()) -> map().
@@ -426,42 +425,38 @@ build_compiled_class_info(
                                     class_method_return_types,
                                     maps:get(classMethodReturnTypes, BuilderState, undefined),
                                     maybe_put(
-                                        class_state,
-                                        maps:get(classState, BuilderState, undefined),
+                                        doc,
+                                        maps:get(classDoc, BuilderState, undefined),
                                         maybe_put(
-                                            doc,
-                                            maps:get(classDoc, BuilderState, undefined),
+                                            method_docs,
+                                            maps:get(methodDocs, BuilderState, undefined),
                                             maybe_put(
-                                                method_docs,
-                                                maps:get(methodDocs, BuilderState, undefined),
+                                                class_method_docs,
+                                                maps:get(
+                                                    classMethodDocs, BuilderState, undefined
+                                                ),
+                                                %% ADR 0050 Phase 5: Pass meta map from BuilderState so
+                                                %% beamtalk_object_class:init/1 can use it during on_load
+                                                %% (erlang:function_exported/3 returns false at that time).
                                                 maybe_put(
-                                                    class_method_docs,
-                                                    maps:get(
-                                                        classMethodDocs, BuilderState, undefined
-                                                    ),
-                                                    %% ADR 0050 Phase 5: Pass meta map from BuilderState so
-                                                    %% beamtalk_object_class:init/1 can use it during on_load
-                                                    %% (erlang:function_exported/3 returns false at that time).
+                                                    meta,
+                                                    maps:get(meta, BuilderState, undefined),
+                                                    %% ADR 0087 Phase 2:
+                                                    %% per-method xref index baked by
+                                                    %% codegen. Defaults to [] (not
+                                                    %% undefined) so init/1 always gets
+                                                    %% a list; maybe_put inserts [] as-is.
+                                                    %% ADR 0087 Phase 4: when
+                                                    %% codegen did not bake methodXref
+                                                    %% (runtime-built ClassBuilder with
+                                                    %% only methodSource: populated),
+                                                    %% derive the index from the method
+                                                    %% sources so built methods are still
+                                                    %% discoverable in beamtalk_xref.
                                                     maybe_put(
-                                                        meta,
-                                                        maps:get(meta, BuilderState, undefined),
-                                                        %% ADR 0087 Phase 2:
-                                                        %% per-method xref index baked by
-                                                        %% codegen. Defaults to [] (not
-                                                        %% undefined) so init/1 always gets
-                                                        %% a list; maybe_put inserts [] as-is.
-                                                        %% ADR 0087 Phase 4: when
-                                                        %% codegen did not bake methodXref
-                                                        %% (runtime-built ClassBuilder with
-                                                        %% only methodSource: populated),
-                                                        %% derive the index from the method
-                                                        %% sources so built methods are still
-                                                        %% discoverable in beamtalk_xref.
-                                                        maybe_put(
-                                                            method_xref,
-                                                            builder_method_xref(BuilderState),
-                                                            Base
-                                                        )
+                                                        method_xref,
+                                                        builder_method_xref(BuilderState),
+                                                        Base
                                                     )
                                                 )
                                             )
@@ -820,8 +815,6 @@ Safe to call if the callback module is not running.
 notify_class_loaded(ClassName) ->
     case application:get_env(beamtalk_runtime, class_load_callback) of
         {ok, Mod} ->
-            %% bt-catcher-audit: not-applicable-no-block - Erlang workspace callback, not a
-            %% Beamtalk block
             try
                 Mod:on_class_loaded(ClassName)
             catch

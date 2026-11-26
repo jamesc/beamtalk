@@ -7,6 +7,7 @@
 
 use super::ReloadDiagnosticsByUriAndOrigin;
 use super::convert::{LineIndex, path_to_uri, to_lsp_diagnostic, uri_to_path};
+use crate::server::guard::guard_notification;
 use crate::server::lock::LockRecover;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -52,8 +53,10 @@ impl OpenPathsHandle {
 /// (BT-5080) — so they are only debug-logged. The task ends when the
 /// `JoinHandle` is aborted or the channel closes (`RuntimeClient` disconnect).
 pub(in crate::server) async fn class_changed_listener(
-    mut class_changed_rx: tokio::sync::mpsc::UnboundedReceiver<ClassChangedEvent>,
+    class_changed_rx: super::listeners::SharedReceiver<ClassChangedEvent>,
 ) {
+    // Held for this run; a panic releases it for the restarted run (BT-5188).
+    let mut class_changed_rx = class_changed_rx.lock().await;
     while let Some(event) = class_changed_rx.recv().await {
         tracing::debug!(
             class_name = %event.class_name,
@@ -62,6 +65,150 @@ pub(in crate::server) async fn class_changed_listener(
     }
     tracing::debug!("class_changed_listener: channel closed, exiting");
 }
+/// Handles one `ReloadCheckEvent`; split out so the listener can run each
+/// event under a panic guard (BT-5131).
+async fn process_reload_check_event(
+    event: &ReloadCheckEvent,
+    client: &Client,
+    runtime: &RuntimeClient,
+    workspace_roots: &[PathBuf],
+    service: &Arc<Mutex<SimpleLanguageService>>,
+    reload_diagnostics: &Arc<std::sync::Mutex<ReloadDiagnosticsByUriAndOrigin>>,
+    open_paths: &OpenPathsHandle,
+) {
+    if event.checked_owners.is_empty() {
+        return;
+    }
+    // Echo the summary line every other surface shows (REPL notice,
+    // workspace UI header — "N callers re-checked, M stale") to the LSP
+    // client's output channel. Squiggles alone don't carry the
+    // clean-recheck count, and `window/logMessage` is the LSP's own
+    // best-effort notice channel (not a `publishDiagnostics` — this
+    // never affects the diagnostic set).
+    let cap_suffix = event
+        .cap_note
+        .as_deref()
+        .map(|n| format!(" ({n})"))
+        .unwrap_or_default();
+    client
+        .log_message(
+            MessageType::INFO,
+            format!(
+                "reload check: {}>>{} {}; {} checked, {} not checked{cap_suffix}",
+                event.changed_class,
+                event.changed_selector,
+                event.classification,
+                event.checked,
+                event.not_checked
+            ),
+        )
+        .await;
+    let classes = match runtime.nav_symbols(Some("user")).await {
+        Ok(classes) => classes,
+        Err(e) => {
+            tracing::warn!(error = %e, "reload_check_listener: nav_symbols failed");
+            return;
+        }
+    };
+    for owner in &event.checked_owners {
+        let Some(class) = classes.iter().find(|c| c.name.as_str() == owner.as_str()) else {
+            tracing::debug!(
+                owner,
+                "reload_check_listener: owner has no known source file, skipping"
+            );
+            continue;
+        };
+        let Some(uri) = resolve_class_uri(class, workspace_roots) else {
+            tracing::debug!(owner, "reload_check_listener: could not resolve class URI");
+            continue;
+        };
+        let diagnostics: Vec<tower_lsp::lsp_types::Diagnostic> = event
+            .findings
+            .iter()
+            .filter(|f| &f.owner == owner)
+            .flat_map(reload_finding_to_lsp_diagnostics)
+            .collect();
+        {
+            let mut guard = reload_diagnostics.lock_recover();
+            // `owner == changed_class` means this owner's OWN source
+            // just changed — the server unconditionally full-wipes it
+            // (`beamtalk_workspace_findings_store:clear_owner/1`) before
+            // any scoped replace, so every origin bucket for this owner
+            // is stale, not just the one keyed to `changed_class`. Every
+            // *other* owner only had its `(owner, changed_class)` origin
+            // scoped-replaced server-side (`put_owner_origin/3`), so a
+            // different changed class's still-valid finding for the
+            // same owner must survive.
+            if owner == &event.changed_class {
+                if let Some(by_origin) = guard.get_mut(&uri) {
+                    by_origin.retain(|(o, _cc), _| o != owner);
+                    if by_origin.is_empty() {
+                        guard.remove(&uri);
+                    }
+                }
+                if !diagnostics.is_empty() {
+                    guard
+                        .entry(uri.clone())
+                        .or_default()
+                        .insert((owner.clone(), event.changed_class.clone()), diagnostics);
+                }
+            } else {
+                let origin_key = (owner.clone(), event.changed_class.clone());
+                if diagnostics.is_empty() {
+                    // An empty `diagnostics` list is ambiguous: it means
+                    // either a genuinely clean re-check (no finding at
+                    // all for this owner — safe to clear), or a finding
+                    // that exists but is siteless (no xref call-site
+                    // line to anchor a `Diagnostic` to). Only the first
+                    // case should clear the origin; conflating the two
+                    // would silently drop a real finding whenever it
+                    // happens to have no placeable site.
+                    let has_finding_for_owner = event.findings.iter().any(|f| &f.owner == owner);
+                    if has_finding_for_owner {
+                        tracing::warn!(
+                            owner,
+                            changed_class = %event.changed_class,
+                            "reload_check_listener: finding present but produced no \
+                             placeable diagnostics (siteless); leaving prior diagnostics \
+                             for this origin untouched"
+                        );
+                    } else if let Some(by_origin) = guard.get_mut(&uri) {
+                        by_origin.remove(&origin_key);
+                        if by_origin.is_empty() {
+                            guard.remove(&uri);
+                        }
+                    }
+                } else {
+                    guard
+                        .entry(uri.clone())
+                        .or_default()
+                        .insert(origin_key, diagnostics);
+                }
+            }
+        }
+        // No tracked document version for a URI the editor may not even
+        // have open — `publishDiagnostics`' `version` field is optional
+        // per the LSP spec, so omitting it is correct here (unlike the
+        // flush listener, which only touches already-open buffers).
+        //
+        // If the URI *is* open and startup preload
+        // is still in-flight, `publish_diagnostics_impl` would recompute
+        // `svc.diagnostics()` against the same partially-populated
+        // `ProjectIndex` that caused the original false `Unresolved
+        // class` positive, and its send could still race
+        // `republish_open_diagnostics`'s later, correct one — the same
+        // channel-ordering race `Backend::publish_diagnostics` was fixed
+        // to avoid, just reached through this listener instead of
+        // `did_open`/`did_change`/`did_save`. Skip the send in that case:
+        // the `reload_diagnostics` map above is already updated, and
+        // `republish_open_diagnostics` is guaranteed to pick it up in its
+        // one, correct publish once preload completes.
+        if !should_defer_reload_publish_for_preload(service, open_paths, &uri) {
+            publish_diagnostics_impl(client, service, reload_diagnostics, open_paths, &uri).await;
+        }
+    }
+}
+
 /// ADR 0105 Phase 1: consume `ReloadCheckEvent`s from the runtime
 /// listener and publish/clear reload-induced diagnostics on the affected
 /// caller classes' documents.
@@ -98,143 +245,28 @@ pub(in crate::server) async fn reload_check_listener(
     workspace_roots: Vec<PathBuf>,
     service: Arc<Mutex<SimpleLanguageService>>,
     reload_diagnostics: Arc<std::sync::Mutex<ReloadDiagnosticsByUriAndOrigin>>,
-    mut reload_check_rx: tokio::sync::mpsc::UnboundedReceiver<ReloadCheckEvent>,
+    reload_check_rx: super::listeners::SharedReceiver<ReloadCheckEvent>,
     open_paths: OpenPathsHandle,
 ) {
+    // Held for this run; a panic releases it for the restarted run (BT-5188).
+    let mut reload_check_rx = reload_check_rx.lock().await;
     while let Some(event) = reload_check_rx.recv().await {
-        if event.checked_owners.is_empty() {
-            continue;
-        }
-        // Echo the summary line every other surface shows (REPL notice,
-        // workspace UI header — "N callers re-checked, M stale") to the LSP
-        // client's output channel. Squiggles alone don't carry the
-        // clean-recheck count, and `window/logMessage` is the LSP's own
-        // best-effort notice channel (not a `publishDiagnostics` — this
-        // never affects the diagnostic set).
-        let cap_suffix = event
-            .cap_note
-            .as_deref()
-            .map(|n| format!(" ({n})"))
-            .unwrap_or_default();
-        client
-            .log_message(
-                MessageType::INFO,
-                format!(
-                    "reload check: {}>>{} {}; {} checked, {} not checked{cap_suffix}",
-                    event.changed_class,
-                    event.changed_selector,
-                    event.classification,
-                    event.checked,
-                    event.not_checked
-                ),
-            )
-            .await;
-        let classes = match runtime.nav_symbols(Some("user")).await {
-            Ok(classes) => classes,
-            Err(e) => {
-                tracing::warn!(error = %e, "reload_check_listener: nav_symbols failed");
-                continue;
-            }
-        };
-        for owner in &event.checked_owners {
-            let Some(class) = classes.iter().find(|c| c.name.as_str() == owner.as_str()) else {
-                tracing::debug!(
-                    owner,
-                    "reload_check_listener: owner has no known source file, skipping"
-                );
-                continue;
-            };
-            let Some(uri) = resolve_class_uri(class, &workspace_roots) else {
-                tracing::debug!(owner, "reload_check_listener: could not resolve class URI");
-                continue;
-            };
-            let diagnostics: Vec<tower_lsp::lsp_types::Diagnostic> = event
-                .findings
-                .iter()
-                .filter(|f| &f.owner == owner)
-                .flat_map(reload_finding_to_lsp_diagnostics)
-                .collect();
-            {
-                let mut guard = reload_diagnostics.lock_recover();
-                // `owner == changed_class` means this owner's OWN source
-                // just changed — the server unconditionally full-wipes it
-                // (`beamtalk_workspace_findings_store:clear_owner/1`) before
-                // any scoped replace, so every origin bucket for this owner
-                // is stale, not just the one keyed to `changed_class`. Every
-                // *other* owner only had its `(owner, changed_class)` origin
-                // scoped-replaced server-side (`put_owner_origin/3`), so a
-                // different changed class's still-valid finding for the
-                // same owner must survive.
-                if owner == &event.changed_class {
-                    if let Some(by_origin) = guard.get_mut(&uri) {
-                        by_origin.retain(|(o, _cc), _| o != owner);
-                        if by_origin.is_empty() {
-                            guard.remove(&uri);
-                        }
-                    }
-                    if !diagnostics.is_empty() {
-                        guard
-                            .entry(uri.clone())
-                            .or_default()
-                            .insert((owner.clone(), event.changed_class.clone()), diagnostics);
-                    }
-                } else {
-                    let origin_key = (owner.clone(), event.changed_class.clone());
-                    if diagnostics.is_empty() {
-                        // An empty `diagnostics` list is ambiguous: it means
-                        // either a genuinely clean re-check (no finding at
-                        // all for this owner — safe to clear), or a finding
-                        // that exists but is siteless (no xref call-site
-                        // line to anchor a `Diagnostic` to). Only the first
-                        // case should clear the origin; conflating the two
-                        // would silently drop a real finding whenever it
-                        // happens to have no placeable site.
-                        let has_finding_for_owner =
-                            event.findings.iter().any(|f| &f.owner == owner);
-                        if has_finding_for_owner {
-                            tracing::warn!(
-                                owner,
-                                changed_class = %event.changed_class,
-                                "reload_check_listener: finding present but produced no \
-                                 placeable diagnostics (siteless); leaving prior diagnostics \
-                                 for this origin untouched"
-                            );
-                        } else if let Some(by_origin) = guard.get_mut(&uri) {
-                            by_origin.remove(&origin_key);
-                            if by_origin.is_empty() {
-                                guard.remove(&uri);
-                            }
-                        }
-                    } else {
-                        guard
-                            .entry(uri.clone())
-                            .or_default()
-                            .insert(origin_key, diagnostics);
-                    }
-                }
-            }
-            // No tracked document version for a URI the editor may not even
-            // have open — `publishDiagnostics`' `version` field is optional
-            // per the LSP spec, so omitting it is correct here (unlike the
-            // flush listener, which only touches already-open buffers).
-            //
-            // If the URI *is* open and startup preload
-            // is still in-flight, `publish_diagnostics_impl` would recompute
-            // `svc.diagnostics()` against the same partially-populated
-            // `ProjectIndex` that caused the original false `Unresolved
-            // class` positive, and its send could still race
-            // `republish_open_diagnostics`'s later, correct one — the same
-            // channel-ordering race `Backend::publish_diagnostics` was fixed
-            // to avoid, just reached through this listener instead of
-            // `did_open`/`did_change`/`did_save`. Skip the send in that case:
-            // the `reload_diagnostics` map above is already updated, and
-            // `republish_open_diagnostics` is guaranteed to pick it up in its
-            // one, correct publish once preload completes.
-            if !should_defer_reload_publish_for_preload(&service, &open_paths, &uri) {
-                publish_diagnostics_impl(&client, &service, &reload_diagnostics, &open_paths, &uri)
-                    .await;
-            }
-        }
+        // BT-5131: a panic handling one event must not silently end this
+        // detached task (it would bypass `guard_*` otherwise); log it and
+        // keep serving the next event.
+        guard_notification(
+            "reload_check_listener",
+            process_reload_check_event(
+                &event,
+                &client,
+                &runtime,
+                &workspace_roots,
+                &service,
+                &reload_diagnostics,
+                &open_paths,
+            ),
+        )
+        .await;
     }
     tracing::debug!("reload_check_listener: channel closed, exiting");
 }

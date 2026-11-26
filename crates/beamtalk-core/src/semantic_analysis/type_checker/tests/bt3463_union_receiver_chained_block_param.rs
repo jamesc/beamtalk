@@ -107,7 +107,7 @@ fn dynamic_in_typed_class_warnings(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
 
 fn build_hierarchy(module: &Module) -> ClassHierarchy {
     let mut hierarchy = ClassHierarchy::with_builtins();
-    let user_hierarchy = ClassHierarchy::build(module).0.unwrap();
+    let user_hierarchy = ClassHierarchy::build(module).0;
     hierarchy.merge(&user_hierarchy);
     hierarchy
 }

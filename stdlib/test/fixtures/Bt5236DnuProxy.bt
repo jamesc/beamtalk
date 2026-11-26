@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5236: a forwarding proxy. It answers neither the collection messages nor
+// `to:do:`, but overrides `doesNotUnderstand:args:`, so the pure send reaches
+// the override. An inlined writing fold or counted loop would raise
+// `does_not_understand` instead, so it raises `stateful_block_dispatch`.
+
+Actor subclass: Bt5236DnuProxy
+
+  doesNotUnderstand: _selector args: _arguments => #forwarded

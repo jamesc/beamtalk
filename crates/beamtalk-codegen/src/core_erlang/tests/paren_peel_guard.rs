@@ -171,6 +171,10 @@ const CEILINGS: &[(&str, usize)] = &[
     // Expression` and `binary_literal_size` read a literal through the
     // parentheses the segment grammar requires (`<<(-1):4>>`, `<<v:(8)>>`).
     ("beamtalk-core/src/ast/pattern.rs", 2),
+    // A binary segment size (ADR 0143, BT-5239): the parser rejects a bignum
+    // size through the parentheses the grammar allows (`<<v:(100…)>>`),
+    // before `ast::normalize` runs.
+    ("beamtalk-core/src/source_analysis/parser/binary.rs", 1),
     // A cascade shared receiver: `erlang_module_of_receiver` is handed
     // `(Erlang lists)` as the shared receiver of `(Erlang lists); f: x`.
     ("beamtalk-core/src/ffi_receiver.rs", 1),
@@ -271,11 +275,6 @@ const CEILINGS: &[(&str, usize)] = &[
     // An assignment value (`a := (Worker spawn)`): not an operand, so
     // `ast::normalize` keeps its parentheses.
     ("beamtalk-core/src/semantic_analysis/actor_spawn.rs", 1),
-    // `SendRef` receivers (cascade shared receivers).
-    (
-        "beamtalk-core/src/semantic_analysis/validators/class_state_abroad.rs",
-        3,
-    ),
     // Shared predicates over statements, assignment values and receivers.
     (
         "beamtalk-core/src/semantic_analysis/validators/lint_validators.rs",

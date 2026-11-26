@@ -271,10 +271,9 @@ fn check_operand_agreement(src: &str, checked: &mut usize) {
 // ADR 0131 Phase 2d (BT-3795): the value of a field / class-variable write
 // ---------------------------------------------------------------------------
 
-/// Positions around a field or class-variable write `self.n := ...`. Only a
-/// class method (a class-variable write) and an actor method (a field write)
-/// have one: a value type cannot write `self.n :=` (ADR 0042), so the value
-/// column is not compiled.
+/// Positions around a field write `self.n := ...`. Only an actor method has
+/// one: a value type cannot write `self.n :=` (ADR 0042) and a class has no
+/// slots (ADR 0153), so the value and class columns are not compiled.
 const FIELD_POSITIONS: &[&str] = &[
     "self.n := ({c}) size\n#[self.n, t]",
     "self.n := t + ({c})\n#[self.n, t]",
@@ -298,7 +297,7 @@ const FIELD_POSITIONS: &[&str] = &[
     "self.n := self error: ({c}) printString\nt",
 ];
 
-fn field_sources(construct: &str, position: &str) -> [String; 2] {
+fn field_sources(construct: &str, position: &str) -> [String; 1] {
     let mut body = String::new();
     for line in format!(
         "t := 0\nu := 0\ns := 0\n{}",
@@ -310,23 +309,18 @@ fn field_sources(construct: &str, position: &str) -> [String; 2] {
         body.push_str(line);
         body.push('\n');
     }
-    [
-        format!(
-            "Object subclass: AgreeClass\n  classState: n = 0\n  classState: blk = nil\n\n  class go =>\n{body}"
-        ),
-        format!(
-            "Actor subclass: AgreeActor\n  state: n = 0\n  state: blk = nil\n\n  go =>\n{body}"
-        ),
-    ]
+    [format!(
+        "Actor subclass: AgreeActor\n  state: n = 0\n  state: blk = nil\n\n  go =>\n{body}"
+    )]
 }
 
-/// The value of a method-body field or class-variable write is a sequenced
-/// operand site: a loop or fold in it that the core rule names is lowered by
-/// codegen's producer, in both directions, in class and actor methods.
+/// The value of a method-body field write is a sequenced operand site: a loop
+/// or fold in it that the core rule names is lowered by codegen's producer, in
+/// both directions, in actor methods.
 #[test]
 fn every_field_write_value_site_the_core_rule_accepts_is_lowered_by_the_producer() {
     let mut checked = 0;
-    let mut by_context = [0, 0];
+    let mut by_context = [0];
     for construct in CONSTRUCTS {
         for position in FIELD_POSITIONS {
             for (i, src) in field_sources(construct, position).iter().enumerate() {
@@ -338,7 +332,7 @@ fn every_field_write_value_site_the_core_rule_accepts_is_lowered_by_the_producer
     }
     assert!(
         by_context.iter().all(|&n| n > 50),
-        "class and actor field-write sites compared: {by_context:?}"
+        "actor field-write sites compared: {by_context:?}"
     );
 }
 

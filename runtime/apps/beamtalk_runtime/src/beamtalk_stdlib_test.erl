@@ -132,8 +132,6 @@ report_results(TestModule, Results) ->
 
 %% Value assertion: compare format_result(Value) =:= Expected
 run_one({value, EvalMod, Expected, VarName, Location}, Bindings) ->
-    %% bt-catcher-audit: not-applicable-other-process - runs in the EUnit test process, not a
-    %% class invocation
     try EvalMod:eval(Bindings) of
         {Value, RawBindings} ->
             NewBindings = maybe_bind(VarName, Value, RawBindings),
@@ -148,8 +146,6 @@ run_one({value, EvalMod, Expected, VarName, Location}, Bindings) ->
     end;
 %% Wildcard value assertion: use matches_pattern/2
 run_one({value_wildcard, EvalMod, Expected, VarName, Location}, Bindings) ->
-    %% bt-catcher-audit: not-applicable-other-process - runs in the EUnit test process, not a
-    %% class invocation
     try EvalMod:eval(Bindings) of
         {Value, RawBindings} ->
             NewBindings = maybe_bind(VarName, Value, RawBindings),
@@ -164,8 +160,6 @@ run_one({value_wildcard, EvalMod, Expected, VarName, Location}, Bindings) ->
     end;
 %% Any value assertion (bare wildcard _): execute but don't check result
 run_one({value_any, EvalMod, VarName, Location}, Bindings) ->
-    %% bt-catcher-audit: not-applicable-other-process - runs in the EUnit test process, not a
-    %% class invocation
     try EvalMod:eval(Bindings) of
         {Value, RawBindings} ->
             NewBindings = maybe_bind(VarName, Value, RawBindings),
@@ -176,8 +170,6 @@ run_one({value_any, EvalMod, VarName, Location}, Bindings) ->
     end;
 %% Error assertion: expect expression to raise #beamtalk_error{kind = Kind}
 run_one({error, EvalMod, ExpectedKind, _VarName, Location}, Bindings) ->
-    %% bt-catcher-audit: not-applicable-other-process - runs in the EUnit test process, not a
-    %% class invocation
     try EvalMod:eval(Bindings) of
         {_Value, _RawBindings} ->
             %% Expression succeeded but we expected an error

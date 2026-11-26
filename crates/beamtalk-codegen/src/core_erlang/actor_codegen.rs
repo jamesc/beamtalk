@@ -78,10 +78,7 @@ impl CoreErlangGenerator {
         let has_classes = !module.classes.is_empty();
         // Protocol-only files also need register_class/0 for protocol registration
         let has_protocols = !module.protocols.is_empty();
-        // Pure-extension files (only `Target >> sel`, no host class) need
-        // register_class/0 + on_load to register their foreign extensions at load.
-        let has_foreign_extensions = Self::has_foreign_extensions(module);
-        let needs_register_class = has_classes || has_protocols || has_foreign_extensions;
+        let needs_register_class = has_classes || has_protocols;
         // Build sealed method exports
         let sealed_export_doc = self.build_sealed_export_doc(module);
         // Build class method exports
@@ -357,22 +354,15 @@ impl CoreErlangGenerator {
         if needs_spec_synthesis {
             docs.push(Document::Str("\n"));
             // Determine which module's class_supervisionPolicy to call.
-            // We check within the current file's AST (both inline class methods and
-            // standalone method definitions); cross-file inherited overrides are not
+            // We check within the current file's AST (same-file `>>` methods are
+            // folded into the class); cross-file inherited overrides are not
             // resolved here (a Phase 1 limitation — see the doc comment on
             // generate_supervision_spec_synthesis).
             let has_local_policy_override = module.classes.first().is_some_and(|c| {
                 let class_name = &c.name.name;
-                let has_inline = self
-                    .semantic_facts
+                self.semantic_facts
                     .class_facts(class_name)
-                    .is_some_and(|cf| cf.has_class_method("supervisionPolicy"));
-                let has_standalone = module.method_definitions.iter().any(|md| {
-                    md.is_class_method
-                        && &md.class_name.name == class_name
-                        && md.method.selector.name() == "supervisionPolicy"
-                });
-                has_inline || has_standalone
+                    .is_some_and(|cf| cf.has_class_method("supervisionPolicy"))
             });
             docs.push(self.generate_supervision_spec_synthesis(has_local_policy_override));
         }
@@ -383,13 +373,12 @@ impl CoreErlangGenerator {
             docs.push(Document::Str("\n"));
             docs.push(self.generate_meta_function(module, needs_spec_synthesis));
             // Generate register_class/0 for class system registration
-            docs.push(self.generate_register_class(module, needs_spec_synthesis)?);
-        } else if has_protocols || has_foreign_extensions {
-            // Protocol-only and pure-extension modules need
-            // register_class/0 (for protocol registration and/or foreign
-            // extension registration) even though there are no classes.
+            docs.push(self.generate_register_class(module, needs_spec_synthesis));
+        } else if has_protocols {
+            // Protocol-only modules need register_class/0 for protocol
+            // registration even though there are no classes.
             docs.push(Document::Str("\n"));
-            docs.push(self.generate_register_class(module, false)?);
+            docs.push(self.generate_register_class(module, false));
         }
 
         if has_protocol_source && let Some(source) = self.source_text.as_deref() {
@@ -660,18 +649,11 @@ impl CoreErlangGenerator {
             return false;
         };
         let class_name = &class.name.name;
-        // Skip if supervisionSpec is defined as an inline class method
-        let has_inline = self
+        // Skip if supervisionSpec is defined as a class method
+        !self
             .semantic_facts
             .class_facts(class_name)
-            .is_some_and(|cf| cf.has_class_method("supervisionSpec"));
-        // Skip if supervisionSpec is defined as a standalone class-side method
-        let has_standalone = module.method_definitions.iter().any(|md| {
-            md.is_class_method
-                && &md.class_name.name == class_name
-                && md.method.selector.name() == "supervisionSpec"
-        });
-        !has_inline && !has_standalone
+            .is_some_and(|cf| cf.has_class_method("supervisionSpec"))
     }
 
     /// Generates the synthesized `class_supervisionSpec/1` function.

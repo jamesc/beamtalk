@@ -341,7 +341,7 @@ on(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}, Limit) ->
 remote_default_snapshot(Name, Limit) ->
     case
         beamtalk_call_failure:erpc(
-            Name, ?MODULE, remote_snapshot_target, [Limit], ?REMOTE_SNAPSHOT_TIMEOUT
+            Name, ?MODULE, remote_snapshot_target, [Limit], ?REMOTE_SNAPSHOT_TIMEOUT, fun is_list/1
         )
     of
         {ok, Snapshot} when is_list(Snapshot) ->

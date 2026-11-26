@@ -100,50 +100,73 @@ call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_tuple':'as_string'
         <'asString'> when 'true' ->
             call 'stdlib_class_tuple':'asString'(Self)
         <_Other> when 'true' ->
+            case Selector of
+                <'class'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'clearField:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'delegate'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'displayString'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'equals:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'error:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'fieldAt:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'fieldAt:put:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'fieldNames'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'hasField:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'hash'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'ifNil:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'ifNil:ifNotNil:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'ifNotNil:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'ifNotNil:ifNil:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'inspect'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'isKindOf:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'isNil'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'notImplemented'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'notNil'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'perform:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'perform:withArguments:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'printString'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'respondsTo:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'show:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'showCr:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'subclassResponsibility'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'then:'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <'yourself'> when 'true' ->
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                <_> when 'true' ->
             %% BT-4260: a memoised verdict picks the direct inherited call.
-            case case Selector of
-                <'class'> when 'true' -> 'slow'
-                <'clearField:'> when 'true' -> 'slow'
-                <'delegate'> when 'true' -> 'slow'
-                <'displayString'> when 'true' -> 'slow'
-                <'equals:'> when 'true' -> 'slow'
-                <'error:'> when 'true' -> 'slow'
-                <'fieldAt:'> when 'true' -> 'slow'
-                <'fieldAt:put:'> when 'true' -> 'slow'
-                <'fieldNames'> when 'true' -> 'slow'
-                <'hasField:'> when 'true' -> 'slow'
-                <'hash'> when 'true' -> 'slow'
-                <'ifNil:'> when 'true' -> 'slow'
-                <'ifNil:ifNotNil:'> when 'true' -> 'slow'
-                <'ifNotNil:'> when 'true' -> 'slow'
-                <'ifNotNil:ifNil:'> when 'true' -> 'slow'
-                <'inspect'> when 'true' -> 'slow'
-                <'isKindOf:'> when 'true' -> 'slow'
-                <'isNil'> when 'true' -> 'slow'
-                <'notImplemented'> when 'true' -> 'slow'
-                <'notNil'> when 'true' -> 'slow'
-                <'perform:'> when 'true' -> 'slow'
-                <'perform:withArguments:'> when 'true' -> 'slow'
-                <'printString'> when 'true' -> 'slow'
-                <'respondsTo:'> when 'true' -> 'slow'
-                <'show:'> when 'true' -> 'slow'
-                <'showCr:'> when 'true' -> 'slow'
-                <'subclassResponsibility'> when 'true' -> 'slow'
-                <'then:'> when 'true' -> 'slow'
-                <'yourself'> when 'true' -> 'slow'
-                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('Tuple', Selector)
-            end of
+            case call 'beamtalk_dispatch':'inherited_target'('Tuple', Selector) of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
-                <{'ext', InhExtOwner}> when 'true' ->
-                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, 'bt@stdlib@object')
                 <_InhSlow> when 'true' ->
-                    case call 'beamtalk_extensions':'lookup'('Tuple', Selector) of
-                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                            apply ExtFun(Args, Self)
-                        <'not_found'> when 'true' ->
-                            call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
-                    end
+                    call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+            end
             end
     end
 
@@ -166,21 +189,13 @@ call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_tuple':'as_string'
 'has_method'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'size', 'at:', 'isOk', 'isError', 'unwrap', 'unwrapOr:', 'unwrapOrElse:', 'asString']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('Tuple', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'bt@stdlib@object':'has_method'(Selector)
-            end
+        <'false'> when 'true' -> call 'bt@stdlib@object':'has_method'(Selector)
     end
 
 'has_method_local'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'size', 'at:', 'isOk', 'isError', 'unwrap', 'unwrapOr:', 'unwrapOrElse:', 'asString']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('Tuple', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> 'false'
-            end
+        <'false'> when 'true' -> 'false'
     end
 
 
@@ -198,7 +213,6 @@ call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_tuple':'as_string'
             'classMethodSignatures' => ~{}~,
             'methodXref' => [~{'class_side' => 'false', 'selector' => 'size', 'line' => 1, 'sends' => [], 'references' => [], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'at:', 'line' => 1, 'sends' => [], 'references' => [], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'isOk', 'line' => 1, 'sends' => [], 'references' => [], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'isError', 'line' => 1, 'sends' => [], 'references' => [], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'unwrap', 'line' => 1, 'sends' => [~{'selector' => 'ifTrue:ifFalse:', 'line' => 3, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => 'isOk', 'line' => 2, 'recv_kind' => 'self_recv', 'recv_type' => 'Tuple'}~, ~{'selector' => 'at:', 'line' => 3, 'recv_kind' => 'self_recv', 'recv_type' => 'Tuple'}~, ~{'selector' => 'ifTrue:ifFalse:', 'line' => 5, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => 'isError', 'line' => 5, 'recv_kind' => 'self_recv', 'recv_type' => 'Tuple'}~, ~{'selector' => 'error:', 'line' => 6, 'recv_kind' => 'self_recv', 'recv_type' => 'Tuple'}~, ~{'selector' => 'at:', 'line' => 6, 'recv_kind' => 'self_recv', 'recv_type' => 'Tuple'}~, ~{'selector' => 'error:', 'line' => 7, 'recv_kind' => 'self_recv', 'recv_type' => 'Tuple'}~], 'references' => [], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'unwrapOr:', 'line' => 1, 'sends' => [~{'selector' => 'ifTrue:ifFalse:', 'line' => 1, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => 'isOk', 'line' => 1, 'recv_kind' => 'self_recv', 'recv_type' => 'Tuple'}~, ~{'selector' => 'at:', 'line' => 1, 'recv_kind' => 'self_recv', 'recv_type' => 'Tuple'}~], 'references' => [], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'unwrapOrElse:', 'line' => 1, 'sends' => [~{'selector' => 'ifTrue:ifFalse:', 'line' => 1, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => 'isOk', 'line' => 1, 'recv_kind' => 'self_recv', 'recv_type' => 'Tuple'}~, ~{'selector' => 'at:', 'line' => 1, 'recv_kind' => 'self_recv', 'recv_type' => 'Tuple'}~, ~{'selector' => 'value', 'line' => 1, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~], 'references' => [], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'asString', 'line' => 1, 'sends' => [], 'references' => [], 'source_status' => 'indexed'}~],
             'stateVarXref' => [],
-            'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
             'classMethodDocs' => ~{}~,
@@ -207,7 +221,6 @@ call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_tuple':'as_string'
       'package' => 'none',
       'kind' => 'object',
       'fields' => [],
-      'class_fields' => [],
       'is_sealed' => 'true',
       'is_abstract' => 'false',
       'is_value' => 'false',
@@ -219,11 +232,10 @@ call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_tuple':'as_string'
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'size' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'at:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'isOk' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'isError' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'unwrap' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'unwrapOr:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'unwrapOrElse:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'asString' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
       'defines_user_class_new0' => 'false'
@@ -246,7 +258,6 @@ call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_tuple':'as_string'
       'package' => 'none',
       'kind' => 'object',
       'fields' => [],
-      'class_fields' => [],
       'is_sealed' => 'true',
       'is_abstract' => 'false',
       'is_value' => 'false',
@@ -258,11 +269,10 @@ call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_tuple':'as_string'
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'size' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'at:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'isOk' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'isError' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'unwrap' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'unwrapOr:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'unwrapOrElse:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~, 'asString' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'none', 'is_sealed' => 'true', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
       'defines_user_class_new0' => 'false'

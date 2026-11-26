@@ -29,7 +29,10 @@ no deferred-reply slots.
   stdout_pending => binary(),             % partial line fragment
   stderr_pending => binary(),             % partial line fragment
   exit_code      => nil | non_neg_integer(),
-  port_closed    => boolean()
+  port_closed    => boolean(),
+  stdin_dropped  => binary(),             % only once the exec port dropped a write
+  stdin_waiters  => queue:queue(From),     % writeLine: callers awaiting stdin_queued
+  stdin_unwritten => queue:queue(From)     % queued, awaiting stdin_written/failed
 }
 ```
 
@@ -235,13 +238,13 @@ init(Config) ->
     {ok, State}.
 
 -doc "Dispatch sync calls.".
--spec handle_call(term(), term(), map()) -> {reply, term(), map()}.
+-spec handle_call(term(), term(), map()) -> {reply, term(), map()} | {noreply, map()}.
 %% Strip propagated context from 3-tuple messages (ADR 0069 Phase 2b)
 handle_call({Selector, Args, PropCtx}, From, State) when is_map(PropCtx) ->
     beamtalk_actor:restore_propagated_ctx(PropCtx),
     handle_call({Selector, Args}, From, State);
-handle_call({'writeLine:', [Data]}, _From, State) ->
-    handle_writeLine(Data, State);
+handle_call({'writeLine:', [Data]}, From, State) ->
+    handle_writeLine(Data, From, State);
 handle_call({exitCode, []}, _From, State) ->
     {reply, maps:get(exit_code, State, nil), State};
 handle_call({close, []}, _From, State) ->
@@ -284,7 +287,7 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
         {exit, _ChildId, Code} ->
             ?LOG_INFO("ReactiveSubprocess exited", #{exit_code => Code}),
             %% Flush pending partial lines, then notify the delegate.
-            S0 = push_pending(stdout, State),
+            S0 = push_pending(stdout, fail_pending_writes(State)),
             S1 = push_pending(stderr, S0),
             (try
                 beamtalk_subprocess_port:close(Port)
@@ -294,6 +297,34 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             NewState = S1#{exit_code => Code, port_closed => true},
             cast_notify(NewState, 'subprocessExit:from:', [Code]),
             {noreply, NewState};
+        {stdin_queued, _ChildId} ->
+            %% BT-5248: the oldest writeLine: was accepted; it waits on for
+            %% the writer thread's report (BT-5269).
+            {noreply, beamtalk_subprocess_port:write_queued('ReactiveSubprocess', State)};
+        {stdin_written, _ChildId} ->
+            %% BT-5269: the oldest queued line is in the child's stdin pipe.
+            {noreply, beamtalk_subprocess_port:write_written(State)};
+        {stdin_failed, _ChildId, Reason} ->
+            %% BT-5269: the child exited or closed its stdin before taking the
+            %% oldest queued line: it and every line queued behind it raise,
+            %% and so does every later writeLine:.
+            ?LOG_WARNING("ReactiveSubprocess stdin write failed", #{
+                reason => Reason, domain => [beamtalk, stdlib]
+            }),
+            {noreply, beamtalk_subprocess_port:write_failed('ReactiveSubprocess', Reason, State)};
+        {error, _ChildId, write_stdin, Reason} ->
+            %% A line was not delivered (the child is not reading its input,
+            %% or closed it): that writeLine: raises, and so does every later
+            %% one, since the stream the child sees is broken (BT-5248).
+            ?LOG_WARNING("ReactiveSubprocess stdin write dropped", #{
+                reason => Reason, domain => [beamtalk, stdlib]
+            }),
+            {noreply, beamtalk_subprocess_port:write_dropped('ReactiveSubprocess', Reason, State)};
+        {error, _ChildId, Command, Reason} ->
+            ?LOG_WARNING("ReactiveSubprocess command refused by exec port", #{
+                command => Command, reason => Reason, domain => [beamtalk, stdlib]
+            }),
+            {noreply, State};
         _Other ->
             {noreply, State}
     end;
@@ -303,7 +334,7 @@ handle_info({Port, {exit_status, _N}}, #{port := Port, port_closed := true} = St
 handle_info({Port, {exit_status, _N}}, #{port := Port} = State) ->
     %% beamtalk_exec binary itself exited unexpectedly.
     ?LOG_WARNING("ReactiveSubprocess exec port exited unexpectedly"),
-    S0 = push_pending(stdout, State),
+    S0 = push_pending(stdout, fail_pending_writes(State)),
     S1 = push_pending(stderr, S0),
     NewState = S1#{port_closed => true},
     cast_notify(NewState, 'subprocessExit:from:', [maps:get(exit_code, NewState, nil)]),
@@ -343,12 +374,17 @@ terminate(_Reason, State) ->
 %%% ============================================================================
 
 -doc "Write Data + newline to subprocess stdin.".
--spec handle_writeLine(iodata() | beamtalk_string:t(), map()) ->
-    {reply, nil | {error, #beamtalk_error{}}, map()}.
+-spec handle_writeLine(iodata() | beamtalk_string:t(), term(), map()) ->
+    {reply, {error, #beamtalk_error{}}, map()} | {noreply, map()}.
 %% BT-4173: lines arrive tagged from Beamtalk — unwrap to bytes.
-handle_writeLine({beamtalk_string, B}, State) when is_binary(B) ->
-    handle_writeLine(B, State);
-handle_writeLine(Data, State) ->
+handle_writeLine({beamtalk_string, B}, From, State) when is_binary(B) ->
+    handle_writeLine(B, From, State);
+handle_writeLine(_Data, _From, #{stdin_dropped := Reason} = State) ->
+    %% BT-5195: an earlier line could not be delivered (the child is not
+    %% reading its input, or closed it), so the stream it sees is broken.
+    Err = beamtalk_subprocess_port:stdin_dropped_error('ReactiveSubprocess', Reason),
+    {reply, {error, Err}, State};
+handle_writeLine(Data, From, State) ->
     #{port := Port, child_id := ChildId, port_closed := PortClosed} = State,
     case PortClosed of
         true ->
@@ -358,18 +394,24 @@ handle_writeLine(Data, State) ->
             try iolist_to_binary(Data) of
                 Bin ->
                     Line = <<Bin/binary, $\n>>,
-                    try
-                        beamtalk_subprocess_port:write_stdin(Port, ChildId, Line),
-                        {reply, nil, State}
-                    catch
-                        _:WriteReason ->
-                            Err = beamtalk_error:with_details(
-                                beamtalk_error:new(
-                                    port_closed, 'ReactiveSubprocess', 'writeLine:'
-                                ),
-                                #{reason => WriteReason}
+                    %% BT-5248/BT-5259: reply is the port's answer; a dead port errors
+                    %% and is torn down like an unexpected exit_status.
+                    case
+                        beamtalk_subprocess_port:submit_write(
+                            'ReactiveSubprocess', Port, ChildId, Line, From, State
+                        )
+                    of
+                        {port_dead, Err, S0} ->
+                            S1 = push_pending(stderr, push_pending(stdout, S0)),
+                            NewState = S1#{port_closed => true},
+                            cast_notify(
+                                NewState, 'subprocessExit:from:', [
+                                    maps:get(exit_code, NewState, nil)
+                                ]
                             ),
-                            {reply, {error, Err}, State#{port_closed => true}}
+                            {reply, {error, Err}, NewState};
+                        Noreply ->
+                            Noreply
                     end
             catch
                 error:badarg ->
@@ -396,8 +438,13 @@ handle_close(State) ->
             catch
                 _:_ -> ok
             end),
-            {reply, nil, State#{port_closed => true}}
+            {reply, nil, (fail_pending_writes(State))#{port_closed => true}}
     end.
+
+-doc "Fail the `writeLine:` callers still awaiting the port's answer.".
+-spec fail_pending_writes(map()) -> map().
+fail_pending_writes(State) ->
+    beamtalk_subprocess_port:fail_pending_writes('ReactiveSubprocess', State).
 
 %%% ============================================================================
 %%% Internal helpers

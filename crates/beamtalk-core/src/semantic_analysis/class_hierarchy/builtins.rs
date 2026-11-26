@@ -145,7 +145,6 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
             has_dynamic_field_writer: false,
             methods: vec![],
             class_methods: vec![],
-            class_variables: vec![],
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![],

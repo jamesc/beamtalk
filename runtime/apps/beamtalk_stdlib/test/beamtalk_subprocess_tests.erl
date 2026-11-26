@@ -126,6 +126,136 @@ writeLine_writes_line_and_returns_nil_test() ->
     gen_server:stop(Pid).
 
 %%% ============================================================================
+%%% writeLine — a child that never reads (BT-5195)
+%%% ============================================================================
+
+%% The exec port queues at most 8 MiB for a child; past that it drops the
+%% write and says so. The writeLine: whose line is dropped raises (BT-5248:
+%% it used to return nil, and only the next one raised), and so does every
+%% later one. A writeLine: answers only once its line is in the pipe
+%% (BT-5269), which a child that never reads leaves full, so ten callers
+%% write at once: eight 1 MiB lines fill the queue, the other two raise. The
+%% eight are never written, so none of them is told nil: close answers them.
+writeLine_raises_for_the_line_the_port_drops_test_() ->
+    {timeout, 60, fun() ->
+        {SleepExe, SleepArgs} = sleep_cmd(),
+        {ok, Pid} = beamtalk_subprocess:start(#{
+            executable => SleepExe,
+            args => SleepArgs
+        }),
+        %% 1 MiB less the newline writeLine: appends: each line is exactly 1 MiB.
+        Chunk = binary:copy(<<"x">>, (1 bsl 20) - 1),
+        beamtalk_subprocess_test_helpers:start_writers(Pid, Chunk, 10),
+        Refused = [beamtalk_subprocess_test_helpers:await_write_reply() || _ <- [1, 2]],
+        lists:foreach(
+            fun(R) ->
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = runtime_error, selector = 'writeLine:'}}, R
+                )
+            end,
+            Refused
+        ),
+        ?assert(
+            lists:any(
+                fun({error, E}) ->
+                    E#beamtalk_error.message =:=
+                        {beamtalk_string, <<"writeLine: failed: the line was not written">>}
+                end,
+                Refused
+            )
+        ),
+        %% Sticky: the next write raises too.
+        ?assertMatch({error, #beamtalk_error{}}, gen_server:call(Pid, {'writeLine:', [<<"x">>]})),
+        ?assertEqual(nil, gen_server:call(Pid, {close, []})),
+        Queued = [beamtalk_subprocess_test_helpers:await_write_reply() || _ <- lists:seq(1, 8)],
+        ?assertEqual(
+            lists:duplicate(8, port_closed),
+            [K || {error, #beamtalk_error{kind = K}} <- Queued]
+        ),
+        gen_server:stop(Pid)
+    end}.
+
+%%% BT-5259: a write to an exec port that has already died must answer a
+%%% structured error and leave the gen_server running (it used to crash on
+%%% the badarg raised by port_command).
+writeLine_to_dead_port_returns_error_and_keeps_server_up_test() ->
+    {CatExe, CatArgs} = cat_cmd(),
+    {ok, Pid} = beamtalk_subprocess:start(#{executable => CatExe, args => CatArgs}),
+    #{port := Port} = sys:get_state(Pid),
+    true = port_close(Port),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = port_closed, selector = 'writeLine:'}},
+        gen_server:call(Pid, {'writeLine:', [<<"x">>]})
+    ),
+    ?assert(is_process_alive(Pid)),
+    %% Later writes keep answering the same error; close stays safe.
+    ?assertMatch(
+        {error, #beamtalk_error{kind = port_closed}},
+        gen_server:call(Pid, {'writeLine:', [<<"y">>]})
+    ),
+    ?assertEqual(nil, gen_server:call(Pid, {close, []})),
+    gen_server:stop(Pid).
+
+%% BT-5259: a reader parked on the dead port is answered (EOF), not left to hang.
+writeLine_to_dead_port_releases_parked_reader_test() ->
+    {CatExe, CatArgs} = cat_cmd(),
+    {ok, Pid} = beamtalk_subprocess:start(#{executable => CatExe, args => CatArgs}),
+    Self = self(),
+    Reader = spawn(fun() -> Self ! {read, gen_server:call(Pid, {readLine, []}, 5000)} end),
+    ok = beamtalk_test_wait:idle(Reader),
+    ok = beamtalk_test_wait:sync(Pid),
+    #{port := Port} = sys:get_state(Pid),
+    true = port_close(Port),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = port_closed}},
+        gen_server:call(Pid, {'writeLine:', [<<"x">>]})
+    ),
+    ?awaitMessage({read, ReadResult}),
+    ?assertEqual(nil, ReadResult),
+    gen_server:stop(Pid).
+
+%% BT-5259: a non-iodata argument is a type_error reply, not a crash.
+writeLine_non_iodata_returns_type_error_test() ->
+    {CatExe, CatArgs} = cat_cmd(),
+    {ok, Pid} = beamtalk_subprocess:start(#{executable => CatExe, args => CatArgs}),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = type_error}},
+        gen_server:call(Pid, {'writeLine:', [42]})
+    ),
+    ?assert(is_process_alive(Pid)),
+    gen_server:call(Pid, {close, []}),
+    gen_server:stop(Pid).
+
+%%% BT-5269: a writeLine: whose child closed its stdin before taking the line
+%%% raises (it used to return nil: the line was queued, then lost silently).
+writeLine_raises_when_the_child_closed_stdin_test_() ->
+    case os:type() of
+        %% Unix only: no stock Windows command closes its stdin and stays up.
+        %% The exec-level test covers the writer thread on every platform.
+        {unix, _} -> [fun writeLine_raises_when_the_child_closed_stdin/0];
+        _ -> []
+    end.
+
+writeLine_raises_when_the_child_closed_stdin() ->
+    {Exe, Args} = beamtalk_subprocess_test_helpers:closed_stdin_cmd(),
+    {ok, Pid} = beamtalk_subprocess:start(#{executable => Exe, args => Args}),
+    %% The child prints once its stdin is closed.
+    ?assertEqual({beamtalk_string, <<"closed">>}, gen_server:call(Pid, {readLine, []}, 5000)),
+    {error, Err} = gen_server:call(Pid, {'writeLine:', [<<"lost">>]}),
+    ?assertMatch(#beamtalk_error{kind = runtime_error, selector = 'writeLine:'}, Err),
+    ?assertEqual(
+        {beamtalk_string, <<"writeLine: failed: the line was not written">>},
+        Err#beamtalk_error.message
+    ),
+    %% Sticky: every later write raises too.
+    ?assertMatch(
+        {error, #beamtalk_error{kind = runtime_error}},
+        gen_server:call(Pid, {'writeLine:', [<<"later">>]})
+    ),
+    ?assertEqual(nil, gen_server:call(Pid, {close, []})),
+    gen_server:stop(Pid).
+
+%%% ============================================================================
 %%% readLine — blocks until data arrives
 %%% ============================================================================
 

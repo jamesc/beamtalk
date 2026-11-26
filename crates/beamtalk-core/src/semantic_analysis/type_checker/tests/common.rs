@@ -119,7 +119,7 @@ pub(super) fn run_with_expect(module: &Module, hierarchy: &ClassHierarchy) -> Ve
 /// Panics if the hierarchy cannot be built. Use [`diags`] to skip suppression.
 pub(super) fn diags_with_expect(source: &str) -> Vec<Diagnostic> {
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     run_with_expect(&module, &hierarchy)
 }
 
@@ -127,7 +127,7 @@ pub(super) fn diags_with_expect(source: &str) -> Vec<Diagnostic> {
 /// hierarchy, type check. No `@expect` suppression (BT-4678).
 pub(super) fn diags(source: &str) -> Vec<Diagnostic> {
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let mut checker = TypeChecker::new();
     checker.check_module(&module, &hierarchy);
     checker.take_diagnostics()
@@ -143,9 +143,7 @@ pub(super) fn diags_parse_ok_with_expect(source: &str) -> Vec<Diagnostic> {
 
 /// The hierarchy of a module holding only `class`. Panics if it cannot be built.
 pub(super) fn build_class_hierarchy(class: ClassDefinition) -> ClassHierarchy {
-    ClassHierarchy::build(&make_module_with_classes(vec![], vec![class]))
-        .0
-        .unwrap()
+    ClassHierarchy::build(&make_module_with_classes(vec![], vec![class])).0
 }
 
 /// Asserts `diags` is empty; `context` (the case name and/or source) names the
@@ -395,7 +393,7 @@ pub(super) fn refine_narrowing(
 pub(super) fn run_with_protocols(source: &str) -> Vec<Diagnostic> {
     let module = parse_source(source);
     let mut hierarchy = ClassHierarchy::with_builtins();
-    let user_hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let user_hierarchy = ClassHierarchy::build(&module).0;
     hierarchy.merge(&user_hierarchy);
 
     let mut checker = check_with_protocols(
@@ -410,7 +408,7 @@ pub(super) fn run_with_protocols(source: &str) -> Vec<Diagnostic> {
 pub(super) fn typed_class_hierarchy(class_name: &str) -> ClassHierarchy {
     let source = format!("typed Object subclass: {class_name}\n");
     let module = parse_source(&source);
-    ClassHierarchy::build(&module).0.unwrap()
+    ClassHierarchy::build(&module).0
 }
 
 /// The return-type mismatch diagnostics `checker` has collected.
@@ -603,40 +601,35 @@ pub(super) fn counter_class_with_typed_state(
     }
 }
 
-/// Helper to build a hierarchy with an extension method registered.
-pub(super) fn hierarchy_with_extension(
+/// Helper to build a hierarchy where `class_name` additionally has an
+/// instance method `selector` with the given signature.
+#[allow(clippy::needless_pass_by_value)] // callers build the signature inline
+pub(super) fn hierarchy_with_method(
     class_name: &str,
     selector: &str,
     arity: usize,
     param_types: Vec<Option<EcoString>>,
     return_type: Option<EcoString>,
 ) -> ClassHierarchy {
-    use crate::compilation::extension_index::{
-        ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
-    };
-    use std::path::PathBuf;
+    use crate::semantic_analysis::class_hierarchy::{DeclaredType, MethodInfo};
 
     let mut h = ClassHierarchy::with_builtins();
-    let mut index = ExtensionIndex::new();
-    let key = ExtensionKey {
-        class_name: class_name.into(),
-        side: MethodSide::Instance,
-        selector: selector.into(),
-    };
-    index.entries_mut().insert(
-        key,
-        vec![ExtensionLocation {
-            file_path: PathBuf::from("test.bt"),
-            span: span(),
-            type_info: ExtensionTypeInfo {
-                answers_receiver: false,
-                arity,
-                param_types,
-                return_type,
-            },
-        }],
+    assert_eq!(arity, param_types.len(), "arity must match the parameters");
+    let method = MethodInfo::synthesized(
+        selector,
+        class_name,
+        return_type.as_deref().map(DeclaredType::parse),
+        param_types
+            .iter()
+            .map(|p| p.as_deref().map(DeclaredType::parse))
+            .collect(),
+        None,
     );
-    h.register_extensions(&index);
+    h.get_class_mut(class_name)
+        .expect("class is a builtin")
+        .methods
+        .push(method);
+    h.rebuild_all_indexes();
     h
 }
 

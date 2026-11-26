@@ -262,15 +262,14 @@ fn test_generate_has_method_from_expression_based_module() {
 // `gen_server::dispatch::generate_has_method` (actor) and
 // `value_type_codegen::generate_primitive_has_method` (value type) implement
 // the same reflection surface — "does this class understand `Selector`,
-// locally, via a foreign extension, or via an ancestor?" — and had drifted:
-// the actor version never checked the extension registry, never delegated
-// to its superclass, and never short-circuited for a catch-all-DNU class,
-// so `respondsTo:` answered differently for an actor than for a value type
-// given the identical situation. Both now render through the same
+// locally or via an ancestor?" — and had drifted: the actor version never
+// delegated to its superclass, and never short-circuited for a catch-all-DNU
+// class, so `respondsTo:` answered differently for an actor than for a value
+// type given the identical situation. Both now render through the same
 // `DispatchSpec`-driven emitter (`dispatch_spec::generate_has_method_from_spec`).
-// These three tests — an extension method, an inherited method, and a
-// DNU-catch-all class — pinned the pre-fix divergence in an earlier revision
-// of this same file; they now assert the corrected, unified behavior.
+// These tests — an inherited method and a DNU-catch-all class — pinned the
+// pre-fix divergence in an earlier revision of this same file; they now
+// assert the corrected, unified behavior.
 
 /// A minimal actor `ClassDefinition` for `has_method` pinning tests — same
 /// shape as the literal built in `test_generate_has_method_lists_primary_class_methods`
@@ -346,22 +345,18 @@ fn catch_all_dnu_method() -> MethodDefinition {
 }
 
 #[test]
-fn test_generate_has_method_actor_checks_extension_registry() {
-    // Value-type has_method/1 always checks `beamtalk_extensions:has/2` for
-    // a selector it doesn't recognize locally (`generate_primitive_has_method`),
-    // so `anActor respondsTo: #anExtensionMethod` and `aValue respondsTo:
-    // #anExtensionMethod` must answer the same way for the identical
-    // situation. Actor has_method/1 now consults the extension
-    // registry too, via the shared `DispatchSpec` emitter.
+fn test_generate_has_method_actor_consults_no_extension_registry() {
+    // ADR 0152: neither actor nor value-type has_method/1 consults an
+    // extension registry; a selector the class does not define locally is
+    // answered by its superclass.
     let class = actor_class_def("Counter", "Actor", vec![unary_method("increment")]);
     let module = module_with_class(class);
     let generator = CoreErlangGenerator::new("counter");
     let doc = generator.generate_has_method(&module);
     let output = doc.to_pretty_string();
     assert!(
-        output.contains("call 'beamtalk_extensions':'has'('Counter', Selector)"),
-        "actor has_method/1 must consult the extension registry, matching \
-         value-type has_method/1. Got:\n{output}"
+        !output.contains("beamtalk_extensions"),
+        "actor has_method/1 must not consult an extension registry. Got:\n{output}"
     );
 }
 

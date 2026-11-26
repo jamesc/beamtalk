@@ -75,6 +75,15 @@ defmodule VeBench.Counter do
   def handle_call(:via_self, _from, n), do: {:reply, increment(n), increment(n)}
   def handle_call({:sum_of, %VeBench.Point{x: x, y: y}}, _from, n), do: {:reply, x + y, n}
 
+  # Row 11l (BT-5207): the loop threads a state map and writes it each pass,
+  # like the actor's StateAcc loop.
+  def handle_call({:spin, k}, _from, _n), do: spun(spin(%{count: k}))
+
+  defp spun(%{count: n}), do: {:reply, n, n}
+
+  defp spin(%{count: k} = s) when 0 < k, do: spin(Map.put(s, :count, k - 1))
+  defp spin(s), do: s
+
   defp increment(n), do: n + 1
 
   @impl true

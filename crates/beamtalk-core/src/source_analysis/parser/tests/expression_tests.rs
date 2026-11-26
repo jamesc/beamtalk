@@ -1233,20 +1233,39 @@ fn parse_binary_pattern_min_int_value() {
 }
 
 #[test]
-fn parse_binary_pattern_double_negated_min_int_is_clean_error() {
-    // Review finding 2: <<- -9223372036854775808:64/signed>> exceeds
-    // i64::MAX — a clean diagnostic, never a panic (or release wrap).
+fn parse_binary_pattern_double_negated_min_int_is_a_bignum() {
+    // BT-5239 (was review finding 2): `- -9223372036854775808` is 2^63, a
+    // bignum — no longer an error. It does not fit a signed 64-bit segment,
+    // so the only diagnostic is the "can never match" warning.
+    use crate::ast::Pattern;
     use crate::source_analysis::Severity;
     let diagnostics = parse_err("x match: [<<- -9223372036854775808:64/signed>> -> 1]");
-    let errors: Vec<_> = diagnostics
-        .iter()
-        .filter(|d| d.severity == Severity::Error)
-        .collect();
-    assert_eq!(errors.len(), 1, "expected one error, got: {errors:?}");
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|d| (d.severity, d.message.to_string()))
+            .collect::<Vec<_>>(),
+        vec![(
+            Severity::Warning,
+            "this arm can never match because the value 9223372036854775808 will not fit in an 'signed' binary segment of size 64".to_string()
+        )]
+    );
+    let (module, _) = parse(lex_with_eof(
+        "x match: [<<- -9223372036854775808:64/signed>> -> 1]",
+    ));
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!("expected Expression::Match");
+    };
+    let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+        panic!("expected Pattern::Binary");
+    };
     assert!(
-        errors[0].message.contains("out of range"),
-        "expected out-of-range error, got: {}",
-        errors[0].message
+        matches!(
+            &segments[0].value,
+            Pattern::Literal(Literal::BigInteger(d), _) if d.as_str() == "9223372036854775808"
+        ),
+        "expected a bignum literal, got: {:?}",
+        segments[0].value
     );
 }
 
@@ -1921,45 +1940,10 @@ fn class_state_after_methods() {
 }
 
 #[test]
-fn class_classstate_after_methods() {
-    // classState: fields should be allowed after method definitions
-    let module = parse_ok(
-        "Actor subclass: Counter
-  increment => self.count := self.count + 1
-  classState: instanceCount = 0
-  state: count = 0
-  getCount => ^self.count",
-    );
-    assert_eq!(module.classes.len(), 1, "Should find 1 class");
-    let class = &module.classes[0];
-    assert_eq!(
-        class.class_variables.len(),
-        1,
-        "Should have 1 classState field, got {}",
-        class.class_variables.len()
-    );
-    assert_eq!(class.class_variables[0].name.name.as_str(), "instanceCount");
-    assert_eq!(
-        class.state.len(),
-        1,
-        "Should have 1 state field, got {}",
-        class.state.len()
-    );
-    assert_eq!(
-        class.methods.len(),
-        2,
-        "Should have 2 methods, got {}",
-        class.methods.len()
-    );
-}
-
-#[test]
-fn class_members_fully_interleaved() {
-    // All member types interleaved: method, classState, method, state, method
+fn class_members_interleaved() {
     let module = parse_ok(
         "Actor subclass: Mixed
   first => 1
-  classState: cv = 0
   second => 2
   state: iv = 0
   third => 3",
@@ -1967,11 +1951,6 @@ fn class_members_fully_interleaved() {
     let class = &module.classes[0];
     assert_eq!(class.methods.len(), 3, "Should have 3 methods");
     assert_eq!(class.state.len(), 1, "Should have 1 state field");
-    assert_eq!(
-        class.class_variables.len(),
-        1,
-        "Should have 1 classState field"
-    );
 }
 
 #[test]
@@ -2058,23 +2037,6 @@ fn class_keyword_method_before_field_declarations() {
     assert_eq!(class.class_methods.len(), 1, "Should have 1 class method");
     assert_eq!(class.methods.len(), 1, "Should have 1 instance method");
     assert_eq!(class.state.len(), 1, "Should have 1 field");
-}
-
-#[test]
-fn class_method_before_classstate() {
-    // Class method before classState: declaration.
-    let module = parse_ok(
-        "Actor subclass: Foo
-  class serial -> Boolean => true
-  classState: count = 0
-  state: x = 0
-  doSomething => self.x",
-    );
-    let class = &module.classes[0];
-    assert_eq!(class.class_methods.len(), 1, "Should have 1 class method");
-    assert_eq!(class.methods.len(), 1, "Should have 1 instance method");
-    assert_eq!(class.class_variables.len(), 1, "Should have 1 classState");
-    assert_eq!(class.state.len(), 1, "Should have 1 state field");
 }
 
 #[test]

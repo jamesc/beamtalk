@@ -23,7 +23,9 @@
 
 use super::{EcoString, MethodDefinition, Position, SimpleLanguageService, Span, Utf8PathBuf};
 use crate::STDLIB_PACKAGE_MARKER;
-use crate::queries::references_provider::{find_class_declarations, find_class_references};
+use crate::queries::references_provider::{
+    find_class_declarations, find_class_references, uses_clause_entries,
+};
 use crate::queries::selector_rename_query::{
     SelectorSendSite, SendReceiver, find_definition_selector_spans, find_selector_send_sites_in,
     find_symbol_literal_sites,
@@ -100,6 +102,9 @@ pub struct RenamePlan {
     pub candidates: Vec<Vec<RenameEdit>>,
     /// File move for a class declared in a file named after it.
     pub file_move: Option<FileMove>,
+    /// What is being renamed, for messages: `Counter`, or `#go on Counter`
+    /// (BT-5188).
+    pub target: String,
 }
 
 /// One method (or the top-level statements) the walkers visit.
@@ -133,14 +138,6 @@ fn stmts(body: &[ExpressionStatement]) -> Vec<&Expression> {
     body.iter().map(|s| &s.expression).collect()
 }
 
-const fn side_of(is_class_method: bool) -> MethodSide {
-    if is_class_method {
-        MethodSide::Class
-    } else {
-        MethodSide::Instance
-    }
-}
-
 impl SimpleLanguageService {
     fn body_contexts(&self) -> Vec<BodyCtx<'_>> {
         let mut out = Vec::new();
@@ -167,11 +164,14 @@ impl SimpleLanguageService {
                     }
                 }
             }
+            // A rejected cross-file `Foo >> sel` (ADR 0152): its sends are
+            // text the user will move into `Foo`'s file, so they are renamed
+            // too, but it is not a method of `Foo` (no owner).
             for smd in &data.module.method_definitions {
                 out.push(BodyCtx {
                     file,
                     source,
-                    owner: Some((smd.class_name.name.as_str(), side_of(smd.is_class_method))),
+                    owner: None,
                     roots: stmts(&smd.method.body),
                 });
             }
@@ -214,15 +214,6 @@ impl SimpleLanguageService {
                     }
                 }
             }
-            for smd in &data.module.method_definitions {
-                if smd.method.selector.name() == selector {
-                    out.push(DefSite {
-                        file,
-                        class: smd.class_name.name.as_str(),
-                        side: side_of(smd.is_class_method),
-                    });
-                }
-            }
         }
         out
     }
@@ -241,8 +232,12 @@ impl SimpleLanguageService {
         file: &Utf8PathBuf,
         position: Position,
     ) -> Result<(Target, Span, EcoString), RenameRefusal> {
-        let nothing =
-            || RenameRefusal::new("Only class names and method selectors can be renamed here.");
+        let nothing = || {
+            RenameRefusal::new(
+                "Only class names and method selectors can be renamed here. Put the cursor on \
+                 a class name, or on a selector in a method header or a send, and try again.",
+            )
+        };
         let data = self.files.get(file).ok_or_else(nothing)?;
         let offset = position
             .to_byte_offset(&data.source)
@@ -309,13 +304,6 @@ impl SimpleLanguageService {
                 visit_def(&class.name.name, MethodSide::Class, m);
             }
         }
-        for smd in &data.module.method_definitions {
-            visit_def(
-                &smd.class_name.name,
-                side_of(smd.is_class_method),
-                &smd.method,
-            );
-        }
 
         let mut send_ctx: Option<(Option<(String, MethodSide)>, SendReceiver)> = None;
         if hit.is_none() {
@@ -341,9 +329,10 @@ impl SimpleLanguageService {
             }
         }
         let Some(span) = hit else {
-            return Err(RenameRefusal::new(
-                "Only class names and method selectors can be renamed here.",
-            ));
+            return Err(RenameRefusal::new(format!(
+                "Cannot rename #{selector} here: the cursor is not on a method header or a \
+                 send of it. Put the cursor on one and try again."
+            )));
         };
 
         let defs = self.definitions_of(selector);
@@ -479,9 +468,9 @@ impl SimpleLanguageService {
             )));
         }
         if new == old {
-            return Err(RenameRefusal::new(
-                "The new name is the same as the old one.",
-            ));
+            return Err(RenameRefusal::new(format!(
+                "The new name is the same as the old one ({old})."
+            )));
         }
         let modules = || self.files.iter().map(|(p, d)| (p, &d.module));
         if self.project_index.hierarchy().has_class(new)
@@ -561,6 +550,7 @@ impl SimpleLanguageService {
             confirmed,
             candidates: Vec::new(),
             file_move,
+            target: old.to_string(),
         })
     }
 
@@ -587,6 +577,128 @@ impl SimpleLanguageService {
             .map_or(0, |i| i + 1);
         let q = &before[start..];
         (!q.is_empty()).then_some(q)
+    }
+
+    /// A descendant override in the standard library or a dependency cannot be
+    /// renamed with the rest, so renaming would silently detach it (BT-5132).
+    fn refuse_read_only_override(
+        &self,
+        old: &str,
+        side: MethodSide,
+        class: &str,
+        subtree: &HashSet<String>,
+        defs: &[DefSite<'_>],
+    ) -> Result<(), RenameRefusal> {
+        match defs.iter().find(|d| {
+            d.side == side
+                && d.class != class
+                && subtree.contains(d.class)
+                && self.is_readonly_file(d.file)
+        }) {
+            Some(d) => Err(RenameRefusal::new(format!(
+                "Cannot rename #{old} on {class}: {} overrides it in the standard library or \
+                 a dependency, which cannot be edited.",
+                d.class
+            ))),
+            None => Ok(()),
+        }
+    }
+
+    /// A `uses:` line of `class` or a descendant that names `old` in its
+    /// `excluding:` or `overriding:` clause refers to the protocol's method
+    /// of that name, which a static rename of the class's method cannot
+    /// follow: the clause would go stale or change which method wins
+    /// (BT-5188). Refused rather than guessed.
+    fn refuse_uses_clause_naming(
+        &self,
+        old: &str,
+        class: &str,
+        side: MethodSide,
+        subtree: &HashSet<String>,
+    ) -> Result<(), RenameRefusal> {
+        // `uses:` composes instance methods; a class-side rename is unrelated.
+        if side != MethodSide::Instance {
+            return Ok(());
+        }
+        let mut files: Vec<_> = self.files.iter().collect();
+        files.sort_by(|a, b| a.0.cmp(b.0));
+        for (_, data) in files {
+            for user in data
+                .module
+                .classes
+                .iter()
+                .filter(|c| subtree.contains(c.name.name.as_str()))
+            {
+                if let Some((used, clause, _)) =
+                    uses_clause_entries(user).find(|(_, _, entry)| entry.name == old)
+                {
+                    let protocol = &used.protocol.name;
+                    return Err(RenameRefusal::new(format!(
+                        "Cannot rename #{old} on {class}: {}'s `uses: {protocol} {} #(#{old})` \
+                         names it, and that clause refers to {protocol}'s #{old}, which this \
+                         rename cannot follow. Edit the `uses:` line first, then run the rename \
+                         again.",
+                        user.name.name,
+                        clause.keyword()
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `#old` literals (`perform: #old`, `respondsTo: #old`, ...): a dynamic
+    /// use cannot be proven to name this method, so candidates only. Read-only
+    /// files never receive edits.
+    fn symbol_literal_candidates(&self, old: &str, new: &str) -> Vec<Vec<RenameEdit>> {
+        let mut out = Vec::new();
+        for ctx in self
+            .body_contexts()
+            .into_iter()
+            .filter(|c| !self.is_readonly_file(c.file))
+        {
+            for span in find_symbol_literal_sites(ctx.roots.iter().copied(), ctx.source, old) {
+                out.push(vec![RenameEdit {
+                    file: ctx.file.clone(),
+                    span,
+                    new_text: format!("#{new}"),
+                }]);
+            }
+        }
+        out
+    }
+
+    /// The edits renaming `class`'s own definition of `old` on `side`.
+    fn definition_edits(
+        &self,
+        old: &str,
+        class: &str,
+        side: MethodSide,
+        new: &str,
+        defs: &[DefSite<'_>],
+    ) -> Result<Vec<RenameEdit>, RenameRefusal> {
+        let def_file = defs
+            .iter()
+            .find(|d| d.class == class && d.side == side)
+            .map(|d| d.file)
+            .ok_or_else(|| {
+                RenameRefusal::new(format!("No definition of #{old} found on {class}."))
+            })?;
+        let def_source = &self.files[def_file].source;
+        let spans =
+            find_definition_selector_spans(def_source, class, old, new, side).map_err(|e| {
+                RenameRefusal::new(format!(
+                    "Cannot rename #{old} on {class}: {e}. Save the file and run the rename again."
+                ))
+            })?;
+        Ok(spans
+            .into_iter()
+            .map(|s| RenameEdit {
+                file: def_file.clone(),
+                span: s.span,
+                new_text: s.new_text,
+            })
+            .collect())
     }
 
     fn plan_selector_rename(
@@ -640,28 +752,21 @@ impl SimpleLanguageService {
         let overridden = defs
             .iter()
             .any(|d| d.side == side && d.class != class && subtree.contains(d.class));
+        self.refuse_read_only_override(old, side, class, &subtree, &defs)?;
+        self.refuse_uses_clause_naming(old, class, side, &subtree)?;
 
-        let mut plan = RenamePlan::default();
+        let mut plan = RenamePlan {
+            target: format!("#{old} on {class}"),
+            ..RenamePlan::default()
+        };
         // The definition itself.
-        let def_file = defs
-            .iter()
-            .find(|d| d.class == class && d.side == side)
-            .map(|d| d.file)
-            .ok_or_else(|| {
-                RenameRefusal::new(format!("No definition of #{old} found on {class}."))
-            })?;
-        let def_source = &self.files[def_file].source;
-        let spans = find_definition_selector_spans(def_source, class, old, new, side)
-            .map_err(|e| RenameRefusal::new(format!("Cannot rename #{old} on {class}: {e}")))?;
-        plan.confirmed.extend(spans.into_iter().map(|s| RenameEdit {
-            file: def_file.clone(),
-            span: s.span,
-            new_text: s.new_text,
-        }));
+        plan.confirmed
+            .extend(self.definition_edits(old, class, side, new, &defs)?);
 
         let mut contexts = self.body_contexts();
         contexts.sort_by(|a, b| a.file.cmp(b.file));
         for ctx in contexts {
+            let readonly = self.is_readonly_file(ctx.file);
             for SelectorSendSite { receiver, spans } in
                 find_selector_send_sites_in(ctx.roots.iter().copied(), ctx.source, old, new)
             {
@@ -678,24 +783,23 @@ impl SimpleLanguageService {
                     && ctx
                         .owner
                         .is_some_and(|(c, s)| s == side && subtree.contains(c));
-                if is_confirmed {
+                if is_confirmed && readonly {
+                    return Err(RenameRefusal::new(format!(
+                        "Cannot rename #{old} on {class}: a call in {} is in the standard \
+                         library or a dependency, so it cannot be rewritten. Nothing was changed.",
+                        ctx.file
+                    )));
+                } else if readonly {
+                    // Read-only files never receive edits, not even candidates.
+                } else if is_confirmed {
                     plan.confirmed.extend(edits);
                 } else {
                     plan.candidates.push(edits);
                 }
             }
         }
-        // `#old` literals (`perform: #old`, `respondsTo: #old`, ...): a dynamic
-        // use cannot be proven to name this method, so candidates only.
-        for ctx in self.body_contexts() {
-            for span in find_symbol_literal_sites(ctx.roots.iter().copied(), ctx.source, old) {
-                plan.candidates.push(vec![RenameEdit {
-                    file: ctx.file.clone(),
-                    span,
-                    new_text: format!("#{new}"),
-                }]);
-            }
-        }
+        plan.candidates
+            .extend(self.symbol_literal_candidates(old, new));
         plan.confirmed
             .sort_by(|a, b| (&a.file, a.span.start()).cmp(&(&b.file, b.span.start())));
         plan.candidates
@@ -724,9 +828,9 @@ fn whole_word_offset(text: &str, name: &str) -> Option<usize> {
 /// The new selector must have the same shape and arity as the old one.
 fn validate_new_selector(old: &str, new: &str) -> Result<(), RenameRefusal> {
     if new == old {
-        return Err(RenameRefusal::new(
-            "The new name is the same as the old one.",
-        ));
+        return Err(RenameRefusal::new(format!(
+            "The new name is the same as the old one (#{old})."
+        )));
     }
     let ident = |s: &str| {
         let mut cs = s.chars();

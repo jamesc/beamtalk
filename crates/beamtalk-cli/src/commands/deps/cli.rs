@@ -244,14 +244,21 @@ fn run_add(
             lockfile.write(project_root)
         };
         if let Err(err) = write_lock() {
-            let _ = crate::commands::util::write_atomic(
+            let restored = crate::commands::util::write_atomic(
                 &manifest_path,
                 &original_manifest,
                 ".beamtalk-manifest.",
             );
-            return Err(
-                err.wrap_err("Failed to update beamtalk.lock; beamtalk.toml was left unchanged")
-            );
+            // Only claim the manifest is unchanged when the restore worked.
+            return Err(match restored {
+                Ok(()) => {
+                    err.wrap_err("Failed to update beamtalk.lock; beamtalk.toml was left unchanged")
+                }
+                Err(restore_err) => err.wrap_err(format!(
+                    "Failed to update beamtalk.lock, and restoring beamtalk.toml failed \
+                     ({restore_err}); beamtalk.toml still contains the new dependency"
+                )),
+            });
         }
     }
 
@@ -478,8 +485,8 @@ fn dep_version(project_root: &Utf8Path, name: &str, source: &DependencySource) -
     };
 
     let manifest_path = dep_root.join("beamtalk.toml");
-    if let Ok(m) = manifest::parse_manifest(&manifest_path) {
-        m.version
+    if let Ok(m) = manifest::parse_dependency_manifest_full(&manifest_path) {
+        m.package.version
     } else {
         "?".to_string()
     }

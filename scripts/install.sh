@@ -82,6 +82,13 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# The swap journal is `dest|slot` per line, so a `|` or newline in the prefix
+# would truncate a rollback path.
+case "${PREFIX}" in
+    *'|'*|*'
+'*) echo "Error: --prefix may not contain '|' or a newline"; exit 1 ;;
+esac
+
 # ─── Detect platform ────────────────────────────────────────────────────
 
 detect_platform() {
@@ -126,6 +133,13 @@ resolve_version() {
     if [ -n "${VERSION}" ]; then
         # Strip leading 'v' if present for consistency, then add it back
         VERSION="${VERSION#v}"
+        # It is spliced into a download URL and a file name: no path or URL
+        # metacharacters.
+        case "${VERSION}" in
+            ''|*[!A-Za-z0-9._+-]*|[!A-Za-z0-9]*)
+                echo "Error: invalid version '${VERSION}'"
+                exit 1 ;;
+        esac
         TAG="v${VERSION}"
         return
     fi
@@ -164,15 +178,16 @@ resolve_version() {
     TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
     if command -v curl >/dev/null 2>&1; then
         if [ -n "${TOKEN}" ]; then
-            RELEASE_JSON=$(curl -sS --retry 3 -H "Authorization: Bearer ${TOKEN}" "${RELEASE_URL}")
+            RELEASE_JSON=$(curl -sS --proto '=https' --proto-redir '=https' --retry 3 -H "Authorization: Bearer ${TOKEN}" "${RELEASE_URL}")
         else
-            RELEASE_JSON=$(curl -sS --retry 3 "${RELEASE_URL}")
+            RELEASE_JSON=$(curl -sS --proto '=https' --proto-redir '=https' --retry 3 "${RELEASE_URL}")
         fi
     elif command -v wget >/dev/null 2>&1; then
+        require_https_only_wget
         if [ -n "${TOKEN}" ]; then
-            RELEASE_JSON=$(wget -qO- --header="Authorization: Bearer ${TOKEN}" "${RELEASE_URL}")
+            RELEASE_JSON=$(wget -qO- --https-only --header="Authorization: Bearer ${TOKEN}" "${RELEASE_URL}")
         else
-            RELEASE_JSON=$(wget -qO- "${RELEASE_URL}")
+            RELEASE_JSON=$(wget -qO- --https-only "${RELEASE_URL}")
         fi
     else
         echo "Error: curl or wget required"
@@ -199,13 +214,25 @@ resolve_version() {
 
 # ─── Download and verify ────────────────────────────────────────────────
 
+# BT-5185: downloads must stay on https, redirects included. GNU wget has
+# --https-only; BusyBox wget (Alpine) does not and would fail with an
+# unrelated-looking usage error, so say what is missing instead.
+require_https_only_wget() {
+    if ! wget --help 2>&1 | grep -q -- '--https-only'; then
+        echo "Error: this wget does not support --https-only (BusyBox wget?), so downloads"
+        echo "  cannot be kept on https. Install curl (e.g. 'apk add curl') or GNU wget and retry."
+        exit 1
+    fi
+}
+
 download() {
     URL="$1"
     DEST="$2"
     if command -v curl >/dev/null 2>&1; then
-        curl --proto '=https' -LsSf "${URL}" -o "${DEST}"
+        curl --proto '=https' --proto-redir '=https' -LsSf "${URL}" -o "${DEST}"
     elif command -v wget >/dev/null 2>&1; then
-        wget -qO "${DEST}" "${URL}"
+        require_https_only_wget
+        wget -qO "${DEST}" --https-only "${URL}"
     else
         echo "Error: curl or wget required"
         exit 1
@@ -304,11 +331,14 @@ install_beamtalk() {
 # What --uninstall removes (the paths a release archive installs).
 OWNED_DIRS="lib/beamtalk share/beamtalk"
 OWNED_BINS="beamtalk beamtalk-compiler-port beamtalk-lsp beamtalk-mcp beamtalk-exec"
+MANIFEST_NAME=".beamtalk-installed"
 
-# Every unit the archive supplies is replaced wholesale: each child of bin/,
-# lib/ and share/ (bin/beamtalk, lib/beamtalk, share/beamtalk, ...) and any
-# other top-level entry. PREFIX itself, and anything else in bin/ lib/ share/,
-# is untouched, so a shared prefix such as /usr/local is safe.
+# Every unit the archive supplies is replaced wholesale: each child of a
+# top-level directory (bin/beamtalk, lib/beamtalk, share/beamtalk, and the
+# same for any other top-level directory such as include/ or man/), and each
+# top-level file. A top-level directory itself is never a unit (BT-5185):
+# PREFIX, and anything else in its directories, is untouched, so a shared
+# prefix such as /usr/local is safe.
 #
 # The swap is journalled: before a unit is replaced its old copy is moved into
 # $OLD and recorded; if any later step fails, rollback_swap undoes every unit
@@ -341,8 +371,13 @@ install_unit() {
     if [ -e "${dest}" ] || [ -L "${dest}" ]; then
         mv "${dest}" "${slot}" || rollback_swap
     fi
-    printf '%s|%s\n' "${dest}" "${slot}" >> "${OLD}/journal"
+    if ! printf '%s|%s\n' "${dest}" "${slot}" >> "${OLD}/journal"; then
+        # Not journalled, so rollback cannot restore it: put the old copy back.
+        if [ -e "${slot}" ] || [ -L "${slot}" ]; then mv "${slot}" "${dest}" || true; fi
+        rollback_swap
+    fi
     mv "${src}" "${dest}" || rollback_swap
+    printf '%s\n' "${dest#"${PREFIX}"/}" >> "${OLD}/manifest" || rollback_swap
 }
 
 swap_into_prefix() {
@@ -362,22 +397,47 @@ swap_into_prefix() {
     # deletes them.
     OLD=$(mktemp -d "${PREFIX}/.beamtalk-old.XXXXXX")
     : > "${OLD}/journal"
+    : > "${OLD}/manifest"
     UNIT_N=0
     for top in "${STAGE}/"*; do
         [ -e "${top}" ] || continue
         name="$(basename "${top}")"
-        case "${name}" in
-            bin|lib|share)
-                for unit in "${top}/"*; do
-                    [ -e "${unit}" ] || continue
-                    install_unit "${unit}" "${PREFIX}/${name}/$(basename "${unit}")"
-                done
-                ;;
-            *)
-                install_unit "${top}" "${PREFIX}/${name}"
-                ;;
-        esac
+        if [ -d "${top}" ] && [ ! -L "${top}" ]; then
+            for unit in "${top}/"*; do
+                [ -e "${unit}" ] || continue
+                install_unit "${unit}" "${PREFIX}/${name}/$(basename "${unit}")"
+            done
+        else
+            install_unit "${top}" "${PREFIX}/${name}"
+        fi
     done
+    # Record what this install owns so --uninstall removes exactly it, even
+    # for units a release adds later (the OWNED_* lists are only a fallback).
+    # BT-5185: keep entries an earlier install recorded that are still there,
+    # so a unit a newer release dropped is not orphaned.
+    if [ -f "${PREFIX}/${MANIFEST_NAME}" ]; then
+        while IFS= read -r rel; do
+            case "${rel}" in
+                ''|/*|..|../*|*/..|*/../*) continue ;;
+            esac
+            if [ -d "${PREFIX}/${rel}" ] && [ ! -L "${PREFIX}/${rel}" ] \
+                && [ "${rel}" = "${rel%%/*}" ]; then
+                # A bare top-level directory an older install.sh installed
+                # wholesale: carry its children as units instead, since
+                # --uninstall never removes a bare directory.
+                for child in "${PREFIX}/${rel}/"*; do
+                    [ -e "${child}" ] || [ -L "${child}" ] || continue
+                    unit="${rel}/$(basename "${child}")"
+                    grep -qxF -- "${unit}" "${OLD}/manifest" \
+                        || printf '%s\n' "${unit}" >> "${OLD}/manifest" || rollback_swap
+                done
+            elif [ -e "${PREFIX}/${rel}" ] || [ -L "${PREFIX}/${rel}" ]; then
+                grep -qxF -- "${rel}" "${OLD}/manifest" \
+                    || printf '%s\n' "${rel}" >> "${OLD}/manifest" || rollback_swap
+            fi
+        done < "${PREFIX}/${MANIFEST_NAME}"
+    fi
+    cp "${OLD}/manifest" "${PREFIX}/${MANIFEST_NAME}" || rollback_swap
     rm -rf "${OLD}"
 }
 
@@ -389,6 +449,26 @@ uninstall_beamtalk() {
     for d in ${OWNED_DIRS}; do
         rm -rf "${PREFIX:?}/${d}"
     done
+    if [ -f "${PREFIX}/${MANIFEST_NAME}" ]; then
+        while IFS= read -r rel; do
+            case "${rel}" in
+                ''|/*|..|../*|*/..|*/../*) continue ;;
+            esac
+            # BT-5185: a bare top-level name is a whole shared directory
+            # (include, man) in a manifest an older install.sh wrote; never
+            # remove one of those wholesale. Units are always <dir>/<name>.
+            case "${rel}" in
+                */*) ;;
+                *) [ -d "${PREFIX}/${rel}" ] && [ ! -L "${PREFIX}/${rel}" ] && continue ;;
+            esac
+            rm -rf "${PREFIX:?}/${rel}"
+            # Tidy its directory if that leaves it empty.
+            case "${rel}" in
+                */*) rmdir "${PREFIX}/${rel%/*}" 2>/dev/null || true ;;
+            esac
+        done < "${PREFIX}/${MANIFEST_NAME}"
+        rm -f "${PREFIX}/${MANIFEST_NAME}"
+    fi
     rm -f "${PREFIX}/.beamtalk-build.sha256"
     # Tidy up now-empty directories; rmdir refuses non-empty ones, so a shared
     # prefix keeps whatever else lives in it.

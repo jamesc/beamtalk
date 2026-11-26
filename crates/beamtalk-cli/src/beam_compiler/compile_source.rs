@@ -8,7 +8,7 @@
 //! `CompileContext` and `ClassHierarchyContext` carry the cross-file inputs;
 //! `compile_source_with_bindings` runs lex → parse → analyse → codegen for one
 //! file and `write_core_erlang_with_bindings` writes the result. This is the
-//! front-end half of the former `beam_compiler.rs` (BT-4700); the escript /
+//! front-end half of the former `beam_compiler.rs` (BT-4700); the
 //! `BeamCompiler` driver stays in the parent module. Behaviour is unchanged and
 //! every item is re-exported from `beam_compiler` under its old path.
 
@@ -70,23 +70,6 @@ pub struct ClassHierarchyContext {
     /// `analyse_full`'s merge order lets the module's own declaration take
     /// precedence over its duplicate pre-loaded entry.
     pub pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
-    /// Project-wide standalone extension definitions from Pass 1.
-    /// Registered into each file's class hierarchy during Pass 2 so
-    /// same-project cross-file extensions resolve instead of producing
-    /// false `Dnu` hints (ADR 0066 / ADR 0100 Rule 2 WS1).
-    pub extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
-    /// Whether `extension_index` holds every dependency's extension methods
-    /// (ADR 0070 WS3, BT-4608) — loaded completely by a dependency resolution
-    /// that succeeded. Analysis lifts the pre-WS3 dependency guard
-    /// (`CompilerOptions::dependency_extensions_unknown`, which callers set
-    /// conservatively to "the package has dependencies") only when this
-    /// holds; the default `false` keeps it on.
-    ///
-    /// **Precondition:** set it `true` only after dependency resolution
-    /// *succeeded* and every dependency's `DependencyExtensions` was complete
-    /// — `analyse_source_with_bindings` passes `resolved = true` to the
-    /// shared rule on the strength of this field alone.
-    pub dependency_extensions_complete: bool,
 }
 
 /// Compilation context bundling hierarchy data with dependency resolution settings.
@@ -348,8 +331,7 @@ pub(crate) fn diagnostics_are_errors(
                 && (!matches!(
                     d.category,
                     Some(
-                        beamtalk_core::source_analysis::DiagnosticCategory::Deprecation
-                            | beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass
+                        beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass
                             | beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedFfi
                             | beamtalk_core::source_analysis::DiagnosticCategory::ArityMismatch
                     )
@@ -399,6 +381,10 @@ pub(crate) fn analyse_source_with_bindings(
         diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions(
             &mut module,
         ));
+        // ADR 0152: a `>>` whose target this file does not define is an error.
+        diagnostics.extend(beamtalk_core::compilation::reject_cross_file_extensions(
+            &module,
+        ));
         (source, module, diagnostics)
     };
 
@@ -419,18 +405,7 @@ pub(crate) fn analyse_source_with_bindings(
         );
     let diag_ctx =
         beamtalk_language_service::queries::diagnostic_provider::ProjectDiagnosticContext {
-            // The pre-WS3 dependency guard: `options` says whether the
-            // package has dependencies; the hierarchy says whether all their
-            // extensions are in `extension_index` (ADR 0070 WS3, BT-4608).
-            options: beamtalk_core::CompilerOptions {
-                dependency_extensions_unknown:
-                    beamtalk_project::dependency_extensions::dependency_extensions_unknown(
-                        options.dependency_extensions_unknown,
-                        true,
-                        ctx.hierarchy.dependency_extensions_complete,
-                    ),
-                ..options.clone()
-            },
+            options: options.clone(),
             cross_file_classes,
             pre_loaded_protocols: ctx.hierarchy.pre_loaded_protocols.clone(),
             pre_loaded_protocol_defs: ctx.hierarchy.pre_loaded_protocol_defs.clone(),
@@ -441,7 +416,6 @@ pub(crate) fn analyse_source_with_bindings(
             // "current file's own aliases" pre-filter is needed here (mirrors
             // `pre_loaded_protocols` immediately above).
             pre_loaded_aliases: ctx.hierarchy.pre_loaded_aliases.clone(),
-            cross_file_extensions: ctx.hierarchy.extension_index.clone(),
             native_type_registry: ctx.native_type_registry.clone(),
             dep_registry: ctx.dep_registry,
             strict_deps: ctx.strict_deps,

@@ -28,7 +28,7 @@ derived_cache_test_() ->
             fun write_during_compute_is_not_served/0},
         {"a hit failing the validity check is recomputed and repaired",
             fun invalid_hit_is_recomputed/0},
-        {"insert, merge_identity, set_runtime_class_methods, put_class_variables and delete each invalidate",
+        {"insert, merge_identity, set_runtime_class_methods, put_process_bound_selectors and delete each invalidate",
             fun metadata_writes_invalidate/0},
         {"a superclass cycle terminates (BT-4065)", fun superclass_cycle_terminates/0}
     ]}.
@@ -81,9 +81,10 @@ metadata_writes_invalidate() ->
         %% ADR 0142 §2 (BT-4299): a runtime fun at an ancestor changes a
         %% descendant's resolved owner, so it must drop derived facts too.
         fun() -> beamtalk_class_metadata:set_runtime_class_methods(Class, [foo]) end,
-        %% BT-4299: so must a class-variable change (it feeds direct_call_ok).
-        fun() -> beamtalk_class_metadata:put_class_variables(Class, true) end,
-        fun() -> beamtalk_class_metadata:put_class_variables(Class, false) end,
+        %% BT-4299: so must a change to the process-bound list (it feeds the
+        %% in-caller owner memo).
+        fun() -> beamtalk_class_metadata:put_process_bound_selectors(Class, [new]) end,
+        fun() -> beamtalk_class_metadata:put_process_bound_selectors(Class, [new, spawn]) end,
         fun() -> beamtalk_class_metadata:delete(Class) end
     ],
     lists:foreach(

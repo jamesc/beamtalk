@@ -6,7 +6,6 @@
 // actor siblings.
 
 Object subclass: Bt3911ArmFramesClass
-  classState: n = 0
 
   // BT-3891: a local bound in a conditional arm of a `whileTrue:` condition
   // is a local of that arm; it used to emit an unbound `StateAcc`.

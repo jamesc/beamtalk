@@ -52,7 +52,7 @@ impl CoreErlangGenerator {
     /// Generates code for a literal value: the Core Erlang term a Beamtalk
     /// literal is.
     ///
-    /// - Integers: `42` → `42`
+    /// - Integers: `42` → `42` (a bignum literal renders its digits verbatim)
     /// - Floats: `3.14` → `3.14`
     /// - Strings: `"hello"` → tagged `{'beamtalk_string', #{#<104>(8,1,...), ...}#}` (BT-4170)
     /// - Symbols: `#foo` → atom `'foo'`
@@ -61,6 +61,7 @@ impl CoreErlangGenerator {
     pub(super) fn literal_doc(lit: &Literal) -> Document<'static> {
         match lit {
             Literal::Integer(n) => leaf::int_lit(*n),
+            Literal::BigInteger(digits) => leaf::big_int_lit(digits),
             Literal::Float(f) => leaf::float_lit(*f),
             Literal::String(s) => leaf::tagged_string_lit(s),
             Literal::Symbol(s) => leaf::atom(s.to_string()),
@@ -627,14 +628,6 @@ impl CoreErlangGenerator {
             .is_some_and(|h| h.state_field_kind(class_name, field_name) == SlotKind::Late)
     }
 
-    /// Class-side counterpart to [`Self::is_late_state_field`], for a
-    /// `classState:` slot read via `self.<var>` in a class method.
-    fn is_late_class_var(&self, class_name: &str, var_name: &str) -> bool {
-        self.class_hierarchy
-            .as_ref()
-            .is_some_and(|h| h.class_variable_kind(class_name, var_name) == SlotKind::Late)
-    }
-
     /// ADR 0124 §3 (as amended by BT-4061): builds the
     /// `call 'beamtalk_error':'raise'(...)` for the `'error'` (absent-key)
     /// arm of [`Self::generate_late_field_read`]. Reuses the shared
@@ -768,22 +761,12 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         field: &Identifier,
     ) -> Result<Document<'static>> {
-        // ADR 0130 §2: a class method reads a class variable in place from the
-        // class process's dictionary (inlined, the runtime helper on a miss).
+        // ADR 0153: a class has no slots. Semantic analysis rejects `self.x`
+        // in a class method; this is the backstop for any path it misses.
         if self.in_class_method() {
-            if self.is_class_var_field_read(receiver, field) {
-                let class_name = self.class_name();
-                let late = self.is_late_class_var(&class_name, field.name.as_str());
-                return Ok(self.class_var_read_doc(field.name.as_str(), late));
-            }
-            if Self::is_self_receiver(receiver)
-                && let Some(err) = self.inherited_class_var_error(field.name.as_str(), field.span)
-            {
-                return Err(err);
-            }
             return Err(CodeGenError::UnsupportedFeature {
                 feature: format!(
-                    "cannot access instance field '{}' in a class method",
+                    "cannot access instance field '{}' in a class method: a class has no slots (ADR 0153 removed class variables)",
                     field.name
                 ),
                 span: Some(field.span),
@@ -885,6 +868,21 @@ impl CoreErlangGenerator {
         })
     }
 
+    /// ADR 0153: a field write in a class method. Semantic analysis rejects
+    /// `self.x := v` there; this is the codegen backstop, shared by the closed
+    /// and open lowerings.
+    pub(super) fn class_side_field_write_error(
+        field_name: &str,
+        span: beamtalk_core::source_analysis::Span,
+    ) -> CodeGenError {
+        CodeGenError::UnsupportedFeature {
+            feature: format!(
+                "cannot assign to instance field '{field_name}' in a class method: a class has no slots (ADR 0153 removed class variables)"
+            ),
+            span: Some(span),
+        }
+    }
+
     /// Generates code for a field assignment (`self.field := value`).
     ///
     /// Uses threading to simulate mutation in Core Erlang. The generated pattern varies
@@ -893,8 +891,7 @@ impl CoreErlangGenerator {
     /// - **Actor context**: `State{n}` threading via `maps:put`
     /// - **`ValueType` context**: `Self{n}` threading — each assignment produces
     ///   a new immutable snapshot; `self` in subsequent expressions resolves to `Self{n}`
-    /// - **Class method**: an in-place `put` into the class process's
-    ///   dictionary (ADR 0130 §2), handled before any threading
+    /// - **Class method**: rejected (ADR 0153: a class has no slots)
     ///
     /// ```erlang
     /// let _Val = <value> in
@@ -916,22 +913,9 @@ impl CoreErlangGenerator {
         field_name: &str,
         value: &Expression,
     ) -> Result<Document<'static>> {
-        // ADR 0130 §2: a class-variable write is an in-place `put` that answers
-        // the assigned value, an expression like any other (no rebinding).
+        // ADR 0153: a class has no slots (see `generate_field_access`).
         if self.in_class_method() {
-            if !self.class_var_names().contains(field_name) {
-                if let Some(err) = self.inherited_class_var_error(field_name, value.span()) {
-                    return Err(err);
-                }
-                return Err(CodeGenError::UnsupportedFeature {
-                    feature: format!(
-                        "cannot assign to instance field '{field_name}' in a class method"
-                    ),
-                    span: Some(value.span()),
-                });
-            }
-            let value_doc = self.expression_doc(value)?;
-            return Ok(self.class_var_write_doc(field_name, value_doc));
+            return Err(Self::class_side_field_write_error(field_name, value.span()));
         }
         // ADR 0137 §3: an actor closure writes a field in place, through the
         // cell; the assignment answers the assigned value and rebinds nothing.
@@ -1157,7 +1141,7 @@ impl CoreErlangGenerator {
         // ADR 0084: A `classBuilder … classMethods: #{…}; register`
         // cascade gets its `classMethods:` block-literal values lowered as
         // class-method funs (see `generate_class_methods_map_arg`).
-        let builder_ctx: Option<(String, Vec<String>)> =
+        let builder_ctx: Option<String> =
             super::class_builder_source::builder_class_method_context(receiver, messages);
 
         let receiver_var = self.fresh_temp_var("Receiver");
@@ -1200,39 +1184,32 @@ impl CoreErlangGenerator {
             // `addClassMethod: #sel body: [block]` is the incremental
             // counterpart — its block (the second argument) is lowered the same
             // way, keeping the selector argument as an ordinary value.
-            let arg_docs =
-                match &builder_ctx {
-                    Some((bclass, cvars)) if selector.name().as_str() == "classMethods:" => {
-                        match arguments {
-                            [Expression::MapLiteral { pairs, .. }] => {
-                                vec![self.generate_class_methods_map_arg(
-                                    pairs, bclass, cvars, &mut docs,
-                                )?]
-                            }
-                            _ => self.generate_cascade_args(arguments, &mut docs)?,
-                        }
-                    }
-                    Some((bclass, cvars)) if selector.name().as_str() == "addClassMethod:body:" => {
-                        match arguments {
-                            [
-                                sel_arg @ Expression::Literal(Literal::Symbol(_), _),
-                                Expression::Block(block),
-                            ] => {
-                                let sel_doc = self.generate_cascade_args(
-                                    std::slice::from_ref(sel_arg),
-                                    &mut docs,
-                                )?;
-                                let mut combined = sel_doc;
-                                combined.push(self.generate_class_method_single_arg(
-                                    sel_arg, block, bclass, cvars,
-                                )?);
-                                combined
-                            }
-                            _ => self.generate_cascade_args(arguments, &mut docs)?,
-                        }
+            let arg_docs = match &builder_ctx {
+                Some(bclass) if selector.name().as_str() == "classMethods:" => match arguments {
+                    [Expression::MapLiteral { pairs, .. }] => {
+                        vec![self.generate_class_methods_map_arg(pairs, bclass, &mut docs)?]
                     }
                     _ => self.generate_cascade_args(arguments, &mut docs)?,
-                };
+                },
+                Some(bclass) if selector.name().as_str() == "addClassMethod:body:" => {
+                    match arguments {
+                        [
+                            sel_arg @ Expression::Literal(Literal::Symbol(_), _),
+                            Expression::Block(block),
+                        ] => {
+                            let sel_doc = self
+                                .generate_cascade_args(std::slice::from_ref(sel_arg), &mut docs)?;
+                            let mut combined = sel_doc;
+                            combined.push(
+                                self.generate_class_method_single_arg(sel_arg, block, bclass)?,
+                            );
+                            combined
+                        }
+                        _ => self.generate_cascade_args(arguments, &mut docs)?,
+                    }
+                }
+                _ => self.generate_cascade_args(arguments, &mut docs)?,
+            };
 
             // BT-4596: every cascade message is a dynamic send, reported at
             // its own line.

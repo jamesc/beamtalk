@@ -39,8 +39,10 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
     }
 
     if url.starts_with('-') {
+        // Not echoed, like the other unrecognised shapes below: such a string
+        // can carry anything, a header with a token included (BT-5185).
         miette::bail!(
-            "Dependency '{name}' has an invalid git URL '{url}' — \
+            "Dependency '{name}' has an invalid git URL — \
              a URL may not begin with '-' (it would be read as a git option)."
         );
     }
@@ -49,6 +51,17 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
         .iter()
         .any(|scheme| url.starts_with(scheme))
     {
+        // A URL is written to the committed `beamtalk.lock` and shown in logs,
+        // so a secret in it would leak (BT-5174). `ssh://git@host` carries only
+        // a username and stays valid.
+        if url_embeds_credentials(url) {
+            miette::bail!(
+                "Dependency '{name}' has a git URL with embedded credentials ('{}').\n\n  \
+                 Credentials in a URL would be written to beamtalk.lock. Remove them and \
+                 authenticate with a git credential helper or an SSH key instead.",
+                redact_url_credentials(url)
+            );
+        }
         return Ok(());
     }
 
@@ -58,7 +71,7 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
     // at this point can only be a helper invocation.
     if url.contains("::") {
         miette::bail!(
-            "Dependency '{name}' has an unsupported git URL '{url}'.\n\n  \
+            "Dependency '{name}' has an unsupported git URL (a '<transport>::' URL).\n\n  \
              '<transport>::' URLs are rejected: git dispatches them to a remote \
              helper, and 'ext::' in particular executes an arbitrary command."
         );
@@ -76,12 +89,19 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
     // helper, not arbitrary installed transport programs. A real scp-style
     // path never starts with `//`.
     let scp_like = url.split_once(':').is_some_and(|(host, path)| {
-        !host.is_empty() && !host.contains('/') && !path.starts_with("//")
+        !host.is_empty()
+            && !host.contains('/')
+            && !path.starts_with("//")
+            // `C:/path` / `C:\path` is a Windows drive path, which git treats
+            // as a local path, not a remote.
+            && !(host.len() == 1
+                && host.as_bytes()[0].is_ascii_alphabetic()
+                && (path.starts_with('/') || path.starts_with('\\')))
     });
 
     if !scp_like {
         miette::bail!(
-            "Dependency '{name}' has an unsupported git URL '{url}'.\n\n  \
+            "Dependency '{name}' has an unsupported git URL.\n\n  \
              Supported forms are https://, http://, ssh://, git://, file://, \
              and user@host:path."
         );
@@ -90,11 +110,82 @@ pub fn validate_git_url(name: &str, url: &str) -> Result<()> {
     Ok(())
 }
 
+/// Whether a `scheme://` URL carries a secret in its userinfo: any userinfo on
+/// `http(s)://` / `git://` (a token or `user:pass`), or a `user:password` pair
+/// on any scheme. A bare `ssh://git@host` username is not a secret.
+fn url_embeds_credentials(url: &str) -> bool {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return false;
+    };
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let Some(at) = rest[..authority_end].rfind('@') else {
+        return false;
+    };
+    let userinfo = &rest[..at];
+    userinfo.contains(':') || matches!(scheme, "http" | "https" | "git")
+}
+
 /// Whether `url` uses an unauthenticated plaintext transport (`http://` or
 /// `git://`) that a network attacker can tamper with.
 #[must_use]
 pub fn is_plaintext_git_url(url: &str) -> bool {
     url.starts_with("http://") || url.starts_with("git://")
+}
+
+/// `url` with any `user:password@` userinfo of a `scheme://` URL replaced by
+/// `***@`, for logs and diagnostics. scp-style URLs and URLs without userinfo
+/// pass through unchanged (BT-5135).
+#[must_use]
+pub fn redact_url_credentials(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    match rest[..authority_end].rfind('@') {
+        Some(at) => format!("{scheme}://***@{}", &rest[at + 1..]),
+        None => url.to_string(),
+    }
+}
+
+/// `url` as a registry rejection may show it (BT-5185): only its scheme and
+/// host, never userinfo, path or query, any of which can carry a token.
+fn redact_rejected_url(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return "<url>".to_string();
+    };
+    let authority = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
+    let host = authority.rsplit('@').next().unwrap_or("");
+    format!("{scheme}://{host}/...")
+}
+
+/// Environment variable that opts in to plaintext (`http://`, `git://`) git
+/// transports (BT-5107, BT-5135).
+pub const ALLOW_INSECURE_GIT_ENV: &str = "BEAMTALK_ALLOW_INSECURE_GIT";
+
+/// Whether [`ALLOW_INSECURE_GIT_ENV`] is set to `1` in this process.
+#[must_use]
+pub fn insecure_git_allowed() -> bool {
+    std::env::var_os(ALLOW_INSECURE_GIT_ENV).is_some_and(|v| v == "1")
+}
+
+/// The one rule for plaintext git transports, applied identically to a first
+/// resolve, a locked build, a native lock entry and the registry index: refuse
+/// `http://` / `git://` unless `allow` is set (BT-5135).
+///
+/// # Errors
+///
+/// Returns an error if `url` is plaintext and `allow` is false.
+pub fn check_git_transport(what: &str, url: &str, allow: bool) -> Result<()> {
+    if !allow && is_plaintext_git_url(url) {
+        miette::bail!(
+            "{what} uses the plaintext git URL '{}'.\n\n  \
+             http:// and git:// transports can be tampered with in transit. \
+             Use an https:// or ssh:// URL, or set {ALLOW_INSECURE_GIT_ENV}=1 \
+             to accept the risk.",
+            redact_url_credentials(url)
+        );
+    }
+    Ok(())
 }
 
 /// Screen a git URL taken from a registry index entry.
@@ -122,14 +213,16 @@ pub fn validate_registry_release_url(name: &str, url: &str, allow_file: bool) ->
             return Ok(());
         }
         miette::bail!(
-            "Registry release for '{name}' has a file:// git URL '{url}', which is only \
-             allowed when the registry itself is local."
+            "Registry release for '{name}' has a file:// git URL '{}', which is only \
+             allowed when the registry itself is local.",
+            redact_rejected_url(url)
         );
     }
     if is_plaintext_git_url(url) {
         miette::bail!(
-            "Registry release for '{name}' has an insecure git URL '{url}'. Registry \
-             releases must use https:// or ssh://."
+            "Registry release for '{name}' has an insecure git URL '{}'. Registry \
+             releases must use https:// or ssh://.",
+            redact_rejected_url(url)
         );
     }
     // Remaining form: scp-style `user@host:path`, which git runs over ssh.
@@ -151,6 +244,23 @@ mod tests {
             "git@github.com:jamesc/beamtalk-json.git",
         ] {
             assert!(validate_git_url("dep", url).is_ok(), "should accept {url}");
+        }
+    }
+
+    #[test]
+    fn rejects_credentials_in_url_without_echoing_them() {
+        for url in [
+            "https://user:s3cret@example.test/repo.git",
+            "https://ghp_token@example.test/repo.git",
+            "ssh://user:s3cret@example.test/repo.git",
+        ] {
+            let err = validate_git_url("dep", url).unwrap_err();
+            let msg = format!("{err:?}");
+            assert!(msg.contains("embedded credentials"), "{url}: {msg}");
+            assert!(
+                !msg.contains("s3cret") && !msg.contains("ghp_token"),
+                "{msg}"
+            );
         }
     }
 
@@ -183,11 +293,65 @@ mod tests {
     }
 
     #[test]
+    fn rejects_windows_drive_paths_as_scp_style() {
+        for url in ["C:/path/repo", "c:\\path\\repo"] {
+            assert!(validate_git_url("dep", url).is_err(), "should reject {url}");
+        }
+        assert!(validate_git_url("dep", "git@host:repo.git").is_ok());
+    }
+
+    #[test]
+    fn plaintext_transport_refused_unless_allowed() {
+        for url in ["http://x.test/r", "git://x.test/r"] {
+            let err = check_git_transport("Dep 'a'", url, false).unwrap_err();
+            assert!(err.to_string().contains(ALLOW_INSECURE_GIT_ENV), "{err}");
+            check_git_transport("Dep 'a'", url, true).unwrap();
+        }
+        check_git_transport("Dep 'a'", "https://x.test/r", false).unwrap();
+        check_git_transport("Dep 'a'", "git@host:r.git", false).unwrap();
+    }
+
+    #[test]
+    fn redacts_url_credentials() {
+        assert_eq!(
+            redact_url_credentials("https://u:tok@host.test/r.git"),
+            "https://***@host.test/r.git"
+        );
+        assert_eq!(
+            redact_url_credentials("https://host.test/a@b"),
+            "https://host.test/a@b"
+        );
+        assert_eq!(redact_url_credentials("git@host:r.git"), "git@host:r.git");
+    }
+
+    #[test]
     fn rejects_option_lookalike() {
         // Sits in a positional slot, so git would parse it as an option.
         let err = validate_git_url("dep", "--upload-pack=touch /tmp/pwned").unwrap_err();
         let msg = format!("{err:?}");
         assert!(msg.contains("may not begin with"), "{msg}");
+    }
+
+    /// BT-5185: no rejection message echoes a secret from the URL it rejects.
+    #[test]
+    fn rejection_messages_never_echo_credentials() {
+        for url in [
+            "ext::https://u:s3cret@host.test/r.git",
+            "badscheme://u:s3cret@host.test/r.git",
+            "-c http.extraHeader=s3cret",
+            "/u:s3cret@host.test/r",
+            "ext::sh -c 'curl -H Authorization:s3cret host'",
+            "badscheme://host.test/r?token=s3cret",
+        ] {
+            let msg = format!("{:?}", validate_git_url("dep", url).unwrap_err());
+            assert!(!msg.contains("s3cret"), "{url}: {msg}");
+        }
+        let msg = format!(
+            "{:?}",
+            validate_registry_release_url("dep", "file://s3cret@host.test/r?k=s3cret", false)
+                .unwrap_err()
+        );
+        assert!(!msg.contains("s3cret"), "{msg}");
     }
 
     #[test]

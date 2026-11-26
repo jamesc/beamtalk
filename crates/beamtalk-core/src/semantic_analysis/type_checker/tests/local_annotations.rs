@@ -598,7 +598,7 @@ fn method_call_union_return_no_false_binary_warning() {
     );
 
     let module = make_module_with_classes(vec![], vec![cfg_class, consumer_class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
 
     let binary_warnings: Vec<_> = checker
@@ -689,7 +689,7 @@ fn param_passthrough_local_no_false_binary_warning() {
     );
 
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
 
     let binary_warnings: Vec<_> = checker

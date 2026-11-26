@@ -123,18 +123,12 @@ Read one configuration setting by sending `Selector` to the supervisor being
 started (`Self`, its own handle): ordinary instance dispatch, in this
 process (ADR 0135 §2).
 
-The send runs under `beamtalk_class_vars:with_snapshot/2` (ADR 0130 §5), as
-the class-side configuration did. Any failure ends `init/1` via
-`config_step/3`.
+Any failure ends `init/1` via `config_step/3`.
 """.
 -spec read_config(tuple(), atom(), atom()) -> term().
 read_config(Self, ClassName, Selector) ->
-    Module = element(3, Self),
-    ClassSelf = beamtalk_supervisor_class_call:make_init_class_self(ClassName, Module),
     config_step(ClassName, Selector, fun() ->
-        beamtalk_class_vars:with_snapshot(ClassSelf, fun() ->
-            beamtalk_message_dispatch:send(Self, Selector, [])
-        end)
+        beamtalk_message_dispatch:send(Self, Selector, [])
     end).
 
 -doc """
@@ -149,8 +143,6 @@ supervisor (OTP `calling_self`, raw or wrapped by dispatch) gets the
 """.
 -spec config_step(atom(), atom(), fun(() -> T)) -> T.
 config_step(ClassName, Selector, Fun) ->
-    %% bt-catcher-audit: not-applicable-reraises - every clause exits init/1, so the
-    %% supervisor process (and any class-variable region in it) ends here
     try
         Fun()
     catch

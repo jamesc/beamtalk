@@ -7,6 +7,7 @@ use beamtalk_core::ast::{
     Pattern,
 };
 use beamtalk_core::source_analysis::Span;
+use beamtalk_core::test_helpers::test_support::wildcard_arm;
 
 fn s() -> Span {
     Span::new(0, 0)
@@ -25,11 +26,6 @@ fn type_arm(binding: &str, class: &str, body: Expression) -> MatchArm {
         body,
         s(),
     )
-}
-
-/// Builds a wildcard `_ -> body` fallthrough arm.
-fn wildcard_arm(body: Expression) -> MatchArm {
-    MatchArm::new(Pattern::Wildcard(s()), body, s())
 }
 
 fn ident_expr(name: &str) -> Expression {

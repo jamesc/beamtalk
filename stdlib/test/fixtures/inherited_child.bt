@@ -5,7 +5,6 @@
 // See fixtures/inherited_parent.bt for the parent.
 
 InheritedParent subclass: InheritedChild
-  classState: counter = 0
 
   // inherited unary class method via `self`
   class tagViaSelf => self parentTag
@@ -19,14 +18,14 @@ InheritedParent subclass: InheritedChild
   // inherited keyword class method via explicit parent class name
   class doubleViaParent: v => InheritedParent stamp: v
 
-  // inherited keyword method that mutates a (duplicate-declared) class var
-  class bumpSelfBy: n => self bumpBy: n
+  // inherited two-keyword method answering a value
+  class addViaSelf: n => self addTo: n by: 3
 
-  // chain two inherited calls in one class method body — each call must
-  // see the ClassVars mutation from the previous one
-  class bumpTwice: n =>
-    self bumpBy: n
-    self bumpBy: n
+  // chain two inherited calls in one class method body — the second sees
+  // the local bound from the first
+  class addTwice: n =>
+    first := self addTo: n by: n
+    self addTo: first by: n
 
   // BT-2007 PR review: a self-send of a selector that doesn't exist on
   // any class in the chain must raise a structured

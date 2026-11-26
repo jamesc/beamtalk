@@ -21,6 +21,8 @@ path = "src/lib.rs"
 [dependencies]
 # why: shared leaf for ~/.beamtalk resolution (see docs/development/architecture-principles.md §6)
 beamtalk-env.workspace = true
+# why: BT-5195 — the shared terminate-then-kill escalation in kill_process
+beamtalk-process.workspace = true
 miette.workspace = true
 sha2.workspace = true
 tracing.workspace = true

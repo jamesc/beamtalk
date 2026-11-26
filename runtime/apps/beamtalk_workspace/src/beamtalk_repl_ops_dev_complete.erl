@@ -734,8 +734,6 @@ collect_methods_with_fun(ClassName, _Depth, Fun) ->
                 {found, AccMap};
             ClassPid ->
                 LocalMethods =
-                    %% bt-catcher-audit: not-applicable-no-block - Fun is an Erlang reflection fun
-                    %% over ClassPid
                     try
                         Fun(ClassPid)
                     catch

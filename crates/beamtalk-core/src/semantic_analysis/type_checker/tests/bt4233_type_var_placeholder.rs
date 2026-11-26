@@ -22,7 +22,7 @@ fn mismatches(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
 #[test]
 fn placeholder_predicate_excludes_real_classes() {
     let module = parse_source("Object subclass: E\n");
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     assert!(!is_type_var_placeholder("E", &hierarchy));
     assert!(is_type_var_placeholder("T", &hierarchy));
     assert!(!is_type_var_placeholder("Integer", &hierarchy));
@@ -66,7 +66,7 @@ typed Object subclass: M
 fn string_level_type_args_use_the_shared_predicate() {
     use crate::semantic_analysis::type_checker::TypeChecker;
     let module = parse_source("Object subclass: E\n");
-    let with_class = ClassHierarchy::build(&module).0.unwrap();
+    let with_class = ClassHierarchy::build(&module).0;
     let without_class = ClassHierarchy::with_builtins();
     let actual: EcoString = "List(Integer)".into();
     let expected: EcoString = "List(E)".into();
@@ -93,7 +93,7 @@ fn substitution_resolver_keeps_real_single_letter_class() {
         SubstitutionMap, resolve_declared_type_in,
     };
     let module = parse_source("Object subclass: E\n");
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let subst = SubstitutionMap::new();
     let resolve = |name: &str| {
         resolve_declared_type_in(

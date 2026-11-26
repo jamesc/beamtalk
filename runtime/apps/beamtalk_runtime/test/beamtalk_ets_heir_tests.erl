@@ -258,22 +258,24 @@ boot_tables_name_heir() ->
     %% beamtalk_runtime_app:start/2, whatever ran before.
     ok = application:stop(beamtalk_runtime),
     try
-        ets:delete(beamtalk_class_state_snapshot)
+        ets:delete(beamtalk_class_warnings)
     catch
         error:badarg -> ok
     end,
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     HeirPid = whereis(beamtalk_ets_heir),
-    %% beamtalk_class_state_snapshot is created by beamtalk_runtime_app:start/2
+    %% beamtalk_class_warnings is created by beamtalk_runtime_app:start/2
     %% (owned by the application master), not by the first class gen_server,
     %% and adopt_owned_tables/0 made the heir its heir. (Other boot tables
     %% are recreated by many test fixtures, so they are not asserted here.)
-    Owner = ets:info(beamtalk_class_state_snapshot, owner),
+    Owner = ets:info(beamtalk_class_warnings, owner),
     ?assertEqual(
         {initial_call, {application_master, start_it, 4}},
         erlang:process_info(Owner, initial_call)
     ),
-    ?assertEqual(HeirPid, ets:info(beamtalk_class_state_snapshot, heir)).
+    ?assertEqual(HeirPid, ets:info(beamtalk_class_warnings, heir)),
+    %% ADR 0153 Phase 3e: the class-state snapshot table is no longer created.
+    ?assertEqual(undefined, ets:info(beamtalk_class_state_snapshot)).
 
 %%====================================================================
 %% Helpers

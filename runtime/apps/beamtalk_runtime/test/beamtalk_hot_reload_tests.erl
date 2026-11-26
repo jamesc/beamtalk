@@ -16,7 +16,9 @@ Tests hot code reloading, actor migration, and module replacement.
 %% gen_server callbacks for a minimal test actor used to exercise
 %% trigger_code_change/2,3 success paths via sys:change_code/4.
 -behaviour(gen_server).
--export([init/1, handle_call/3, handle_cast/2, code_change/3, log/2]).
+-export([
+    init/1, handle_call/3, handle_cast/2, code_change/3, log/2, report_late_hot_reload_failure/3
+]).
 
 %%====================================================================
 %% Tests for beamtalk_hot_reload domain service
@@ -730,6 +732,33 @@ try_change_code_timeout_logs_error_and_resumes_when_change_finishes_test_() ->
         end
     end}.
 
+%% BT-5136: a migration that fails after the reload stopped waiting (it already
+%% answered `timeout`) is reported through the workspace callback, once.
+late_migration_failure_is_reported_test_() ->
+    {timeout, 30, fun() ->
+        Name = bt5136_late_report,
+        true = register(Name, self()),
+        ok = beamtalk_workspace_callback:register(?MODULE),
+        {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+        try
+            {ok, 0, [{Pid, timeout}]} =
+                beamtalk_hot_reload:trigger_code_change(?MODULE, [Pid], {slow_fail, 6500}),
+            ?awaitMessage(
+                {late_failure, ?MODULE, Pid, {error, {left_suspended, _}}}, 15000
+            ),
+            ?assertEqual(suspended, sys_state(Pid))
+        after
+            ok = beamtalk_workspace_callback:unregister(),
+            unregister(Name),
+            unlink(Pid),
+            beamtalk_test_proc:stop(Pid)
+        end
+    end}.
+
+report_late_hot_reload_failure(Module, Pid, Failure) ->
+    bt5136_late_report ! {late_failure, Module, Pid, Failure},
+    ok.
+
 %% BT-5084: the process doing the reload dies mid-change. The actor must still
 %% be resumed once the change finishes (it was left suspended before).
 reloader_killed_mid_change_still_resumes_actor_test_() ->
@@ -747,6 +776,41 @@ reloader_killed_mid_change_still_resumes_actor_test_() ->
             beamtalk_test_wait:dead(Reloader),
             ok = beamtalk_test_wait:until(fun() -> running =:= sys_state(Pid) end, 15000)
         after
+            beamtalk_test_proc:stop(Pid)
+        end
+    end}.
+
+%% BT-5167: the reloading process dies mid-change and the migration then fails.
+%% The worker's result goes to a dead caller; the failure must still be reported
+%% through the workspace callback (it used to reach only the ERROR log).
+failure_after_reloader_death_is_reported_test_() ->
+    {timeout, 30, fun() ->
+        Name = bt5136_late_report,
+        true = register(Name, self()),
+        ok = beamtalk_workspace_callback:register(?MODULE),
+        {ok, Pid} = gen_server:start_link(?MODULE, #{v => 1}, []),
+        unlink(Pid),
+        Parent = self(),
+        Reloader = spawn(fun() ->
+            beamtalk_hot_reload:trigger_code_change(
+                ?MODULE, [Pid], {slow_fail_notify, 1500, Parent}
+            )
+        end),
+        try
+            ?awaitMessage(change_started, 5000),
+            exit(Reloader, kill),
+            beamtalk_test_wait:dead(Reloader),
+            ?awaitMessage(
+                {late_failure, ?MODULE, Pid, {error, {left_suspended, _}}}, 15000
+            )
+        after
+            ok = beamtalk_workspace_callback:unregister(),
+            unregister(Name),
+            try
+                sys:resume(Pid)
+            catch
+                _:_ -> ok
+            end,
             beamtalk_test_proc:stop(Pid)
         end
     end}.

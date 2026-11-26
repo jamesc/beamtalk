@@ -11,7 +11,7 @@ use crate::core_erlang::threaded_ir::ir::{ConsPerCall, FOLD_RESULT_LIST_SLOT};
 fn filter_list() -> FoldResultList {
     FoldResultList {
         slot: FOLD_RESULT_LIST_SLOT,
-        cons: ConsPerCall::AtMostOne,
+        cons: ConsPerCall::Filter { keep_when: true },
     }
 }
 
@@ -138,12 +138,17 @@ fn mismatch(expected: ConsPerCall, slot_conses: usize, stray: Vec<usize>) -> Vec
 #[test]
 fn a_lambda_that_declares_its_kinds_list_is_clean() {
     assert_eq!(
-        verify_fold_result_list_declared(&body(Some(filter_list())), Some(filter_list()), span()),
+        verify_fold_result_list_declared(
+            &body(Some(filter_list())),
+            Some(filter_list()),
+            None,
+            span()
+        ),
         Vec::new()
     );
     // A kind with no result list has nothing to declare.
     assert_eq!(
-        verify_fold_result_list_declared(&body(None), None, span()),
+        verify_fold_result_list_declared(&body(None), None, None, span()),
         Vec::new()
     );
 }
@@ -159,7 +164,7 @@ fn a_lambda_that_does_not_declare_its_kinds_list_is_reported() {
         }]
     };
     assert_eq!(
-        verify_fold_result_list_declared(&body(None), Some(expected), span()),
+        verify_fold_result_list_declared(&body(None), Some(expected), None, span()),
         undeclared(None)
     );
     let other = FoldResultList {
@@ -167,7 +172,7 @@ fn a_lambda_that_does_not_declare_its_kinds_list_is_reported() {
         cons: ConsPerCall::ExactlyOne,
     };
     assert_eq!(
-        verify_fold_result_list_declared(&body(Some(other)), Some(expected), span()),
+        verify_fold_result_list_declared(&body(Some(other)), Some(expected), None, span()),
         undeclared(Some(other))
     );
     // A body that ends in no accumulator statement at all.
@@ -175,6 +180,7 @@ fn a_lambda_that_does_not_declare_its_kinds_list_is_reported() {
         verify_fold_result_list_declared(
             &[ThreadedStmt::Statement(docvec!["ok"], span())],
             Some(expected),
+            None,
             span()
         ),
         undeclared(None)
@@ -196,6 +202,7 @@ fn filter_case(include: AccSlot, skip: AccSlot) -> FoldAccValue {
         prelude: None,
         body: FoldAccBody::BoolCase {
             scrutinee: docvec!["Pred"],
+            negated: false,
             arms: [arm(true, include), arm(false, skip)],
             fallback: docvec!["<V> when 'true' -> error(V)"],
         },
@@ -209,6 +216,7 @@ fn a_filter_that_includes_or_skips_is_clean() {
         verify_fold_result_list_declared(
             &body_of(value, Some(filter_list())),
             Some(filter_list()),
+            None,
             span()
         ),
         Vec::new()
@@ -222,9 +230,10 @@ fn a_filter_arm_that_conses_twice_is_rejected() {
         verify_fold_result_list_declared(
             &body_of(value, Some(filter_list())),
             Some(filter_list()),
+            None,
             span()
         ),
-        mismatch(ConsPerCall::AtMostOne, 2, vec![])
+        mismatch(ConsPerCall::Filter { keep_when: true }, 2, vec![])
     );
 }
 
@@ -235,9 +244,10 @@ fn an_arm_that_conses_into_slot_two_is_rejected() {
         verify_fold_result_list_declared(
             &body_of(value, Some(filter_list())),
             Some(filter_list()),
+            None,
             span()
         ),
-        mismatch(ConsPerCall::AtMostOne, 0, vec![2])
+        mismatch(ConsPerCall::Filter { keep_when: true }, 0, vec![2])
     );
 }
 
@@ -248,6 +258,7 @@ fn a_collect_arm_with_no_cons_is_rejected() {
         verify_fold_result_list_declared(
             &body_of(value, Some(collect_list())),
             Some(collect_list()),
+            None,
             span()
         ),
         mismatch(ConsPerCall::ExactlyOne, 0, vec![])
@@ -260,6 +271,7 @@ fn a_collect_arm_with_no_cons_is_rejected() {
                 Some(collect_list())
             ),
             Some(collect_list()),
+            None,
             span()
         ),
         Vec::new()
@@ -273,6 +285,7 @@ fn an_accumulator_the_verifier_cannot_read_is_rejected() {
         verify_fold_result_list_declared(
             &body_of(opaque, Some(filter_list())),
             Some(filter_list()),
+            None,
             span()
         ),
         vec![VerifyError::FoldResultListOpaque { at: span() }]
@@ -285,6 +298,7 @@ fn a_cons_onto_another_list_than_acc_list_is_rejected() {
         verify_fold_result_list_declared(
             &body_of(value, Some(filter_list())),
             Some(filter_list()),
+            None,
             span(),
         )
     };
@@ -315,6 +329,7 @@ fn a_head_too_short_to_reach_the_slot_is_reported_as_missing_not_opaque() {
         verify_fold_result_list_declared(
             &body_of(tuple_acc(Vec::new()), Some(filter_list())),
             Some(filter_list()),
+            None,
             span()
         ),
         vec![VerifyError::FoldResultListSlotMissing {
@@ -322,4 +337,146 @@ fn a_head_too_short_to_reach_the_slot_is_reported_as_missing_not_opaque() {
             at: span(),
         }]
     );
+}
+
+// ─── BT-5190: a filter's arms, and what each conses ─────────────────────────
+
+fn filter_value(negated: bool, on_true: AccSlot, on_false: AccSlot) -> FoldAccValue {
+    let arm = |value, head| {
+        Box::new(BoolArm {
+            value,
+            body: FoldAccBody::Tuple {
+                head: vec![head],
+                tail: tail(),
+            },
+        })
+    };
+    FoldAccValue {
+        prelude: None,
+        body: FoldAccBody::BoolCase {
+            scrutinee: docvec!["Pred"],
+            negated,
+            arms: [arm(true, on_true), arm(false, on_false)],
+            fallback: docvec!["<V> when 'true' -> error(V)"],
+        },
+    }
+}
+
+fn keep_when(keep: bool) -> FoldResultList {
+    FoldResultList {
+        slot: FOLD_RESULT_LIST_SLOT,
+        cons: ConsPerCall::Filter { keep_when: keep },
+    }
+}
+
+/// Verifies `value` as the production lowering does: stamped with what it
+/// builds, against what the kind (`expected`, element `item`) says.
+fn verify_filter(value: FoldAccValue, expected: FoldResultList, item: &str) -> Vec<VerifyError> {
+    let declared = value.inferred_result_list();
+    verify_fold_result_list_declared(
+        &body_of(value, declared),
+        Some(expected),
+        Some(item),
+        span(),
+    )
+}
+
+fn undeclared(expected: FoldResultList, found: Option<FoldResultList>) -> Vec<VerifyError> {
+    vec![VerifyError::FoldResultListUndeclared {
+        expected,
+        found,
+        at: span(),
+    }]
+}
+
+#[test]
+fn select_and_reject_accumulators_as_lowered_are_clean() {
+    // `select:`: cons on the true arm of `Pred`.
+    let select = filter_value(
+        false,
+        AccSlot::cons("E", "AccList"),
+        AccSlot::Name("AccList"),
+    );
+    assert_eq!(verify_filter(select, keep_when(true), "E"), Vec::new());
+    // `reject:`: the scrutinee is `not(Pred)`, so the true arm drops the element
+    // from the lambda's point of view and conses when `Pred` is false.
+    let reject = filter_value(
+        true,
+        AccSlot::cons("E", "AccList"),
+        AccSlot::Name("AccList"),
+    );
+    assert_eq!(verify_filter(reject, keep_when(false), "E"), Vec::new());
+}
+
+#[test]
+fn a_filter_that_conses_in_neither_arm_is_rejected() {
+    let value = filter_value(false, AccSlot::Name("AccList"), AccSlot::Name("AccList"));
+    assert_eq!(
+        verify_filter(value, keep_when(true), "E"),
+        undeclared(keep_when(true), None)
+    );
+}
+
+#[test]
+fn a_filter_that_conses_in_both_arms_is_rejected() {
+    let value = filter_value(
+        false,
+        AccSlot::cons("E", "AccList"),
+        AccSlot::cons("E", "AccList"),
+    );
+    assert_eq!(
+        verify_filter(value, keep_when(true), "E"),
+        undeclared(keep_when(true), None)
+    );
+}
+
+#[test]
+fn a_select_whose_arms_are_swapped_is_rejected() {
+    // Conses when `Pred` is false: that is `reject:`.
+    let value = filter_value(
+        false,
+        AccSlot::Name("AccList"),
+        AccSlot::cons("E", "AccList"),
+    );
+    assert_eq!(
+        verify_filter(value, keep_when(true), "E"),
+        undeclared(keep_when(true), Some(keep_when(false)))
+    );
+}
+
+#[test]
+fn a_reject_whose_arms_are_swapped_is_rejected() {
+    // `reject:` conses on the *false* arm of `not(Pred)` by mistake: that keeps.
+    let value = filter_value(
+        true,
+        AccSlot::Name("AccList"),
+        AccSlot::cons("E", "AccList"),
+    );
+    assert_eq!(
+        verify_filter(value, keep_when(false), "E"),
+        undeclared(keep_when(false), Some(keep_when(true)))
+    );
+}
+
+#[test]
+fn a_filter_that_conses_something_other_than_the_element_is_rejected() {
+    let value = filter_value(
+        false,
+        AccSlot::cons("Pred", "AccList"),
+        AccSlot::Name("AccList"),
+    );
+    assert_eq!(
+        verify_filter(value, keep_when(true), "E"),
+        vec![VerifyError::FoldResultListWrongItem {
+            expected: "E".to_string(),
+            found: "Pred".to_string(),
+            at: span(),
+        }]
+    );
+}
+
+#[test]
+fn a_hand_built_filter_declares_nothing() {
+    let value = FoldAccValue::opaque(docvec!["{AccList, StateAcc}"]);
+    assert_eq!(value.inferred_result_list(), None);
 }

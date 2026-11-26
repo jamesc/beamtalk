@@ -495,9 +495,8 @@ impl CoreErlangGenerator {
         // `LocalAssignPure`, so this is the "see through the value-carrying
         // parent" step the field write itself needs: lower it through the
         // SAME real-`Bind` producer C1 (`lower_field_assignment_bind`) uses
-        // for a bare `self.field := ...` statement — arbitrary-RHS support,
-        // `reject_class_var_field_assignment`'s class-var gate, and
-        // `thread_ahead`-based sequencing all included — then alias this
+        // for a bare `self.field := ...` statement — arbitrary-RHS support
+        // and `thread_ahead`-based sequencing all included — then alias this
         // statement's own local var to the identical assigned value, exactly
         // as `:=`'s "the whole assignment evaluates to the assigned value"
         // semantics require. Checked before C3/C3b/C4 below: a field write's

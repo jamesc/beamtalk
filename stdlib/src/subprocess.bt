@@ -78,6 +78,27 @@ typed Actor subclass: Subprocess native: beamtalk_subprocess
 
   /// Write a line to the subprocess's stdin (appends newline).
   ///
+  /// Returns `nil` once the line is in the child's stdin pipe. It does not
+  /// wait for the child to read it, but it does wait while the pipe is full
+  /// (the child is not reading), so a call to a stalled child can time out
+  /// like any actor call. Its line then stays queued and may still be
+  /// written, so do not resend it on a timeout.
+  ///
+  /// The `writeLine:` whose line does not reach the pipe raises a
+  /// `runtime_error` saying the line was not written (the reason is in its
+  /// hint), and so does every later `writeLine:`. That happens when the child
+  /// exited or closed its input before taking the line (and then every line
+  /// still queued behind it raises too), or when more than 8 MiB from other
+  /// callers is already waiting for a child that is not reading.
+  ///
+  /// A `writeLine:` still waiting when the subprocess is closed, or exits
+  /// with the line unreported (its pipe full and held open by a process that
+  /// does not read it), raises `port_closed`.
+  ///
+  /// No caller is told `nil` for a line that is lost before reaching the
+  /// pipe. A line the child has not read yet when it exits is lost after
+  /// `nil`, as with any pipe: `nil` means written, not read.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// agent writeLine: "\{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}"

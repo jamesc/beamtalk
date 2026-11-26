@@ -263,17 +263,15 @@ conforming_classes_unknown_protocol_test() ->
     ?assertEqual([], beamtalk_protocol_registry:conforming_classes('Unknown')).
 
 %%% ============================================================================
-%%% Class Method Extension Conformance Tests
+%%% Class Method Conformance Tests
 %%% ============================================================================
 
 -doc """
-Protocol with class method requirement satisfied via class-side extension
-should report conformance.
+Protocol with class method requirement satisfied via a class's own class
+method should report conformance.
 """.
-class_method_extension_conforms_test() ->
-    setup(),
-    %% Ensure extensions ETS table exists
-    beamtalk_extensions:init(),
+class_method_conforms_test() ->
+    rt_setup(),
     %% Register a protocol requiring only a class method
     beamtalk_protocol_registry:register_protocol(#{
         name => 'Parseable',
@@ -282,25 +280,26 @@ class_method_extension_conforms_test() ->
         type_params => [],
         extending => undefined
     }),
-    %% Register a class-side extension: 'TestExtClass class' >> fromString:
-    %% The metaclass tag for TestExtClass is 'TestExtClass class'.
-    ExtFun = fun(_Args, _Self) -> ok end,
-    beamtalk_extensions:register('TestExtClass class', 'fromString:', ExtFun, test),
-    %% Verify conformance — class has no process but extension satisfies class method
+    Pid = beamtalk_test_class:start(
+        'TestClassMethodClass',
+        #{
+            superclass => none,
+            module => bt_test_class_method_class_mod,
+            class_methods => #{'fromString:' => <<>>}
+        }
+    ),
     try
-        ?assert(beamtalk_protocol_registry:conforms_to('TestExtClass', 'Parseable'))
+        ?assert(beamtalk_protocol_registry:conforms_to('TestClassMethodClass', 'Parseable'))
     after
-        ets:delete(beamtalk_extensions, {'TestExtClass class', 'fromString:'})
+        beamtalk_test_class:stop(Pid)
     end.
 
 -doc """
-Protocol with class method requirement NOT satisfied (no extension, no process)
-should report non-conformance.
+Protocol with class method requirement NOT satisfied (no class method, no
+process) should report non-conformance.
 """.
-class_method_no_extension_does_not_conform_test() ->
+class_method_missing_does_not_conform_test() ->
     setup(),
-    %% Ensure extensions ETS table exists
-    beamtalk_extensions:init(),
     %% Register a protocol requiring only a class method
     beamtalk_protocol_registry:register_protocol(#{
         name => 'Parseable2',
@@ -309,8 +308,8 @@ class_method_no_extension_does_not_conform_test() ->
         type_params => [],
         extending => undefined
     }),
-    %% No extension registered, no class process — should not conform
-    ?assertNot(beamtalk_protocol_registry:conforms_to('NoExtClass', 'Parseable2')).
+    %% No class method, no class process — should not conform
+    ?assertNot(beamtalk_protocol_registry:conforms_to('NoClassMethodClass', 'Parseable2')).
 
 %%% ============================================================================
 %%% required_methods with class methods tests

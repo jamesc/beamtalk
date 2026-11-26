@@ -13,6 +13,7 @@
 //! renders the same value, so the data the verifier reads is the text that is
 //! generated. Every other kind keeps [`FoldAccBody::Opaque`].
 
+use super::ir::FoldResultList;
 use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::{Document, docvec, join, leaf};
 
@@ -51,6 +52,14 @@ impl AccSlot {
         Self::Cons {
             item: item.to_string(),
             list: Box::new(Self::Name(list)),
+        }
+    }
+
+    /// The element consed last onto this slot, if it conses at all.
+    fn head_item(&self) -> Option<&str> {
+        match self {
+            Self::Cons { item, .. } => Some(item),
+            Self::Name(_) => None,
         }
     }
 
@@ -93,6 +102,9 @@ pub(in crate::core_erlang) enum FoldAccBody {
     /// `case scrutinee of <'a'> when 'true' -> … <'b'> when 'true' -> … fallback end`.
     BoolCase {
         scrutinee: Document<'static>,
+        /// BT-5190: the scrutinee is `not(<block answer>)` (`reject:`), so an
+        /// arm taken on `true` is the one taken when the block answers `false`.
+        negated: bool,
         arms: [Box<BoolArm>; 2],
         /// The `<V> when 'true' -> error({'case_clause', V})` clause, built
         /// once by the epilogue (it mints the `_PredBad` temp).
@@ -121,6 +133,9 @@ pub(in crate::core_erlang) enum LeafConses {
         slot_missing: bool,
         /// The list the result-list slot builds on (`None` when missing).
         slot_base: Option<&'static str>,
+        /// BT-5190: the element consed last onto the result-list slot (the
+        /// head of the list it builds), `None` when the slot conses nothing.
+        slot_item: Option<String>,
     },
     /// The leaf is hand-built text.
     Opaque,
@@ -152,6 +167,41 @@ impl FoldAccValue {
             Some(prelude) => docvec![prelude.clone(), self.body.render()],
             None => self.body.render(),
         }
+    }
+
+    /// BT-5190: the result list this accumulator *builds*, read off its own
+    /// shape rather than off the fold kind that asked for it, so the
+    /// declaration and the kind are two independent witnesses
+    /// (`verify_fold_result_list_declared` compares them). A tuple that conses
+    /// the result-list slot is a map (`ExactlyOne`); a boolean `case` with one
+    /// consing arm is a filter keeping on that arm's boolean (undone by
+    /// `negated`). Anything else (no consing arm, both arms consing, hand-built
+    /// text) declares nothing. An arm that conses more than once still counts
+    /// as consing: the per-leaf count check reports that.
+    pub(in crate::core_erlang) fn inferred_result_list(&self) -> Option<FoldResultList> {
+        use super::ir::{ConsPerCall, FOLD_RESULT_LIST_SLOT};
+        let slot = FOLD_RESULT_LIST_SLOT;
+        let conses = |body: &FoldAccBody| match body {
+            FoldAccBody::Tuple { head, .. } => head.get(slot - 1).map(|s| s.cons_depth().0 > 0),
+            _ => None,
+        };
+        let cons = match &self.body {
+            FoldAccBody::Tuple { .. } => conses(&self.body)?.then_some(ConsPerCall::ExactlyOne)?,
+            FoldAccBody::BoolCase { arms, negated, .. } => {
+                let [a, b] = arms;
+                match (conses(&a.body)?, conses(&b.body)?) {
+                    (true, false) => ConsPerCall::Filter {
+                        keep_when: a.value != *negated,
+                    },
+                    (false, true) => ConsPerCall::Filter {
+                        keep_when: b.value != *negated,
+                    },
+                    _ => return None,
+                }
+            }
+            FoldAccBody::Opaque(_) => return None,
+        };
+        Some(FoldResultList { slot, cons })
     }
 
     /// The conses each leaf arm makes, with `slot` the 1-based result-list slot.
@@ -203,6 +253,7 @@ impl FoldAccBody {
                 scrutinee,
                 arms,
                 fallback,
+                ..
             } => render_bool_case(
                 scrutinee.clone(),
                 [
@@ -221,12 +272,14 @@ impl FoldAccBody {
                 let mut slot_conses = 0;
                 let mut slot_missing = true;
                 let mut slot_base = None;
+                let mut slot_item = None;
                 let mut stray_slots = Vec::new();
                 for (i, s) in head.iter().enumerate() {
                     let (conses, base) = s.cons_depth();
                     if i + 1 == slot {
                         slot_conses = conses;
                         slot_base = Some(base);
+                        slot_item = s.head_item().map(str::to_string);
                         slot_missing = false;
                     } else if conses > 0 {
                         stray_slots.push(i + 1);
@@ -237,6 +290,7 @@ impl FoldAccBody {
                     stray_slots,
                     slot_missing,
                     slot_base,
+                    slot_item,
                 });
             }
             Self::BoolCase { arms, .. } => {

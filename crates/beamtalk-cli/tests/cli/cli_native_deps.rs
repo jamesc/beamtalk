@@ -215,6 +215,86 @@ fn transitive_native_git_dep_pinned_on_fresh_build() {
     assert_eq!(checked_out_version(project, "bar"), "bar1");
 }
 
+/// BT-5185: a transitive dependency's plaintext git URL is refused before
+/// anything is fetched from it (git refuses the transport), not after
+/// `rebar3 compile` has run it. A loopback listener stands in for the
+/// plaintext server and must see no connection; nothing is compiled; the
+/// error names the fix, and that fix (declaring the dependency directly with
+/// an allowed URL) builds.
+#[test]
+fn transitive_plaintext_native_git_dep_is_refused_before_fetch() {
+    // Stands in for the plaintext server: records and drops every
+    // connection, so a fetch that does reach it fails fast instead of hanging.
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let contacted = Arc::new(AtomicBool::new(false));
+    {
+        let contacted = Arc::clone(&contacted);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                contacted.store(true, Ordering::SeqCst);
+                drop(stream);
+            }
+        });
+    }
+
+    let repos = tempfile::tempdir().expect("tempdir");
+    let bar = make_app_repo(repos.path(), "bar", "bar1", "");
+    let foo = make_app_repo(
+        repos.path(),
+        "foo",
+        "foo1",
+        &format!("{{bar, {{git, \"http://127.0.0.1:{port}/bar.git\", {{branch, \"main\"}}}}}}"),
+    );
+
+    let project = cli_common::fixture_project();
+    let project = project.path();
+    let foo_dep = format!(
+        "foo = {{ git = \"{}\", branch = \"main\" }}",
+        cli_common::file_url(&foo)
+    );
+    write_manifest(project, &foo_dep);
+
+    let output = cli_common::beamtalk()
+        .current_dir(project)
+        .env_remove("BEAMTALK_ALLOW_INSECURE_GIT")
+        .arg("build")
+        .output()
+        .expect("run beamtalk build");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "build must fail: {stderr}");
+    assert!(
+        !contacted.load(Ordering::SeqCst),
+        "the plaintext URL must not be contacted: {stderr}"
+    );
+    assert!(
+        stderr.contains("[native.dependencies]") && stderr.contains("BEAMTALK_ALLOW_INSECURE_GIT"),
+        "error must name the remedies: {stderr}"
+    );
+    assert!(
+        !project
+            .join("_build/dev/native/default/lib/foo/ebin/foo.beam")
+            .exists(),
+        "nothing may be compiled after a refused fetch"
+    );
+
+    // The remedy: declare `bar` directly with an allowed URL; the direct
+    // declaration wins over foo's transitive one.
+    write_manifest(
+        project,
+        &format!(
+            "{foo_dep}\nbar = {{ git = \"{}\", branch = \"main\" }}",
+            cli_common::file_url(&bar)
+        ),
+    );
+    build(project);
+    assert_eq!(checked_out_version(project, "bar"), "bar1");
+    assert!(
+        !contacted.load(Ordering::SeqCst),
+        "the remedy must not contact it either"
+    );
+}
+
 /// Changing one dependency re-resolves only that one: an unchanged direct
 /// dependency stays on its locked commit even though its branch moved on.
 /// Removing a dependency removes its checkout, so it leaves the code path.

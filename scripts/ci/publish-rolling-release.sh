@@ -33,16 +33,19 @@ for f in "$@"; do
 done
 
 move_tag() {
-    # PATCH moves an existing tag. Only a missing ref falls through to POST
-    # (create); any other PATCH failure is reported as itself and stops, so the
-    # real cause (permissions, rate limit, ...) is not replaced by a POST error
-    # (BT-5101).
+    # PATCH moves an existing tag; only a missing ref is created with POST. Any
+    # other failure is reported as itself and stops, so the real cause
+    # (permissions, rate limit, ...) is not replaced by a POST error (BT-5101).
+    # Ask whether the tag exists instead of matching the text of PATCH's
+    # error message (BT-5134): a 404 from the GET is the only "missing" case.
     local out
-    if out="$(gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" \
-        -f sha="${SHA}" -F force=true 2>&1)"; then
-        return 0
+    if out="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" 2>&1)"; then
+        out="$(gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" \
+            -f sha="${SHA}" -F force=true 2>&1)" && return 0
+        echo "error: could not move tag ${TAG} to ${SHA}: ${out}" >&2
+        return 1
     fi
-    if grep -qi 'reference does not exist' <<<"${out}"; then
+    if grep -q 'HTTP 404' <<<"${out}"; then
         gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
             -f ref="refs/tags/${TAG}" -f sha="${SHA}" >/dev/null
     else

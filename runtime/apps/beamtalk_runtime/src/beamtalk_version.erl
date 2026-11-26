@@ -27,7 +27,7 @@ site or the shape of any existing response.
 
 -include("beamtalk.hrl").
 
--export([get/0, app_vsn/1]).
+-export([get/0, app_vsn/1, dist_versions/0]).
 
 -export_type([version_report/0]).
 
@@ -66,6 +66,16 @@ get() ->
         otp_release => iolist_to_binary(erlang:system_info(otp_release)),
         erts_version => iolist_to_binary(erlang:system_info(version))
     }.
+
+-doc """
+This node's `{wireVersion, beamtalkVersion}` pair (ADR 0126 Amendment
+(BT-5193) D3). `beamtalk_node_monitor` reads it from a newly connected peer
+via `erpc` and compares it with its own, announcing `NodeVersionSkew` on a
+mismatch. Plain data (an integer and a binary) so any peer can answer it.
+""".
+-spec dist_versions() -> #{wireVersion := pos_integer(), beamtalkVersion := binary()}.
+dist_versions() ->
+    #{wireVersion => ?BT_WIRE_VERSION, beamtalkVersion => app_vsn(beamtalk_runtime)}.
 
 %%====================================================================
 %% Internal helpers

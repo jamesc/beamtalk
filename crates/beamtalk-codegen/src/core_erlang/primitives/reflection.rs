@@ -8,7 +8,8 @@
 //! Contains BIF generators for introspection and meta-level classes:
 //! `CompiledMethod`, `Symbol`.
 
-use super::{generate_comparison_bif, wrap_string_result};
+use super::{generate_ordering_comparison_bif, wrap_string_result};
+use crate::core_erlang::operators::OrderingKind;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -21,7 +22,10 @@ pub(crate) fn generate_symbol_bif(selector: &str, params: &[String]) -> Option<D
         // Comparison (ADR 0002: Erlang operators). Ordering is the atom
         // term order — alphabetical by name (BT-3924: symbols reach these via
         // dispatch, the comparison guard only keeps numbers/strings bare).
-        "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => generate_comparison_bif(selector, params),
+        // A non-Symbol argument raises a `type_error` (BT-5213).
+        "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => {
+            generate_ordering_comparison_bif(OrderingKind::Symbol, selector, params)
+        }
         // Conversion
         "asString" => Some(wrap_string_result(Document::Str(
             "call 'erlang':'atom_to_binary'(Self, 'utf8')",

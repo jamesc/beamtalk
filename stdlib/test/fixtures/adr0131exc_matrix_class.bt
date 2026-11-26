@@ -10,29 +10,8 @@
 // condition. The expected answers are in stdlib/test/adr0131exc_matrix_test.bt.
 
 Object subclass: Adr0131ExcMatrixClass
-  classState: n = 0
 
   class plain => 0
-
-  class armCvarOnDo: c =>
-    t := 0
-    c
-      ifTrue: [
-        [
-          t := t + 1
-          self.n := 1
-        ] on: Error do: [:e | 0]
-      ]
-    t
-
-  class armCvarOuterOnDo: c =>
-    t := 0
-    c
-      ifTrue: [
-        self.n := 1
-        [t := t + 1] on: Error do: [:e | 0]
-      ]
-    t
 
   class armDirectEnsure: c =>
     t := 0
@@ -462,30 +441,6 @@ Object subclass: Adr0131ExcMatrixClass
     c ifTrue: [#(1) do: [:z | [t := t + 1] on: Error do: [:e | 0]]]
     t
 
-  class loopCvarOnDo =>
-    t := 0
-    i := 0
-    [i < 1]
-      whileTrue: [
-        i := i + 1
-        [
-          t := t + 1
-          self.n := 1
-        ] on: Error do: [:e | 0]
-      ]
-    t
-
-  class loopCvarOuterOnDo =>
-    t := 0
-    i := 0
-    [i < 1]
-      whileTrue: [
-        i := i + 1
-        self.n := 1
-        [t := t + 1] on: Error do: [:e | 0]
-      ]
-    t
-
   class loopDirectEnsure =>
     t := 0
     i := 0
@@ -539,118 +494,6 @@ Object subclass: Adr0131ExcMatrixClass
           self plain
         ] on: Error do: [:e | 0]
       ]
-    t
-
-  class protCvarDo =>
-    t := 0
-    [
-      #(1, 2)
-        do: [:e |
-          t := t + e
-          self.n := 1
-        ]
-      7
-    ] on: Error do: [:e | 0]
-    t
-
-  class protCvarInject =>
-    t := 0
-    [
-      #(1, 2)
-        inject: 0
-        into: [:a :x |
-          t := t + x
-          self.n := 1
-          a + x
-        ]
-      7
-    ] on: Error do: [:e | 0]
-    t
-
-  class protCvarOnDo =>
-    t := 0
-    [
-      [
-        t := t + 1
-        self.n := 1
-      ] on: Error do: [:e | 0]
-      7
-    ] on: Error do: [:e | 0]
-    t
-
-  class protCvarToDo =>
-    t := 0
-    [
-      1
-        to: 2
-        do: [:i |
-          t := t + i
-          self.n := 1
-        ]
-      7
-    ] on: Error do: [:e | 0]
-    t
-
-  class protCvarWhile =>
-    t := 0
-    [
-      [t < 2]
-        whileTrue: [
-          t := t + 1
-          self.n := 1
-        ]
-      7
-    ] on: Error do: [:e | 0]
-    t
-
-  class protCvarOuterDo =>
-    t := 0
-    [
-      self.n := 1
-      #(1, 2) do: [:e | t := t + e]
-      7
-    ] on: Error do: [:e | 0]
-    t
-
-  class protCvarOuterInject =>
-    t := 0
-    [
-      self.n := 1
-      #(1, 2)
-        inject: 0
-        into: [:a :x |
-          t := t + x
-          a + x
-        ]
-      7
-    ] on: Error do: [:e | 0]
-    t
-
-  class protCvarOuterOnDo =>
-    t := 0
-    [
-      self.n := 1
-      [t := t + 1] on: Error do: [:e | 0]
-      7
-    ] on: Error do: [:e | 0]
-    t
-
-  class protCvarOuterToDo =>
-    t := 0
-    [
-      self.n := 1
-      1 to: 2 do: [:i | t := t + i]
-      7
-    ] on: Error do: [:e | 0]
-    t
-
-  class protCvarOuterWhile =>
-    t := 0
-    [
-      self.n := 1
-      [t < 2] whileTrue: [t := t + 1]
-      7
-    ] on: Error do: [:e | 0]
     t
 
   class protDirectCollect =>

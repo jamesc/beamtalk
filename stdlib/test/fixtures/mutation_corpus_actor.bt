@@ -97,8 +97,8 @@ Actor subclass: MutationCorpusActor
 
   // A nested loop where only the OUTER loop's top-level body mutates the actor
   // state field (the inner loop touches only its own local) — the compiling
-  // counterpart of BT-3172's rejected inner-mutates shape. Class-var/state-field
-  // threading is top-level-body-only by design (`loop_body_threads_class_vars`),
+  // counterpart of BT-3172's rejected inner-mutates shape. State-field
+  // threading is top-level-body-only by design,
   // so this shape threads correctly and must keep doing so. The outer body
   // reads the inner loop's local back (`+ j`), so a lost inner write shows
   // (BT-3776).
@@ -311,7 +311,7 @@ Actor subclass: MutationCorpusActor
   // `needs_mutation_threading` requires a co-occurring outer-local read+write
   // alongside the field write/self-send — a bare self-send with no other
   // mutation in the block never reaches the threaded path at all (see
-  // mutation_corpus_class_method.bt's classState comment).
+  // mutation_corpus_class_method.bt's comment on the opaque helpers).
   selfSendIfTrueNonLastReadWrite: flag =>
     seen := 0
     flag
@@ -543,7 +543,7 @@ Actor subclass: MutationCorpusActor
   // class-method loop-body family detectors agree — see
   // `family_detector_differential.rs`); besides, a
   // same-class class-method self-send used DIRECTLY as the receiver of a
-  // threaded `do:`/`ifTrue:` in a class with a `classState:` is a separate,
+  // threaded `do:`/`ifTrue:` in a class with class state is a separate,
   // pre-existing compiler crash (`unbound variable 'ClassVars1'`) — see
   // ADR 0128's Scope section.
   sealed opaqueDo: block => #(1, 2, 3) do: block

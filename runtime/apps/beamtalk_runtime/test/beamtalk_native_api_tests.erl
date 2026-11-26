@@ -9,8 +9,8 @@
 BT-4556: `beamtalk_native_api`, the supported entry point for package native
 Erlang code to send messages to Beamtalk objects. Sends to a compiled
 class-side method and to instance methods, String and Result round trips,
-where a class-side send runs (in the caller for a class with no class
-variables, in the class process otherwise), and `send/4`'s timeout on the
+where a class-side send runs (in the caller, or in the class process for a
+process-bound selector), and `send/4`'s timeout on the
 class-process path.
 """.
 
@@ -37,13 +37,23 @@ setup() ->
     ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
     ok.
 
-with_class(Name, ClassVars, Fun) ->
+with_class(Name, Fun) ->
+    with_class(Name, false, Fun).
+
+%% `ProcessBound`: list every class method as process-bound, the one input
+%% that keeps a class method in the class process (ADR 0153 §5; an ADR 0084
+%% runtime-fun shadow no longer does, BT-5161).
+with_class(Name, ProcessBound, Fun) ->
+    Meta =
+        case ProcessBound of
+            true -> #{process_bound_class_selectors => [new, spawn | maps:keys(?METHODS)]};
+            false -> ?META
+        end,
     ClassInfo = #{
         superclass => none,
         module => ?HELPER,
         class_methods => ?METHODS,
-        class_state => ClassVars,
-        meta => ?META
+        meta => Meta
     },
     {ok, Pid} = beamtalk_object_class:start_link(Name, ClassInfo),
     unlink(Pid),
@@ -129,22 +139,22 @@ native_api_test_() ->
         {"result_to_tuple rejects a non-Result", fun() ->
             ?assertEqual(type_error, error_kind(fun() -> ?API:result_to_tuple(42) end))
         end},
-        {"a class with no class variables runs its class method in the caller", fun() ->
-            with_class('Bt4556Stateless', #{}, fun(Class, _Pid) ->
+        {"a class method runs in the caller", fun() ->
+            with_class('Bt4556Stateless', fun(Class, _Pid) ->
                 ?assertEqual(self(), ?API:send(Class, testSelf, [])),
                 ?assertEqual({with_arg, 7}, ?API:send(Class, 'testWith:', [7])),
                 %% The method's `self` is the class object the caller holds.
                 ?assertEqual(Class, ?API:send(Class, testClassSelf, []))
             end)
         end},
-        {"a class with class variables runs its class method in the class process", fun() ->
-            with_class('Bt4556Stateful', #{count => 0}, fun(Class, Pid) ->
+        {"a process-bound class method runs in the class process", fun() ->
+            with_class('Bt4556Bound', true, fun(Class, Pid) ->
                 ?assertEqual(Pid, ?API:send(Class, testSelf, [])),
                 ?assertEqual({with_arg, 7}, ?API:send(Class, 'testWith:', [7]))
             end)
         end},
         {"send/4 bounds the wait for the class process", fun() ->
-            with_class('Bt4556Slow', #{count => 0}, fun(Class, Pid) ->
+            with_class('Bt4556Slow', true, fun(Class, Pid) ->
                 ?assertEqual(Pid, ?API:send(Class, 'testSleep:', [10], 5000)),
                 ?assertEqual(
                     timeout,
@@ -153,7 +163,7 @@ native_api_test_() ->
             end)
         end},
         {"send/4 does not bound a class method that runs in the caller", fun() ->
-            with_class('Bt4556Fast', #{}, fun(Class, _Pid) ->
+            with_class('Bt4556Fast', fun(Class, _Pid) ->
                 ?assertEqual(self(), ?API:send(Class, 'testSleep:', [100], 10))
             end)
         end}

@@ -30,9 +30,28 @@ you `COPY` into a container or copy to a server. An existing
 `--output` directory is replaced only if it carries the `.beamtalk-release`
 marker the command writes (or an older release's provenance manifest); the
 previous output is kept until the new release is assembled, and restored if
-the build fails. `--force-output` replaces an unmarked directory; use it
-deliberately. The project root, the current directory and their ancestors
-are always refused.
+the build fails. An empty directory is always accepted. `--force-output`
+replaces an unmarked directory only if it is release-shaped (a `releases/`
+directory and nothing but `bin/`, `lib/`, `releases/`, `erts-*/` at the top
+level); any other directory is refused, forced or not. A filesystem root, the
+home directory, the project root, the current directory and their ancestors,
+and the project's source directories (`src/`, `test/`, `native/`, `priv/`,
+`deps/`, `.git/`) and anything inside them are always refused. An existing tarball
+beside the output is replaced only if `beamtalk release` wrote it, or, with
+`--force-output`, if it is at least a gzip'd tar archive.
+
+A run killed part-way is cleaned up by the next one. While a previous
+release is parked, a `<output>.beamtalk-swap` journal sits beside the output:
+until the new release is complete the previous one is restored; once the
+journal says `committed`, the new release is kept and the leftover old copy
+removed.
+
+Each run holds an exclusive lock on `<output>.beamtalk-lock` for its whole
+duration, taken before that recovery, so two projects (or checkouts) sharing one
+`--output` cannot interleave. Like the project build lock, a second run waits
+(printing a notice) rather than failing; the OS frees the lock if the holder
+dies. The lock file stays beside the output (safe to delete or git-ignore), and
+`BEAMTALK_NO_BUILD_LOCK=1` turns it off along with the other beamtalk file locks.
 
 `Beamtalk releaseInfo` is the parity-neutral reflective send that names the
 release, its version and the toolchain OTP release. `rpc`/`eval` resolve `Beamtalk`, `Workspace` and `Transcript` as ordinary
@@ -89,7 +108,7 @@ alongside the release and carry the same verbs (ADR 0027 tier 1):
 | `foreground` (default) | Boots in the foreground. Stdout is the container's stdout — `Console` output (ADR 0099) lands there, which is what 12-factor logging wants. |
 | `stop` | Graceful `init:stop()` in the running node, via distribution. |
 | `ping` | Liveness check, via distribution. |
-| `remote_console` | Attach an *Erlang* shell to the running node, from the same host only (ADR 0091). A Beamtalk `eval` inside it needs `include-compiler`. |
+| `remote_console` | Attach an *Erlang* shell to the running node, from the same host (ADR 0091), or over TLS with [`RELEASE_DISTRIBUTION=tls`](#clustering-across-hosts). A Beamtalk `eval` inside it needs `include-compiler`. |
 | `eval "Class selector [args]"` | Start a **separate** throwaway VM — the runtime closure only, no distribution, not the project's own application — dispatch one entry, halt with its exit code. |
 | `rpc "Class selector [args]"` | Dispatch one entry **into the running node** over distribution and print the result. |
 | `version` | Print the release name, version, `beamtalk`/`otp` toolchain versions and platform. |
@@ -106,6 +125,123 @@ fresh on every invocation — never baked into the tarball:
 RELEASE_COOKIE=$(cat /run/secrets/orders_cookie) bin/orders foreground
 RELEASE_COOKIE=$(cat /run/secrets/orders_cookie) bin/orders stop
 ```
+
+The launcher never puts the cookie on `erl`'s command line. It writes it to a
+private directory under `$TMPDIR` (`%TEMP%` on Windows), starts `erl` with that
+directory as its home, and clears `RELEASE_COOKIE` so processes the node starts
+do not inherit it. The node removes the directory as it boots; if it crashes
+before then, a `beamtalk-cookie-*` directory
+readable only by the service user is left in the temp directory (also when a
+Windows `launcher.cmd` verb is interrupted with Ctrl-C and "Terminate batch
+job" is answered yes). Every verb that uses the cookie therefore needs a
+writable temp directory: with a read-only root filesystem (Kubernetes
+`readOnlyRootFilesystem`), mount a small writable volume (an `emptyDir`) and
+point `TMPDIR` at it. Applications the boot script starts before
+`beamtalk_runtime` still see the private `HOME`, so they should not resolve
+paths from it while starting.
+
+## Clustering across hosts
+
+By default a release never leaves its host: the node is `-sname
+<name>@localhost`, epmd listens on `127.0.0.1`, and distribution listens on
+`127.0.0.1`. To cluster nodes on two or more hosts, opt in to TLS distribution
+with peer verification (ADR 0126 §9 and its amendment, decision D2). Plain TCP
+distribution off the host is not offered.
+
+| Variable | Meaning |
+|---|---|
+| `RELEASE_DISTRIBUTION=tls` | The opt-in. Any other value is refused. |
+| `RELEASE_HOST` | This host's name as the other nodes reach it, and the name its certificate carries: a fully qualified name (with a `.`) or an IP address, since Erlang long names refuse a bare `node1` or `localhost`. The node becomes `-name <RELEASE_NODE or release name>@<RELEASE_HOST>`. |
+| `RELEASE_DIST_INTERFACE` | The IP address to listen on, for distribution and epmd. There is no default; `0.0.0.0` listens on every interface only if you name it. An IPv6 address selects `inet6_tls`. |
+| `RELEASE_SSL_DIST_OPTFILE` | The `-ssl_dist_optfile` file: this node's certificate, key and CA. |
+
+The launcher checks all of this before it starts any node, and refuses with an
+explanation unless the option file sets `{verify, verify_peer}` on **both** the
+server and client sides and `{fail_if_no_peer_cert, true}` on the server side.
+Without them TLS only encrypts the link: any client is let in. `Node connect:`
+uses the same check before it connects off-host. It also refuses `verify_fun`
+and `partial_chain`, which can accept a peer the CA did not sign.
+
+Two things the check cannot see are yours to get right:
+
+- **Trust only your own CA.** Point `cacertfile` at a private CA that signs
+  nothing but your nodes. An option file that trusts public CAs (for example
+  `{cacerts, public_key:cacerts_get()}`) would let in any holder of a publicly
+  issued certificate.
+- **Keep host-name checking on.** By default each node checks that the peer's
+  certificate names the host it dialled. `{server_name_indication, disable}` or
+  a permissive `customize_hostname_check` turns that off, so any certificate
+  from your CA could stand in for any node.
+
+A two-host recipe, with `web1.example.com` (10.0.0.5) and `web2.example.com`
+(10.0.0.6). Issue each host a certificate for its own name from one private CA,
+then write the option file on each:
+
+```erlang
+%% /etc/orders/ssl_dist.conf on web1 (web2's names its own cert and key)
+[{server, [{certfile, "/etc/orders/web1.pem"},
+           {keyfile, "/etc/orders/web1.key"},
+           {cacertfile, "/etc/orders/ca.pem"},
+           {verify, verify_peer},
+           {fail_if_no_peer_cert, true}]},
+ {client, [{certfile, "/etc/orders/web1.pem"},
+           {keyfile, "/etc/orders/web1.key"},
+           {cacertfile, "/etc/orders/ca.pem"},
+           {verify, verify_peer}]}].
+```
+
+```bash
+# on web1 (on web2: RELEASE_HOST=web2.example.com RELEASE_DIST_INTERFACE=10.0.0.6)
+export RELEASE_DISTRIBUTION=tls RELEASE_HOST=web1.example.com \
+       RELEASE_DIST_INTERFACE=10.0.0.5 \
+       RELEASE_SSL_DIST_OPTFILE=/etc/orders/ssl_dist.conf \
+       RELEASE_COOKIE=$(cat /run/secrets/orders_cookie)
+bin/orders foreground
+```
+
+`RELEASE_HOST` must resolve, on the node's own host too, to an address the
+node listens on: the local client verbs dial it. Debian and Ubuntu map the
+machine's own name to `127.0.1.1` in `/etc/hosts`; with an interface such as
+`10.0.0.5`, `ping` and `stop` then report the running node as down. Fix that
+line, or name a wildcard interface.
+
+Both hosts use the same cookie. Open epmd (TCP 4369) and the distribution
+ports between them, and pin the distribution ports with
+`inet_dist_listen_min`/`inet_dist_listen_max` in a `[release] vm-args` overlay
+to keep the firewall rule small. A node then reaches the other with `(Node
+named: 'orders@web2.example.com') connect`. `stop`, `ping`, `rpc` and
+`remote_console` need the same four variables (and the cookie) and talk to the
+local node over TLS. Each of them first runs the TLS check in a short-lived VM,
+so a `ping` takes about twice as long as on loopback: allow for that in health
+check timeouts.
+
+**Unauthenticated clients and the distribution port.** A client that does
+not speak TLS (for example a plain `erl -sname` node) is turned away in a few
+milliseconds and does not hold up the next peer. A client that opens TCP
+connections and then sends nothing does. OTP's TLS distribution listener runs
+at most one pending handshake per scheduler (`erlang:system_info(schedulers_online)`),
+and each one waits up to `net_setuptime` (7 s by default) for the peer's TLS
+hello. A host that holds that many idle connections open stops this node from
+accepting new peers until they time out, and can keep doing so. Established
+connections are not affected. So:
+
+- Firewall epmd and the distribution ports to your cluster's own hosts. This is
+  the real mitigation: only hosts you trust can reach the listener at all.
+- Optionally shorten the window with `-kernel net_setuptime 2` (seconds) in a
+  `[release] vm-args` overlay. Keep it above the slowest TLS handshake between
+  your hosts.
+
+**macOS and a wildcard interface.** On macOS, an epmd that listens on every
+interface (`RELEASE_DIST_INTERFACE=0.0.0.0` or `::`) does not stop a second,
+loopback-only epmd from starting on the same port; Linux refuses the second
+one. Any non-TLS Erlang node started later on that host (a loopback release,
+a `bin/<name> ping` without the TLS variables, a beamtalk REPL) starts that
+loopback epmd, which then answers every loopback lookup and does not know this
+node. The node keeps running and other hosts still reach it, but the local
+`ping`, `stop`, `rpc` and `remote_console` report it as down until that epmd
+is stopped (`epmd -kill`, with its nodes stopped). On macOS, name a specific
+interface address instead of a wildcard: epmd then holds loopback on that port
+itself, and a second epmd cannot start there.
 
 ## Docker
 
@@ -237,7 +373,8 @@ Measure before choosing a size: `benchmarks/vs-elixir/benchee.sh` with
 
 ### Hardening: `-start_epmd false`
 
-Every release runs loopback-bound Erlang distribution and, by OTP default,
+Every release runs loopback-bound Erlang distribution (unless it opts in to
+[TLS across hosts](#clustering-across-hosts)) and, by OTP default,
 an `epmd`, because that's what makes `stop`/`ping`/`rpc` work with zero
 configuration. An operator who wants no `epmd` at all can set
 `-start_epmd false` with a fixed `inet_dist_listen_min`/`inet_dist_listen_max`

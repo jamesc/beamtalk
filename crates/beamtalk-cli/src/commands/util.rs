@@ -195,9 +195,7 @@ pub(crate) fn protocol_hashes<'a>(
 /// Hash of the cross-file analysis surface every Pass 2 file type-checks
 /// against (BT-3674, generalised in BT-4336): every pre-loaded `ClassInfo`
 /// (the project's own — trait provisions already flattened in — and every
-/// dependency's), every pre-loaded `ProtocolInfo` and `AliasInfo`, and
-/// every standalone extension method (`String >> shout`) in the
-/// project-wide extension index.
+/// dependency's), and every pre-loaded `ProtocolInfo` and `AliasInfo`.
 ///
 /// A file's diagnostics depend on these signatures, but its own source does
 /// not change when a class it calls changes a return type, drops a method,
@@ -221,13 +219,8 @@ pub(crate) fn analysis_surface_hash(
     class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     protocol_infos: &[beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo],
     alias_infos: &[beamtalk_core::semantic_analysis::AliasInfo],
-    extension_index: &beamtalk_core::compilation::extension_index::ExtensionIndex,
 ) -> String {
-    if class_infos.is_empty()
-        && protocol_infos.is_empty()
-        && alias_infos.is_empty()
-        && extension_index.is_empty()
-    {
+    if class_infos.is_empty() && protocol_infos.is_empty() && alias_infos.is_empty() {
         return String::new();
     }
     let mut classes: Vec<_> = class_infos.iter().map(signature_only_class_info).collect();
@@ -236,22 +229,11 @@ pub(crate) fn analysis_surface_hash(
     protocols.sort_by_key(|p| (p["package"].to_string(), p["name"].to_string()));
     let mut aliases: Vec<_> = alias_infos.iter().map(alias_surface_value).collect();
     aliases.sort_by_key(ToString::to_string);
-    let mut extensions: Vec<_> = extension_index
-        .entries()
-        .iter()
-        .flat_map(|(key, locations)| {
-            locations
-                .iter()
-                .map(move |loc| extension_surface_value(key, loc))
-        })
-        .collect();
-    extensions.sort_by_key(ToString::to_string);
     surface_hash_of(serde_json::to_value(&classes).map(|classes| {
         serde_json::json!({
             "classes": classes,
             "protocols": protocols,
             "aliases": aliases,
-            "extensions": extensions,
         })
     }))
 }
@@ -299,24 +281,6 @@ pub(crate) fn alias_surface_value(
         a.name.as_str(),
         a.annotation.type_name().as_str(),
         a.is_internal,
-    ])
-}
-
-/// The surface-relevant shape of one standalone extension location (see
-/// [`protocol_surface_value`]).
-pub(crate) fn extension_surface_value(
-    key: &beamtalk_core::compilation::extension_index::ExtensionKey,
-    loc: &beamtalk_core::compilation::extension_index::ExtensionLocation,
-) -> serde_json::Value {
-    serde_json::json!([
-        key.class_name.as_str(),
-        format!("{:?}", key.side),
-        key.selector.as_str(),
-        loc.file_path,
-        loc.type_info.arity,
-        loc.type_info.param_types,
-        loc.type_info.return_type.as_deref(),
-        loc.type_info.answers_receiver,
     ])
 }
 
@@ -1112,25 +1076,6 @@ mod tests {
         assert_eq!(&line[pos..], "// => ok");
     }
 
-    /// BT-4788: `discarded-update` reads whether an extension answers its
-    /// receiver, so flipping only that (same signature) must move the hash.
-    #[test]
-    fn analysis_surface_hash_tracks_extension_answers_receiver() {
-        use beamtalk_core::compilation::extension_index::ExtensionIndex;
-        use beamtalk_core::source_analysis::{lex_with_eof, parse};
-
-        let hash = |body: &str| {
-            let source = format!("Object >> store: v :: Integer -> Self => {body}\n");
-            let (module, diags) = parse(lex_with_eof(&source));
-            assert!(diags.is_empty(), "{diags:?}");
-            let mut extensions = ExtensionIndex::new();
-            extensions.add_module(&module, std::path::Path::new("src/ext.bt"));
-            analysis_surface_hash(&[], &[], &[], &extensions)
-        };
-        assert_ne!(hash("self"), hash("self withId: v"));
-        assert_eq!(hash("self withId: v"), hash("self withId: v + 1"));
-    }
-
     /// BT-4336: the analysis surface hash moves with every signature a
     /// dependent file type-checks against — a class method's return type,
     /// a protocol requirement, a type alias — and stays put for edits that
@@ -1138,7 +1083,6 @@ mod tests {
     /// shifts that move the declarations' source spans.
     #[test]
     fn analysis_surface_hash_tracks_signatures_not_docs_or_spans() {
-        use beamtalk_core::compilation::extension_index::ExtensionIndex;
         use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
         use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
         use beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry;
@@ -1147,76 +1091,52 @@ mod tests {
         let hash = |source: &str| {
             let (module, diags) = parse(lex_with_eof(source));
             assert!(diags.is_empty(), "{diags:?}");
-            let mut extensions = ExtensionIndex::new();
-            extensions.add_module(&module, std::path::Path::new("src/lib.bt"));
             analysis_surface_hash(
                 &ClassHierarchy::extract_class_infos(&module),
                 &ProtocolRegistry::extract_protocol_infos(&module),
                 &AliasRegistry::extract_alias_infos(&module),
-                &extensions,
             )
         };
-        let source = |pad: &str, doc: &str, ret: &str, req: &str, alias: &str, ext: &str| {
+        let source = |pad: &str, doc: &str, ret: &str, req: &str, alias: &str| {
             format!(
                 "{pad}type Mode = {alias}\n\n\
                  Protocol define: Labelled\n  label -> {req}\n\n\
-                 Value subclass: Lib\n\n  /// {doc}\n  label -> {ret} => \"x\"\n\n\
-                 String >> shout -> {ext} => 1\n"
+                 Value subclass: Lib\n\n  /// {doc}\n  label -> {ret} => \"x\"\n"
             )
         };
-        let base = hash(&source(
-            "", "Doc.", "String", "String", "#a | #b", "Integer",
-        ));
+        let base = hash(&source("", "Doc.", "String", "String", "#a | #b"));
         assert!(!base.is_empty());
         assert_eq!(
             base,
-            hash(&source(
-                "", "Doc.", "String", "String", "#a | #b", "Integer"
-            ))
+            hash(&source("", "Doc.", "String", "String", "#a | #b"))
         );
         assert_eq!(
             base,
-            hash(&source(
-                "",
-                "Reworded doc.",
-                "String",
-                "String",
-                "#a | #b",
-                "Integer"
-            )),
+            hash(&source("", "Reworded doc.", "String", "String", "#a | #b")),
             "a doc-comment edit must not move the hash"
         );
         assert_eq!(
             base,
-            hash(&source(
-                "\n\n", "Doc.", "String", "String", "#a | #b", "Integer"
-            )),
+            hash(&source("\n\n", "Doc.", "String", "String", "#a | #b")),
             "shifted spans must not move the hash"
         );
         for (what, changed) in [
             (
                 "class method return type",
-                source("", "Doc.", "Object", "String", "#a | #b", "Integer"),
+                source("", "Doc.", "Object", "String", "#a | #b"),
             ),
             (
                 "protocol requirement",
-                source("", "Doc.", "String", "Object", "#a | #b", "Integer"),
+                source("", "Doc.", "String", "Object", "#a | #b"),
             ),
             (
                 "type alias",
-                source("", "Doc.", "String", "String", "#a | #c", "Integer"),
-            ),
-            (
-                "extension method",
-                source("", "Doc.", "String", "String", "#a | #b", "Object"),
+                source("", "Doc.", "String", "String", "#a | #c"),
             ),
         ] {
             assert_ne!(base, hash(&changed), "a {what} change must move the hash");
         }
-        assert_eq!(
-            analysis_surface_hash(&[], &[], &[], &ExtensionIndex::new()),
-            ""
-        );
+        assert_eq!(analysis_surface_hash(&[], &[], &[]), "");
     }
 
     /// BT-4586: every `ClassInfo` / `MethodInfo` field is classified as part of
@@ -1233,9 +1153,8 @@ mod tests {
     )]
     fn class_info_fields_are_classified_against_the_surface_hash() {
         use beamtalk_core::ast::{ConstantValue, SlotKind};
-        use beamtalk_core::compilation::extension_index::ExtensionIndex;
         use beamtalk_core::semantic_analysis::class_hierarchy::{
-            AutoConstructors, ClassHierarchy, ClassInfo, ClassVarInfo, DeclaredType, MethodInfo,
+            AutoConstructors, ClassHierarchy, ClassInfo, DeclaredType, MethodInfo,
             SuperclassTypeArg,
         };
         use beamtalk_core::source_analysis::{lex_with_eof, parse};
@@ -1255,9 +1174,7 @@ mod tests {
         let mut base = ClassHierarchy::extract_class_infos(&module).remove(0);
         assert!(!base.methods.is_empty() && !base.class_methods.is_empty());
         base.methods[0].doc = Some("Doc.".into());
-        let hash = |info: &ClassInfo| {
-            analysis_surface_hash(std::slice::from_ref(info), &[], &[], &ExtensionIndex::new())
-        };
+        let hash = |info: &ClassInfo| analysis_surface_hash(std::slice::from_ref(info), &[], &[]);
         let base_hash = hash(&base);
 
         // Exhaustive: a new `ClassInfo` field fails to compile until classified below.
@@ -1284,7 +1201,6 @@ mod tests {
             has_dynamic_field_writer: _,
             methods: _,
             class_methods: _,
-            class_variables: _,
             type_params: _,
             type_param_bounds: _,
             superclass_type_args: _,
@@ -1343,14 +1259,6 @@ mod tests {
             }),
             ("class_methods", Signature, |c| {
                 c.class_methods[0].selector = "renamed".into();
-            }),
-            ("class_variables", Signature, |c| {
-                c.class_variables.push(ClassVarInfo {
-                    name: "extra".into(),
-                    ty: None,
-                    has_default: false,
-                    kind: SlotKind::Eager,
-                });
             }),
             ("type_params", Signature, |c| c.type_params.push("T".into())),
             ("type_param_bounds", Signature, |c| {

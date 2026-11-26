@@ -140,7 +140,7 @@ fn test_ffi_call_multi_arg_returns_typed_result() {
 /// drop its FFI-driven `@expect` overrides (ADR 0075 amendment).
 #[test]
 fn ffi_list_tuple_element_propagates_into_iteration_and_literal_at() {
-    // Reproduces SystemNavigation `extensionsBy:` pattern:
+    // Reproduces an FFI call answering a list of 2-tuples:
     //   pairs := (Erlang ext) extensions_by: x
     //   pairs collect: [:pair | pair at: 1]
     // With a registry whose return type is List(Tuple(Symbol, Symbol)), the

@@ -20,7 +20,7 @@ socket_opts => [{ip, BindAddr}, {port, Port}]
 
 **Security properties:**
 - The first message on a connection must authenticate with the workspace cookie. Before authentication the connection has a 10 second deadline and a 4 KiB frame limit; both are relaxed after a successful login.
-- A cookie of `nocookie` is never accepted. `beamtalk repl --foreground` starts a distributed node (so it needs `epmd`) under a random per-process cookie, passed to the node through a private `-args_file`, never on the command line.
+- A cookie of `nocookie` is never accepted. `beamtalk repl --foreground` starts a distributed node (so it needs `epmd`) under a random per-process cookie. The CLI never puts a cookie on a node's command line: `-setcookie`, `ERL_AFLAGS` and `-args_file` all expand into the BEAM's argv, which any local user can read with `ps`. Nor does a node ever run with some other cookie while it boots: a connection made then would stay authenticated after the cookie changed. Instead the cookie is written to `.erlang.cookie` (mode 0400) in a fresh private directory (0700), and `erl` is started with that directory as its home (`HOME` on Unix, `HOMEDRIVE` + `HOMEPATH` on Windows), so OTP reads the cookie as the kernel boots, before distribution accepts a connection. The node's first step (its first `-eval`, or `beamtalk_runtime`'s start in a release) puts the home variables back and removes the file and directory. No cookie is in the node's argv or environment. Detached workspace nodes, the `beamtalk run` probes and the release launcher (`bin/<name>`, via `RELEASE_COOKIE`, which it clears before starting `erl` so no child process, epmd included, inherits it) work the same way. Tests start real nodes and check `ps`, `/proc/<pid>/cmdline` and `/proc/<pid>/environ`, and try to connect to a booting node with every cookie on its command line. One exception is outside the CLI's control: `beamtalk attach --port <p> --cookie <c>` takes the cookie as an argument of the `beamtalk` process itself, so it is visible in `ps` while attached. Prefer `beamtalk attach <name>`, which reads the cookie from the workspace's `cookie` file (mode 0600).
 - If the upgrade request carries an `Origin` header it must name a loopback host, and the `Host` header must be a loopback name, the bound address, or (for a wildcard bind) an IP literal. Failures get HTTP `403`. Clients without an `Origin` (CLI, MCP, LSP, VS Code) are unaffected. A browser UI behind a reverse proxy must have the proxy rewrite `Host` to a loopback name.
 - At most 256 concurrent connections.
 - The port is OS-assigned unless `--port` (or `BEAMTALK_REPL_PORT`) is given.
@@ -28,7 +28,7 @@ socket_opts => [{ip, BindAddr}, {port, Port}]
 
 ### MCP server
 
-The MCP server's file-based tools (`lint`, `diagnostic_summary`, `load_file`, `load_project`, `test` on a file, `export_traces`) are confined to the project root; symlinks and `..` components are resolved before the check. `--allow-outside-project` removes the confinement. Every MCP tool declares `readOnlyHint`, and every non-read-only tool a `destructiveHint`.
+The MCP server's file-based tools (`lint`, `diagnostic_summary`, `load_file`, `load_project`, `test` on a file, `export_traces`) are confined to the project root; symlinks and `..` components are resolved before the check. The server refuses to start confined to the filesystem root, the user's home directory (`HOME` on Unix, the profile folder on Windows) or any directory containing it, such as `/home`. `--allow-outside-project` removes the confinement. Every MCP tool declares `readOnlyHint`, and every non-read-only tool a `destructiveHint`.
 
 ### LiveView IDE front
 
@@ -53,7 +53,7 @@ Workspace metadata is scoped to its project.
 |--------|------------|
 | Remote network access to REPL | Loopback binding (`127.0.0.1`) prevents remote connections |
 | Cross-site WebSocket hijacking / DNS rebinding from a browser | `Origin` and `Host` must be loopback (or the bound address); cookie required |
-| Unauthenticated connections tying up the server | 10 s auth deadline, 4 KiB pre-auth frame limit, 256 connection cap |
+| Unauthenticated connections tying up the server | 10 s auth deadline, 4 KiB pre-auth frame limit, a separate 32-socket pre-auth budget in which a new socket evicts the oldest unauthenticated one, 256 authenticated-connection cap |
 | Cross-user access to workspace state | Per-workspace directories created with mode 0700 |
 
 ### Out of Scope (Current)

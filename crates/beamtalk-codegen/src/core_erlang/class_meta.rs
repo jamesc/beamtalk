@@ -27,6 +27,21 @@ use beamtalk_core::ast::{
 };
 use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, DeclaredType};
 
+/// The runtime ABI a compiled module declares as `module_abi` in
+/// `__beamtalk_meta/0`. The runtime's load gate
+/// (`beamtalk_module_abi:check_class_info_abi/2`, enforced at class
+/// registration, hot reload and the release preflight) refuses a module whose
+/// value is not exactly `?BT_MODULE_ABI` in
+/// `runtime/apps/beamtalk_runtime/include/beamtalk_module_abi.hrl`;
+/// `module_abi_matches_the_runtime_header` keeps the two equal.
+///
+/// `1`-`3` were the class-variable calling conventions of ADR 0130, 0137 and
+/// 0142, declared under an older key. ADR 0153 deleted the runtime modules
+/// those conventions call, so the number moved to `4` under a new key and a
+/// module built by an older compiler (no `module_abi`) is refused with a clear
+/// message instead of failing with `undef`.
+pub(super) const MODULE_ABI: i64 = 4;
+
 /// ADR 0098 Phase 3: producing-toolchain identity baked into a module's
 /// `__beamtalk_meta/0` map so a *loaded* module is self-describing — consumers
 /// (workspace attach, tooling) can detect staleness without re-reading the
@@ -153,7 +168,6 @@ impl CoreErlangGenerator {
     ///     ~{'class' => 'Counter',
     ///       'superclass' => 'Actor',
     ///       'fields' => ['value'],
-    ///       'class_fields' => ['total'],
     ///       'methods' => [{'increment', 0}, {'decrement', 0}, {'getValue', 0}],
     ///       'class_methods' => [{'new', 0}]
     ///     }~
@@ -266,18 +280,6 @@ impl CoreErlangGenerator {
 
         let fields_doc = Self::meta_atom_list(&fields);
 
-        // Build class-side field list from `classState:` declarations so
-        // class-side slots are reflectable (`Behaviour>>classVarNames` /
-        // `allClassVarNames`). The instance `fields` key above carries instance
-        // state only.
-        let class_fields: Vec<String> = class
-            .class_variables
-            .iter()
-            .map(|s| s.name.name.to_string())
-            .collect();
-
-        let class_fields_doc = Self::meta_atom_list(&class_fields);
-
         // Boolean flags
         let is_sealed_doc = Self::meta_bool(class.is_sealed);
         let is_abstract_doc = Self::meta_bool(class.is_abstract);
@@ -300,14 +302,14 @@ impl CoreErlangGenerator {
         // without the AST (post-initialize validation in gen_server codegen).
         let field_has_default_doc = Self::meta_field_has_default_map(&class.state);
 
-        // field_kinds / class_field_kinds (ADR 0124 §1/B5a): map of field
-        // name → 'eager' | 'late', for instance state and class-side state
-        // respectively. The guarded read (B3) and cross-file `ClassInfo`
-        // population (`beamtalk-core`'s `parse_class_info_from_meta_term`)
-        // read these so an inherited or cross-file `late` slot is known
-        // without the declaring class's AST.
+        // field_kinds (ADR 0124 §1): map of field name → 'eager' | 'late'.
+        // The guarded read (B3) and cross-file `ClassInfo` population
+        // (`beamtalk-compiler-port`'s `parse_class_info_from_meta_term`) read
+        // it so an inherited or cross-file `late` slot is known without the
+        // declaring class's AST. ADR 0153: there are no class variables, so
+        // the class-side `class_fields`/`class_field_kinds` keys are gone; the
+        // runtime reads a missing key as empty.
         let field_kinds_doc = Self::meta_field_kinds_map(&class.state);
-        let class_field_kinds_doc = Self::meta_field_kinds_map(&class.class_variables);
 
         // initialize_assigns (ADR 0124 A2a): this class's own `initialize`
         // definitely-assigned slot summary — a must-analysis
@@ -416,8 +418,6 @@ impl CoreErlangGenerator {
             kind_doc,
             ",\n      'fields' => ",
             fields_doc,
-            ",\n      'class_fields' => ",
-            class_fields_doc,
             ",\n      'is_sealed' => ",
             is_sealed_doc,
             ",\n      'is_abstract' => ",
@@ -440,18 +440,16 @@ impl CoreErlangGenerator {
             field_has_default_doc,
             ",\n      'field_kinds' => ",
             field_kinds_doc,
-            ",\n      'class_field_kinds' => ",
-            class_field_kinds_doc,
             ",\n      'initialize_assigns' => ",
             initialize_assigns_doc,
             ",\n      'method_info' => ",
             method_info_doc,
             ",\n      'class_method_info' => ",
             class_method_info_doc,
-            // ADR 0130 §3: the class-variable calling convention this module
-            // was compiled for (the runtime's load gate reads it).
-            ",\n      'class_var_abi' => ",
-            leaf::int_lit(super::class_var_keys::ABI_VERSION),
+            // The runtime ABI this module was compiled for (the runtime's load
+            // gate reads it).
+            ",\n      'module_abi' => ",
+            leaf::int_lit(MODULE_ABI),
             // ADR 0103: sendability handle scope (omitted when undeclared).
             handle_scope_doc,
             // ADR 0123 §1/§2: declared shape version + migration table
@@ -723,17 +721,12 @@ impl CoreErlangGenerator {
         Document::Vec(parts)
     }
 
-    /// Builds a field-kinds map for `__beamtalk_meta/0` (ADR 0124 §1/B5a):
-    /// `'eager'` for every ordinary declaration, `'late'` for a `late
-    /// state:`/`late classState:` slot.
+    /// Builds the `'field_kinds'` map for `__beamtalk_meta/0` (ADR 0124 §1):
+    /// `'eager'` for every ordinary declaration, `'late'` for a `late state:`
+    /// slot.
     ///
     /// Example: `[StateDecl{name: "proc", slot_kind: Late}]` → `~{'proc' => 'late'}~`
     /// Empty slice → `~{}~`
-    ///
-    /// Used for both the `'field_kinds'` key (instance `state:`, `class.state`)
-    /// and the `'class_field_kinds'` key (class-side `classState:`,
-    /// `class.class_variables`) — same per-declaration shape, so one emitter
-    /// serves both call sites (`build_meta_map_doc_with_extra`).
     pub(super) fn meta_field_kinds_map(state: &[StateDeclaration]) -> Document<'static> {
         if state.is_empty() {
             return Document::Str("~{}~");

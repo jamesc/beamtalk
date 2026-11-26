@@ -9,9 +9,11 @@
 //! adding tests rarely conflict on the same region.
 
 mod common;
+mod deep_input_stack_safety;
 
 mod adr0144_protocol_metatypes;
 mod alias_and_cross_file_diagnostics;
+mod file_interface;
 mod find_references_click_rejection;
 mod goto_definition_navigation;
 mod identifier_lookup_type_annotations;
@@ -23,3 +25,4 @@ mod rename;
 mod shape_keys;
 mod simple_service_and_call_hierarchy;
 mod type_hierarchy;
+mod unterminated_literal_recovery;

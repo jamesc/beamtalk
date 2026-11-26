@@ -384,7 +384,7 @@ jobs:
       contents: write
     steps:
       # persist-credentials kept: the step below pushes coverage badges to the `badges` branch.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6 # zizmor: ignore[artipacked]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked]
         with:
           persist-credentials: true
 

@@ -3,13 +3,11 @@
 
 // BT-4300 (ADR 0142 §1-§3): a class-side send to a class whose chain declares
 // no class variables, and that nothing shadows, runs the class method in the
-// caller. A class with class variables, or one that inherits from such a class,
-// keeps its class process. Each row checks where a block passed into the class
+// caller. Each row checks where a block passed into the class
 // method runs, through a literal receiver, a class held in a variable, and
 // `perform:`.
 //
-// Fixtures: fixtures/in_caller_probe.bt, fixtures/in_caller_probe_sub.bt,
-// fixtures/in_caller_stateful.bt, fixtures/in_caller_stateful_sub.bt.
+// Fixtures: fixtures/in_caller_probe.bt, fixtures/in_caller_probe_sub.bt.
 
 TestCase subclass: ClassMethodInCallerTest
 
@@ -65,22 +63,14 @@ TestCase subclass: ClassMethodInCallerTest
     self assert: InCallerProbe meVia == InCallerProbe
     self assert: (InCallerProbe meVia double: 2) equals: 4
 
-  // `clearField:` and `hasField:` on a class with no class variables answer
-  // as they did in the class process.
-  testClassVariableReflectionOnAStatelessClass =>
-    self assert: InCallerProbe clearMissing == InCallerProbe
-    self assert: InCallerProbeSub clearMissing == InCallerProbeSub
-    self deny: InCallerProbe hasMissing
-
-  // `performLocally:` resolves through the receiving class's class-method
-  // chain: a parent-only selector is found from an inherited method and
-  // from outside, and a subclass override is the one reached.
-  testPerformLocallyWalksTheReceivingClassChain =>
-    self assert: InCallerProbeSub viaLocally equals: #parent
-    self assert: InCallerProbeSub viaLocallyOverridden equals: #sub
-    self assert: InCallerProbe viaLocallyOverridden equals: #parent
-    self assert: (InCallerProbeSub performLocally: #parentOnly withArguments: #()) equals: #parent
-    self assert: (InCallerProbeSub performLocally: #overridden withArguments: #()) equals: #sub
+  // `perform:withArguments:` resolves through the receiving class's
+  // class-method chain, as `performLocally:` did before ADR 0153 removed it:
+  // a parent-only selector is found and a subclass override is the one
+  // reached.
+  testPerformWalksTheReceivingClassChain =>
+    self assert: (InCallerProbeSub perform: #parentOnly withArguments: #()) equals: #parent
+    self assert: (InCallerProbeSub perform: #overridden withArguments: #()) equals: #sub
+    self assert: (InCallerProbe perform: #overridden withArguments: #()) equals: #parent
 
   // Errors keep the value they had through the class process.
   testErrorsAreUnchanged =>
@@ -89,26 +79,3 @@ TestCase subclass: ClassMethodInCallerTest
     self assert: ([
       cls boom
     ] on: Error do: [:e | e message]) equals: "in-caller boom"
-
-  // === Classes with class variables keep their process ===
-  testStatefulClassMethodRunsInItsClassProcess =>
-    self deny: (self pidThrough: InCallerStateful) == Erlang erlang self
-
-  // A subclass that declares no class variables of its own, but whose
-  // superclass does, keeps its process for its own methods too.
-  testSubclassOfStatefulClassRunsInItsClassProcess =>
-    self deny: (self pidThrough: InCallerStatefulSub) == Erlang erlang self
-    self deny: (InCallerStatefulSub runOwn: [
-      Erlang erlang self
-    ]) == Erlang erlang self
-
-  // A stateless class method called from inside another class's stateful
-  // invocation runs there, in that class process, and installs no
-  // class-variable home of its own (ADR 0130 §1: nothing nests), so the
-  // caller's write after it lands.
-  testStatelessCallFromStatefulInvocation =>
-    InCallerStateful reset
-    InCallerStateful addDoubleVia: InCallerProbe
-    self assert: InCallerStateful count equals: 4
-    InCallerStateful addDoubleVia: InCallerProbeSub
-    self assert: InCallerStateful count equals: 10

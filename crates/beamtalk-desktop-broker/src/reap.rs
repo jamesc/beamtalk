@@ -20,10 +20,18 @@
 //! `beamtalk-cli`'s `NodeInfo.start_time` already uses for its own PID-reuse
 //! detection) and refusing to signal a PID whose *current* start time
 //! doesn't match what was recorded. `proc_start_time` (from
-//! `beamtalk_workspace::pid_liveness`) reads a real value on Windows via
-//! `GetProcessTimes`; treat any future platform arm that instead returns
-//! `None` unconditionally as "unknown, trust liveness" — every sweep would
-//! match, closing nothing.
+//! `beamtalk_workspace::pid_liveness`) reads a real value on Linux
+//! (`/proc`), macOS (`proc_pidinfo`) and Windows (`GetProcessTimes`).
+//!
+//! A record with **no** start time (`start_time: None`: an old record, or a
+//! platform where `proc_start_time` has no arm) is never signalled
+//! (BT-5194): with nothing to compare, the live process at that PID cannot
+//! be told apart from an unrelated one that was handed the recycled PID, so
+//! [`classify_record`] maps it to [`Disposition::SkipUnverifiable`] and the
+//! sweep leaves both the process and the record alone (the record is cleared
+//! by a later sweep once nothing runs at that PID). A real orphan therefore
+//! outlives a broker crash until the user stops it, but stays recorded; that
+//! is the deliberate price of never killing an unrelated process.
 //!
 //! **A narrower race: `sweep` calls `is_process_alive` and
 //! `proc_start_time` as two separate syscalls** — if the process exits in
@@ -508,6 +516,12 @@ pub enum Disposition {
     /// recorded one — the OS recycled the PID for something unrelated.
     /// Clear the stale record but do **not** signal the process.
     SkipPidReused,
+    /// A process is alive at that PID, but the record has no start time to
+    /// match it against (BT-5194), so it may be an unrelated process holding
+    /// a recycled PID. Do **not** signal the process, and keep the record:
+    /// it may still be a real orphan, and a later sweep clears the record once
+    /// the PID is dead.
+    SkipUnverifiable,
 }
 
 /// Decide what to do with a record, given what's actually true about its PID
@@ -516,13 +530,10 @@ pub enum Disposition {
 /// logic itself needs no process I/O to test).
 ///
 /// When the *recorded* start time is unavailable (a platform without the
-/// cheap read, or an old record predating this field), this falls back to
-/// trusting liveness alone — the same "best effort" stance `beamtalk-cli`'s
-/// own `NodeInfo.start_time` handling takes for backward compatibility. This
-/// means PID-reuse detection is best-effort, not a hard guarantee, on
-/// platforms/records where start time was never available — matching the
-/// spike's own framing of this as hardening a known gap, not eliminating it
-/// outright.
+/// read, or an old record predating this field), the live process cannot be
+/// matched to the record at all, so it is [`Disposition::SkipUnverifiable`]:
+/// never signalled (BT-5194). Liveness alone proves only that *some* process
+/// holds the PID.
 ///
 /// A recorded start time with no matching *observed* value (`record.start_time:
 /// Some(_)`, `actual_start_time: None`) is treated differently,
@@ -539,6 +550,9 @@ pub fn classify_record(
     if !is_alive {
         return Disposition::ClearStale;
     }
+    if record.start_time.is_none() {
+        return Disposition::SkipUnverifiable;
+    }
     if start_time_matches(record.start_time, actual_start_time) {
         Disposition::Reap
     } else {
@@ -552,6 +566,12 @@ pub struct SweepReport {
     pub reaped: Vec<FrontRecord>,
     pub stale_cleared: Vec<FrontRecord>,
     pub pid_reused_skipped: Vec<FrontRecord>,
+    /// Alive, but with no recorded start time to match: not signalled, and
+    /// the record kept.
+    pub unverifiable_skipped: Vec<FrontRecord>,
+    /// Records whose file could not be removed (logged; the sweep carries on
+    /// with the rest, BT-5194).
+    pub remove_failed: Vec<FrontRecord>,
 }
 
 /// Grace period between `SIGTERM` and a forced `SIGKILL` (ignored on Windows —
@@ -568,10 +588,22 @@ const TERMINATE_GRACE: Duration = Duration::from_millis(300);
 /// prior in-memory "what's attached" state is gone, so there is no
 /// legitimate reason for a pre-existing front to still be tracked.
 ///
+/// A record whose file cannot be removed is logged and listed in
+/// [`SweepReport::remove_failed`]; the sweep carries on with the remaining
+/// records rather than leaving every later orphan running (BT-5194).
+///
 /// # Errors
 ///
-/// Returns an error if loading or clearing records in `dir` fails.
+/// Returns an error if the records in `dir` cannot be listed.
 pub fn sweep(dir: &Path) -> Result<SweepReport> {
+    sweep_with(dir, remove_record)
+}
+
+/// [`sweep`] with the record removal injected, so a test can make it fail.
+fn sweep_with(
+    dir: &Path,
+    mut remove: impl FnMut(&Path, &str, u16) -> Result<()>,
+) -> Result<SweepReport> {
     let mut report = SweepReport::default();
     for record in load_all_records(dir)? {
         let alive = is_process_alive(record.pid);
@@ -602,6 +634,17 @@ pub fn sweep(dir: &Path) -> Result<SweepReport> {
                 );
                 report.pid_reused_skipped.push(record.clone());
             }
+            Disposition::SkipUnverifiable => {
+                tracing::warn!(
+                    workspace = %record.workspace_id,
+                    pid = record.pid,
+                    "sweep: no recorded start time to match the live process at this PID \
+                     against — leaving it and its record alone (stop it by hand if it is \
+                     an orphaned front)"
+                );
+                report.unverifiable_skipped.push(record);
+                continue;
+            }
         }
         // `remove_record` below backgrounds its Windows RELEASE_TMP retry
         // removal onto its own thread rather than retrying inline,
@@ -611,7 +654,15 @@ pub fn sweep(dir: &Path) -> Result<SweepReport> {
         // disposition's target may not have fully exited (and released files
         // it held open under RELEASE_TMP) by the time that call returns
         // above.
-        remove_record(dir, &record.workspace_id, record.port)?;
+        if let Err(err) = remove(dir, &record.workspace_id, record.port) {
+            tracing::warn!(
+                workspace = %record.workspace_id,
+                port = record.port,
+                %err,
+                "sweep: could not remove the front record; continuing with the rest"
+            );
+            report.remove_failed.push(record);
+        }
     }
     Ok(report)
 }
@@ -695,12 +746,22 @@ mod tests {
         assert_eq!(disposition, Disposition::SkipPidReused);
     }
 
+    /// BT-5194: an older record with no `start_time`, or one written on a
+    /// platform without the read, cannot be matched to the live process at
+    /// its PID, which may be an unrelated process holding a recycled PID.
+    /// It used to be reaped on liveness alone (`SIGTERM` then `SIGKILL`).
     #[test]
-    fn alive_with_no_recorded_start_time_falls_back_to_reap() {
-        // Backward compat: an older record with no start_time field, or a
-        // platform without the cheap read — best-effort trusts liveness.
-        let disposition = classify_record(&record(1234, None), true, Some(100));
-        assert_eq!(disposition, Disposition::Reap);
+    fn alive_with_no_recorded_start_time_is_never_reaped() {
+        for observed in [Some(100), None] {
+            let disposition = classify_record(&record(1234, None), true, observed);
+            assert_eq!(disposition, Disposition::SkipUnverifiable);
+        }
+    }
+
+    #[test]
+    fn dead_with_no_recorded_start_time_is_cleared_as_stale() {
+        let disposition = classify_record(&record(1234, None), false, None);
+        assert_eq!(disposition, Disposition::ClearStale);
     }
 
     /// This used to fall back to trusting liveness (`Reap`), the
@@ -1031,17 +1092,61 @@ mod tests {
         assert!(load_all_records(tmp.path()).unwrap().is_empty());
     }
 
-    // Linux/Windows-only: `proc_start_time` only returns a real value on
-    // those two platforms (see `beamtalk_workspace::pid_liveness`; the Windows
-    // `GetProcessTimes` arm) — `classify_record`'s fallback for a platform
-    // where the *observed* start time is unavailable is `Reap` (best effort,
-    // matching `beamtalk-cli`'s own stance), which on a CI runner without a
-    // real `proc_start_time` would make this test SIGTERM/TerminateProcess
-    // its own test process. Gating this way keeps that real behavior safe to
-    // exercise here; `classify_record`'s fallback branch itself is covered
-    // platform-independently by `alive_with_no_observed_start_time_is_pid_reused_not_reaped`
-    // above.
-    #[cfg(any(target_os = "linux", windows))]
+    /// BT-5194: the full sweep, against this test process's own live PID with
+    /// no recorded start time — it must survive, and the record is kept (it
+    /// may be a real orphan; a later sweep clears it once the PID is dead).
+    #[test]
+    fn sweep_never_signals_a_live_pid_it_cannot_match_by_start_time() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let own_pid = std::process::id();
+        let rec = record(own_pid, None);
+        save_record(tmp.path(), &rec).unwrap();
+
+        let report = sweep(tmp.path()).unwrap();
+        assert!(report.reaped.is_empty(), "must never reap the test process");
+        assert_eq!(report.unverifiable_skipped, vec![rec.clone()]);
+        assert_eq!(load_all_records(tmp.path()).unwrap(), vec![rec]);
+        assert!(is_process_alive(own_pid));
+    }
+
+    /// BT-5194: one record whose file cannot be removed must not stop the
+    /// sweep from handling the others (it used to `?` out of the loop).
+    #[test]
+    fn a_failed_record_removal_does_not_abort_the_sweep() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let first = FrontRecord {
+            workspace_id: "first".to_string(),
+            ..record(u32::MAX, Some(1))
+        };
+        let second = FrontRecord {
+            workspace_id: "second".to_string(),
+            ..record(u32::MAX - 1, Some(1))
+        };
+        save_record(tmp.path(), &first).unwrap();
+        save_record(tmp.path(), &second).unwrap();
+
+        let mut attempted = Vec::new();
+        let report = sweep_with(tmp.path(), |dir, workspace_id, port| {
+            attempted.push(workspace_id.to_string());
+            if attempted.len() == 1 {
+                Err(std::io::Error::other("simulated removal failure").into())
+            } else {
+                remove_record(dir, workspace_id, port)
+            }
+        })
+        .expect("a removal failure must not fail the whole sweep");
+
+        assert_eq!(attempted.len(), 2, "every record must be processed");
+        assert_eq!(report.stale_cleared.len(), 2);
+        assert_eq!(report.remove_failed.len(), 1);
+        assert_eq!(load_all_records(tmp.path()).unwrap().len(), 1);
+    }
+
+    // Gated to the platforms where `proc_start_time` returns a real value
+    // (Linux, macOS, Windows): elsewhere the observed start time is `None`,
+    // which this record (`Some(1)`) also refuses to reap, but the test would
+    // then not be exercising the mismatch it is named for.
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     #[test]
     fn sweep_skips_and_clears_a_pid_reused_record_without_reaping() {
         let tmp = tempfile::TempDir::new().unwrap();

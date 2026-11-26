@@ -50,7 +50,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     defp observer_conn(conn) do
       Plug.Test.init_test_session(conn, %{
         "bt_user" => %{"sub" => "bob", "groups" => ["beamtalk-observers"]},
-        "bt_logged_in_at" => System.system_time(:second)
+        "bt_logged_in_at" => System.system_time(:second),
+        "live_socket_id" => "bt_session:#{System.unique_integer([:positive])}"
       })
     end
 
@@ -509,7 +510,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     {view, _html, class} = open_fresh_def_tab(conn)
     trace_source_refreshes(view)
 
-    save_html =
+    _ =
       view
       |> form("form[phx-submit='save_method']")
       |> render_submit(%{
@@ -518,6 +519,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
         "selector" => "▸ class definition",
         "source" => "Actor subclass: #{class}\n  state: value = 0\n\n  value => self.value + 1"
       })
+
+    # BT-5129: the eval folds off-process; wait for it.
+    save_html = render_async(view, 10_000)
 
     assert save_html =~ "Compiled #{class}"
 
@@ -688,10 +692,13 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # through the same `evaluate` op the REPL `:remove-method` meta-command,
     # the MCP `remove_method` tool, and the LSP `beamtalk.removeMethod`
     # command all use — no dedicated workspace-side op (ADR 0112).
-    remove_html =
+    _ =
       view
       |> element(~s(button[phx-click="remove_method"]))
       |> render_click()
+
+    # BT-5129: the eval folds off-process; wait for it.
+    remove_html = render_async(view, 10_000)
 
     assert remove_html =~ "Removed triple from #{class}"
     refute remove_html =~ "{:error"
@@ -744,10 +751,13 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # Click "Remove Class": dispatches `#{class} removeFromSystem` through the
     # same `evaluate` op the REPL `:remove-class` meta-command and the MCP
     # `remove_class` tool use — no dedicated workspace-side op (ADR 0113).
-    remove_html =
+    _ =
       view
       |> element(~s(button[phx-click="remove_class"]))
       |> render_click()
+
+    # BT-5129: the eval folds off-process; wait for it.
+    remove_html = render_async(view, 10_000)
 
     assert remove_html =~ "Removed #{class} from memory"
     assert remove_html =~ "not yet flushed to disk"
@@ -828,10 +838,13 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # file (eval-defined, no project tree in the test workspace), so its
     # entry is `flushable: false` — a safe no-op to flush, not a real
     # delete; it must not error.
-    flush_html =
+    _ =
       view
       |> element(~s(button[phx-click="flush_destructive"][phx-value-class="#{class}"]))
       |> render_click()
+
+    # BT-5129: the eval folds off-process; wait for it.
+    flush_html = render_async(view, 10_000)
 
     assert flush_html =~ "Flushed the pending removal for #{class}"
     refute flush_html =~ "beamtalk_error"
@@ -875,10 +888,13 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     assert open_html =~ "rename-new-name"
 
-    rename_html =
+    _ =
       view
       |> form("#rename-form")
       |> render_submit(%{"new_name" => new_name})
+
+    # BT-5129: the eval folds off-process; wait for it.
+    rename_html = render_async(view, 10_000)
 
     assert rename_html =~ "Renamed #{class} to #{new_name}"
     assert rename_html =~ "not yet flushed to disk"
@@ -955,10 +971,13 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     assert open_modal_html =~ "rename-new-name"
 
-    rename_html =
+    _ =
       view
       |> form("#rename-form")
       |> render_submit(%{"new_name" => "tripled"})
+
+    # BT-5129: the eval folds off-process; wait for it.
+    rename_html = render_async(view, 10_000)
 
     assert rename_html =~ "Renamed #{class} triple to tripled"
     assert rename_html =~ "not yet flushed to disk"
@@ -1049,10 +1068,13 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # tree's selected class.
     view |> element(~s(button[phx-click="open_rename"])) |> render_click()
 
-    rename_html =
+    _ =
       view
       |> form("#rename-form")
       |> render_submit(%{"new_name" => new_name})
+
+    # BT-5129: the eval folds off-process; wait for it.
+    rename_html = render_async(view, 10_000)
 
     assert rename_html =~ "Renamed #{class_a} to #{new_name}"
     refute rename_html =~ "{:error"
@@ -1121,12 +1143,15 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # file (eval-defined, no project tree in the test workspace), so its
     # entry is `flushable: false` — a safe no-op to flush, not a real
     # rewrite; it must not error.
-    flush_html =
+    _ =
       view
       |> element(
         ~s(button[phx-click="flush_destructive"][phx-value-class="#{new_name}"][phx-value-kind="rename-class"])
       )
       |> render_click()
+
+    # BT-5129: the eval folds off-process; wait for it.
+    flush_html = render_async(view, 10_000)
 
     assert flush_html =~ "Flushed the pending rename to #{new_name}"
     refute flush_html =~ "beamtalk_error"
@@ -2700,7 +2725,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       conn =
         Plug.Test.init_test_session(conn, %{
           "bt_user" => %{"sub" => "obs", "groups" => ["beamtalk-observers"]},
-          "bt_logged_in_at" => System.system_time(:second)
+          "bt_logged_in_at" => System.system_time(:second),
+          "live_socket_id" => "bt_session:#{System.unique_integer([:positive])}"
         })
 
       {:ok, conn: conn}

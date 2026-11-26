@@ -60,11 +60,6 @@ Erlang BIFs without dispatching (ADR 0002).
 -export([to_timeout/1]).
 -export([lt/2, gt/2, lte/2, gte/2]).
 
-%% Exported for white-box tests only (no production caller).
--ifdef(TEST).
--export([is_duration/1]).
--endif.
-
 -type t() :: #{?BT_CLASS_TAG_KEY := 'Duration', millis := integer()}.
 -export_type([t/0]).
 
@@ -345,18 +340,6 @@ gte(Self, Other) -> '>='(Self, Other).
 %% directly to the Erlang BIFs by codegen and never dispatch to a method (ADR
 %% 0002), so nothing could reach them. Duration canonicalises to a
 %% single `millis` field, which makes raw term equality already correct.
-
-%%% ============================================================================
-%%% Cross-module Helpers
-%%% ============================================================================
-
-%% Only the tests call this (BT-5048).
--ifdef(TEST).
--doc "True if the value is a Duration tagged map.".
--spec is_duration(term()) -> boolean().
-is_duration(#{?BT_CLASS_TAG_KEY := 'Duration', millis := Ms}) -> is_integer(Ms);
-is_duration(_) -> false.
--endif.
 
 %%% ============================================================================
 %%% Internal Functions

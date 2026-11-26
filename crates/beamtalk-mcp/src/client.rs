@@ -160,7 +160,8 @@ impl ReplClient {
                 }
             })?;
 
-        let session_id = perform_auth_handshake(&mut ws, cookie, resume).await?;
+        let nonce = expected_nonce(workspace_id.as_deref(), port)?;
+        let session_id = perform_auth_handshake(&mut ws, cookie, resume, nonce.as_deref()).await?;
         verify_server_versions(&mut ws).await?;
 
         let inner = Arc::new(Mutex::new(ReplClientInner { ws }));
@@ -225,6 +226,15 @@ impl ReplClient {
         .await;
 
         let (mut ws, connect_port) = match connect_result {
+            // BT-5188: the workspace no longer owns the cached port (its port
+            // file names another, or is gone): whatever answers there is not
+            // it, so look for the workspace's new port instead.
+            Ok(Ok(_)) if expected_nonce(self.workspace_id.as_deref(), cached_port).is_err() => {
+                self.reconnect_with_new_port(&format!(
+                    "Workspace is no longer on port {cached_port}"
+                ))
+                .await?
+            }
             Ok(Ok((ws, _response))) => (ws, cached_port),
             Ok(Err(cached_err)) => {
                 // Cached port failed — try re-reading the port file.
@@ -246,8 +256,14 @@ impl ReplClient {
             .lock()
             .map_err(|_| "Internal cookie state unavailable".to_string())?
             .clone();
-        let session_id =
-            perform_auth_handshake(&mut ws, &cookie, requested_session.as_deref()).await?;
+        let nonce = expected_nonce(self.workspace_id.as_deref(), connect_port)?;
+        let session_id = perform_auth_handshake(
+            &mut ws,
+            &cookie,
+            requested_session.as_deref(),
+            nonce.as_deref(),
+        )
+        .await?;
         // A restarted node may run a different toolchain — re-verify (BT-4327).
         verify_server_versions(&mut ws).await?;
 
@@ -591,7 +607,8 @@ impl ReplClient {
         let mut ws = ws_client::connect_with_timeout(&url, CONNECT_TIMEOUT)
             .await
             .map_err(|e| format!("Failed to open interrupt connection to {url}: {e:?}"))?;
-        perform_auth_handshake(&mut ws, &cookie, session.as_deref()).await?;
+        let nonce = expected_nonce(self.workspace_id.as_deref(), port)?;
+        perform_auth_handshake(&mut ws, &cookie, session.as_deref(), nonce.as_deref()).await?;
         verify_server_versions(&mut ws).await?;
 
         let result = async {
@@ -957,10 +974,15 @@ fn spawn_keepalive(inner: Arc<Mutex<ReplClientInner>>) -> tokio::task::JoinHandl
 ///
 /// Reads `auth-required`, sends `auth` (with optional `resume`), reads `auth_ok`,
 /// and reads `session-started`. Returns the session ID from the server.
+///
+/// With `nonce` (the workspace's port-file nonce, BT-5188), the server must
+/// first prove it knows it for a fresh challenge; the cookie is sent only
+/// after that, so a process reusing a dead workspace's port never gets it.
 async fn perform_auth_handshake<S>(
     ws: &mut tokio_tungstenite::WebSocketStream<S>,
     cookie: &str,
     resume: Option<&str>,
+    nonce: Option<&str>,
 ) -> Result<Option<String>, String>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
@@ -968,21 +990,127 @@ where
     // The step sequence is shared (BT-4682); `client` tags the session
     // surface so `Workspace sessions` can show it originated from the MCP
     // server.
-    handshake::perform_auth_sequence(
-        ws,
-        cookie,
-        "mcp",
-        resume,
-        async |ws: &mut tokio_tungstenite::WebSocketStream<S>, text: String| {
-            ws.send(Message::Text(text.into()))
-                .await
-                .map_err(|e| e.to_string())
-        },
-        async |ws: &mut tokio_tungstenite::WebSocketStream<S>| {
-            read_text_message_with_timeout(ws, REPL_IO_TIMEOUT).await
-        },
-    )
-    .await
+    let send = async |ws: &mut tokio_tungstenite::WebSocketStream<S>, text: String| {
+        ws.send(Message::Text(text.into()))
+            .await
+            .map_err(|e| e.to_string())
+    };
+    let recv = async |ws: &mut tokio_tungstenite::WebSocketStream<S>| {
+        read_text_message_with_timeout(ws, REPL_IO_TIMEOUT).await
+    };
+    match nonce {
+        Some(nonce) => {
+            let challenge = fresh_challenge();
+            handshake::perform_verified_auth_sequence(
+                ws,
+                cookie,
+                "mcp",
+                resume,
+                (nonce, &challenge),
+                send,
+                recv,
+            )
+            .await
+        }
+        None => handshake::perform_auth_sequence(ws, cookie, "mcp", resume, send, recv).await,
+    }
+}
+
+/// A fresh, unpredictable identity challenge: 16 random bytes, hex.
+fn fresh_challenge() -> String {
+    use rand::Rng;
+    let mut bytes = [0u8; 16];
+    rand::rng().fill_bytes(&mut bytes);
+    beamtalk_workspace::hex_encode(&bytes)
+}
+
+/// The nonce a server on `port` must prove it knows before it gets the
+/// cookie (BT-5188).
+///
+/// `Ok(None)` without a workspace id (an explicit `--port`: nothing to check
+/// against). With one, the port file must name `port` and carry a nonce;
+/// otherwise this is an error and the cookie is not sent — the workspace
+/// moved or stopped, and whatever now listens on `port` is unverified.
+pub fn expected_nonce(workspace_id: Option<&str>, port: u16) -> Result<Option<String>, String> {
+    let Some(id) = workspace_id else {
+        return Ok(None);
+    };
+    match beamtalk_workspace::read_port_file(id).ok().flatten() {
+        Some((file_port, Some(nonce))) if file_port == port => Ok(Some(nonce)),
+        Some((file_port, _)) if file_port != port => Err(format!(
+            "Workspace '{id}' is no longer on port {port} (its port file names {file_port}); \
+             the cookie was not sent."
+        )),
+        Some(_) => Err(format!(
+            "Workspace '{id}' has no nonce in its port file, so it cannot be verified; the \
+             cookie was not sent. Restart it with `beamtalk workspace stop {id}`."
+        )),
+        None => Err(format!(
+            "Workspace '{id}' has no port file (it is not running); the cookie was not sent."
+        )),
+    }
+}
+
+/// What an identity probe found on a port (BT-5188).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeOutcome {
+    /// The workspace that wrote the port file answers there.
+    Verified,
+    /// Something answers, but it is not that workspace (a reused port, a
+    /// restarted node with a new nonce, or a non-WebSocket listener).
+    NotTheWorkspace,
+    /// Nothing accepts connections on the port, or nothing answered in
+    /// time (starting, busy, at its connection cap): worth retrying.
+    Unreachable,
+}
+
+/// Connects to `port`, has the server prove it knows `nonce`, and hangs up
+/// without authenticating — no cookie is sent (BT-5188).
+pub async fn probe_workspace_identity(port: u16, nonce: &str, timeout: Duration) -> ProbeOutcome {
+    // Nothing accepting connections, or nothing answering in time (a node
+    // still starting, busy, or at its connection cap), is `Unreachable`:
+    // the caller may retry. Only a peer that answers and is wrong — refuses
+    // the WebSocket upgrade, sends something other than our welcome, or
+    // fails the challenge — is `NotTheWorkspace`.
+    let connected =
+        tokio::time::timeout(timeout, tokio::net::TcpStream::connect(("127.0.0.1", port))).await;
+    let Ok(Ok(stream)) = connected else {
+        return ProbeOutcome::Unreachable;
+    };
+    let url = format!("ws://127.0.0.1:{port}/ws");
+    let mut ws =
+        match tokio::time::timeout(timeout, tokio_tungstenite::client_async(url, stream)).await {
+            Err(_elapsed) => return ProbeOutcome::Unreachable,
+            Ok(Err(_)) => return ProbeOutcome::NotTheWorkspace,
+            Ok(Ok((ws, _response))) => ws,
+        };
+    let challenge = fresh_challenge();
+    let outcome = async {
+        let Ok(welcome) = read_text_message_with_timeout(&mut ws, timeout).await else {
+            return ProbeOutcome::Unreachable;
+        };
+        let welcome: Option<serde_json::Value> = serde_json::from_str(&welcome).ok();
+        if !welcome.as_ref().is_some_and(handshake::is_auth_required) {
+            return ProbeOutcome::NotTheWorkspace;
+        }
+        let identify = handshake::identify_request(&challenge).to_string();
+        if ws.send(Message::Text(identify.into())).await.is_err() {
+            return ProbeOutcome::Unreachable;
+        }
+        let Ok(reply) = read_text_message_with_timeout(&mut ws, timeout).await else {
+            return ProbeOutcome::Unreachable;
+        };
+        let verified = serde_json::from_str::<serde_json::Value>(&reply)
+            .is_ok_and(|reply| handshake::verify_identity(&reply, nonce, &challenge));
+        if verified {
+            ProbeOutcome::Verified
+        } else {
+            ProbeOutcome::NotTheWorkspace
+        }
+    }
+    .await;
+    let _ = tokio::time::timeout(Duration::from_secs(1), ws.close(None)).await;
+    outcome
 }
 
 /// Client side of the version lock (BT-4327): refuse a stale node via

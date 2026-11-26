@@ -170,8 +170,6 @@ pub struct ClassDefinition {
     pub methods: Vec<MethodDefinition>,
     /// Class-side method definitions (defined with `class` prefix).
     pub class_methods: Vec<MethodDefinition>,
-    /// Class variable declarations (defined with `classState:`).
-    pub class_variables: Vec<StateDeclaration>,
     /// Non-doc comments (`//` and `/* */`) appearing before this class.
     pub comments: CommentAttachment,
     /// Doc comment attached to this class (`///` lines).
@@ -230,10 +228,7 @@ impl ClassDefinition {
     ///
     /// [`Module::state_default_exprs`]: crate::ast::Module::state_default_exprs
     pub fn state_default_exprs(&self) -> impl Iterator<Item = &Expression> {
-        self.state
-            .iter()
-            .chain(&self.class_variables)
-            .filter_map(|d| d.default_value.as_ref())
+        self.state.iter().filter_map(|d| d.default_value.as_ref())
     }
 
     /// Creates a new class definition.
@@ -259,7 +254,6 @@ impl ClassDefinition {
             state,
             methods,
             class_methods: Vec::new(),
-            class_variables: Vec::new(),
             type_params: Vec::new(),
             superclass_type_args: Vec::new(),
             uses: Vec::new(),
@@ -331,7 +325,6 @@ impl ClassDefinition {
             state,
             methods,
             class_methods: Vec::new(),
-            class_variables: Vec::new(),
             type_params: Vec::new(),
             superclass_type_args: Vec::new(),
             uses: Vec::new(),
@@ -472,14 +465,10 @@ pub fn declared_shape_migrations(class: &ClassDefinition) -> Vec<(u32, EcoString
 ///
 /// Example: `Counter >> increment => self.value := self.value + 1`
 /// Example: `Counter class >> withInitial: n => self spawnWith: #{value => n}`
-/// Example: `json@Parser >> lenientParse: input => ...` (cross-package extension, ADR 0070)
 #[derive(Debug, Clone, PartialEq)]
 pub struct StandaloneMethodDefinition {
     /// The class this method belongs to.
     pub class_name: Identifier,
-    /// Optional package qualifier for cross-package extensions (ADR 0070).
-    /// E.g., `json` in `json@Parser >> lenientParse: input => ...`
-    pub package: Option<Identifier>,
     /// Whether this is a class-side method (`Counter class >> ...`).
     pub is_class_method: bool,
     /// The method definition.
@@ -591,7 +580,7 @@ pub struct ProtocolMethodSignature {
 ///
 /// Grammar: `uses: [package@]ProtocolName[(TypeArgs)] [excluding: #(#sel, …)]
 /// [overriding: #(#sel, …)]`. `uses:` lines must appear immediately after
-/// the class header, before any `state:`/`field:`/`classState:` or method
+/// the class header, before any `state:`/`field:` or method
 /// declaration.
 ///
 /// This node only carries the *syntax* — composing these into the using
@@ -735,7 +724,7 @@ impl DeclaredKeyword {
 
 /// Whether a slot is eagerly initialised or declared `late` (ADR 0124 §1).
 ///
-/// `late` is a declaration-level modifier on `state:`/`classState:` marking a
+/// `late` is a declaration-level modifier on `state:` marking a
 /// slot that is legitimately unassigned after `initialize` — absent from the
 /// state map until assigned, and exempt from ADR 0078's post-`initialize`
 /// check. This is the parser/AST half (ADR 0124 B1); the exemption itself is

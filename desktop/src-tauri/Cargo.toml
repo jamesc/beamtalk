@@ -25,7 +25,7 @@ name = "beamtalk-desktop"
 description = "Desktop picker: attach to live Beamtalk workspaces (ADR 0097, BT-2986)"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "Apache-2.0"
 publish = false
 
@@ -90,3 +90,6 @@ tempfile = "3.27.0"
 # ships in the release binary (edition 2024's per-target feature resolver
 # keeps dev-dependency features out of `cargo build`).
 tauri = { version = "2", features = ["test"] }
+# "test": `SpawnedFront::from_child_for_tests`, so `commands.rs`'s
+# quit test can track a real process as an attached front (BT-5194).
+beamtalk-desktop-broker = { path = "../../crates/beamtalk-desktop-broker", features = ["test"] }

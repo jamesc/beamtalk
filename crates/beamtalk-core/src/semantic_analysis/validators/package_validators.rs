@@ -130,18 +130,6 @@ pub fn check_package_qualifiers(
 
     // Check standalone method definitions
     for method_def in &module.method_definitions {
-        if let Some(ref pkg) = method_def.package
-            && !known_packages.contains(pkg.name.as_str())
-        {
-            diagnostics.push(unknown_package_diagnostic(
-                pkg,
-                format!(
-                    "Unknown package '{}' in extension target '{}@{}'",
-                    pkg.name, pkg.name, method_def.class_name.name
-                ),
-            ));
-        }
-
         for stmt in &method_def.method.body {
             check_expression_packages(&stmt.expression, known_packages, diagnostics);
         }
@@ -227,18 +215,6 @@ mod tests {
             "Object subclass: Foo\n  bar => xml@Parser parse: \"test\"",
             &["json"],
             Outcome::Message("Unknown package 'xml'"),
-        ),
-        (
-            "qualified_in_standalone_method_target",
-            "xml@Parser >> lenient => 42",
-            &["json"],
-            Outcome::Message("Unknown package 'xml'"),
-        ),
-        (
-            "qualified_in_standalone_method_target_known",
-            "json@Parser >> lenient => 42",
-            &["json"],
-            Outcome::NoErrors,
         ),
         (
             "multiple_unknown_packages_multiple_errors",

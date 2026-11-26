@@ -2,7 +2,6 @@
 # Each line: <pattern-id><TAB><path><TAB><reason>. An entry that no longer matches a hit fails the check.
 # An exception covers a whole file, so keep reasons specific and delete the entry when the hit goes.
 catch-error-map	runtime/apps/beamtalk_runtime/test/beamtalk_class_dispatch_tests.erl	value-returning outcome helper or needs the raised wrapper map; each site carries a BT-4900 'kept hand-written' note
-catch-error-map	runtime/apps/beamtalk_runtime/test/beamtalk_class_shadow_flags_tests.erl	value-returning outcome helper or needs the raised wrapper map; each site carries a BT-4900 'kept hand-written' note
 catch-error-map	runtime/apps/beamtalk_runtime/test/beamtalk_erlang_proxy_tests.erl	value-returning outcome helper or needs the raised wrapper map; each site carries a BT-4900 'kept hand-written' note
 catch-error-map	runtime/apps/beamtalk_runtime/test/beamtalk_exception_handler_tests.erl	value-returning outcome helper or needs the raised wrapper map; each site carries a BT-4900 'kept hand-written' note
 catch-error-map	runtime/apps/beamtalk_runtime/test/beamtalk_supervisor_tests.erl	value-returning outcome helper or needs the raised wrapper map; each site carries a BT-4900 'kept hand-written' note
@@ -17,3 +16,4 @@ build-literal	crates/beamtalk-parity-tests/src/drivers/cli.rs	directory-name ski
 self-name	crates/beamtalk-core/src/ast/expression.rs	the definition of Expression::is_self() itself
 build-literal	crates/beamtalk-core/src/build_layout.rs	the BuildLayout definition itself (BUILD_DIR_NAME)
 send-form-call	crates/beamtalk-codegen/src/core_erlang/dispatch_codegen/mod.rs	the runtime_send_doc definition itself (the one construction of the send call)
+self-name	crates/beamtalk-core/src/semantic_analysis/validators/class_validators.rs	a block-parameter name (BlockParameter), not an Expression receiver: a block that declares :self rebinds self

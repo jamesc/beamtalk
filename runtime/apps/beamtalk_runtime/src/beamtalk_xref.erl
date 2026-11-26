@@ -63,7 +63,8 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     purge_class/1,
     put_method/4,
     purge_method/3,
-    register_state_vars/2
+    register_state_vars/2,
+    safe_xref/1
 ]).
 
 %% API — read path
@@ -128,7 +129,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 %% `protocol` (ADR 0127 §12): a method flattened into the class from a
 %% `uses:`d trait's provision. Its companion `origin` field (below) names the
 %% protocol; every other provenance leaves `origin` `undefined`.
--type provenance() :: class_body | extension | class_builder | put_method | protocol.
+-type provenance() :: class_body | class_builder | put_method | protocol.
 -type recv_kind() :: self_recv | super_recv | erlang_ffi | other.
 
 %% ADR 0115 Phase 2: a message send's receiver, projected onto
@@ -378,8 +379,8 @@ purge_class(Class) when is_atom(Class) ->
 -doc """
 Replace the xref rows for a single method without touching siblings.
 
-Used for method-level edits (`put_method/4` source patches, ADR 0082;
-extension registers, ADR 0066) where only one method's data changes.
+Used for method-level edits (`put_method/4` source patches, ADR 0082) where
+only one method's data changes.
 Synchronous. Unlike `register_class/2`, a single-method patch does NOT bump
 the class generation — the unbumped sibling methods must stay on the current
 generation rather than being stranded behind the reader's `current_gen`
@@ -397,10 +398,10 @@ put_method(Class, ClassSide, Selector, MethodXref) when
 Remove the xref rows for a single method without touching siblings.
 
 The narrow counterpart to `put_method/4` (which replaces). Used for
-method-level *removal* — e.g. `beamtalk_extensions:unregister/2` (ADR 0066)
-drops an extension method, so its `{Class, ClassSide, Selector}` method row
-plus every sender / reference row owned by that method must be purged while
-sibling methods on the same class stay intact. Synchronous. Idempotent —
+method-level *removal* — e.g. `removeSelector:` (ADR 0112) drops a method, so
+its `{Class, ClassSide, Selector}` method row plus every sender / reference row
+owned by that method must be purged while sibling methods on the same class
+stay intact. Synchronous. Idempotent —
 purging an unknown method is a no-op.
 
 Does not bump the class's generation: removal leaves no new rows to publish,
@@ -411,6 +412,20 @@ purge_method(Class, ClassSide, Selector) when
     is_atom(Class), is_boolean(ClassSide), is_atom(Selector)
 ->
     gen_server:call(?MODULE, {purge_method, Class, ClassSide, Selector}).
+
+-doc """
+Run a `beamtalk_xref` gen_server call best-effort.
+
+The xref index is advisory tooling state; class hot patches and class removal
+must not crash if it is unavailable. Tolerates a missing (`noproc`),
+unreachable (`nodedown`) or stopping (`normal`/`shutdown`) `beamtalk_xref` via
+`beamtalk_call_failure:tolerate_gone/3`, degrading to a no-op. Other
+exits/errors propagate. The one `safe_xref/1`; callers in other modules use
+this one.
+""".
+-spec safe_xref(fun(() -> ok)) -> ok.
+safe_xref(Fun) ->
+    beamtalk_call_failure:tolerate_gone(Fun, ok, #{stopping => true}).
 
 %%====================================================================
 %% API — xref-entry construction helpers
@@ -428,15 +443,14 @@ runtime "all references" walker, so class references are left empty for live
 edits; the class-reference channel is fully populated only at compile time).
 
 Used by the method-level mutation entry points that re-index a single method:
-`beamtalk_object_class:put_method/4` (live `>>` patch, ADR 0082) and
-`beamtalk_extensions:register/5` (sourced extension, ADR 0066).
+`beamtalk_object_class:put_method/4` (live `>>` patch, ADR 0082).
 
 `Source` is the method's bare body text; the method-relative definition line is
 1 (the signature is the first source line). When the compiler app is absent or
 `Source` is empty / unparseable, returns an entry with empty `sends` /
 `references` rather than failing — the index degrades gracefully, mirroring the
 miss-policy fallback. `SourceStatus` is the caller-chosen tag (`indexed` for a
-sourced patch / extension, `unindexed_runtime_fun` for a sourceless one).
+sourced patch, `unindexed_runtime_fun` for a sourceless one).
 `Provenance` records which mutation path produced the entry.
 """.
 -spec build_method_entry(class_side(), selector(), binary(), source_status(), provenance()) ->
@@ -468,8 +482,7 @@ receiver tag (`self | super | erlang_ffi | other`) onto the xref `recv_kind`
 (`self_recv | super_recv | erlang_ffi | other`) and converts the binary
 selector to an atom.
 
-Security: `Source` is attacker-influenceable (live `>>` patches and extension
-registration both flow user text here), so the selector is converted with
+Security: `Source` is attacker-influenceable (live `>>` patches flow user text here), so the selector is converted with
 `binary_to_existing_atom` — never `binary_to_atom` — to avoid growing the
 global atom table from untrusted input (mirrors `beamtalk_repl_ops_nav`). A
 selector that has no existing atom (e.g. a send to a never-yet-seen message)
@@ -1036,8 +1049,8 @@ other `_bt` reads:
 - `indexed` — one `selector_row()` (`#{owner, class_side, selector}`) per
   method-table row whose owner class is still loaded (**stale rows dropped**).
   The BT side keeps the selector atoms and applies the lowercase substring
-  filter; the owner / side are carried so de-duplication against the source /
-  extension selectors stays correct.
+  filter; the owner / side are carried so de-duplication against the source
+  selectors stays correct.
 - `fallback_classes` — the loaded-but-unindexed, method-bearing classes whose
   selectors the BT side must gather directly from `methods` / `class methods`.
   One `xref_miss` `?LOG_WARNING` is emitted per class. See `senders_of_bt/1`.

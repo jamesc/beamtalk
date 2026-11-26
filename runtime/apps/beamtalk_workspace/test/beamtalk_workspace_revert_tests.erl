@@ -105,13 +105,11 @@ revert_e2e_test_() ->
             fun remove_selector_if_absent_returns_block_value_on_absence/1,
             fun remove_selector_if_absent_returns_receiver_on_success/1,
             fun remove_selector_allow_stdlib_removes_from_a_stdlib_class/1,
-            fun remove_selector_contested_extension_re_exposes_local_method/1,
             %% ADR 0112 Phase 3: "remove-method" ChangeLog entries +
             %% the (class, selector, side) flush-shadow-key / revert-side-
             %% resolution required fix.
             fun remove_selector_instance_side_logs_remove_method_changelog_entry/1,
             fun remove_selector_class_side_logs_remove_method_changelog_entry/1,
-            fun remove_selector_extension_logs_remove_method_changelog_entry/1,
             %% ADR 0113 Phase 1: "remove-class" ChangeLog entries
             %% for `removeFromSystem`.
             fun remove_from_system_logs_remove_class_changelog_entry/1,
@@ -491,40 +489,6 @@ remove_selector_allow_stdlib_removes_from_a_stdlib_class(#{tmp := Tmp, unique :=
         ?_assert(lists:member(keep, AfterRemove))
     ].
 
-%% ADR 0112 § Extension methods, case 3: a local method shadowed by a
-%% same-named extension. Removal must drop only the dispatch-winning
-%% extension (mirroring beamtalk_dispatch:lookup/5's extension-first order),
-%% re-exposing the local method; a second removeSelector: call removes that
-%% too. Constructed directly via beamtalk_extensions:register/4 rather than
-%% `>>` syntax — targeting an already-locally-defined selector on a known
-%% class with `>>` patches the local method in place instead of registering a
-%% foreign extension, not the contested state this case needs.
-remove_selector_contested_extension_re_exposes_local_method(#{tmp := Tmp, unique := U}) ->
-    ClassName = list_to_binary("Bt3186Contested" ++ U),
-    {ok, Pid} = define_project_class(Tmp, ClassName, ["  greet => 1\n"]),
-    ClassAtom = binary_to_atom(ClassName, utf8),
-    ExtFun = fun(_Args, _Self) -> ext_greet end,
-    ok = beamtalk_extensions:register(ClassAtom, greet, ExtFun, bt3186_test_owner),
-    Self = instance_self(ClassName, Pid),
-    HasExtBefore = beamtalk_extensions:has(ClassAtom, greet),
-    LocalBefore = beamtalk_runtime_api:local_instance_methods(Pid),
-    %% First removal: drops the extension only; the local `greet` is untouched.
-    Result1 = beamtalk_class_refactor:classRemoveSelector(Self, greet),
-    HasExtAfterFirst = beamtalk_extensions:has(ClassAtom, greet),
-    LocalAfterFirst = beamtalk_runtime_api:local_instance_methods(Pid),
-    %% Second removal: the now-dispatch-winning local method is removed too.
-    Result2 = beamtalk_class_refactor:classRemoveSelector(Self, greet),
-    LocalAfterSecond = beamtalk_runtime_api:local_instance_methods(Pid),
-    [
-        ?_assert(HasExtBefore),
-        ?_assert(lists:member(greet, LocalBefore)),
-        ?_assertEqual(Self, Result1),
-        ?_assertNot(HasExtAfterFirst),
-        ?_assert(lists:member(greet, LocalAfterFirst)),
-        ?_assertEqual(Self, Result2),
-        ?_assertNot(lists:member(greet, LocalAfterSecond))
-    ].
-
 %%====================================================================
 %% ADR 0112 Phase 3 — "remove-method" ChangeLog entries; the
 %% (class, selector, side) flush-shadow-key and revert-side-resolution
@@ -570,36 +534,6 @@ remove_selector_class_side_logs_remove_method_changelog_entry(#{tmp := Tmp, uniq
             project_class_path(Tmp, ClassName),
             beamtalk_workspace_changelog:entry_source_file(Entry)
         )
-    ].
-
-%% Extension-side counterpart (ADR 0112 § Extension methods): removing a
-%% genuine EXTENSION method — registered via `beamtalk_extensions:register/5`
-%% with real source text, not the local class table — also logs a
-%% `"remove-method"` entry, but is always `flushable: false,
-%% not_flushable_reason: "extension"` (no reliable byte-span resolver for a
-%% foreign `TargetClass >> selector` definition exists in this codebase — see
-%% `emit_extension_remove_change_entry/7`'s doc). The extension's source text
-%% is still captured as `prev_source` for the audit trail even though nothing
-%% can act on it yet.
-remove_selector_extension_logs_remove_method_changelog_entry(#{tmp := Tmp, unique := U}) ->
-    ClassName = list_to_binary("Bt3187Ext" ++ U),
-    {ok, Pid} = define_project_class(Tmp, ClassName, ["  base => 1\n"]),
-    ClassAtom = binary_to_atom(ClassName, utf8),
-    ExtFun = fun(_Args, _Self) -> ext_shout end,
-    ExtSource = <<"shout => ^ 'loud'">>,
-    ok = beamtalk_extensions:register(ClassAtom, shout, ExtFun, bt3187_test_owner, ExtSource),
-    Self = instance_self(ClassName, Pid),
-    _ = beamtalk_class_refactor:classRemoveSelector(Self, shout),
-    Entry = only_remove_method_entry(ClassName, <<"shout">>),
-    PrevBody = beamtalk_workspace_changelog:read_prev_source_body(Entry),
-    [
-        ?_assertEqual('remove-method', beamtalk_workspace_changelog:entry_kind(Entry)),
-        ?_assertEqual(instance, beamtalk_workspace_changelog:entry_side(Entry)),
-        ?_assertNot(beamtalk_workspace_changelog:entry_flushable(Entry)),
-        ?_assertEqual(
-            <<"extension">>, beamtalk_workspace_changelog:entry_not_flushable_reason(Entry)
-        ),
-        ?_assertEqual({ok, ExtSource}, PrevBody)
     ].
 
 %%====================================================================

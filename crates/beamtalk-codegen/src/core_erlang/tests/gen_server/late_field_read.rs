@@ -4,9 +4,8 @@
 //! ADR 0124 §3/B3: the guarded `maps:find` read for a `late` slot, in both
 //! `generate_field_access` branches (instance `State`/`Self` map,
 //! class-method class-variable read) — `expressions.rs`. Companion to BT-3548's
-//! `test_late_state_omitted_from_init_state_literal` /
-//! `test_late_classstate_omitted_from_classstate_map` in
-//! `class_registration.rs`, which cover the *representation* (key absence);
+//! `test_late_state_omitted_from_init_state_literal` in
+//! `class_registration.rs`, which covers the *representation* (key absence);
 //! this covers the *read*.
 
 use super::*;
@@ -87,62 +86,6 @@ fn eager_instance_field_read_stays_bare_maps_get_alongside_late_sibling() {
     );
 }
 
-/// Class-method branch (ADR 0130 §2): `self.current` on a `late classState:`
-/// var reads in place; only an absent key is a miss, which the runtime's
-/// `get_late/2` turns into the structured `uninitialized_state_error` — a
-/// stored `nil` answers on the hit path (BT-4061).
-#[test]
-fn late_class_var_read_inlines_the_hit_and_falls_back_to_get_late() {
-    let src = concat!(
-        "typed Actor subclass: CodexClient\n",
-        "  late classState: current :: CodexClient\n",
-        "  classState: total :: Integer = 0\n\n",
-        "  class fetch => self.current\n",
-    );
-    let code = codegen_named(src, "codex_client");
-
-    assert!(
-        code.contains("call 'maps':'find'('current', "),
-        "a `late` class variable read must guard with maps:find. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("when call 'erlang':'=/='("),
-        "a `late` class variable read must NOT treat a stored nil as a miss — presence is assignment. Got:\n{code}"
-    );
-    assert!(
-        code.contains("call 'beamtalk_class_vars':'get_late'(ClassSelf, 'current')"),
-        "the miss path is the runtime's get_late/2. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("ClassVars"),
-        "no ClassVars map is read (ADR 0130 §3). Got:\n{code}"
-    );
-
-    assert_compiles_through_erlc("codex_client", &code);
-}
-
-/// An eager class variable alongside a `late` one reads through `get/2`, not
-/// `get_late/2`, and has no nil-is-a-miss guard.
-#[test]
-fn eager_class_var_read_uses_get_alongside_late_sibling() {
-    let src = concat!(
-        "typed Actor subclass: CodexClient\n",
-        "  late classState: current :: CodexClient\n",
-        "  classState: total :: Integer = 0\n\n",
-        "  class fetchTotal => self.total\n",
-    );
-    let code = codegen_named(src, "codex_client");
-
-    assert!(
-        code.contains("call 'beamtalk_class_vars':'get'(ClassSelf, 'total')"),
-        "an eager class variable's miss path is get/2. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'get_late'(ClassSelf, 'total')") && !code.contains("'=/='"),
-        "an eager class variable has no late guard. Got:\n{code}"
-    );
-}
-
 /// Cross-file inheritance: a `late` instance field declared on a
 /// compiled-elsewhere ancestor (`ClassInfo` metadata only, no AST) must
 /// still be guarded when read in the subclass's own method — the flattened
@@ -217,18 +160,18 @@ fn cross_file_inherited_late_field_read_is_guarded() {
 /// test below and tracked as a follow-up, not part of ADR 0124 B3).
 #[test]
 fn late_field_read_inside_hybrid_while_loop_is_not_pre_extracted_and_compiles() {
-    // BT-4121: neither the condition (its receiver is the literal `3`, so the
-    // comparison is a bare BIF) nor the body (`self.n + 1`
-    // is bare on the `:: Integer` field) holds a guarded operator; one would
-    // route the loop to `StateAcc` (a hybrid loop cannot bracket its slow
-    // path).
+    // BT-4121: neither the condition (`=:=` is a structural BIF; an ordering
+    // comparison on the local `i` would be guarded, ADR 0116 § Addendum)
+    // nor the body (`self.n + 1` is bare on the `:: Integer` field) holds a
+    // guarded operator; one would route the loop to `StateAcc` (a hybrid
+    // loop cannot bracket its slow path).
     let src = concat!(
         "typed Actor subclass: CodexClient\n",
         "  late state: proc :: Subprocess\n",
         "  state: n :: Integer = 0\n\n",
         "  pump: limit :: Integer =>\n",
         "    i := 0\n",
-        "    [3 > i] whileTrue: [\n",
+        "    [i =:= 0] whileTrue: [\n",
         "      p := self.proc\n",
         "      self.n := self.n + 1\n",
         "      i := limit\n",

@@ -11,8 +11,8 @@ use super::{
     StateDeclaration, TypeAliasDefinition, break_, concat, docvec, group, join_docs,
     leading_ends_with_orphaned_doc_comment, leaf, line, nest, nil, unparse_comment,
     unparse_comment_attachment_leading, unparse_expression, unparse_expression_statement,
-    unparse_literal, unparse_method_display_signature_doc, unparse_selector_and_params,
-    unparse_type_annotation,
+    unparse_literal, unparse_literal_at, unparse_method_display_signature_doc,
+    unparse_selector_and_params, unparse_type_annotation, value_with_separator,
 };
 
 /// One of the four top-level declaration kinds that can appear in a
@@ -290,7 +290,7 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
                 docvec![
                     line(),
                     "shapeVersion: ",
-                    leaf::int_lit(i64::from(sv.version))
+                    unparse_literal_at(&Literal::Integer(i64::from(sv.version)), sv.span)
                 ]
             )
         ]
@@ -312,14 +312,6 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
     // matching the `line()` inside nest() pattern used for instance methods.
     for state in &class.state {
         docs.push(nest(2, docvec![line(), unparse_state_declaration(state)]));
-    }
-
-    // Class variables
-    for state in &class.class_variables {
-        docs.push(nest(
-            2,
-            docvec![line(), unparse_class_state_declaration(state)],
-        ));
     }
 
     // Blank line before first method (always, regardless of whether state is present)
@@ -370,15 +362,6 @@ pub(crate) fn unparse_standalone_method_definition(
     smd: &StandaloneMethodDefinition,
 ) -> Document<'static> {
     let class = leaf::ident(&smd.class_name.name);
-    // Cross-package extension methods (ADR 0070): `package@ClassName >> ...`.
-    // `smd.package`, when present, must be consulted here so `beamtalk fmt`
-    // does not drop the package qualifier from a cross-package
-    // standalone method.
-    let class = if let Some(package) = &smd.package {
-        docvec![leaf::ident(&package.name), "@", class]
-    } else {
-        class
-    };
     let separator = if smd.is_class_method {
         Document::Str(" class >> ")
     } else {
@@ -903,15 +886,6 @@ pub(super) fn unparse_keyword_part(part: &KeywordPart) -> Document<'static> {
 /// Emits non-doc comments, doc comment, then `state: name [: Type] [= default]`.
 #[must_use]
 pub(crate) fn unparse_state_declaration(state: &StateDeclaration) -> Document<'static> {
-    unparse_state_declaration_inner(state, false)
-}
-
-/// Builds a [`Document`] for a class-variable declaration.
-fn unparse_class_state_declaration(state: &StateDeclaration) -> Document<'static> {
-    unparse_state_declaration_inner(state, true)
-}
-
-fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> Document<'static> {
     let mut docs: Vec<Document<'static>> = Vec::new();
 
     // Non-doc leading comments
@@ -952,11 +926,7 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
         docs.push(line());
     }
 
-    let keyword = if is_class {
-        "classState: "
-    } else {
-        state.declared_keyword.as_str()
-    };
+    let keyword = state.declared_keyword.as_str();
     let mut decl: Vec<Document<'static>> = Vec::new();
     // ADR 0124 §1: `late` precedes the declaration keyword, matching the
     // class-header modifier position.
@@ -972,8 +942,8 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
     }
 
     if let Some(default) = &state.default_value {
-        decl.push(Document::Str(" = "));
-        decl.push(unparse_expression(default));
+        decl.push(Document::Str(" ="));
+        decl.push(value_with_separator(default, " "));
     }
 
     // Trailing comment

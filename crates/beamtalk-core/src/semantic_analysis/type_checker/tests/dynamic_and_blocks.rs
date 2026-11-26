@@ -30,7 +30,7 @@ fn test_dynamic_inference_warning_in_typed_class() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let dynamic_warnings: Vec<_> = checker
         .diagnostics()
@@ -77,7 +77,7 @@ fn test_no_dynamic_inference_warning_in_untyped_class() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let dynamic_warnings: Vec<_> = checker
         .diagnostics()
@@ -110,7 +110,7 @@ fn test_no_dynamic_inference_warning_for_known_types() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let dynamic_warnings: Vec<_> = checker
         .diagnostics()
@@ -130,7 +130,7 @@ fn test_expect_type_suppresses_dynamic_inference_warning() {
     let source =
         "typed Object subclass: Processor\n  process: handler =>\n    @expect type\n    handler";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let dynamic_warnings: Vec<_> = diags
         .iter()
@@ -157,7 +157,7 @@ fn test_expect_type_stale_when_no_dynamic_warning() {
     // should produce a stale @expect warning.
     let source = "typed Object subclass: Processor\n  getValue =>\n    @expect type\n    42";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let stale: Vec<_> = diags
         .iter()
@@ -194,7 +194,7 @@ fn block_params_typed_from_sort_on_parameterized_list() {
     // List(String)>>sort: declares Block(E, E, Boolean) — block params should get String.
     let source = "typed Object subclass: T\n  field: items :: List(String)\n  m -> List(String) => self.items sort: [:a :b | a < b]";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let dynamic_warnings: Vec<_> = diags
         .iter()
@@ -211,7 +211,7 @@ fn block_params_typed_from_any_satisfy_on_parameterized_list() {
     // List(Integer)>>anySatisfy: declares Block(E, Boolean) — block param should get Integer.
     let source = "typed Object subclass: T\n  field: nums :: List(Integer)\n  m -> Boolean => self.nums anySatisfy: [:n | n > 0]";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let dynamic_warnings: Vec<_> = diags
         .iter()
@@ -228,7 +228,7 @@ fn block_params_typed_from_inject_into() {
     // List(Integer)>>inject:into: declares [A, Block(A, E, A)] — acc gets type from first arg.
     let source = "typed Object subclass: T\n  field: nums :: List(Integer)\n  m -> Integer => self.nums inject: 0 into: [:acc :n | acc + n]";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let dynamic_warnings: Vec<_> = diags
         .iter()
@@ -245,7 +245,7 @@ fn block_params_typed_from_collect_on_parameterized_array() {
     // Array(Integer)>>collect: declares Block(E, R) — block param should get Integer.
     let source = "typed Object subclass: T\n  field: nums :: Array(Integer)\n  m -> Array => self.nums collect: [:n | n + 1]";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let dynamic_warnings: Vec<_> = diags
         .iter()
@@ -262,7 +262,7 @@ fn block_params_remain_dynamic_for_unparameterized_list() {
     // List>>sort: with unparameterized List — E can't be resolved, params stay Dynamic.
     let source = "typed Object subclass: T\n  field: items :: List\n  m -> List => self.items sort: [:a :b | a < b]";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let dynamic_warnings: Vec<_> = checker
         .diagnostics()
@@ -342,7 +342,7 @@ fn block_params_fewer_than_signature_no_crash() {
     // User passes a 1-param block. Extra resolved types are silently dropped.
     let source = "typed Object subclass: T\n  field: items :: List(String)\n  m -> List(String) => self.items sort: [:a | a]";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     // Should not crash, and the one param should be typed (no Dynamic warning for it)
     let dynamic_warnings: Vec<_> = checker
@@ -362,7 +362,7 @@ fn block_params_more_than_signature_extra_stays_dynamic() {
     // User passes a 2-param block. Extra param stays Dynamic.
     let source = "typed Object subclass: T\n  field: nums :: List(Integer)\n  m -> Boolean => self.nums anySatisfy: [:n :extra | n > 0]";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     // The first param (n) is used and should still be typed from List(Integer),
     // so no Dynamic inference warning should be emitted for this block.
@@ -402,7 +402,7 @@ typed Object subclass: App\n\
   m: router :: HTTPRouter -> HTTPRouter =>\n\
     router build: [:r | r get: \"/\" handler: [:req | req body]]\n";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         diags.is_empty(),
@@ -424,7 +424,7 @@ typed Object subclass: HTTPRouter\n\
 typed Object subclass: App\n\
   go -> Integer => HTTPRouter build: [:r | r get: \"/\"]\n";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         diags.is_empty(),
@@ -443,7 +443,7 @@ typed Object subclass: HTTPRouter\n\
   class build: aBlock :: Block(HTTPRouteBuilder, Object) -> Integer => 42\n\
   class buildHello -> Integer => self build: [:r | r get: \"/hello\"]\n";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         diags.is_empty(),
@@ -468,7 +468,7 @@ typed Object subclass: App\n\
       build: [:r | r get: \"/\"];\n\
       buildMore: [:r2 | r2 get: \"/more\"]\n";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         diags.is_empty(),
@@ -492,7 +492,7 @@ typed Object subclass: App\n\
       build: [:r | r get: \"/\"];\n\
       yourself\n";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         diags.is_empty(),
@@ -505,7 +505,7 @@ fn block_params_typed_via_method_parameter_annotation() {
     // Method parameter `items :: List(Dictionary)` — sort: block params should get Dictionary.
     let source = "typed Object subclass: T\n  m: items :: List(Dictionary) -> List(Dictionary) => items sort: [:a :b | (a at: \"x\" ifAbsent: [0]) < (b at: \"x\" ifAbsent: [0])]";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let dynamic_warnings: Vec<_> = diags
         .iter()
@@ -522,7 +522,7 @@ fn block_params_typed_in_cascade_sends() {
     // Cascade sends should also propagate block param types.
     let source = "typed Object subclass: T\n  field: nums :: List(Integer)\n  m -> List(Integer) =>\n    self.nums\n      sort: [:a :b | a < b];\n      yourself";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let dynamic_warnings: Vec<_> = diags
         .iter()

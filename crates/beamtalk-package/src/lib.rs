@@ -16,7 +16,7 @@
 pub mod content_hash;
 pub mod dependency_classes;
 // Lives in `beamtalk-project` so the LSP applies the same rule (BT-4611).
-pub use beamtalk_project::dependency_extensions;
+pub use beamtalk_project::dependency_aliases;
 pub mod erlang_lint;
 pub mod ffi_type_registry;
 pub mod lint_pipeline;

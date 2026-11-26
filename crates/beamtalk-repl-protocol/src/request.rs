@@ -192,13 +192,17 @@ impl RequestBuilder {
     // Session state is read and reset via the `Session` API
     // (`Session current bindings keys`, `Session current clear`) over `eval`.
 
-    /// Build a `sessions` request.
+    /// Build a `sessions` request. No Rust client sends it (VS Code and the
+    /// LiveView facade do); the REPL-protocol e2e harness uses it to prove a
+    /// release-mode listener answers a non-compiling op
+    /// (`crates/beamtalk-cli/tests/repl_protocol.rs`).
     #[must_use]
     pub fn sessions() -> serde_json::Value {
         Self::no_param("sessions")
     }
 
-    /// Build a `close` request.
+    /// Build a `close` request: ends the sender's own session (the CLI REPL's
+    /// `:exit` / Ctrl-D, BT-5199).
     #[must_use]
     pub fn close() -> serde_json::Value {
         Self::no_param("close")
@@ -222,7 +226,8 @@ impl RequestBuilder {
         })
     }
 
-    /// Build a `kill` request.
+    /// Build a `kill` request. Clients send `kill` from VS Code and LiveView;
+    /// in Rust the REPL-protocol e2e harness uses this to drive the real op.
     #[must_use]
     pub fn kill(actor: &str) -> serde_json::Value {
         serde_json::json!({

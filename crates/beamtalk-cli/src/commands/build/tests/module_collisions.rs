@@ -92,7 +92,6 @@ fn test_project_class_wins_module_index_over_dependency_class() {
         is_direct: true,
         via_chain: Vec::new(),
         stubs_dir: None,
-        extensions: beamtalk_project::dependency_extensions::DependencyExtensions::default(),
     };
     let dep_ctx = DependencyContext {
         resolved_deps: vec![dep],

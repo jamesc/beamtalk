@@ -9,7 +9,7 @@
 EUnit tests for beamtalk_repl_ops_session module.
 
 Covers the shutdown handler (lines 75-97), which was 0% covered prior to
-this test file. The sessions, close, health, and clone (success) handlers
+this test file. The sessions, close, and health handlers
 are already exercised by integration tests and are not duplicated here.
 
 The shutdown handler validates the Erlang node cookie via constant-time

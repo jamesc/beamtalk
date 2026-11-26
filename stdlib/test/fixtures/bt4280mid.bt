@@ -1,6 +1,6 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-4280: the middle class, where an extension shadows Bt4280Root.
+// BT-4280: the middle class, between Bt4280Root and Bt4280Leaf.
 
 Bt4280Root subclass: Bt4280Mid

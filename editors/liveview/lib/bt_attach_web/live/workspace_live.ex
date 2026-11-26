@@ -247,6 +247,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   alias BtAttach.Workspace
   alias BtAttachWeb.Live.ClassModals
   alias BtAttachWeb.Live.Dock
+  alias BtAttachWeb.Live.Dock.GitChanges
   alias BtAttachWeb.Live.Inspector
   alias BtAttachWeb.Live.MethodEditor
   alias BtAttachWeb.Live.RequestContext
@@ -702,8 +703,18 @@ defmodule BtAttachWeb.WorkspaceLive do
       domain: [:beamtalk, :liveview]
     )
 
+    # BT-5129: also drop every surface tied to the dead session (streams, queued
+    # evals) — a stale `eval_running` would hide Stop and wedge the queue.
+    socket =
+      if socket.assigns[:repl_seq], do: SessionLifecycle.reset_session_ui(socket), else: socket
+
     {:noreply, assign(socket, session_monitor: nil, workspace_lost: reason)}
   end
+
+  # BT-5189: a test run/load task announcing its pid, so Stop can reach the
+  # workspace-side worker it waits on.
+  def handle_info({:test_op_task, _token, _pid} = msg, socket),
+    do: TestRunner.handle_info(msg, socket)
 
   def handle_info(_msg, socket), do: {:noreply, socket}
 

@@ -93,9 +93,6 @@ pub(super) struct ClassMeta {
     pub(super) methods: Vec<MethodMeta>,
     /// Class-side method signatures.
     pub(super) class_methods: Vec<MethodMeta>,
-    /// Class variables (`classState:` declarations) — name, declared type,
-    /// default-value presence and slot kind (ADR 0124 B5a).
-    pub(super) class_variables: Vec<ClassVarMeta>,
     /// Type parameters for generic classes (e.g., `["T", "E"]` for `Result(T, E)`).
     pub(super) type_params: Vec<String>,
     /// Type arguments passed to the superclass, e.g. `["E"]` for
@@ -133,19 +130,6 @@ pub(super) fn sorted_by_class_name(class_metadata: &[ClassMeta]) -> Vec<&ClassMe
     let mut sorted: Vec<&ClassMeta> = class_metadata.iter().collect();
     sorted.sort_by_key(|m| &m.class_name);
     sorted
-}
-
-/// Metadata for a single class variable (`classState:` declaration),
-/// extracted from the AST — mirrors `ClassVarInfo` (ADR 0124 B5a).
-pub(super) struct ClassVarMeta {
-    /// The class variable name.
-    pub(super) name: String,
-    /// Declared type annotation, if any.
-    pub(super) ty: Option<DeclaredType>,
-    /// Whether this class variable carries an explicit default value.
-    pub(super) has_default: bool,
-    /// Slot kind (`#eager` | `#late`, ADR 0124 §1).
-    pub(super) kind: beamtalk_core::ast::SlotKind,
 }
 
 /// Metadata for a single method, extracted from the AST.
@@ -781,17 +765,6 @@ pub(super) fn extract_class_metadata(
     let has_dynamic_field_writer =
         beamtalk_core::semantic_analysis::has_dynamic_field_writer(&class.methods);
 
-    let class_variables = class
-        .class_variables
-        .iter()
-        .map(|cv| ClassVarMeta {
-            name: cv.name.name.to_string(),
-            ty: cv.type_annotation.as_ref().map(DeclaredType::from),
-            has_default: cv.default_value.is_some(),
-            kind: cv.slot_kind,
-        })
-        .collect();
-
     let class_name = class.name.name.to_string();
 
     // Synthesize auto-generated methods for Value subclasses with state,
@@ -845,9 +818,8 @@ pub(super) fn extract_class_metadata(
                 &module, true,
             );
         hierarchy
-            .ok()
-            .and_then(|h| h.get_class(&class_name).map(|c| c.in_caller_new1))
-            .unwrap_or(false)
+            .get_class(&class_name)
+            .is_some_and(|c| c.in_caller_new1)
     };
 
     Ok(ClassMeta {
@@ -869,7 +841,6 @@ pub(super) fn extract_class_metadata(
         has_dynamic_field_writer,
         methods,
         class_methods,
-        class_variables,
         type_params,
         superclass_type_args,
         handle_scope: class.handle_scope.as_ref().map(|s| s.name.to_string()),

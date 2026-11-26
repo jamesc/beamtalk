@@ -134,7 +134,7 @@ impl CoreErlangGenerator {
         let reason_var = self.fresh_var(&format!("{var_prefix}Reason"));
         let stack_var = self.fresh_var(&format!("{var_prefix}Stack"));
         let plain_error_var = self.fresh_var(&format!("{var_prefix}Plain"));
-        let class_var = self.fresh_var(&format!("{var_prefix}Class"));
+        let class_term = self.fresh_var(&format!("{var_prefix}Class"));
         let no_match_fallback = self.case_clause_fallback(&format!("{var_prefix}NoMatch"));
         let nlr_tuple_doc = || {
             docvec![
@@ -164,7 +164,7 @@ impl CoreErlangGenerator {
             ", ~{'selector' => ",
             leaf::atom(selector_atom.to_string()),
             ", 'class' => ",
-            leaf::var(class_var.clone()),
+            leaf::var(class_term.clone()),
             "}~)",
         ]);
         let raise_call = self.annotate_current_send_call(docvec![
@@ -189,7 +189,7 @@ impl CoreErlangGenerator {
             " = ",
             form::primop("build_stacktrace", [leaf::var(stack_var)]),
             " in let ",
-            leaf::var(class_var),
+            leaf::var(class_term),
             " = call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'()) in ",
             reraise_call,
             " <{'error', ",

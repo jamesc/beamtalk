@@ -17,9 +17,8 @@
 // again (`X class removeSelector:`, BT-4438), so the tests can run twice in
 // one VM.
 //
-// Fixtures: fixtures/bt4363const_key.bt, fixtures/bt4363const_ext.bt,
-// fixtures/bt4363const_fun.bt, fixtures/bt4363const_sealed.bt,
-// fixtures/bt4504const_kinds.bt, fixtures/bt4504const_ext_{string,symbol}.bt,
+// Fixtures: fixtures/bt4363const_key.bt, fixtures/bt4363const_fun.bt,
+// fixtures/bt4363const_sealed.bt, fixtures/bt4504const_kinds.bt,
 // fixtures/bt4504const_fun_{string,symbol}.bt.
 
 TestCase subclass: ConstantClassMethodTest
@@ -71,26 +70,6 @@ TestCase subclass: ConstantClassMethodTest
     self assert: result equals: 9
     self assert: count equals: 1
 
-  // A class-side extension of `cls`'s `answer`, registered after `send` (a
-  // block holding a class-literal send of it) has warmed its call site, wins,
-  // and `send` answers `literal` again once it goes.
-  assertExtensionWinsOver: send on: cls literal: literal =>
-    self assert: send value equals: literal
-    Erlang beamtalk_extensions
-      register: (Erlang erlang element: 2 of: cls)
-      selector: #answer
-      fun: [:args :receiver | #extension]
-      owner: #test
-    patched := send value
-    dynamic := (self lookUp: cls name) answer
-    Erlang beamtalk_extensions
-      unregister: cls name
-      selector: #answer
-      classSide: true
-    self assert: patched equals: #extension
-    self assert: dynamic equals: #extension
-    self assert: send value equals: literal
-
   // A runtime class-method fun (`put_class_method`) on `cls`'s `answer`,
   // installed after `send` has warmed its call site, wins, and its removal
   // gives `literal` back.
@@ -108,26 +87,6 @@ TestCase subclass: ConstantClassMethodTest
     ] ensure: [cls class removeSelector: #answer]
     self assert: send value equals: literal
     self assert: (self lookUp: cls name) answer equals: literal
-
-  // A class-side extension registered after warm-up wins, and the literal is
-  // back once it goes.
-  testExtensionRegisteredAfterWarmUpWins =>
-    self
-      assertExtensionWinsOver: [Bt4363ConstExt answer]
-      on: Bt4363ConstExt
-      literal: 1
-
-  testExtensionRegisteredAfterWarmUpWinsOverAString =>
-    self
-      assertExtensionWinsOver: [Bt4504ConstExtString answer]
-      on: Bt4504ConstExtString
-      literal: "one"
-
-  testExtensionRegisteredAfterWarmUpWinsOverASymbol =>
-    self
-      assertExtensionWinsOver: [Bt4504ConstExtSymbol answer]
-      on: Bt4504ConstExtSymbol
-      literal: #one
 
   // A runtime class-method fun (`put_class_method`) installed after warm-up
   // wins, and its removal gives the literal back.
@@ -192,7 +151,7 @@ TestCase subclass: ConstantClassMethodTest
   // its constant-value key. Guards the Rust certification
   // (`MethodDefinition::literal_constant_body`) against drifting from what the
   // method's codegen actually returns. A selector another test has shadowed
-  // (class-side extension, ADR 0084 runtime fun) or patched is declined by the
+  // (an ADR 0084 runtime fun) or patched is declined by the
   // runtime and so is skipped: the fold never answers for it.
   testEveryCertifiedConstantIsWhatItsMethodAnswers =>
     checked := Beamtalk allClasses

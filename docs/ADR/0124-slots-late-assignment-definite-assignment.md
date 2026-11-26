@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-09-22) — accepted 2026-09-18; Parts A and B shipped under Epic BT-3544 (all issues done). B7 (inspector `#lateSlot`) and B11 (`ClassBuilder` parity) remain unplanned future work by decision. Amended 2026-10-25 (BT-4061, done).
 
+> **Amended by [ADR 0153](0153-remove-class-variables.md) (2026-11-25), class-side slots.** `late classState:` and the class-side halves of `hasField:`, `clearField:` and `fieldAt:` are removed. `late` applies to `state:` only, and those selectors sent to a class raise `does_not_understand`.
+
 Two parts, decided together because they are one rule seen from both sides.
 
 - **Part A — definite assignment (§6, §7).** A compile-time diagnostic at the

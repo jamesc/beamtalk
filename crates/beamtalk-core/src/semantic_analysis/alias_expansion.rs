@@ -286,11 +286,6 @@ impl InternalAliasExpander {
         for ty in info.state_types.values_mut() {
             *ty = self.expand(ty);
         }
-        for var in &mut info.class_variables {
-            if let Some(ty) = &mut var.ty {
-                *ty = self.expand(ty);
-            }
-        }
     }
 
     /// Expands a protocol's required and provided method signatures.

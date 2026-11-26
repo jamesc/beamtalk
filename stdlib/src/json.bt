@@ -45,6 +45,9 @@ type JsonValue = Nil | Boolean | Integer | Float | String | List | Dictionary
 ///   asJson => #{"full_name" => self.fullName}
 /// ```
 ///
+/// For classes whose `asJson` is only a field-to-key rename, `uses: JsonMappable`
+/// with a class-side `jsonMapping` (a `JsonMapping`) provides it declaratively.
+///
 /// ## Examples
 /// ```beamtalk
 /// (Json parse: "42") unwrap                 // => 42

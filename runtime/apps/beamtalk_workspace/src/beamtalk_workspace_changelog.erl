@@ -60,7 +60,7 @@ Each `changes.jsonl` line is a JSON object with these fields (ADR 0082,
 | `candidate_sites`      | `[{sourceFile,span},...] \| null`                           | ADR 0114: `"rename-method"`-only — reported, never auto-rewritten senders; no `source_ref`/`prev_source_ref` since nothing here is ever spliced |
 | `intent`               | `"durable"`\|`"ephemeral"`                                  | |
 | `flushable`            | boolean                                                      | true iff in-project source; for `"rename-class"`/`"rename-method"`, true iff every entry in `sites` (never `candidate_sites`) resolves to a flushable file |
-| `not_flushable_reason` | string \| null                                              | `"stdlib"`/`"dynamic"`/`"dependency:<path>"`/`"extension"`; `"rename-class"` is `"dynamic"`\|null only (ADR 0114 refuses stdlib/dependency before any entry exists); `"rename-method"` is `"stdlib"`\|`"dynamic"`\|`"dependency:<path>"`\|null — `"extension"` is not reachable there either (ADR 0114 § ChangeLog schema) |
+| `not_flushable_reason` | string \| null                                              | `"stdlib"`/`"dynamic"`/`"dependency:<path>"`; `"rename-class"` is `"dynamic"`\|null only (ADR 0114 refuses stdlib/dependency before any entry exists); `"rename-method"` is `"stdlib"`\|`"dynamic"`\|`"dependency:<path>"`\|null (ADR 0114 § ChangeLog schema) |
 | `author`               | string                                                       | session/tool id |
 | `author_kind`          | `"human"`\|`"agent"`                                        | audit metadata |
 
@@ -103,6 +103,7 @@ release nodes do not start a workspace, so this code is a no-op there.
     flushable_pending/0,
     mark_flushed/1,
     retire_entries/1,
+    retire_new_class_or_append/2,
     clear/0,
     find_revert_target/2,
     find_revert_target/3,
@@ -358,6 +359,27 @@ retire_entries([]) ->
 retire_entries(Seqs) when is_list(Seqs) ->
     %% BT-5110: the same bound as `append/1`; the server can be busy rotating.
     gen_server:call(?MODULE, {retire_entries, Seqs}, call_timeout()).
+
+-doc """
+Record the removal of the class `ClassNameBin` in one server call (BT-5190):
+when the class has a pending `'new-class'` entry (created this session, never
+flushed) the class's pending entries are retired, since there is no file to
+remove, and `{ok, cancelled}` is answered; otherwise `Input` (the
+`'remove-class'` entry) is appended and `{ok, {appended, Seq}}` answered. A
+failed retire falls back to the append, in the same call.
+
+Deciding and acting in the server closes two windows a caller-side check left
+open. A `'new-class'` append whose caller timed out is still queued, not yet in
+ETS, when the class is removed: the gen_server handles calls in order, so that
+append lands first and this call sees it, instead of appending a
+`'remove-class'` behind it. And a caller whose own call times out leaves the
+decision to the server, which completes it either way, so a later failure of the
+retire cannot leave a `'new-class'` pending without a `'remove-class'`.
+""".
+-spec retire_new_class_or_append(binary(), append_input()) ->
+    {ok, cancelled | {appended, non_neg_integer()}} | {error, #beamtalk_error{}}.
+retire_new_class_or_append(ClassNameBin, Input) when is_binary(ClassNameBin), is_map(Input) ->
+    gen_server:call(?MODULE, {retire_new_class_or_append, ClassNameBin, Input}, call_timeout()).
 
 %% The caller's wait for a ChangeLog call that can queue behind a rotation.
 -spec call_timeout() -> timeout().
@@ -1148,6 +1170,38 @@ handle_call({append, Input}, _From, State) ->
         {error, _Reason} = Err ->
             {reply, Err, State}
     end;
+handle_call({retire_new_class_or_append, ClassNameBin, Input}, _From, State) ->
+    Retired =
+        case pending_new_class_seqs(ClassNameBin) of
+            [] ->
+                not_retired;
+            Seqs ->
+                case do_mark_flushed(Seqs, true, State) of
+                    ok ->
+                        retired;
+                    {error, Reason} ->
+                        ?LOG_ERROR(
+                            "Failed to retire pending entries of a removed new class",
+                            #{
+                                class => ClassNameBin,
+                                reason => Reason,
+                                domain => [beamtalk, runtime]
+                            }
+                        ),
+                        not_retired
+                end
+        end,
+    case Retired of
+        retired ->
+            {reply, {ok, cancelled}, State#state{rotation_stuck = false}};
+        not_retired ->
+            case do_append(Input, State) of
+                {ok, Seq, State1} ->
+                    {reply, {ok, {appended, Seq}}, State1};
+                {error, _Reason} = Err ->
+                    {reply, Err, State}
+            end
+    end;
 handle_call(epoch, _From, State) ->
     {reply, State#state.epoch, State};
 handle_call({mark_flushed, Seqs}, _From, State) ->
@@ -1270,6 +1324,22 @@ normalize_append_input(Input) ->
         Input,
         Fields
     ).
+
+%% The seqs of a class's active entries that a removal retires: all of them
+%% (the `'new-class'`, later `'class-def'` and method patches) when the class
+%% has a pending `'new-class'`, none otherwise. Renames are left alone.
+-spec pending_new_class_seqs(binary()) -> [non_neg_integer()].
+pending_new_class_seqs(ClassNameBin) ->
+    Pending = [
+        E
+     || E <- active_entries(),
+        E#entry.class =:= ClassNameBin,
+        not lists:member(E#entry.kind, ['rename-class', 'rename-method'])
+    ],
+    case lists:any(fun(E) -> E#entry.kind =:= 'new-class' end, Pending) of
+        true -> [E#entry.seq || E <- Pending];
+        false -> []
+    end.
 
 %% Mark each given seq's entry as flushed. Updates ETS in-place and rewrites the
 %% on-disk log so the flag survives restart. Unknown seqs are silently skipped

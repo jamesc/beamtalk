@@ -27,6 +27,7 @@ use tracing::{info, instrument};
 use beamtalk_cli::repl_startup;
 
 use super::beam_environment::BeamEnvironment;
+use super::cookie_env;
 use super::util::to_forward_slash;
 use super::workspace;
 use beamtalk_core::build_layout::BuildLayout;
@@ -146,14 +147,17 @@ fn ensure_runtime_built(
 ) -> Result<()> {
     if layout == repl_startup::RuntimeLayout::Dev && !paths.runtime_ebin.exists() {
         info!("Building Beamtalk runtime...");
-        let status = Command::new("rebar3")
+        let status = crate::commands::build::native::rebar3_tool_command()?
             .arg("compile")
             .current_dir(runtime_dir)
             .status()
             .map_err(|e| miette!("Failed to build runtime: {e}"))?;
 
         if !status.success() {
-            return Err(miette!("Failed to build Beamtalk runtime"));
+            return Err(miette!(
+                "Failed to build Beamtalk runtime{}",
+                crate::commands::build::native::rebar3_restricted_env_hint()
+            ));
         }
     }
     Ok(())
@@ -375,21 +379,14 @@ fn forwarded_exit_code(status: std::process::ExitStatus) -> Option<i32> {
     if status.success() {
         return None;
     }
-    if let Some(code) = status.code() {
-        return Some(code);
-    }
     #[cfg(unix)]
     {
         use std::os::unix::process::ExitStatusExt;
-        status
-            .signal()
-            .filter(|&sig| sig != libc::SIGINT)
-            .map(|sig| 128 + sig)
+        if status.signal() == Some(libc::SIGINT) {
+            return None;
+        }
     }
-    #[cfg(not(unix))]
-    {
-        None
-    }
+    beamtalk_process::exit_code::status_code(status)
 }
 
 /// Run a class entry method inside a live shared workspace (ADR 0099 §3).
@@ -734,18 +731,39 @@ fn node_name_flag(node_name: &str) -> &'static str {
     }
 }
 
-/// Build the `erl -noshell -hidden` command for a short-lived named client
-/// node that RPCs into the workspace (`args` carries its `-sname`/`-name`).
+/// Run the `erl -noshell -hidden` command for a short-lived named client
+/// node that RPCs into the workspace (`args` carries its `-sname`/`-name`
+/// and an `-eval` that begins with `cookie_env::restore_then`), and wait for
+/// it.
 ///
 /// A named node starts epmd if none is running, so this goes through
-/// [`beamtalk_workspace::erl_command`], which pins epmd's bind address
-/// (BT-3987).
-fn hidden_client_command(args: &[OsString], project_root: &std::path::Path) -> Command {
-    let mut cmd = beamtalk_workspace::erl_command();
+/// `cookie_env::erl_command` (the resolved real `erl`, BT-5185), which pins
+/// epmd's bind address (BT-3987).
+fn run_hidden_client(
+    args: &[OsString],
+    project_root: &std::path::Path,
+    cookie: &str,
+) -> std::io::Result<std::process::Output> {
+    // BT-5126 / BT-5185: the node boots its cookie from a private home, never
+    // from argv; the guard outlives the node.
+    let cookie_home = cookie_env::CookieHome::new(cookie)?;
+    hidden_client_command(args, project_root, &cookie_home).output()
+}
+
+/// The command [`run_hidden_client`] runs.
+fn hidden_client_command(
+    args: &[OsString],
+    project_root: &std::path::Path,
+    cookie_home: &cookie_env::CookieHome,
+) -> Command {
+    let mut cmd = cookie_env::erl_command();
     cmd.arg("-noshell")
         .arg("-hidden")
         .args(args)
+        // BT-5127: pin this client's distribution listener to loopback too.
+        .args(beamtalk_workspace::loopback_dist_args())
         .current_dir(project_root);
+    cookie_home.apply(&mut cmd);
     cmd
 }
 
@@ -781,12 +799,10 @@ fn probe_running_workspace_app(project_root: &std::path::Path, app_name: &str) -
     let mut args = repl_startup::beam_pa_args(&paths);
     args.push(OsString::from(node_name_flag(&client_node)));
     args.push(OsString::from(&client_node));
-    args.push(OsString::from("-setcookie"));
-    args.push(OsString::from(&cookie));
     args.push(OsString::from("-eval"));
-    args.push(OsString::from(&eval_cmd));
+    args.push(OsString::from(cookie_env::restore_then(&eval_cmd)));
 
-    let output = hidden_client_command(&args, project_root).output().ok()?;
+    let output = run_hidden_client(&args, project_root, &cookie).ok()?;
 
     if output.status.success()
         && String::from_utf8_lossy(&output.stdout)
@@ -835,13 +851,10 @@ fn ensure_otp_app_in_workspace(
     let mut args = repl_startup::beam_pa_args(beam_paths);
     args.push(OsString::from(node_name_flag(&client_node)));
     args.push(OsString::from(&client_node));
-    args.push(OsString::from("-setcookie"));
-    args.push(OsString::from(cookie));
     args.push(OsString::from("-eval"));
-    args.push(OsString::from(&eval_cmd));
+    args.push(OsString::from(cookie_env::restore_then(&eval_cmd)));
 
-    let output = hidden_client_command(&args, project_root)
-        .output()
+    let output = run_hidden_client(&args, project_root, &cookie)
         .map_err(|e| miette!("Failed to start RPC probe: {e}\nIs Erlang/OTP installed?"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1190,12 +1203,58 @@ mod tests {
         // BT-3987: the probe/RPC client is a named node, so it must hand erl
         // an explicit epmd address (the value rule is beamtalk_workspace's).
         let args = [OsString::from("-sname"), OsString::from("probe@localhost")];
-        let cmd = hidden_client_command(&args, std::path::Path::new("."));
+        let home = cookie_env::CookieHome::new("c").unwrap();
+        let cmd = hidden_client_command(&args, std::path::Path::new("."), &home);
         let epmd = cmd
             .get_envs()
             .find(|(k, _)| *k == std::ffi::OsStr::new("ERL_EPMD_ADDRESS"))
             .and_then(|(_, v)| v);
         assert!(epmd.is_some(), "ERL_EPMD_ADDRESS must be set");
+    }
+
+    /// BT-5127: the client node's distribution listener is pinned to loopback
+    /// (unless the operator opted out with a non-loopback `ERL_EPMD_ADDRESS`).
+    #[test]
+    fn test_hidden_client_command_pins_dist_interface() {
+        let args = [OsString::from("-sname"), OsString::from("probe@localhost")];
+        let home = cookie_env::CookieHome::new("c").unwrap();
+        let cmd = hidden_client_command(&args, std::path::Path::new("."), &home);
+        let cmd_argv: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let pinned = cmd_argv.iter().any(|a| a == "inet_dist_use_interface");
+        assert_eq!(
+            pinned,
+            beamtalk_workspace::loopback_dist_args().contains(&"inet_dist_use_interface")
+        );
+    }
+
+    /// BT-5126 / BT-5185: the probe/RPC client carries no cookie in argv
+    /// (not even a placeholder) or the environment; it boots from the private
+    /// cookie home.
+    #[test]
+    fn test_hidden_client_command_keeps_cookie_out_of_argv() {
+        let args = [OsString::from("-sname"), OsString::from("probe@localhost")];
+        let home = cookie_env::CookieHome::new("s3cr3t-cookie").unwrap();
+        let cmd = hidden_client_command(&args, std::path::Path::new("."), &home);
+        assert!(
+            cmd.get_args().all(|a| {
+                let a = a.to_string_lossy();
+                !a.contains("s3cr3t") && a != "-setcookie"
+            }),
+            "no cookie in argv"
+        );
+        assert!(
+            cmd.get_envs()
+                .all(|(_, v)| v.is_none_or(|v| !v.to_string_lossy().contains("s3cr3t"))),
+            "no cookie in the environment"
+        );
+        let env = cmd
+            .get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new(cookie_env::COOKIE_HOME_ENV))
+            .and_then(|(_, v)| v);
+        assert_eq!(env, Some(home.path().as_os_str()));
     }
 
     #[test]

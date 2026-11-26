@@ -58,19 +58,15 @@ TestCase subclass: ArithmeticOperatorOverloadTest
 
   /// `5 + aMoney` dispatches to `Money>>plusFromNumber:`, not `Money>>+`
   /// (which would need `aMoney` on the left). `check_binary_operand_types`
-  /// (type checker) doesn't know about `plusFromNumber:` and still flags this
-  /// as a numeric-argument mismatch (ADR 0116 § Consequences, Negative) even
-  /// though it now dispatches correctly at runtime — `@expect type`
-  /// acknowledges that known false positive.
+  /// (type checker) finds `Money>>plusFromNumber:` (BT-5212), so this send
+  /// type-checks cleanly with no `@expect type`.
   testNumberPlusUserTypeDispatches =>
     a := (Money new) withCents: 150
-    @expect type
     self assert: (5 + a) cents equals: 155
 
   /// `5 * aMoney` dispatches to `Money>>timesFromNumber:`.
   testNumberTimesUserTypeDispatches =>
     a := (Money new) withCents: 100
-    @expect type
     self assert: (5 * a) cents equals: 500
 
   /// A type with no `plusFromNumber:` hook at all (`Widget`) raises
@@ -95,7 +91,7 @@ TestCase subclass: ArithmeticOperatorOverloadTest
     @expect type
     hint := [5 + w] on: RuntimeError do: [:e | e hint]
     self assert: (hint includesSubstring: "plusFromNumber:")
-    self assert: (hint includesSubstring: "implement it")
+    self assert: (hint includesSubstring: "'+' cannot combine a number with Widget")
 
   /// "Implement it anyway, to reject with intent" (ADR 0116 § Reflected
   /// method protocol): `Money>>divFromNumber:` exists but deliberately
@@ -106,10 +102,8 @@ TestCase subclass: ArithmeticOperatorOverloadTest
   /// `self error:` (which isn't a DNU at all).
   testNumberDivUserTypeRejectsWithIntent =>
     a := (Money new) withCents: 100
-    @expect type
     message := [5 / a] on: Exception do: [:e | e message]
     self assert: (message includesSubstring: "Cannot divide a number by Money")
-    @expect type
     kind := [5 / a] on: Exception do: [:e | e kind]
     self assert: kind equals: #user_error
 
@@ -117,8 +111,8 @@ TestCase subclass: ArithmeticOperatorOverloadTest
   // BT-3264 (ADR 0116): `badarith` between two genuinely numeric operands
   // (zero divisor, float overflow) must still raise the existing raw
   // `#badarith` (the "bad arithmetic operation" classification, ADR 0028 —
-  // `#type_error` at a class-dispatch/actor boundary per
-  // `class_var_nlr_shadow_test.bt`, `#badarith` directly from a plain
+  // `#type_error` at a class-dispatch/actor boundary
+  // class-dispatch/actor boundary, `#badarith` directly from a plain
   // instance method per `test_case_assertion_test.bt`/`math_test.bt`; these
   // tests don't cross such a boundary, so `#badarith` is the one
   // `should:raise:` actually observes here), NOT misrouted to a

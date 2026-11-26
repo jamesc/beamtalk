@@ -7,12 +7,13 @@
 use super::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, BlockParameter,
     CascadeMessage, CommentAttachment, CommentKind, Document, Expression, ExpressionStatement,
-    Identifier, Literal, LiteralCommentSlots, LiteralComments, MapPair, MapPatternKey, MatchArm,
-    MessageSelector, Pattern, PipelineSends, Span, StringSegment, TypeAnnotation,
-    binary_binding_power, break_, concat, docvec, group, join_docs, join_docs_vec, leaf, line,
+    GapComments, GapSlot, Identifier, Literal, LiteralCommentSlots, LiteralComments, MapPair,
+    MapPatternKey, MatchArm, MessageSelector, Pattern, PipelineSends, Span, StringSegment,
+    TypeAnnotation, binary_binding_power, break_, concat, docvec, group, join_docs, leaf, line,
     nest, nil, unparse_comment, unparse_comment_attachment_leading, unparse_expect_categories,
     unparse_keyword_part, unparse_type_annotation,
 };
+use crate::source_analysis::{TokenKind, lex_with_eof, parse_integer_literal};
 
 /// Builds a [`Document`] for an [`ExpressionStatement`].
 ///
@@ -52,7 +53,7 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
     #[cfg(test)]
     UNPARSE_EXPRESSION_CALLS.with(|n| n.set(n.get() + 1));
     match expr {
-        Expression::Literal(lit, _) => unparse_literal(lit),
+        Expression::Literal(lit, span) => unparse_literal_at(lit, *span),
         Expression::Identifier(id) => unparse_identifier(id),
         Expression::ClassReference { name, package, .. } => {
             leaf::class_ref(package.as_ref().map(|pkg| pkg.name.as_str()), &name.name)
@@ -90,26 +91,41 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             ..
         } => {
             let target_doc = unparse_expression(target);
+            let value_doc = docvec![" :=", value_with_separator(value, " ")];
             if let Some(ann) = type_annotation {
-                docvec![
-                    target_doc,
-                    " :: ",
-                    unparse_type_annotation(ann),
-                    " := ",
-                    unparse_expression(value)
-                ]
+                docvec![target_doc, " :: ", unparse_type_annotation(ann), value_doc]
             } else {
-                docvec![target_doc, " := ", unparse_expression(value)]
+                docvec![target_doc, value_doc]
             }
         }
         Expression::Return { value, .. } => {
-            docvec!["^", unparse_expression(value)]
+            docvec!["^", value_with_separator(value, "")]
         }
         Expression::Cascade {
             receiver, messages, ..
         } => unparse_cascade(receiver, messages),
-        Expression::Parenthesized { expression, .. } => {
-            docvec!["(", unparse_expression(expression), ")"]
+        Expression::Parenthesized { expression, span } => {
+            // Comments just inside the parentheses (BT-5183).
+            let open = gap_comments(span.start(), GapSlot::AfterOpenParen);
+            let close = gap_comments(span.end(), GapSlot::BeforeCloseParen);
+            if open.is_none() && close.is_none() {
+                docvec!["(", unparse_expression(expression), ")"]
+            } else {
+                // The `)` after a close-gap comment starts its own line at
+                // the enclosing indentation.
+                docvec![
+                    "(",
+                    nest(
+                        1,
+                        docvec![
+                            open.as_ref().map_or_else(nil, gap_break),
+                            unparse_expression(expression),
+                        ]
+                    ),
+                    close.as_ref().map_or_else(nil, gap_break),
+                    ")"
+                ]
+            }
         }
         Expression::Match {
             value,
@@ -121,7 +137,8 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             if let Some(pipeline) = Pipeline::of(expr) {
                 return pipeline.unparse();
             }
-            unparse_match(unparse_expression(value), arms, *exhaustive)
+            let gap = gap_comments(value.span().end(), GapSlot::BeforeMatch);
+            unparse_match(unparse_expression(value), gap.as_ref(), arms, *exhaustive)
         }
         Expression::MapLiteral { pairs, span } => unparse_map_literal(pairs, *span),
         Expression::ListLiteral {
@@ -179,7 +196,11 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             docvec!["/* error: ", leaf::raw_text(&safe_msg), " */"]
         }
         Expression::DestructureAssignment { pattern, value, .. } => {
-            docvec![unparse_pattern(pattern), " := ", unparse_expression(value)]
+            docvec![
+                unparse_pattern(pattern),
+                " :=",
+                value_with_separator(value, " ")
+            ]
         }
         Expression::Spread { name, .. } => {
             docvec!["...", leaf::ident(&name.name)]
@@ -192,6 +213,7 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
 pub(super) fn unparse_literal(lit: &Literal) -> Document<'static> {
     match lit {
         Literal::Integer(n) => leaf::int_lit(*n),
+        Literal::BigInteger(digits) => leaf::big_int_lit(digits),
         Literal::Float(f) => leaf::float_lit(*f),
         Literal::String(s) => {
             // The lexer unescapes doubled delimiters ("" → ") in the AST.
@@ -201,7 +223,7 @@ pub(super) fn unparse_literal(lit: &Literal) -> Document<'static> {
         Literal::Symbol(s) => {
             // Symbols: #name or #'name with spaces'
             if needs_symbol_quoting(s) {
-                docvec!["#'", leaf::symbol_content(s), "'"]
+                docvec!["#'", leaf::quoted_symbol_content(s), "'"]
             } else {
                 docvec!["#", leaf::symbol_content(s)]
             }
@@ -221,15 +243,142 @@ pub(super) fn unparse_literal(lit: &Literal) -> Document<'static> {
     }
 }
 
-/// Returns true if a symbol name needs quoting.
+/// Whether symbol `s` must be printed quoted (`#'…'`).
+///
+/// A symbol is printed bare only when it is an identifier or keyword symbol
+/// (`#foo`, `#at:put:`) **and** the lexer reads the bare spelling back as
+/// that same single symbol token (BT-5183). Asking the lexer, rather than
+/// restating its rules, keeps the two from drifting: the lexer's bare
+/// symbols are ASCII-only, so `#'café'` must stay quoted. Binary-operator
+/// symbols (`#'+'`), which the lexer also accepts bare, are kept quoted as
+/// the canonical spelling.
 fn needs_symbol_quoting(s: &str) -> bool {
-    s.is_empty()
-        || s.contains(' ')
-        || s.chars()
-            .next()
-            .is_none_or(|c| !c.is_alphabetic() && c != '_')
-        || s.chars()
-            .any(|c| !c.is_alphanumeric() && c != '_' && c != ':')
+    let starts_like_identifier = s
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+    if !starts_like_identifier {
+        return true;
+    }
+    let mut bare = String::with_capacity(s.len() + 1);
+    bare.push('#');
+    bare.push_str(s);
+    let tokens = lex_with_eof(&bare);
+    !matches!(
+        tokens.as_slice(),
+        [symbol, eof]
+            if matches!(symbol.kind(), TokenKind::Symbol(name) if name == s)
+                && symbol.trailing_trivia().is_empty()
+                && eof.leading_trivia().is_empty()
+                && matches!(eof.kind(), TokenKind::Eof)
+    )
+}
+
+/// Prints the literal at `span`, using its recorded source spelling when it
+/// is a number (BT-5183): `16rFF` stays `16rFF` rather than becoming `255`.
+pub(super) fn unparse_literal_at(lit: &Literal, span: Span) -> Document<'static> {
+    if matches!(
+        lit,
+        Literal::Integer(_) | Literal::BigInteger(_) | Literal::Float(_)
+    ) && let Some(doc) = source_number_spelling(lit, span)
+    {
+        return doc;
+    }
+    unparse_literal(lit)
+}
+
+/// The source spelling of the number `lit` at `span`, if one was recorded
+/// and it reads back as exactly `lit`.
+///
+/// The spelling is keyed by the number token's span. A negated literal —
+/// a match-arm pattern or binary segment written `- 5` or `<<- 16rFF:8>>`,
+/// the only places the parser negates a number — holds the negated value,
+/// and its span may also cover the `-`, so the one spelling inside the span
+/// is used with the sign moved onto it (`-5`), or, where that does not lex
+/// back as one token (`-16rFF` reads as `-16 rFF`), kept as a separate `- `. Every candidate is checked by lexing
+/// and parsing it back; when none reads back as `lit`, `None` is returned
+/// and the value is printed canonically (and the round-trip check in
+/// `format_source` then reports the lost spelling rather than writing it).
+fn source_number_spelling(lit: &Literal, span: Span) -> Option<Document<'static>> {
+    let recorded = LITERAL_COMMENTS.with(|current| {
+        let table = current.borrow();
+        table.spelling(span).cloned().or_else(|| {
+            let mut inside = table.spellings_within(span);
+            if inside.len() == 1 {
+                inside.pop()
+            } else {
+                None
+            }
+        })
+    })?;
+    if number_reads_back_as(&recorded, lit) {
+        return Some(leaf::number_spelling(recorded));
+    }
+    let negated = negate_literal(lit)?;
+    if let Some(positive) = recorded.strip_prefix('-') {
+        return number_reads_back_as(positive, lit).then(|| leaf::number_spelling(positive));
+    }
+    let mut joined = String::from("-");
+    joined.push_str(&recorded);
+    if number_reads_back_as(&joined, lit) {
+        return Some(leaf::number_spelling(joined));
+    }
+    number_reads_back_as(&recorded, &negated)
+        .then(|| docvec!["- ", leaf::number_spelling(recorded)])
+}
+
+/// A binary segment's `unit:` value, in its source spelling (`unit:16r8`)
+/// when one was recorded (BT-5183). The AST keeps no span for the unit, but
+/// it is the last number written in its segment (the value and size come
+/// before the `/`), so the segment's last recorded spelling is the unit's
+/// when it reads back as the unit.
+fn unparse_unit(unit: usize, segment: Span) -> Document<'static> {
+    let spelling =
+        LITERAL_COMMENTS.with(|current| current.borrow().spellings_within(segment).pop());
+    match (spelling, i64::try_from(unit)) {
+        (Some(spelling), Ok(value))
+            if number_reads_back_as(&spelling, &Literal::Integer(value)) =>
+        {
+            leaf::number_spelling(spelling)
+        }
+        _ => leaf::nat_lit(unit),
+    }
+}
+
+/// `-lit` for a number literal, if it is representable.
+fn negate_literal(lit: &Literal) -> Option<Literal> {
+    match lit {
+        Literal::Integer(_) | Literal::BigInteger(_) | Literal::Float(_) => {
+            Some(lit.clone().negated())
+        }
+        _ => None,
+    }
+}
+
+/// Whether `spelling` lexes as one number token whose value is exactly `lit`.
+fn number_reads_back_as(spelling: &str, lit: &Literal) -> bool {
+    let tokens = lex_with_eof(spelling);
+    let [token, eof] = tokens.as_slice() else {
+        return false;
+    };
+    if !matches!(eof.kind(), TokenKind::Eof)
+        || !token.trailing_trivia().is_empty()
+        || !eof.leading_trivia().is_empty()
+    {
+        return false;
+    }
+    match (token.kind(), lit) {
+        (TokenKind::Integer(text), Literal::Integer(_) | Literal::BigInteger(_)) => {
+            text == spelling && parse_integer_literal(text).is_ok_and(|v| v == *lit)
+        }
+        (TokenKind::Float(text), Literal::Float(value)) => {
+            text == spelling
+                && text
+                    .parse::<f64>()
+                    .is_ok_and(|v| v.to_bits() == value.to_bits())
+        }
+        _ => false,
+    }
 }
 
 // --- Identifier unparsing ---
@@ -447,7 +596,14 @@ fn unparse_message_laid_out(
         }
         MessageSelector::Binary(op) => {
             let arg = arg_doc(&arguments[0]);
-            docvec![recv_doc, " ", leaf::ident(op), " ", arg]
+            // Comments around the operator (BT-5183) put it on its own line.
+            match gap_comments(arguments[0].span().start(), GapSlot::AroundBinaryOperator) {
+                Some(gap) => docvec![
+                    recv_doc,
+                    nest(2, docvec![gap_break(&gap), leaf::ident(op), " ", arg])
+                ],
+                None => docvec![recv_doc, " ", leaf::ident(op), " ", arg],
+            }
         }
         MessageSelector::Keyword(parts) => {
             // Break all keywords to their own indented lines when:
@@ -463,7 +619,16 @@ fn unparse_message_laid_out(
             // the check would double the work at every level of nested block
             // arguments, making unparse exponential in nesting depth (BT-4531).
             let arg_docs: Vec<Document<'static>> = arguments.iter().map(arg_doc).collect();
+            // Comments written before a keyword (BT-5183) put it on its own line.
+            let gaps: Vec<Option<GapComments>> = parts
+                .iter()
+                .map(|part| gap_comments(part.span.start(), GapSlot::BeforeKeyword))
+                .collect();
             let always_break = parts.len() >= 3
+                || gaps.iter().any(Option::is_some)
+                || arguments
+                    .iter()
+                    .any(|a| gap_comments(a.span().start(), GapSlot::AfterKeyword).is_some())
                 || arg_docs
                     .iter()
                     .any(|doc| doc.to_pretty_string().contains('\n'));
@@ -471,11 +636,11 @@ fn unparse_message_laid_out(
 
             if always_break {
                 let mut kw_docs: Vec<Document<'static>> = Vec::new();
-                for part in parts {
-                    kw_docs.push(line());
+                for (i, (part, gap)) in parts.iter().zip(&gaps).enumerate() {
+                    kw_docs.push(gap.as_ref().map_or_else(line, gap_break));
                     let part_doc = unparse_keyword_part(part);
                     if let Some(arg) = arg_docs.next() {
-                        kw_docs.push(docvec![part_doc, " ", arg]);
+                        kw_docs.push(docvec![part_doc, argument_separator(&arguments[i]), arg]);
                     } else {
                         kw_docs.push(part_doc);
                     }
@@ -497,11 +662,11 @@ fn unparse_message_laid_out(
                 }
             } else {
                 let mut docs: Vec<Document<'static>> = vec![recv_doc];
-                for part in parts {
+                for (i, part) in parts.iter().enumerate() {
                     docs.push(Document::Str(" "));
                     docs.push(unparse_keyword_part(part));
                     if let Some(arg) = arg_docs.next() {
-                        docs.push(Document::Str(" "));
+                        docs.push(argument_separator(&arguments[i]));
                         docs.push(arg);
                     }
                 }
@@ -644,7 +809,7 @@ impl<'e> SpineMessage<'e> {
                 arguments,
                 is_cast,
             } => unparse_message_laid_out(receiver_doc, selector, arguments, is_cast, layout),
-            Self::Match { arms, exhaustive } => unparse_match(receiver_doc, arms, exhaustive),
+            Self::Match { arms, exhaustive } => unparse_match(receiver_doc, None, arms, exhaustive),
         }
     }
 }
@@ -842,17 +1007,22 @@ fn unparse_concat_chain(expr: &Expression) -> Option<Document<'static>> {
             unparse_operand(s, slot)
         })
         .collect();
+    // Comments around a `++` (BT-5183) force one segment per line.
+    let gaps: Vec<Option<GapComments>> = segments[1..]
+        .iter()
+        .map(|seg| gap_comments(seg.span().start(), GapSlot::AroundBinaryOperator))
+        .collect();
     let inline = join_docs(seg_docs.clone(), " ++ ");
     let inline_width = inline.to_pretty_string().len();
 
-    if inline_width <= 80 {
+    if inline_width <= 80 && gaps.iter().all(Option::is_none) {
         Some(inline)
     } else {
         // One segment per line, continuation lines start with "++ "
         let first = seg_docs[0].clone();
         let mut continuation: Vec<Document<'static>> = Vec::new();
-        for seg_doc in &seg_docs[1..] {
-            continuation.push(line());
+        for (seg_doc, gap) in seg_docs[1..].iter().zip(&gaps) {
+            continuation.push(gap.as_ref().map_or_else(line, gap_break));
             continuation.push(docvec!["++ ", seg_doc.clone()]);
         }
         Some(docvec![first, nest(2, concat(continuation))])
@@ -881,19 +1051,47 @@ fn collect_concat_segments<'a>(expr: &'a Expression, out: &mut Vec<&'a Expressio
 // --- Block unparsing ---
 
 fn unparse_block(block: &Block) -> Document<'static> {
+    // Comments between the parameters and the `|`, and before the `]`
+    // (BT-5183). Either forces the block onto several lines.
+    let bar_gap = gap_comments(block.span.start(), GapSlot::BeforeBlockBar);
+    let close_gap = gap_comments(block.span.end(), GapSlot::BeforeBlockClose);
+    let param_gaps: Vec<Option<GapComments>> = block
+        .parameters
+        .iter()
+        .map(|param| gap_comments(param.span.start(), GapSlot::BeforeBlockParam))
+        .collect();
+
     // Build the parameter prefix: `:x :y | ` (if any)
     let params_doc: Document<'static> = if block.parameters.is_empty() {
         nil()
     } else {
-        let params: Vec<Document<'static>> = block
-            .parameters
-            .iter()
-            .map(unparse_block_parameter)
-            .collect();
-        let mut p = join_docs_vec(params, " ");
-        p.push(Document::Str(" | "));
+        let mut p: Vec<Document<'static>> = Vec::new();
+        for (i, (param, gap)) in block.parameters.iter().zip(&param_gaps).enumerate() {
+            match gap {
+                Some(gap) => p.push(nest(2, gap_break(gap))),
+                None if i > 0 => p.push(Document::Str(" ")),
+                None => {}
+            }
+            p.push(unparse_block_parameter(param));
+        }
+        match &bar_gap {
+            Some(gap) => {
+                p.push(nest(2, gap_break(gap)));
+                p.push(Document::Str("| "));
+            }
+            None => p.push(Document::Str(" | ")),
+        }
         concat(p)
     };
+
+    if bar_gap.is_some() || close_gap.is_some() || param_gaps.iter().any(Option::is_some) {
+        return unparse_block_broken(
+            params_doc,
+            !block.parameters.is_empty(),
+            &block.body,
+            close_gap.as_ref(),
+        );
+    }
 
     match block.body.as_slice() {
         // Empty block: `[]`
@@ -931,7 +1129,7 @@ fn unparse_block(block: &Block) -> Document<'static> {
         [single]
             if matches!(
                 single.comments.trailing.as_ref().map(|c| c.kind),
-                Some(CommentKind::Line)
+                Some(CommentKind::Line | CommentKind::Doc)
             ) =>
         {
             let body = unparse_expression_statement(single);
@@ -963,6 +1161,44 @@ fn unparse_block(block: &Block) -> Document<'static> {
         // Unreachable: the slice patterns above are exhaustive.
         _ => unreachable!(),
     }
+}
+
+/// A block on several lines — `[` and its parameters, each statement on its
+/// own line, then the comments before the `]` (BT-5183), then `]` on its own
+/// line.
+fn unparse_block_broken(
+    params_doc: Document<'static>,
+    has_params: bool,
+    body: &[ExpressionStatement],
+    close_gap: Option<&GapComments>,
+) -> Document<'static> {
+    let mut body_docs: Vec<Document<'static>> = Vec::new();
+    for (i, stmt) in body.iter().enumerate() {
+        if i > 0 && stmt.preceding_blank_line {
+            body_docs.push(line());
+        }
+        body_docs.push(line());
+        body_docs.push(unparse_expression_statement(stmt));
+    }
+    if let Some(gap) = close_gap {
+        for (i, comment) in gap.same_line.iter().enumerate() {
+            // `params_doc` already ends in a space (`[:a | `).
+            body_docs.push(Document::Str(if i == 0 && has_params && body.is_empty() {
+                " "
+            } else {
+                "  "
+            }));
+            body_docs.push(unparse_comment(comment));
+        }
+        for comment in &gap.own_line {
+            if comment.preceding_blank_line {
+                body_docs.push(line());
+            }
+            body_docs.push(line());
+            body_docs.push(unparse_comment(comment));
+        }
+    }
+    docvec!["[", params_doc, nest(2, concat(body_docs)), line(), "]"]
 }
 
 fn unparse_block_parameter(param: &BlockParameter) -> Document<'static> {
@@ -999,17 +1235,30 @@ fn unparse_cascade_message(msg: &CascadeMessage) -> Document<'static> {
         MessageSelector::Unary(name) => leaf::ident(name),
         MessageSelector::Binary(op) => {
             let arg = arg_doc(&msg.arguments[0]);
-            docvec![leaf::ident(op), " ", arg]
+            // Comments around the operator (BT-5183) put its argument on the
+            // next line.
+            match gap_comments(
+                msg.arguments[0].span().start(),
+                GapSlot::AroundBinaryOperator,
+            ) {
+                Some(gap) => docvec![leaf::ident(op), nest(2, docvec![gap_break(&gap), arg])],
+                None => docvec![leaf::ident(op), " ", arg],
+            }
         }
         MessageSelector::Keyword(parts) => {
             let mut kw_docs: Vec<Document<'static>> = Vec::new();
             for (i, part) in parts.iter().enumerate() {
                 if i > 0 {
-                    kw_docs.push(Document::Str(" "));
+                    // A keyword written after a comment goes on its own line
+                    // (BT-5183).
+                    match gap_comments(part.span.start(), GapSlot::BeforeKeyword) {
+                        Some(gap) => kw_docs.push(nest(2, gap_break(&gap))),
+                        None => kw_docs.push(Document::Str(" ")),
+                    }
                 }
                 kw_docs.push(unparse_keyword_part(part));
                 if i < msg.arguments.len() {
-                    kw_docs.push(Document::Str(" "));
+                    kw_docs.push(argument_separator(&msg.arguments[i]));
                     kw_docs.push(arg_doc(&msg.arguments[i]));
                 }
             }
@@ -1040,8 +1289,23 @@ fn unparse_cascade(receiver: &Expression, messages: &[CascadeMessage]) -> Docume
         _ => unparse_expression(receiver),
     };
     let msg_docs: Vec<Document<'static>> = messages.iter().map(unparse_cascade_message).collect();
+    // Comments around a `;` (BT-5183) put the message after it on its own line.
+    let gaps: Vec<Option<GapComments>> = messages
+        .iter()
+        .map(|m| gap_comments(m.span.start(), GapSlot::BeforeCascadeMessage))
+        .collect();
 
-    if messages.len() == 1 {
+    if gaps.iter().any(Option::is_some) {
+        let mut continuation: Vec<Document<'static>> = Vec::new();
+        for (i, (msg_doc, gap)) in msg_docs.into_iter().zip(&gaps).enumerate() {
+            if i > 0 {
+                continuation.push(Document::Str(";"));
+            }
+            continuation.push(gap.as_ref().map_or_else(line, gap_break));
+            continuation.push(msg_doc);
+        }
+        docvec![receiver_doc, ";", nest(2, concat(continuation))]
+    } else if messages.len() == 1 {
         // Single cascade message: always inline
         docvec![receiver_doc, "; ", msg_docs.into_iter().next().unwrap()]
     } else {
@@ -1074,23 +1338,32 @@ fn unparse_cascade(receiver: &Expression, messages: &[CascadeMessage]) -> Docume
 
 // --- Match unparsing ---
 
+/// `value_doc match: [arms]`. Comments written between the receiver and
+/// `match:` (`gap`, BT-5183) put the keyword and its arms on the next line,
+/// indented.
 fn unparse_match(
     value_doc: Document<'static>,
+    gap: Option<&GapComments>,
     arms: &[MatchArm],
     exhaustive: bool,
 ) -> Document<'static> {
     // ADR 0106: `matchExhaustive:` round-trips through unparse just
     // like `match:` — only the keyword selector differs.
     let keyword = if exhaustive {
-        " matchExhaustive: ["
+        "matchExhaustive: ["
     } else {
-        " match: ["
+        "match: ["
     };
     let arm_docs: Vec<Document<'static>> = arms.iter().map(unparse_match_arm).collect();
-    if arm_docs.len() <= 1 {
+    // Comments after an arm (BT-5183) force one arm per line.
+    let arm_gaps: Vec<Option<GapComments>> = arms
+        .iter()
+        .map(|arm| gap_comments(arm.body.span().end(), GapSlot::AfterMatchArm))
+        .collect();
+    let rest = if arm_docs.len() <= 1 && gap.is_none() && arm_gaps.iter().all(Option::is_none) {
         // Single arm: try inline, break if too wide
         let joined = join_docs(arm_docs, "; ");
-        group(docvec![value_doc, keyword, joined, "]"])
+        return group(docvec![value_doc, " ", keyword, joined, "]"]);
     } else {
         // Multiple arms: one per line
         let mut body: Vec<Document<'static>> = Vec::new();
@@ -1111,8 +1384,25 @@ fn unparse_match(
             if i < arms.len() - 1 {
                 body.push(Document::Str(";"));
             }
+            if let Some(arm_gap) = &arm_gaps[i] {
+                for comment in &arm_gap.same_line {
+                    body.push(Document::Str("  "));
+                    body.push(unparse_comment(comment));
+                }
+                for comment in &arm_gap.own_line {
+                    if comment.preceding_blank_line {
+                        body.push(line());
+                    }
+                    body.push(line());
+                    body.push(unparse_comment(comment));
+                }
+            }
         }
-        docvec![value_doc, keyword, nest(2, concat(body)), line(), "]"]
+        docvec![keyword, nest(2, concat(body)), line(), "]"]
+    };
+    match gap {
+        Some(gap) => docvec![value_doc, nest(2, docvec![gap_break(gap), rest])],
+        None => docvec![value_doc, " ", rest],
     }
 }
 
@@ -1139,7 +1429,7 @@ fn unparse_match_arm(arm: &MatchArm) -> Document<'static> {
 fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
     match pattern {
         Pattern::Wildcard(_) => Document::Str("_"),
-        Pattern::Literal(lit, _) => unparse_literal(lit),
+        Pattern::Literal(lit, span) => unparse_literal_at(lit, *span),
         Pattern::Nil(_) => Document::Str("nil"),
         Pattern::Variable(id) => unparse_identifier(id),
         Pattern::Type { binding, class, .. } => {
@@ -1265,7 +1555,7 @@ fn unparse_binary_segment<V>(
         }));
     }
     if let Some(unit) = seg.unit {
-        specs.push(docvec!["unit:", leaf::nat_lit(unit)]);
+        specs.push(docvec!["unit:", unparse_unit(unit, seg.span)]);
     }
     if !specs.is_empty() {
         docs.push(Document::Str("/"));
@@ -1305,6 +1595,55 @@ impl Drop for LiteralCommentScope {
     fn drop(&mut self) {
         let previous = std::mem::take(&mut self.previous);
         LITERAL_COMMENTS.with(|current| *current.borrow_mut() = previous);
+    }
+}
+
+/// The comments recorded in gap `slot` anchored at `anchor`, if any
+/// (BT-5183).
+fn gap_comments(anchor: u32, slot: GapSlot) -> Option<GapComments> {
+    LITERAL_COMMENTS.with(|current| current.borrow().gap(anchor, slot).cloned())
+}
+
+/// The comments of a gap, laid out where they were written, followed by the
+/// line break they force: same-line comments after the preceding token
+/// (`foo: 1  // why`), then a line break, then each own-line comment on its
+/// own line. The caller puts this inside the `nest` that indents what comes
+/// after the gap, and the gap replaces the separator it would otherwise emit.
+fn gap_break(gap: &GapComments) -> Document<'static> {
+    let mut docs: Vec<Document<'static>> = Vec::new();
+    for comment in &gap.same_line {
+        docs.push(Document::Str("  "));
+        docs.push(unparse_comment(comment));
+    }
+    docs.push(line());
+    for comment in &gap.own_line {
+        if comment.preceding_blank_line {
+            docs.push(line());
+        }
+        docs.push(unparse_comment(comment));
+        docs.push(line());
+    }
+    concat(docs)
+}
+
+/// The separator between a keyword and its `argument`: a space, or the
+/// comments written there (BT-5183), which put the argument on the next line.
+fn argument_separator(argument: &Expression) -> Document<'static> {
+    match gap_comments(argument.span().start(), GapSlot::AfterKeyword) {
+        Some(gap) => nest(2, gap_break(&gap)),
+        None => Document::Str(" "),
+    }
+}
+
+/// `value` as written after `:=`, `^` or `=`: `plain` then the
+/// value, or the comments written before it (BT-5183) with the value on the
+/// next line, indented — the whole value, so its own continuation lines
+/// indent under it.
+pub(super) fn value_with_separator(value: &Expression, plain: &'static str) -> Document<'static> {
+    let slot = GapSlot::BeforeValue;
+    match gap_comments(value.span().start(), slot) {
+        Some(gap) => nest(2, docvec![gap_break(&gap), unparse_expression(value)]),
+        None => docvec![plain, unparse_expression(value)],
     }
 }
 

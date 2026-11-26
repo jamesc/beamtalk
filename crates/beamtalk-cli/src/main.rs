@@ -88,8 +88,10 @@ enum Command {
         #[arg(long)]
         force: bool,
 
-        /// Delete a pre-existing --output directory even if it doesn't
-        /// look like a previous `beamtalk release` output
+        /// Replace a pre-existing --output directory that lacks the
+        /// `.beamtalk-release` marker, provided it is release-shaped (a
+        /// `releases/` directory and only bin/, lib/, releases/, erts-*/ at
+        /// the top level); any other non-empty directory is still refused
         #[arg(long)]
         force_output: bool,
 
@@ -275,10 +277,6 @@ enum Command {
         /// Source files or directories to format
         #[arg(default_value = ".")]
         paths: Vec<String>,
-
-        /// Use `beamtalk fmt-check` instead
-        #[arg(long, hide = true)]
-        check: bool,
     },
 
     /// Check Beamtalk source formatting without modifying files
@@ -372,10 +370,6 @@ enum Command {
         /// the raw `module:function/arity` beside each display name
         #[arg(long)]
         raw_mfa: bool,
-
-        /// Deprecated alias for `--raw-mfa`
-        #[arg(long, hide = true)]
-        full_traces: bool,
     },
 
     /// Check environment setup (Erlang, runtime, stdlib)
@@ -625,7 +619,7 @@ fn run() -> Result<()> {
 ///
 /// Split out from [`run`] so the argument-validation branches that
 /// don't touch the filesystem or spawn subprocesses (e.g. `--entry`/`-o`
-/// without `--escript`, `fmt --check`) are unit-testable without going
+/// without `--escript`) are unit-testable without going
 /// through `Cli::parse()`/tracing/miette setup.
 #[expect(
     clippy::too_many_lines,
@@ -737,14 +731,7 @@ fn dispatch_command(command: Command) -> Result<()> {
         Command::Check { path, warnings } => {
             commands::check::run_check(&path, &warnings.compiler_options())
         }
-        Command::Fmt { paths, check } => {
-            if check {
-                miette::bail!(
-                    "`beamtalk fmt --check` is not supported. Use `beamtalk fmt-check` instead."
-                );
-            }
-            commands::fmt::run_fmt(&paths, false)
-        }
+        Command::Fmt { paths } => commands::fmt::run_fmt(&paths, false),
         Command::FmtCheck { paths } => commands::fmt::run_fmt(&paths, true),
         Command::Lint {
             path,
@@ -765,13 +752,7 @@ fn dispatch_command(command: Command) -> Result<()> {
             jobs,
             quiet,
             raw_mfa,
-            full_traces,
-        } => {
-            if full_traces {
-                eprintln!("warning: `--full-traces` is deprecated; use `--raw-mfa`");
-            }
-            commands::test::run_tests(&path, warnings, jobs, quiet, raw_mfa || full_traces)
-        }
+        } => commands::test::run_tests(&path, warnings, jobs, quiet, raw_mfa),
         Command::Generate { action } => commands::generate::cli::run(action),
         Command::Deps { action } => commands::deps::cli::run(action),
         Command::Version { args } => commands::version::run(&args),
@@ -822,6 +803,7 @@ mod tests {
             "beamtalk-exec",
             "beamtalk-lsp",
             "beamtalk-mcp",
+            "beamtalk-process",
         ];
         let directive = verbose_filter_directive(1);
         for name in deps.keys().filter(|k| k.starts_with("beamtalk-")) {
@@ -914,16 +896,6 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_fmt_check_true_rejects_with_hint() {
-        let err = dispatch_command(Command::Fmt {
-            paths: vec![".".to_string()],
-            check: true,
-        })
-        .unwrap_err();
-        assert!(err.to_string().contains("beamtalk fmt-check"), "got: {err}");
-    }
-
-    #[test]
     fn dispatch_check_on_missing_path_errors() {
         // `beamtalk check` runs the real checker: a nonexistent path fails
         // during source discovery without touching anything else.
@@ -972,11 +944,19 @@ mod tests {
     }
 
     #[test]
-    fn cli_fmt_check_flag_is_hidden_but_parses() {
-        let cli = Cli::try_parse_from(["beamtalk", "fmt", "--check"]).expect("parses");
-        match cli.command {
-            Some(Command::Fmt { check, .. }) => assert!(check),
-            other => panic!("expected Fmt command, got {other:?}"),
+    fn retired_fmt_check_and_full_traces_flags_are_rejected() {
+        // BT-5196: the hidden `fmt --check` stub and the `--full-traces`
+        // alias were removed; clap now rejects both as unknown arguments.
+        for args in [
+            ["beamtalk", "fmt", "--check"],
+            ["beamtalk", "test", "--full-traces"],
+        ] {
+            let err = Cli::try_parse_from(args).unwrap_err();
+            assert_eq!(
+                err.kind(),
+                clap::error::ErrorKind::UnknownArgument,
+                "{args:?}: {err}"
+            );
         }
     }
 }

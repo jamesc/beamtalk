@@ -176,6 +176,26 @@ kill_child_sleep_test() ->
 %%% Internal helpers
 %%% ============================================================================
 
+%% Decode one port event and classify it for ChildId.
+%%
+%% `binary_to_term(_, [safe])` rejects atoms the node has not seen yet, so
+%% every event tag the port can send is spelled out as its own clause with a
+%% distinct result: the atoms then live in this module's atom table even in a
+%% fresh node where no stdlib module has been loaded (BT-5262). Do not merge
+%% these clauses into the catch-all, or erlc drops the atoms again.
+%% Events: see beamtalk_exec_port's moduledoc.
+decode_event(Bin, ChildId) ->
+    case binary_to_term(Bin, [safe]) of
+        {stdout, ChildId, Data} -> {stdout, Data};
+        {exit, ChildId, Code} -> {exit, Code};
+        {stderr, ChildId, _} -> ignore;
+        {stdin_queued, ChildId} -> queued;
+        {stdin_written, ChildId} -> written;
+        {stdin_failed, ChildId, Reason} -> error({exec_port_stdin_failed, ChildId, Reason});
+        {error, ChildId, Command, Reason} -> error({exec_port_error, ChildId, Command, Reason});
+        _ -> ignore
+    end.
+
 %% Collect all stdout data for ChildId until the process exits.
 receive_stdout(Port, ChildId, Timeout) ->
     receive_stdout(Port, ChildId, Timeout, <<>>).
@@ -183,10 +203,10 @@ receive_stdout(Port, ChildId, Timeout) ->
 receive_stdout(Port, ChildId, Timeout, Acc) ->
     receive
         {Port, {data, Bin}} ->
-            case binary_to_term(Bin, [safe]) of
-                {stdout, ChildId, Data} ->
+            case decode_event(Bin, ChildId) of
+                {stdout, Data} ->
                     receive_stdout(Port, ChildId, Timeout, <<Acc/binary, Data/binary>>);
-                {exit, ChildId, _Code} ->
+                {exit, _Code} ->
                     Acc;
                 _ ->
                     receive_stdout(Port, ChildId, Timeout, Acc)
@@ -201,8 +221,8 @@ receive_stdout(Port, ChildId, Timeout, Acc) ->
 receive_exit(Port, ChildId, Timeout) ->
     receive
         {Port, {data, Bin}} ->
-            case binary_to_term(Bin, [safe]) of
-                {exit, ChildId, Code} ->
+            case decode_event(Bin, ChildId) of
+                {exit, Code} ->
                     Code;
                 _ ->
                     receive_exit(Port, ChildId, Timeout)

@@ -10,7 +10,7 @@ use beamtalk_core::test_helpers::test_support::{empty_module, make_actor_class};
 fn test_generate_register_class_empty_module_renders_empty() {
     let mut generator = CoreErlangGenerator::new("test");
     let module = empty_module();
-    let doc = generator.generate_register_class(&module, false).unwrap();
+    let doc = generator.generate_register_class(&module, false);
     assert_eq!(
         doc.to_pretty_string(),
         "",
@@ -25,7 +25,7 @@ fn test_generate_register_class_includes_class_name() {
         classes: vec![make_actor_class("Counter")],
         ..empty_module()
     };
-    let doc = generator.generate_register_class(&module, false).unwrap();
+    let doc = generator.generate_register_class(&module, false);
     let output = doc.to_pretty_string();
     assert!(
         output.contains("'Counter'"),

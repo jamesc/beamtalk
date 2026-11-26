@@ -146,22 +146,17 @@ call 'beamtalk_message_dispatch':'send'(_flag@57, 'ifFalse:ifTrue:', [_falseBloc
             let <DispArg2> = call 'erlang':'hd'(call 'erlang':'tl'(call 'erlang':'tl'(Args))) in
             call 'if_false_if_true_inline':'blocks:false:true:'(Self, DispArg0, DispArg1, DispArg2)
         <_Other> when 'true' ->
+            case Selector of
+                <'printString'> when 'true' ->
+                    call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)
+                <_> when 'true' ->
             %% BT-4260: a memoised verdict picks the direct inherited call.
-            case case Selector of
-                <'printString'> when 'true' -> 'slow'
-                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('IfFalseIfTrueProbe', Selector)
-            end of
+            case call 'beamtalk_dispatch':'inherited_target'('IfFalseIfTrueProbe', Selector) of
                 <{'value', _InhOwner, InhModule}> when 'true' ->
                     call InhModule:'dispatch'(Selector, Args, Self)
-                <{'ext', InhExtOwner}> when 'true' ->
-                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, 'bt@stdlib@value')
                 <_InhSlow> when 'true' ->
-                    case call 'beamtalk_extensions':'lookup'('IfFalseIfTrueProbe', Selector) of
-                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                            apply ExtFun(Args, Self)
-                        <'not_found'> when 'true' ->
-                            call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)
-                    end
+                    call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)
+            end
             end
     end
 
@@ -184,21 +179,13 @@ call 'beamtalk_message_dispatch':'send'(_flag@57, 'ifFalse:ifTrue:', [_falseBloc
 'has_method'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'pick:', 'typed:', 'early:', 'earlyCanonical:', 'tail:', 'tailCanonical:', 'blocks:false:true:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('IfFalseIfTrueProbe', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'bt@stdlib@value':'has_method'(Selector)
-            end
+        <'false'> when 'true' -> call 'bt@stdlib@value':'has_method'(Selector)
     end
 
 'has_method_local'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'pick:', 'typed:', 'early:', 'earlyCanonical:', 'tail:', 'tailCanonical:', 'blocks:false:true:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('IfFalseIfTrueProbe', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> 'false'
-            end
+        <'false'> when 'true' -> 'false'
     end
 
 
@@ -216,7 +203,6 @@ call 'beamtalk_message_dispatch':'send'(_flag@57, 'ifFalse:ifTrue:', [_falseBloc
             'classMethodSignatures' => ~{}~,
             'methodXref' => [~{'class_side' => 'false', 'selector' => 'pick:', 'line' => 1, 'sends' => [~{'selector' => 'ifFalse:ifTrue:', 'line' => 1, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~], 'references' => [], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'typed:', 'line' => 1, 'sends' => [~{'selector' => 'ifFalse:ifTrue:', 'line' => 1, 'recv_kind' => 'other', 'recv_type' => 'Boolean'}~], 'references' => [~{'class' => 'Boolean', 'line' => 1}~, ~{'class' => 'Integer', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'early:', 'line' => 1, 'sends' => [~{'selector' => 'ifFalse:ifTrue:', 'line' => 2, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~], 'references' => [~{'class' => 'String', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'earlyCanonical:', 'line' => 1, 'sends' => [~{'selector' => 'ifTrue:ifFalse:', 'line' => 2, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~], 'references' => [~{'class' => 'String', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'tail:', 'line' => 1, 'sends' => [~{'selector' => 'ifFalse:ifTrue:', 'line' => 1, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~], 'references' => [], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'tailCanonical:', 'line' => 1, 'sends' => [~{'selector' => 'ifTrue:ifFalse:', 'line' => 1, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~], 'references' => [], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'blocks:false:true:', 'line' => 1, 'sends' => [~{'selector' => 'ifFalse:ifTrue:', 'line' => 2, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~], 'references' => [], 'source_status' => 'indexed'}~],
             'stateVarXref' => [],
-            'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
             'classMethodDocs' => ~{}~,
@@ -225,7 +211,6 @@ call 'beamtalk_message_dispatch':'send'(_flag@57, 'ifFalse:ifTrue:', [_falseBloc
       'package' => 'none',
       'kind' => 'value',
       'fields' => [],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'true',
@@ -237,11 +222,10 @@ call 'beamtalk_message_dispatch':'send'(_flag@57, 'ifFalse:ifTrue:', [_falseBloc
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'pick:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'typed:' => ~{'arity' => 1, 'param_types' => ['Boolean'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'early:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'earlyCanonical:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'tail:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'tailCanonical:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'blocks:false:true:' => ~{'arity' => 3, 'param_types' => ['none', 'none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'direct_constructors' => ['new', 'new:'],
       'defines_user_class_new1' => 'false',
@@ -265,7 +249,6 @@ call 'beamtalk_message_dispatch':'send'(_flag@57, 'ifFalse:ifTrue:', [_falseBloc
       'package' => 'none',
       'kind' => 'value',
       'fields' => [],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'true',
@@ -277,11 +260,10 @@ call 'beamtalk_message_dispatch':'send'(_flag@57, 'ifFalse:ifTrue:', [_falseBloc
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'pick:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'typed:' => ~{'arity' => 1, 'param_types' => ['Boolean'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'early:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'earlyCanonical:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'tail:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'tailCanonical:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'blocks:false:true:' => ~{'arity' => 3, 'param_types' => ['none', 'none', 'none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'direct_constructors' => ['new', 'new:'],
       'defines_user_class_new1' => 'false',

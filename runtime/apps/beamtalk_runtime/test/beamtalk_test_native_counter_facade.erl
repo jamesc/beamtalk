@@ -18,5 +18,5 @@ gen_server (`beamtalk_test_native_counter`). Used by
     #{
         native => true,
         backing_module => beamtalk_test_native_counter,
-        class_var_abi => beamtalk_class_var_abi:abi()
+        module_abi => beamtalk_module_abi:abi()
     }.

@@ -654,18 +654,12 @@ register_missing_classname_key_test_() ->
             gen_server:stop(Pid, normal, 5000)
         end),
         %% `self new` inside a fun-backed class method of a module-less builder
-        %% class returns a usable generic instance. The class-method fun runs inside the
-        %% class gen_server, so it routes through handle_self_instantiation exactly as
-        %% compiled class-method codegen does — reading field defaults from the process
-        %% dictionary cache rather than gen_server:call-ing self (which would deadlock).
+        %% class returns a usable generic instance. ADR 0153 §5 (BT-5161): the
+        %% fun runs in the caller, so it calls what class-method codegen emits
+        %% for a `self new` send, `class_self_new/3` with the class name and
+        %% module taken from `ClassSelf`, not a send to `self()`.
         ?_test(begin
-            %% `self new` from inside a class method routes through
-            %% class_send(self(), 'new', _), which short-circuits to the
-            %% self-instantiation path — exactly what class-method
-            %% codegen emits for a `self new` send.
-            Make = fun(_ClassSelf) ->
-                beamtalk_class_dispatch:class_send(self(), 'new', [])
-            end,
+            Make = fun(ClassSelf) -> self_instantiate(ClassSelf, []) end,
             State = #{
                 className => 'BT2275SelfNew',
                 superclassRef => 'Object',
@@ -683,9 +677,7 @@ register_missing_classname_key_test_() ->
 
         %% `self new: #{...}` self-instantiation merges the initialiser map.
         ?_test(begin
-            MakeWith = fun(_ClassSelf) ->
-                beamtalk_class_dispatch:class_send(self(), 'new:', [#{a => 42}])
-            end,
+            MakeWith = fun(ClassSelf) -> self_instantiate(ClassSelf, [#{a => 42}]) end,
             State = #{
                 className => 'BT2275SelfNewWith',
                 superclassRef => 'Object',
@@ -701,11 +693,9 @@ register_missing_classname_key_test_() ->
 
         %% `self new` on an abstract module-less class raises
         %% instantiation_error — the generic path screens abstractness via
-        %% the process-dict flag, matching the external `X new` rejection.
+        %% the class's abstract flag, matching the external `X new` rejection.
         ?_test(begin
-            MakeAbstract = fun(_ClassSelf) ->
-                beamtalk_class_dispatch:class_send(self(), 'new', [])
-            end,
+            MakeAbstract = fun(ClassSelf) -> self_instantiate(ClassSelf, []) end,
             State = #{
                 className => 'BT2275SelfNewAbstract',
                 superclassRef => 'Object',
@@ -966,3 +956,11 @@ classbuilder_methods_appear_in_xref_test_() ->
 %%% Module-level fixture (BT-4962): loading a compiled `bt@stdlib@*` module starts
 %%% class processes; with no runtime app to own them they would outlive this suite.
 eunit_wrapper_(Tests) -> beamtalk_test_class_teardown:leak_free(Tests).
+
+%% What class-method codegen emits for `self new` / `self new:` (the
+%% instantiation intrinsic): `class_self_new/3` with the class name taken from
+%% `ClassSelf`'s tag and the module looked up by that name.
+self_instantiate(#beamtalk_object{class = Tag}, Args) ->
+    ClassName = beamtalk_primitive:class_name_from_tag(Tag),
+    Module = beamtalk_class_instantiation:resolve_module_or_raise(ClassName, 'new'),
+    beamtalk_class_instantiation:class_self_new(ClassName, Module, Args).

@@ -370,7 +370,11 @@ fn closest_alias_name(target: &str, alias_registry: &AliasRegistry) -> Option<Ec
         if dist > 0
             && dist <= 3
             && dist < target.len() / 2 + 1
-            && best.as_ref().is_none_or(|(_, d)| dist < *d)
+            // Ties go to the alphabetically first name: `alias_names` is a
+            // `HashMap` key walk, so "first seen" is not stable (BT-5184).
+            && best
+                .as_ref()
+                .is_none_or(|(b, d)| dist < *d || (dist == *d && name < b))
         {
             best = Some((name.clone(), dist));
         }
@@ -652,7 +656,6 @@ mod tests {
     fn test_unresolved_class_warns_on_unknown() {
         let module = empty_module_with_exprs(vec![class_ref("NonExistent")]);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
         check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &mut diags);
@@ -672,7 +675,6 @@ mod tests {
             class_ref("False"),
         ]);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
         check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &mut diags);
@@ -685,7 +687,6 @@ mod tests {
         // Object, Integer, String, etc. are builtins in the hierarchy
         let module = empty_module_with_exprs(vec![class_ref("Object"), class_ref("Integer")]);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
         check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &mut diags);
@@ -702,7 +703,6 @@ mod tests {
         // and should not trigger unresolved class warnings.
         let module = empty_module_with_exprs(vec![class_ref("Printable")]);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        let hierarchy = hierarchy.unwrap();
         let mut registry = ProtocolRegistry::new();
         registry.register_test_protocol(crate::semantic_analysis::ProtocolInfo {
             name: "Printable".into(),
@@ -770,6 +770,35 @@ mod tests {
             diags[0].message
         );
         assert_eq!(diags[0].category, Some(DiagnosticCategory::UnresolvedClass));
+    }
+
+    /// BT-5184: with several aliases at the same edit distance, the
+    /// suggestion was whichever the alias `HashMap` yielded first, so it could
+    /// change between runs. Ties now go to the alphabetically first name.
+    #[test]
+    fn test_unresolved_type_alias_suggestion_tie_is_stable() {
+        let source = "type PointD = Integer\ntype PointB = Integer\ntype PointE = Integer\n\
+                      type PointA = Integer\ntype PointC = Integer\n\n\
+                      Object subclass: Foo\n  at: p :: PointX => p\n";
+        for _ in 0..20 {
+            let (module, hierarchy) = parse_and_build(source);
+            let protocol_registry = ProtocolRegistry::new();
+            let alias_registry = registered_aliases(&module, &hierarchy, &protocol_registry);
+            let mut diags = Vec::new();
+            check_unresolved_type_aliases(
+                &module,
+                &hierarchy,
+                &protocol_registry,
+                &alias_registry,
+                &mut diags,
+            );
+            assert_eq!(diags.len(), 1, "{diags:?}");
+            assert!(
+                diags[0].message.contains("(did you mean `PointA`?)"),
+                "{}",
+                diags[0].message
+            );
+        }
     }
 
     #[test]
@@ -1349,7 +1378,6 @@ mod tests {
         module.classes.push(class_def);
 
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
         check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &mut diags);
@@ -1379,7 +1407,6 @@ mod tests {
         module.classes.push(class_def);
 
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        let hierarchy = hierarchy.unwrap();
         let mut diags = Vec::new();
 
         check_unresolved_classes(&module, &hierarchy, &ProtocolRegistry::new(), &mut diags);
@@ -1430,7 +1457,7 @@ mod tests {
     #[test]
     fn test_beamtalk_prefix_accepted() {
         assert!(is_known_erlang_module(
-            "beamtalk_extensions",
+            "beamtalk_dispatch",
             &empty_known_modules()
         ));
         assert!(is_known_erlang_module(

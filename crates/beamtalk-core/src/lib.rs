@@ -130,21 +130,6 @@ pub struct CompilerOptions {
     /// because genuinely unresolved".
     pub knowledge_scope: semantic_analysis::KnowledgeScope,
 
-    /// Whether the package being compiled has dependencies whose extension
-    /// methods are not all visible to the checker (ADR 0100 Rule 2's pre-WS3
-    /// guard; ADR 0070 WS3, BT-4608).
-    ///
-    /// A dependency can extend any class — including `Object` — so while any
-    /// dependency's extensions are unknown, no receiver's method surface is
-    /// provably complete. When true and `knowledge_scope` is
-    /// `ProjectComplete`, the receiver-knowledge classifier keeps every
-    /// receiver `Open` (no unresolved-selector hints) rather than risk
-    /// hinting on a dependency-contributed method that genuinely exists
-    /// (ADR 0100 Rule 1's third downgrade). Surfaces that load every
-    /// dependency's extensions into `cross_file_extensions` set it `false`;
-    /// see `beamtalk_project::dependency_extensions`.
-    pub dependency_extensions_unknown: bool,
-
     /// Erlang modules the `unresolved_ffi` check treats as known (BT-4022,
     /// BT-4724).
     ///

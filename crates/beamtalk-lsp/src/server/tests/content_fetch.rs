@@ -261,3 +261,41 @@ async fn fetch_content_returns_content_for_registered_stdlib_file() {
         .expect("should return content");
     assert_eq!(result.content, content);
 }
+
+/// BT-5251: `native/test/` helpers count as known Erlang modules for files
+/// under `test/` only; a `src/` file calling one is still flagged.
+#[tokio::test]
+async fn test_helpers_known_to_test_files_only() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let root = temp.path().to_path_buf();
+    std::fs::create_dir_all(root.join("native/test")).unwrap();
+    std::fs::write(
+        root.join("native/test/bt5251_helper.erl"),
+        b"-module(bt5251_helper).\n",
+    )
+    .unwrap();
+
+    let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+    let backend: &Backend = service.inner();
+    backend.load_type_cache(std::slice::from_ref(&root)).await;
+
+    let mut svc = backend.service.lock_recover();
+    if !svc.known_erlang_modules().check_enabled() {
+        return; // no OTP: the unresolved_ffi check is off
+    }
+    let call = "Object subclass: Probe\n  run => (Erlang bt5251_helper) ping\n";
+    let utf8 = |p: PathBuf| Utf8PathBuf::from_path_buf(p).unwrap();
+    let src = utf8(root.join("src/probe.bt"));
+    let test = utf8(root.join("test/probe_test.bt"));
+    svc.update_files([
+        (src.clone(), call.to_string()),
+        (test.clone(), call.to_string()),
+    ]);
+    let flagged = |f: &Utf8PathBuf| {
+        svc.diagnostics(f)
+            .iter()
+            .any(|d| d.message.contains("bt5251_helper"))
+    };
+    assert!(flagged(&src), "src/ must not see test helpers");
+    assert!(!flagged(&test), "test/ must see native/test helpers");
+}

@@ -1,0 +1,166 @@
+{
+  "description": "Whether a node's distribution listener is pinned to loopback, given the operator's ERL_EPMD_ADDRESS (BT-5127, BT-5185). The value is a comma-separated address list; each entry is trimmed and blanks are skipped. The listener is left unpinned only when some entry parses as an IP address that is not loopback: that is a deliberate private-network opt-out. Addresses are parsed strictly (four dotted decimal fields for IPv4; an IPv6 %zone suffix is ignored; an IPv4-mapped IPv6 address counts as its IPv4 address). Unset, blank, loopback (127.0.0.0/8, ::1, localhost) and unparseable values pin, so a typo fails closed. Rust beamtalk_workspace::loopback_dist_for, Elixir BtAttach.Workspace.loopback_dist?/1 and Erlang beamtalk_dist_address:loopback_dist/1 all read this file.",
+  "cases": [
+    {
+      "name": "unset",
+      "value": null,
+      "pin": true
+    },
+    {
+      "name": "empty",
+      "value": "",
+      "pin": true
+    },
+    {
+      "name": "whitespace",
+      "value": "  ",
+      "pin": true
+    },
+    {
+      "name": "ipv4 loopback",
+      "value": "127.0.0.1",
+      "pin": true
+    },
+    {
+      "name": "ipv4 loopback padded",
+      "value": " 127.0.0.1 ",
+      "pin": true
+    },
+    {
+      "name": "trailing space",
+      "value": "127.0.0.1 ",
+      "pin": true
+    },
+    {
+      "name": "other 127/8 address",
+      "value": "127.0.0.2",
+      "pin": true
+    },
+    {
+      "name": "ipv6 loopback",
+      "value": "::1",
+      "pin": true
+    },
+    {
+      "name": "ipv6 loopback long form",
+      "value": "0:0:0:0:0:0:0:1",
+      "pin": true
+    },
+    {
+      "name": "localhost",
+      "value": "localhost",
+      "pin": true
+    },
+    {
+      "name": "localhost upper case",
+      "value": "LOCALHOST",
+      "pin": true
+    },
+    {
+      "name": "loopback list",
+      "value": "127.0.0.1,::1",
+      "pin": true
+    },
+    {
+      "name": "loopback list with spaces and blanks",
+      "value": " 127.0.0.1 , , ::1 ",
+      "pin": true
+    },
+    {
+      "name": "ipv4-mapped loopback",
+      "value": "::ffff:127.0.0.1",
+      "pin": true
+    },
+    {
+      "name": "unparseable fails closed",
+      "value": "not-an-address",
+      "pin": true
+    },
+    {
+      "name": "shorthand ipv4 is not an address",
+      "value": "10.1",
+      "pin": true
+    },
+    {
+      "name": "leading-zero ipv4 is not an address",
+      "value": "010.0.0.1",
+      "pin": true
+    },
+    {
+      "name": "private ipv4",
+      "value": "10.0.0.5",
+      "pin": false
+    },
+    {
+      "name": "private ipv4 padded",
+      "value": " 10.0.0.5\t",
+      "pin": false
+    },
+    {
+      "name": "wildcard ipv4",
+      "value": "0.0.0.0",
+      "pin": false
+    },
+    {
+      "name": "wildcard ipv6",
+      "value": "::",
+      "pin": false
+    },
+    {
+      "name": "ipv6 address",
+      "value": "fd00::5",
+      "pin": false
+    },
+    {
+      "name": "zoned link-local ipv6",
+      "value": "fe80::1%eth0",
+      "pin": false
+    },
+    {
+      "name": "ipv4-mapped private",
+      "value": "::ffff:10.0.0.1",
+      "pin": false
+    },
+    {
+      "name": "loopback plus private",
+      "value": "127.0.0.1,10.0.0.5",
+      "pin": false
+    }
+  ],
+  "interface_description": "When the listener is pinned: the loopback address to pin it to, given the node's -proto_dist values. An IPv6 distribution (inet6_tcp, inet6_tls) gets ::1, since an IPv4 interface cannot bind its listener; anything else gets 127.0.0.1. Rust beamtalk_workspace::loopback_interface_for and Elixir BtAttach.Workspace.loopback_interface/1 both read these cases.",
+  "interface_cases": [
+    {
+      "name": "default distribution",
+      "proto_dist": [],
+      "interface": "ipv4"
+    },
+    {
+      "name": "inet_tcp",
+      "proto_dist": [
+        "inet_tcp"
+      ],
+      "interface": "ipv4"
+    },
+    {
+      "name": "inet6_tcp",
+      "proto_dist": [
+        "inet6_tcp"
+      ],
+      "interface": "ipv6"
+    },
+    {
+      "name": "inet6_tls",
+      "proto_dist": [
+        "inet6_tls"
+      ],
+      "interface": "ipv6"
+    },
+    {
+      "name": "inet_tls",
+      "proto_dist": [
+        "inet_tls"
+      ],
+      "interface": "ipv4"
+    }
+  ]
+}

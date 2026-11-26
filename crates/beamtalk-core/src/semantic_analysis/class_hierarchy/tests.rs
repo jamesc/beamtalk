@@ -357,7 +357,6 @@ fn resolves_selector_through_unknown_external_parent_to_object() {
     // subclassResponsibility lives on Object, two hops above CondimentDecorator.
     let module = module_with_classes(vec![make_user_class("CondimentDecorator", "Beverage")]);
     let (h, _diags) = ClassHierarchy::build(&module);
-    let h = h.unwrap();
     // Object method must be reachable even though Beverage is unknown.
     assert!(
         h.resolves_selector("CondimentDecorator", "subclassResponsibility"),
@@ -392,7 +391,6 @@ fn make_user_class(name: &str, superclass: &str) -> ClassDefinition {
 fn user_defined_class_added_to_hierarchy() {
     let module = module_with_classes(vec![make_user_class("Counter", "Actor")]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h.unwrap();
     assert!(diags.is_empty());
     assert!(h.has_class("Counter"));
     let counter = h.get_class("Counter").unwrap();
@@ -404,7 +402,7 @@ fn user_defined_class_added_to_hierarchy() {
 #[test]
 fn user_class_inherits_from_actor_chain() {
     let module = module_with_classes(vec![make_user_class("Counter", "Actor")]);
-    let h = ClassHierarchy::build(&module).0.unwrap();
+    let h = ClassHierarchy::build(&module).0;
     let chain = h.superclass_chain("Counter");
     assert_eq!(
         chain,
@@ -418,7 +416,7 @@ fn user_class_inherits_from_actor_chain() {
 #[test]
 fn user_class_resolves_inherited_selectors() {
     let module = module_with_classes(vec![make_user_class("Counter", "Actor")]);
-    let h = ClassHierarchy::build(&module).0.unwrap();
+    let h = ClassHierarchy::build(&module).0;
     // Local method
     assert!(h.resolves_selector("Counter", "increment"));
     // spawn is class-side on Actor — verify via all_class_methods
@@ -438,7 +436,6 @@ fn user_class_resolves_inherited_selectors() {
 fn sealed_class_subclassing_rejected() {
     let module = module_with_classes(vec![make_user_class("MyInt", "Integer")]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h.unwrap();
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed"));
     assert!(diags[0].message.contains("Integer"));
@@ -456,7 +453,6 @@ fn sealed_string_subclassing_rejected() {
 fn non_sealed_subclassing_allowed() {
     let module = module_with_classes(vec![make_user_class("MyActor", "Actor")]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h.unwrap();
     assert!(diags.is_empty());
     assert!(h.has_class("MyActor"));
 }
@@ -466,7 +462,6 @@ fn stdlib_mode_exempts_builtin_class_from_sealed_check() {
     // In stdlib_mode, a class named "Character" extending sealed "Integer" is allowed.
     let module = module_with_classes(vec![make_user_class("Character", "Integer")]);
     let (h, diags) = ClassHierarchy::build_with_options(&module, true);
-    let h = h.unwrap();
     assert!(
         diags.is_empty(),
         "stdlib_mode should exempt builtin class: {diags:?}"
@@ -478,7 +473,6 @@ fn user_code_character_subclassing_integer_rejected() {
     // Without stdlib_mode, even a class named "Character" is rejected.
     let module = module_with_classes(vec![make_user_class("Character", "Integer")]);
     let (h, diags) = ClassHierarchy::build_with_options(&module, false);
-    let h = h.unwrap();
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed"));
     assert!(diags[0].message.contains("Integer"));
@@ -585,7 +579,6 @@ fn sealed_method_override_rejected() {
     let child = make_class_with_sealed_method("Child", "Parent", "doCustomWork", false);
     let module = module_with_classes(vec![parent, child]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h.unwrap();
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed method"));
     assert!(diags[0].message.contains("`doCustomWork`"));
@@ -610,7 +603,6 @@ fn sealed_method_in_grandparent_enforced() {
     let grandchild = make_class_with_sealed_method("GrandChild", "Parent", "locked", false);
     let module = module_with_classes(vec![grandparent, parent, grandchild]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h.unwrap();
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed method"));
     assert!(diags[0].message.contains("`locked`"));
@@ -623,7 +615,6 @@ fn builtin_sealed_method_override_rejected() {
     let child = make_class_with_sealed_method("MyObj", "Object", "respondsTo:", false);
     let module = module_with_classes(vec![child]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h.unwrap();
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed method"));
     assert!(diags[0].message.contains("`respondsTo:`"));
@@ -636,7 +627,6 @@ fn builtin_actor_spawn_override_rejected() {
     let child = make_class_with_sealed_class_method("MyActor", "Actor", "spawn", false);
     let module = module_with_classes(vec![child]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h.unwrap();
     assert_eq!(diags.len(), 1);
     assert!(diags[0].message.contains("sealed method"));
     assert!(diags[0].message.contains("`spawn`"));
@@ -648,7 +638,7 @@ fn builtin_actor_spawn_override_rejected() {
 fn mro_is_depth_first() {
     // Counter -> Actor -> Object -> ProtoObject
     let module = module_with_classes(vec![make_user_class("Counter", "Actor")]);
-    let h = ClassHierarchy::build(&module).0.unwrap();
+    let h = ClassHierarchy::build(&module).0;
     let methods = h.all_methods("Counter");
     // First method should be from Counter (most specific)
     assert_eq!(methods[0].defined_in.as_str(), "Counter");
@@ -703,7 +693,6 @@ fn multiple_user_classes_in_module() {
     };
     let module = module_with_classes(vec![base, derived]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h.unwrap();
     assert!(diags.is_empty());
     // Derived should inherit from Base -> Actor -> Object -> ProtoObject
     assert!(h.resolves_selector("Derived", "derivedMethod"));
@@ -721,7 +710,6 @@ fn multiple_user_classes_in_module() {
 fn user_class_with_unknown_superclass() {
     let module = module_with_classes(vec![make_user_class("Orphan", "NonExistent")]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h.unwrap();
     // No diagnostic for unknown superclass (sealed check passes)
     assert!(diags.is_empty());
     // Class is still added
@@ -791,7 +779,7 @@ fn typed_class_is_typed() {
     let mut class = make_class_with_sealed_method("StrictCounter", "Actor", "increment", false);
     class.is_typed = true;
     let module = module_with_classes(vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     assert!(
         hierarchy.is_typed("StrictCounter"),
         "explicitly typed class should be typed"
@@ -804,7 +792,7 @@ fn typed_class_inheritance() {
     parent.is_typed = true;
     let child = make_class_with_sealed_method("UntypedChild", "TypedParent", "method", false);
     let module = module_with_classes(vec![parent, child]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     assert!(hierarchy.is_typed("TypedParent"), "parent should be typed");
     assert!(
         hierarchy.is_typed("UntypedChild"),
@@ -819,7 +807,7 @@ fn typed_class_inheritance_reverse_order() {
     let child = make_class_with_sealed_method("UntypedChild", "TypedParent", "method", false);
     // Note: child comes first in the vec! (reverse definition order)
     let module = module_with_classes(vec![child, parent]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     assert!(hierarchy.is_typed("TypedParent"), "parent should be typed");
     assert!(
         hierarchy.is_typed("UntypedChild"),
@@ -832,7 +820,7 @@ fn non_typed_class_not_inherited() {
     let parent = make_class_with_sealed_method("Parent", "Actor", "method", false);
     let child = make_class_with_sealed_method("Child", "Parent", "method", false);
     let module = module_with_classes(vec![parent, child]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     assert!(!hierarchy.is_typed("Parent"));
     assert!(!hierarchy.is_typed("Child"));
 }
@@ -874,7 +862,7 @@ fn user_class_return_type_propagated() {
         ..ClassDefinition::test("Counter", Some("Object"), ClassKind::Object)
     };
     let module = module_with_classes(vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let method = hierarchy
         .find_method("Counter", "getValue")
         .expect("Counter >> getValue should exist");
@@ -901,7 +889,7 @@ fn user_class_param_types_propagated() {
         ..ClassDefinition::test("Counter", Some("Object"), ClassKind::Object)
     };
     let module = module_with_classes(vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let method = hierarchy
         .find_method("Counter", "add:")
         .expect("Counter >> add: should exist");
@@ -935,7 +923,6 @@ fn make_typed_state_class(name: &str, superclass: &str) -> ClassDefinition {
 fn state_field_type_table() {
     let module = module_with_classes(vec![make_typed_state_class("Counter", "Actor")]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h.unwrap();
     assert!(diags.is_empty());
     let cases = [
         (
@@ -970,7 +957,6 @@ fn state_field_type_inherited_from_parent() {
     };
     let module = module_with_classes(vec![parent, child]);
     let (h, diags) = ClassHierarchy::build(&module);
-    let h = h.unwrap();
     assert!(diags.is_empty());
     // Child's own typed field
     assert_eq!(
@@ -1005,7 +991,7 @@ fn state_field_type_shadowed_untyped_field() {
         ..ClassDefinition::test("Child", Some("TypedParent"), ClassKind::Object)
     };
     let module = module_with_classes(vec![parent, child]);
-    let h = ClassHierarchy::build(&module).0.unwrap();
+    let h = ClassHierarchy::build(&module).0;
     // Child's untyped `count` shadows parent's typed `count: Integer`
     assert_eq!(h.state_field_type("Child", "count"), None);
     // Parent's typed `count` is still accessible on the parent
@@ -1136,9 +1122,7 @@ fn value_subclass_sets_is_value_flag() {
     let module = Module::new(vec![], test_span());
     let mut module_with_class = module;
     module_with_class.classes.push(class);
-    let (Ok(h), _) = ClassHierarchy::build(&module_with_class) else {
-        panic!("build should succeed");
-    };
+    let (h, _) = ClassHierarchy::build(&module_with_class);
     let info = h.get_class("Point").expect("Point should be registered");
     assert!(info.is_value, "Value subclass should have is_value = true");
     assert!(h.is_value_subclass("Point"));
@@ -1153,9 +1137,7 @@ fn value_subclass_auto_generates_slot_methods() {
         ..ClassDefinition::test("Point", Some("Value"), ClassKind::Value)
     };
     let module = module_with_classes(vec![class]);
-    let (Ok(h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (h, _) = ClassHierarchy::build(&module);
     let info = h.get_class("Point").expect("Point should be registered");
     // Auto-generated instance methods: getters (x, y) + setters (withX:, withY:)
     let instance_sels: Vec<&str> = info.methods.iter().map(|m| m.selector.as_str()).collect();
@@ -1199,9 +1181,7 @@ fn value_subclass_auto_methods_have_generated_docs() {
         ..ClassDefinition::test("Point", Some("Value"), ClassKind::Value)
     };
     let module = module_with_classes(vec![class]);
-    let (Ok(h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (h, _) = ClassHierarchy::build(&module);
     let info = h.get_class("Point").expect("Point should be registered");
     // Getter doc contains field name, default, and compiler-generated tag
     let getter = info.methods.iter().find(|m| m.selector == "x").unwrap();
@@ -1272,7 +1252,6 @@ fn value_subclass_auto_methods_respect_user_overrides() {
             test_span(),
         )],
         class_methods: vec![],
-        class_variables: vec![],
         type_params: vec![],
         superclass_type_args: vec![],
         uses: vec![],
@@ -1284,9 +1263,7 @@ fn value_subclass_auto_methods_respect_user_overrides() {
         span: test_span(),
     };
     let module = module_with_classes(vec![class]);
-    let (Ok(h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (h, _) = ClassHierarchy::build(&module);
     let info = h.get_class("Point").expect("Point should be registered");
     // User-defined `x` should appear once, not duplicated by auto-generation
     let x_count = info.methods.iter().filter(|m| m.selector == "x").count();
@@ -1300,9 +1277,7 @@ fn value_subclass_auto_methods_respect_user_overrides() {
 #[test]
 fn actor_subclass_does_not_set_is_value_flag() {
     let module = module_with_classes(vec![make_user_class("Counter", "Actor")]);
-    let (Ok(h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (h, _) = ClassHierarchy::build(&module);
     let info = h
         .get_class("Counter")
         .expect("Counter should be registered");
@@ -1330,9 +1305,7 @@ fn sealed_override_checks_with_external_superclasses() {
         ..ClassDefinition::test("ClassC", Some("UnknownClass"), ClassKind::Object)
     };
     let module = module_with_classes(vec![sealed_base, override_class]);
-    let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (mut h, _) = ClassHierarchy::build(&module);
     // Register external class relationship: UnknownClass <- ClassB
     let mut external_index = std::collections::HashMap::new();
     external_index.insert("UnknownClass".to_string(), "ClassB".to_string());
@@ -1499,9 +1472,7 @@ fn stamp_package_sets_package_on_non_builtin_classes() {
     let source = "Actor subclass: Counter\n  state: count = 0\n";
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, _) = crate::source_analysis::parse(tokens);
-    let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (mut h, _) = ClassHierarchy::build(&module);
     h.stamp_package("myapp");
     let counter = h.get_class("Counter").unwrap();
     assert_eq!(
@@ -1601,253 +1572,6 @@ fn extract_class_infos_captures_methods_and_state() {
     assert!(info.methods.iter().any(|m| m.selector == "increment"));
     assert!(info.methods.iter().any(|m| m.selector == "getValue"));
 }
-// --- Extension method registration tests ---
-//
-// BT-4806: the six `register_extensions_*` tests share their fixture (a builtin hierarchy and
-// a one-entry extension index) but assert six different facets of the result (method counts,
-// the class side, a `Dynamic` return, an unknown class, no override, `resolves_selector`), so
-// they stay separate tests over this shared builder, not rows of one table.
-fn single_extension_index(
-    class_name: &str,
-    side: crate::compilation::extension_index::MethodSide,
-    selector: &str,
-    file: &str,
-    param_types: Vec<Option<ecow::EcoString>>,
-    return_type: Option<&str>,
-) -> crate::compilation::extension_index::ExtensionIndex {
-    use crate::compilation::extension_index::{
-        ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo,
-    };
-    let mut index = ExtensionIndex::new();
-    index.entries_mut().insert(
-        ExtensionKey {
-            class_name: class_name.into(),
-            side,
-            selector: selector.into(),
-        },
-        vec![ExtensionLocation {
-            file_path: std::path::PathBuf::from(file),
-            span: test_span(),
-            type_info: ExtensionTypeInfo {
-                answers_receiver: false,
-                arity: param_types.len(),
-                param_types,
-                return_type: return_type.map(Into::into),
-            },
-        }],
-    );
-    index
-}
-#[test]
-fn register_extensions_adds_instance_method() {
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    let original_count = h.all_methods("String").len();
-    let index = single_extension_index(
-        "String",
-        MethodSide::Instance,
-        "shout",
-        "String+Shout.bt",
-        vec![],
-        Some("String"),
-    );
-    h.register_extensions(&index);
-    let methods = h.all_methods("String");
-    assert_eq!(methods.len(), original_count + 1);
-    let ext = methods.iter().find(|m| m.selector == "shout").unwrap();
-    assert_eq!(ext.arity, 0);
-    assert_eq!(ext.return_type, Some(DeclaredType::simple("String")));
-    assert_eq!(ext.defined_in.as_str(), "String");
-}
-#[test]
-fn register_extensions_instance_side_keeps_compiled_method() {
-    // ADR 0066: on the instance side a compiled method beats an extension on
-    // the same class, so the static model keeps the compiled signature.
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    let before = h.all_methods("String").len();
-    let index = single_extension_index(
-        "String",
-        MethodSide::Instance,
-        "size",
-        "String+Size.bt",
-        vec![],
-        Some("Boolean"),
-    );
-    h.register_extensions(&index);
-    let methods = h.all_methods("String");
-    assert_eq!(methods.len(), before);
-    let m = methods.iter().find(|m| m.selector == "size").unwrap();
-    assert_ne!(m.return_type, Some(DeclaredType::simple("Boolean")));
-}
-
-#[test]
-fn register_extensions_class_side_replaces_compiled_class_method() {
-    // BT-5061 / BT-5111: on the class side the extension is checked before the
-    // class's own class method, so the static model must carry the extension's
-    // signature, not the compiled one it shadows.
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    let existing = h
-        .get_class("Object")
-        .unwrap()
-        .class_methods
-        .first()
-        .map(|m| (m.selector.clone(), m.arity))
-        .expect("Object has a class method");
-    let params = vec![None; existing.1];
-    let index = single_extension_index(
-        "Object",
-        MethodSide::Class,
-        &existing.0,
-        "Object+Patch.bt",
-        params,
-        Some("BtFiveOneOneOneMarker"),
-    );
-    h.register_extensions(&index);
-    let class_methods = &h.get_class("Object").unwrap().class_methods;
-    let matching: Vec<_> = class_methods
-        .iter()
-        .filter(|m| m.selector == existing.0)
-        .collect();
-    assert_eq!(matching.len(), 1, "no duplicate entry for the selector");
-    assert_eq!(
-        matching[0].return_type,
-        Some(DeclaredType::simple("BtFiveOneOneOneMarker"))
-    );
-}
-
-#[test]
-fn register_extensions_class_side_first_pass_wins_over_later_pass() {
-    // BT-5111: the current module's class-side extension is registered before
-    // the project-wide index (which may hold a stale saved copy); the later
-    // pass must not overwrite it.
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    let (selector, arity) = h
-        .get_class("Object")
-        .unwrap()
-        .class_methods
-        .first()
-        .map(|m| (m.selector.clone(), m.arity))
-        .expect("Object has a class method");
-    let mk = |ret| {
-        single_extension_index(
-            "Object",
-            MethodSide::Class,
-            &selector,
-            "Object+Patch.bt",
-            vec![None; arity],
-            Some(ret),
-        )
-    };
-    h.register_extensions(&mk("Integer"));
-    h.register_extensions(&mk("String"));
-    let m = h
-        .get_class("Object")
-        .unwrap()
-        .class_methods
-        .iter()
-        .find(|m| m.selector == selector)
-        .unwrap();
-    assert_eq!(m.return_type, Some(DeclaredType::simple("Integer")));
-}
-
-#[test]
-fn register_extensions_adds_class_method() {
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    let original_count = h.all_class_methods("String").len();
-    let index = single_extension_index(
-        "String",
-        MethodSide::Class,
-        "fromJson:",
-        "String+JSON.bt",
-        vec![Some("String".into())],
-        Some("String"),
-    );
-    h.register_extensions(&index);
-    let methods = h.all_class_methods("String");
-    assert_eq!(methods.len(), original_count + 1);
-    let ext = methods.iter().find(|m| m.selector == "fromJson:").unwrap();
-    assert_eq!(ext.arity, 1);
-    assert_eq!(ext.param_types, vec![Some(DeclaredType::simple("String"))]);
-}
-#[test]
-fn register_extensions_unannotated_uses_dynamic() {
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    let index = single_extension_index(
-        "Array",
-        MethodSide::Instance,
-        "shuffle",
-        "Array+Shuffle.bt",
-        vec![],
-        None,
-    );
-    h.register_extensions(&index);
-    let ext = h
-        .find_method("Array", "shuffle")
-        .expect("extension should be resolvable");
-    assert!(ext.return_type.is_none(), "unannotated = Dynamic");
-}
-#[test]
-fn register_extensions_skips_unknown_class() {
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    let index = single_extension_index(
-        "NonexistentClass",
-        MethodSide::Instance,
-        "doStuff",
-        "Nonexistent+Stuff.bt",
-        vec![],
-        None,
-    );
-    // Should not panic
-    h.register_extensions(&index);
-    assert!(!h.has_class("NonexistentClass"));
-}
-#[test]
-fn register_extensions_does_not_override_existing_method() {
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    // "size" already exists on String
-    let original = h.find_method("String", "size").unwrap().clone();
-    let index = single_extension_index(
-        "String",
-        MethodSide::Instance,
-        "size",
-        "String+Size.bt",
-        vec![],
-        Some("Integer"),
-    );
-    h.register_extensions(&index);
-    // Original method should be unchanged
-    let after = h.find_method("String", "size").unwrap();
-    assert_eq!(after.defined_in, original.defined_in);
-}
-#[test]
-fn register_extensions_resolves_selector() {
-    use crate::compilation::extension_index::MethodSide;
-    let mut h = ClassHierarchy::with_builtins();
-    assert!(
-        !h.resolves_selector("String", "toJson"),
-        "precondition: toJson doesn't exist"
-    );
-    let index = single_extension_index(
-        "String",
-        MethodSide::Instance,
-        "toJson",
-        "String+JSON.bt",
-        vec![],
-        Some("String"),
-    );
-    h.register_extensions(&index);
-    assert!(
-        h.resolves_selector("String", "toJson"),
-        "extension should be resolvable via resolves_selector"
-    );
-}
 // --- ClassKind hierarchy propagation tests ---
 /// BT-4679: the former five `resolve_class_kind_*` tests. Each row seeds the external
 /// superclass index (when non-empty), then resolves a class's `ClassKind`.
@@ -1925,7 +1649,7 @@ fn handle_scope_stored_and_read() {
   handleScope: #node",
     );
     let (module, _) = crate::source_analysis::parse(tokens);
-    let h = ClassHierarchy::build(&module).0.unwrap();
+    let h = ClassHierarchy::build(&module).0;
     assert_eq!(
         h.handle_scope("MetricsTable").map(EcoString::as_str),
         Some("node")
@@ -1936,7 +1660,7 @@ fn handle_scope_stored_and_read() {
 fn handle_scope_none_when_undeclared() {
     let tokens = crate::source_analysis::lex_with_eof("Object subclass: Plain");
     let (module, _) = crate::source_analysis::parse(tokens);
-    let h = ClassHierarchy::build(&module).0.unwrap();
+    let h = ClassHierarchy::build(&module).0;
     assert_eq!(h.handle_scope("Plain"), None);
 }
 
@@ -1950,7 +1674,7 @@ fn handle_scope_inherited_from_ancestor() {
 HandleBase subclass: HandleChild",
     );
     let (module, _) = crate::source_analysis::parse(tokens);
-    let h = ClassHierarchy::build(&module).0.unwrap();
+    let h = ClassHierarchy::build(&module).0;
     assert_eq!(
         h.handle_scope("HandleChild").map(EcoString::as_str),
         Some("process")
@@ -1965,9 +1689,7 @@ fn indirect_value_subclass_sets_is_value_in_hierarchy() {
         make_user_class("MyValueBase", "Value"),
         make_user_class("MyValueChild", "MyValueBase"),
     ]);
-    let (Ok(h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (h, _) = ClassHierarchy::build(&module);
     let base_info = h
         .get_class("MyValueBase")
         .expect("MyValueBase should exist");
@@ -1991,9 +1713,7 @@ fn indirect_value_subclass_gets_auto_methods() {
         make_user_class("MyValueBase", "Value"),
         make_user_class("MyValueChild", "MyValueBase"),
     ]);
-    let (Ok(h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (h, _) = ClassHierarchy::build(&module);
     let child_info = h
         .get_class("MyValueChild")
         .expect("MyValueChild should exist");
@@ -2021,9 +1741,7 @@ fn testcase_indirect_value_subclass() {
         make_user_class("TestCase", "Value"),
         make_user_class("MyTest", "TestCase"),
     ]);
-    let (Ok(h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (h, _) = ClassHierarchy::build(&module);
     assert!(
         h.is_value_subclass("MyTest"),
         "MyTest should be a Value subclass"
@@ -2036,9 +1754,7 @@ fn supervisor_subclass_stays_object() {
     // Supervisor inherits from Object. WebApp inherits from Supervisor.
     // WebApp should remain ClassKind::Object.
     let module = module_with_classes(vec![make_user_class("WebApp", "Supervisor")]);
-    let (Ok(h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (h, _) = ClassHierarchy::build(&module);
     let info = h.get_class("WebApp").expect("WebApp should exist");
     assert!(
         !info.is_value,
@@ -2055,9 +1771,7 @@ fn cross_file_indirect_value_subclass() {
     // Simulate: File A defines MyValueBase as Value subclass (external).
     // File B defines MyChild as MyValueBase subclass (in module).
     let module = module_with_classes(vec![make_user_class("MyChild", "MyValueBase")]);
-    let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (mut h, _) = ClassHierarchy::build(&module);
     // At this point, MyValueBase is unknown, so MyChild has is_value = false
     let info_before = h.get_class("MyChild").expect("MyChild should exist");
     assert!(
@@ -2125,9 +1839,7 @@ fn cross_file_value_sub_subclass_finds_new() {
         )
     });
     let module = module_with_classes(vec![child_class]);
-    let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (mut h, _) = ClassHierarchy::build(&module);
     // Inject cross-file Base class (from another file: Value subclass: Base)
     let base_info = ClassInfo {
         is_value: true,
@@ -2163,24 +1875,18 @@ fn cross_file_value_sub_subclass_finds_new() {
     assert_eq!(result.unwrap().defined_in.as_str(), "Value");
 }
 
-/// ADR 0124 §1/B5a cross-file test: class `B` (this file) subclasses `A`
-/// (a different file, injected via `add_from_beam_meta` the way a
+/// ADR 0124 §1 cross-file test: class `B` (this file) subclasses `A` (a
+/// different file, injected via `add_from_beam_meta` the way a
 /// cross-package/prior-compiled ancestor is), where `A` declares
-/// `late state: proc` and `late classState: current` alongside an
-/// ordinary eager field/class-variable of each kind. `ClassInfo` for `B`
-/// must report both kinds through the flattened
-/// `state_field_kind`/`class_variable_kind` accessors — the metadata B3's
-/// guarded read depends on — without `A`'s AST being present in this
-/// compilation.
+/// `late state: proc` alongside an ordinary eager field. `ClassInfo` for `B`
+/// must report both kinds through the flattened `state_field_kind` accessor —
+/// the metadata B3's guarded read depends on — without `A`'s AST being
+/// present in this compilation.
 #[test]
-fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
+fn cross_file_state_field_kind_reports_late() {
     let module = module_with_classes(vec![make_user_class("B", "A")]);
-    let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (mut h, _) = ClassHierarchy::build(&module);
 
-    // Inject cross-file A: `late state: proc`, `state: id`,
-    // `late classState: current`, `classState: total`.
     let a_info = ClassInfo {
         is_typed: true,
         state: vec![EcoString::from("proc"), EcoString::from("id")],
@@ -2188,27 +1894,10 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
             (EcoString::from("proc"), crate::ast::SlotKind::Late),
             (EcoString::from("id"), crate::ast::SlotKind::Eager),
         ]),
-        class_variables: vec![
-            ClassVarInfo {
-                name: EcoString::from("current"),
-                ty: Some(DeclaredType::simple("TranscriptStream")),
-                has_default: false,
-                kind: crate::ast::SlotKind::Late,
-            },
-            ClassVarInfo {
-                name: EcoString::from("total"),
-                ty: None,
-                has_default: true,
-                kind: crate::ast::SlotKind::Eager,
-            },
-        ],
         ..ClassInfo::test("A", Some("Object"))
     };
     h.add_from_beam_meta(vec![a_info]);
 
-    // B declares no state/class-variables of its own (make_user_class's
-    // "count" state field is irrelevant here) — both kinds must be found
-    // by walking B → A.
     assert_eq!(
         h.state_field_kind("B", "proc"),
         crate::ast::SlotKind::Late,
@@ -2219,34 +1908,11 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
         crate::ast::SlotKind::Eager,
         "B should report A's ordinary instance field as SlotKind::Eager"
     );
-    assert_eq!(
-        h.class_variable_kind("B", "current"),
-        crate::ast::SlotKind::Late,
-        "B should report A's late class variable as SlotKind::Late"
-    );
-    assert_eq!(
-        h.class_variable_kind("B", "total"),
-        crate::ast::SlotKind::Eager,
-        "B should report A's ordinary class variable as SlotKind::Eager"
-    );
     // An unknown field degrades to Eager rather than panicking.
     assert_eq!(
         h.state_field_kind("B", "doesNotExist"),
         crate::ast::SlotKind::Eager
     );
-    // ADR 0124 B3: the guarded read's hint names the declared type, walked
-    // the same way as the kind.
-    assert_eq!(
-        h.class_variable_type("B", "current"),
-        Some(DeclaredType::simple("TranscriptStream")),
-        "B should report A's late class variable's declared type"
-    );
-    assert_eq!(
-        h.class_variable_type("B", "total"),
-        None,
-        "an untyped class variable has no declared type"
-    );
-    assert_eq!(h.class_variable_type("B", "doesNotExist"), None);
 }
 
 // --- ADR 0124 A2a: all_initialize_assigns tests ---
@@ -2260,9 +1926,7 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
 #[test]
 fn cross_file_all_initialize_assigns_includes_parent_summary() {
     let module = module_with_classes(vec![make_user_class("B", "A")]);
-    let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (mut h, _) = ClassHierarchy::build(&module);
 
     let a_info = ClassInfo {
         state: vec![EcoString::from("socket")],
@@ -2297,9 +1961,7 @@ fn all_initialize_assigns_includes_own_summary() {
     // real body — this test is about the flattening accessor, not the
     // must-analysis itself (covered by `initialize_assigns.rs`'s own tests).
     let module = module_with_classes(vec![class]);
-    let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (mut h, _) = ClassHierarchy::build(&module);
     // Overwrite the AST-derived (empty-body) summary with a non-empty one,
     // simulating a class whose real `initialize` assigns `value`.
     if let Some(info) = h.get_class_mut("Standalone") {
@@ -2320,9 +1982,7 @@ fn all_initialize_assigns_includes_own_summary() {
 #[test]
 fn all_initialize_assigns_native_ancestor_marks_incomplete() {
     let module = module_with_classes(vec![make_user_class("Child", "NativeParent")]);
-    let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (mut h, _) = ClassHierarchy::build(&module);
     // Give Child its own definitely-assigned slot so this test can prove
     // `incomplete` doesn't come at the cost of losing `assigned` data.
     if let Some(info) = h.get_class_mut("Child") {
@@ -2352,9 +2012,7 @@ fn all_initialize_assigns_native_ancestor_marks_incomplete() {
 #[test]
 fn all_initialize_assigns_missing_chain_link_marks_incomplete() {
     let module = module_with_classes(vec![make_user_class("Orphan", "UnknownAncestor")]);
-    let (Ok(h), _) = ClassHierarchy::build(&module) else {
-        panic!("build should succeed");
-    };
+    let (h, _) = ClassHierarchy::build(&module);
 
     let summary = h.all_initialize_assigns("Orphan");
     assert!(
@@ -2368,9 +2026,7 @@ fn all_initialize_assigns_missing_chain_link_marks_incomplete() {
 fn bt4099_hierarchy_for_source(source: &str) -> ClassHierarchy {
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, _) = crate::source_analysis::parse(tokens);
-    ClassHierarchy::build(&module)
-        .0
-        .expect("fixture hierarchy should build")
+    ClassHierarchy::build(&module).0
 }
 
 #[test]
@@ -2619,14 +2275,6 @@ fn direct_constructors_table() {
             new1: Some(false),
             keyword: None,
         },
-        Row {
-            label: "classState blocks all",
-            source: "Value subclass: Pt\n  state: x :: Integer = 0\n  classState: total = 0\n",
-            class: "Pt",
-            new0: Some(false),
-            new1: Some(false),
-            keyword: Some(None),
-        },
         // `new`/`new:` route through the `{new, _}` handler, which rejects abstract
         // classes; keyword constructors go through `class_method_call`, which has no
         // abstract check — the direct call preserves both paths.
@@ -2823,9 +2471,7 @@ fn repropagation_keeps_indirect_keyword_anchor() {
         "Value subclass: Base\nBase subclass: Leaf\n  state: y :: Integer = 0\n",
     );
     let (module, _) = crate::source_analysis::parse(tokens);
-    let mut h = ClassHierarchy::build(&module)
-        .0
-        .expect("fixture hierarchy should build");
+    let mut h = ClassHierarchy::build(&module).0;
     h.propagate_class_kind(&module);
     h.propagate_cross_file_class_kind();
     assert_eq!(
@@ -2864,9 +2510,7 @@ fn value_itself_is_never_anchored() {
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     let tokens = crate::source_analysis::lex_with_eof(&source);
     let (module, _) = crate::source_analysis::parse(tokens);
-    let h = ClassHierarchy::build(&module)
-        .0
-        .expect("value.bt hierarchy should build");
+    let h = ClassHierarchy::build(&module).0;
     assert!(h.get_class("Value").expect("Value").auto_ctors.is_none());
     assert_eq!(
         h.direct_constructors("Value"),
@@ -2948,11 +2592,9 @@ fn indirect_unknown_or_cyclic_chain_is_never_anchored() {
     let tokens = crate::source_analysis::lex_with_eof("Aaa subclass: Bbb\nBbb subclass: Aaa\n");
     let (module, _) = crate::source_analysis::parse(tokens);
     let (h, _) = ClassHierarchy::build(&module);
-    if let Ok(h) = h {
-        for name in ["Aaa", "Bbb"] {
-            assert!(h.get_class(name).is_none_or(|i| i.auto_ctors.is_none()));
-            assert_eq!(h.direct_constructors(name), DirectConstructors::default());
-        }
+    for name in ["Aaa", "Bbb"] {
+        assert!(h.get_class(name).is_none_or(|i| i.auto_ctors.is_none()));
+        assert_eq!(h.direct_constructors(name), DirectConstructors::default());
     }
 }
 
@@ -3074,78 +2716,40 @@ fn process_bound_selectors_are_never_direct_call_eligible() {
 #[test]
 fn direct_call_eligibility_is_adr_0142s_rule() {
     // BT-4301: no `sealed`/`class sealed` requirement; the class must define
-    // the method itself; no class in its chain may declare class variables
-    // (the runtime's chain-wide rule 2); class-variable reflection selectors
-    // are never eligible.
+    // the method itself. ADR 0153 (BT-5154): with no class variables the
+    // chain plays no part; a process-bound selector keeps the class process.
+    // BT-5155: a class method named after a field-reflection selector is
+    // no exception, since the runtime no longer intercepts it.
     let hierarchy = bt4099_hierarchy_for_source(
         "Object subclass: Open\n  class foo => 1\n  class hasField: x => 2\n\n\
-         Open subclass: OpenSub\n  class bar => 3\n\n\
-         Object subclass: Stateful\n  classState: n :: Integer = 0\n  class foo => 1\n\n\
-         Stateful subclass: StatelessSub\n  class bar => 3\n",
+         Open subclass: OpenSub\n  class bar => 5\n\n\
+         Missing subclass: Orphan\n  class baz => 6\n",
     );
     assert!(hierarchy.is_direct_call_eligible("Open", "foo"));
-    assert!(!hierarchy.is_direct_call_eligible("Open", "hasField:"));
+    assert!(hierarchy.is_direct_call_eligible("Open", "hasField:"));
     assert!(hierarchy.is_direct_call_eligible("OpenSub", "bar"));
     assert!(
         !hierarchy.is_direct_call_eligible("OpenSub", "foo"),
         "an inherited class method is not in the class's own table"
     );
-    assert!(!hierarchy.is_direct_call_eligible("Stateful", "foo"));
     assert!(
-        !hierarchy.is_direct_call_eligible("StatelessSub", "bar"),
-        "a subclass of a class with class variables keeps its process"
+        hierarchy.is_direct_call_eligible("Orphan", "baz"),
+        "an unresolved superclass is no longer a doubt"
     );
-    assert!(hierarchy.chain_has_class_variables("StatelessSub"));
-    assert!(!hierarchy.chain_has_class_variables("OpenSub"));
-    assert!(hierarchy.chain_has_class_variables("NoSuchClass"));
+    assert!(hierarchy.runs_class_method_in_caller("NoSuchClass", "foo"));
+    assert!(!hierarchy.runs_class_method_in_caller("NoSuchClass", "spawn"));
 }
 
-/// BT-4148: the compile-time class-variable reflection selector set agrees
-/// with the runtime's (`beamtalk_object_class:is_class_var_reflection_selector/1`).
-/// Both sides are pinned to the shared fixture; the Erlang half is
-/// `beamtalk_object_class_tests:class_var_reflection_selectors_match_shared_fixture_test/0`.
+/// BT-5155: a user class method named `fieldAt:` / `fieldAt:put:` is what a
+/// send reaches on every route (the class process no longer intercepts it),
+/// so it is direct-call eligible like any other class method.
 #[test]
-fn class_var_reflection_selectors_match_shared_fixture() {
-    let path = crate::source_analysis::corpus_test_support::repo_root().join(
-        "runtime/apps/beamtalk_runtime/test/fixtures/class_var_reflection_selectors_conformance.json",
-    );
-    let raw = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read fixture {}: {e}", path.display()));
-    let fixture: serde_json::Value = serde_json::from_str(&raw).expect("fixture is JSON");
-    let list = |key: &str| -> Vec<String> {
-        fixture[key]
-            .as_array()
-            .unwrap_or_else(|| panic!("fixture.{key} is an array"))
-            .iter()
-            .map(|v| v.as_str().expect("selector is a string").to_string())
-            .collect()
-    };
-    let members = list("selectors");
-    assert!(!members.is_empty());
-    for sel in &members {
-        assert!(
-            ClassInfo::is_class_var_reflection_selector(sel),
-            "{sel} is a class-variable reflection selector at runtime"
-        );
-    }
-    for sel in list("non_selectors") {
-        assert!(
-            !ClassInfo::is_class_var_reflection_selector(&sel),
-            "{sel} is not a class-variable reflection selector"
-        );
-    }
-}
-
-/// BT-4148: a user class method named `fieldAt:` / `fieldAt:put:` is never
-/// what a send reaches (the class process answers it first), so it is never
-/// direct-call eligible.
-#[test]
-fn field_at_class_methods_are_not_direct_call_eligible() {
+fn field_at_class_methods_are_direct_call_eligible() {
     let hierarchy = bt4099_hierarchy_for_source(
         "Object subclass: Reg\n  class fieldAt: k => 1\n  class fieldAt: k put: v => 2\n",
     );
-    assert!(!hierarchy.is_direct_call_eligible("Reg", "fieldAt:"));
-    assert!(!hierarchy.is_direct_call_eligible("Reg", "fieldAt:put:"));
+    assert!(hierarchy.is_direct_call_eligible("Reg", "fieldAt:"));
+    assert!(hierarchy.is_direct_call_eligible("Reg", "fieldAt:put:"));
 }
 
 /// BT-4464: `ClassHierarchy::explicit_class_new_builds_in_caller` over the
@@ -3153,9 +2757,7 @@ fn field_at_class_methods_are_not_direct_call_eligible() {
 fn bt4464_explicit_new_verdict(source: &str) -> bool {
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, _) = crate::source_analysis::parse(tokens);
-    let h = ClassHierarchy::build(&module)
-        .0
-        .expect("fixture hierarchy should build");
+    let h = ClassHierarchy::build(&module).0;
     h.explicit_class_new_builds_in_caller(&module.classes[0])
 }
 
@@ -3222,24 +2824,8 @@ fn explicit_class_new_needs_a_concrete_stateless_class() {
         "abstract Object subclass: Tag\n  class new => (Erlang erlang) make_ref\n"
     ));
     assert!(!bt4464_explicit_new_verdict(
-        "Object subclass: Tag\n  classState: count = 0\n  class new => (Erlang erlang) make_ref\n"
-    ));
-    assert!(!bt4464_explicit_new_verdict(
         "Actor subclass: Tag\n  class new => (Erlang erlang) make_ref\n"
     ));
-    // Class variables anywhere in the chain keep the class process.
-    let tokens = crate::source_analysis::lex_with_eof(
-        "Object subclass: Base\n  classState: count = 0\n\
-         Base subclass: Tag\n  class new => (Erlang erlang) make_ref\n",
-    );
-    let (module, _) = crate::source_analysis::parse(tokens);
-    let h = ClassHierarchy::build(&module)
-        .0
-        .expect("fixture hierarchy should build");
-    assert!(
-        !h.explicit_class_new_builds_in_caller(&module.classes[1]),
-        "an ancestor's class variables keep the class process"
-    );
     // An instance-side `new` replaces `new/0`: nothing to call directly.
     assert!(!bt4464_explicit_new_verdict(
         "Object subclass: Tag\n  new => self\n  class new => (Erlang erlang) make_ref\n"
@@ -3281,9 +2867,7 @@ fn explicit_class_new_stdlib_audit() {
 fn bt4475_explicit_new1_verdict(source: &str) -> bool {
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, _) = crate::source_analysis::parse(tokens);
-    let h = ClassHierarchy::build(&module)
-        .0
-        .expect("fixture hierarchy should build");
+    let h = ClassHierarchy::build(&module).0;
     h.explicit_class_new1_runs_in_caller(&module.classes[0])
 }
 
@@ -3324,10 +2908,6 @@ fn explicit_class_new1_needing_the_class_process_stays_there() {
     // A non-parameter, non-literal argument may read anything.
     assert!(!bt4475_explicit_new1_verdict(
         "Object subclass: Tag\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: self name\n"
-    ));
-    // Class variables in the chain keep the class process for `new:` too.
-    assert!(!bt4475_explicit_new1_verdict(
-        "Object subclass: Tag\n  classState: count = 0\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: xs\n"
     ));
     // An instance-side `new:` of the same name fails closed.
     assert!(!bt4475_explicit_new1_verdict(
@@ -3399,7 +2979,6 @@ fn runs_class_method_in_caller_follows_published_explicit_new1_verdict() {
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _) = crate::source_analysis::parse(tokens);
     let (h, _) = ClassHierarchy::build(&module);
-    let h = h.expect("hierarchy");
     assert!(h.get_class("Fwd").unwrap().in_caller_new1);
     assert!(h.runs_class_method_in_caller("Fwd", "new:"));
     assert!(!h.get_class("FwdChild").unwrap().in_caller_new1);
@@ -3430,20 +3009,17 @@ fn explicit_new1_verdict_survives_pass1_extraction_across_files() {
 
     for (base_src, expected) in [
         ("Object subclass: Base\n", true),
-        ("Object subclass: Base\n  classState: n = 0\n", false),
         ("Actor subclass: Base\n", false),
         ("Value subclass: Base\n", true),
     ] {
         let base = parse(base_src);
         // Caller's view: only Pass 1 infos of both sibling files.
-        let (h, _) = ClassHierarchy::build(&caller);
-        let mut h = h.expect("hierarchy");
+        let (mut h, _) = ClassHierarchy::build(&caller);
         let mut injected = ClassHierarchy::extract_class_infos(&base);
         injected.extend(fwd_infos.clone());
         assert!(h.add_from_beam_meta(injected));
         // Defining module's view (codegen).
-        let (hd, _) = ClassHierarchy::build(&fwd);
-        let mut hd = hd.expect("hierarchy");
+        let (mut hd, _) = ClassHierarchy::build(&fwd);
         assert!(hd.add_from_beam_meta(ClassHierarchy::extract_class_infos(&base)));
         assert_eq!(
             hd.explicit_class_new1_runs_in_caller(&fwd.classes[0]),
@@ -3498,7 +3074,6 @@ fn methods_of_sealed_class_are_sealed_with_or_without_keyword() {
     let (module, diags) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
     assert!(diags.is_empty(), "{diags:?}");
     let (h, _) = ClassHierarchy::build(&module);
-    let h = h.unwrap();
     let flag = |class: &str, sel: &str, class_side: bool| {
         let class_info = h.get_class(class).unwrap();
         let methods = if class_side {
@@ -3534,7 +3109,6 @@ fn abstract_sealed_class_methods_are_sealed_only_with_the_keyword() {
     let (module, diags) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
     assert!(diags.is_empty(), "{diags:?}");
     let (h, _) = ClassHierarchy::build(&module);
-    let h = h.unwrap();
     let methods = &h.get_class("Gate").unwrap().methods;
     let flag = |sel: &str| {
         methods

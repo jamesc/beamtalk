@@ -242,7 +242,7 @@ row. Re-attaching (a `resume`) within that period cancels the countdown.
 A cast, so a client that races a dying shell never crashes; ordering with a later
 `lifecycle_state/1` call from the same process is preserved.
 """.
--spec attach(pid(), pid()) -> ok | gone.
+-spec attach(pid(), pid()) -> ok | gone | timeout.
 attach(SessionPid, ClientPid) when is_pid(ClientPid) ->
     %% A call, not a cast (BT-5084): a shell whose idle timeout is already queued
     %% stops before it handles the attach, and the caller must learn that instead
@@ -250,6 +250,10 @@ attach(SessionPid, ClientPid) when is_pid(ClientPid) ->
     try
         gen_server:call(SessionPid, {attach, ClientPid}, 5000)
     catch
+        %% BT-5129: a busy shell that does not answer in time is still alive —
+        %% report that distinctly so the caller keeps resuming its live session
+        %% instead of discarding it as `gone`.
+        exit:{timeout, _} -> timeout;
         exit:_ -> gone
     end.
 
@@ -257,8 +261,8 @@ attach(SessionPid, ClientPid) when is_pid(ClientPid) ->
 How the idle monitor should see this session (BT-5012):
 
 - `attached`   — a client is connected.
-- `unattached` — no client has ever attached (a dist-attached/`clone` session whose
-  owner stops it explicitly); treated as active, as before.
+- `unattached` — no client has ever attached (a dist-attached session whose owner
+  stops it explicitly); treated as active, as before.
 - `busy`       — detached, but an eval is still running; treated as active.
 - `detached`   — a client was attached and has gone; only this state lets the
   workspace be considered idle.
@@ -280,7 +284,7 @@ Settable (BT-5084), first match wins: application env `session_idle_seconds` of
 `beamtalk_workspace` (`sys.config`), then the `BEAMTALK_SESSION_IDLE_SECONDS`
 environment variable of the workspace node, then the default of 4 hours (the same
 as the workspace idle timeout). A session that has never had a client attached
-(`clone`, a dist-attached LiveView) is bounded the same way, counted from its
+(a dist-attached LiveView) is bounded the same way, counted from its
 last eval.
 """.
 -spec session_idle_seconds() -> non_neg_integer().
@@ -810,12 +814,22 @@ touch_unattached() ->
 -spec attach_client(pid()) -> ok.
 attach_client(ClientPid) ->
     #{clients := Clients} = lifecycle(),
-    Ref = erlang:monitor(process, ClientPid),
-    cancel_idle_timer(),
-    put(?LIFECYCLE_KEY, (lifecycle())#{
-        clients => Clients#{Ref => ClientPid}, ever_attached => true, deadline => undefined
-    }),
-    ok.
+    %% BT-5129: idempotent per client pid — a resume attaches from the
+    %% registry probe and again from `bind_session`, which used to leave two
+    %% monitors (and so two DOWNs) for one LiveView.
+    case lists:member(ClientPid, maps:values(Clients)) of
+        true ->
+            ok;
+        false ->
+            Ref = erlang:monitor(process, ClientPid),
+            cancel_idle_timer(),
+            put(?LIFECYCLE_KEY, (lifecycle())#{
+                clients => Clients#{Ref => ClientPid},
+                ever_attached => true,
+                deadline => undefined
+            }),
+            ok
+    end.
 
 -spec detach_client(reference()) -> ok.
 detach_client(Ref) ->
