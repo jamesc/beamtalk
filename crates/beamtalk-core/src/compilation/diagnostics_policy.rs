@@ -224,7 +224,9 @@ fn value_type_name(value: &toml::Value) -> &'static str {
 /// `class-state-abroad` and `class-process-ffi` with class variables, and
 /// `class-var-reflection-shadowing` once a class's own `fieldAt:` method
 /// answered on every route, BT-5155; BT-5196 removed `extension-conflict`,
-/// `deprecation` and `shadowed-class`, whose diagnostics were never emitted).
+/// `deprecation` and `shadowed-class`, whose diagnostics were never emitted;
+/// the `@expect deprecation` / `@expect shadowed_class` names still parse and
+/// are reported stale, `extension-conflict` never had an `@expect` name).
 /// A manifest that still sets one keeps
 /// building: the key is ignored, as the matching `@expect` name is accepted
 /// and reported stale.
@@ -659,6 +661,9 @@ fn expect_category_unchecked(
         // Deprecated, parse-only (ADR 0153): the lints were removed.
         | ExpectCategory::ClassStateAbroad
         | ExpectCategory::ClassProcessFfi
+        // Deprecated, parse-only (BT-5196): nothing ever produced them.
+        | ExpectCategory::Deprecation
+        | ExpectCategory::ShadowedClass
         | ExpectCategory::ClassVarReflectionShadowing => false,
     }
 }
@@ -1478,7 +1483,8 @@ dnu = "error"
     fn removed_class_variable_lint_keys_are_ignored() {
         let value: toml::Value = toml::from_str(
             "class-state-abroad = \"off\"\nclass-process-ffi = \"off\"\n\
-             class-var-reflection-shadowing = \"off\"\ndnu = \"off\"",
+             class-var-reflection-shadowing = \"off\"\nextension-conflict = \"off\"\n\
+             deprecation = \"off\"\nshadowed-class = \"off\"\ndnu = \"off\"",
         )
         .unwrap();
         let table = parse_diagnostics_table(Some(&value)).unwrap();
@@ -1493,6 +1499,8 @@ dnu = "error"
             "class_state_abroad",
             "class_process_ffi",
             "class_var_reflection_shadowing",
+            "deprecation",
+            "shadowed_class",
         ] {
             let source = format!("@expect {name}\n42");
             let (module, parse_diags) = parse(lex_with_eof(&source));

@@ -137,7 +137,7 @@ same scope as `build`.
 
 - `beamtalk build` / `beamtalk test` fail on `Error` diagnostics, and with
   `--warnings-as-errors` also on `Warning`/`Hint` (except the documented
-  `Deprecation`/`UnresolvedClass`/`UnresolvedFfi`/`ArityMismatch` exclusions,
+  `UnresolvedClass`/`UnresolvedFfi`/`ArityMismatch` exclusions,
   which an explicit `[diagnostics]` entry can opt back in).
 - `beamtalk lint` is the lint-severity gate by default. With
   `--warnings-as-errors` it additionally fails on the live-recheck set — the

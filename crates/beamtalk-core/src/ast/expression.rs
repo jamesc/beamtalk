@@ -93,6 +93,12 @@ pub enum ExpectCategory {
     /// Deprecated, parse-only (ADR 0153): the `class-process-ffi` lint was
     /// removed with class variables; reported as a stale expectation.
     ClassProcessFfi,
+    /// Deprecated, parse-only (BT-5196): the `deprecation` diagnostic was
+    /// never emitted; reported as a stale expectation.
+    Deprecation,
+    /// Deprecated, parse-only (BT-5196): the shadowed-class diagnostic was
+    /// never emitted; reported as a stale expectation.
+    ShadowedClass,
     /// Suppress any diagnostic on the following expression.
     All,
 }
@@ -126,6 +132,8 @@ impl ExpectCategory {
             "stored_closure" => Some(Self::StoredClosure),
             "class_state_abroad" => Some(Self::ClassStateAbroad),
             "class_process_ffi" => Some(Self::ClassProcessFfi),
+            "deprecation" => Some(Self::Deprecation),
+            "shadowed_class" => Some(Self::ShadowedClass),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -159,6 +167,8 @@ impl ExpectCategory {
             Self::StoredClosure => "stored_closure",
             Self::ClassStateAbroad => "class_state_abroad",
             Self::ClassProcessFfi => "class_process_ffi",
+            Self::Deprecation => "deprecation",
+            Self::ShadowedClass => "shadowed_class",
             Self::All => "all",
         }
     }
