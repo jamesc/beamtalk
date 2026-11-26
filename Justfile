@@ -1016,6 +1016,7 @@ lint-repo: \
     test-publish-guard \
     test-publish-rolling-release \
     test-refresh-edge \
+    test-setup-cloud \
     test-sign-macos-nested-binaries \
     test-uat-dispatch-payload \
     test-vs-elixir-nightly \
@@ -1158,6 +1159,17 @@ test-check-stdlib-class-beams:
 [windows]
 test-check-stdlib-class-beams:
     @echo "test-check-stdlib-class-beams: skipped on Windows (covered by Linux CI)"
+
+# Test (BT-5341): scripts/setup-cloud.sh installs/verifies only the tools the
+# resolved .tool-versions pins (a satellite checkout pinning only erlang+rebar
+# must not require elixir). Hermetic: stub PATH, SKIP_ERLANG=1, no installs.
+[unix]
+test-setup-cloud:
+    @bash scripts/test-setup-cloud.sh
+
+[windows]
+test-setup-cloud:
+    @echo "test-setup-cloud: skipped on Windows (covered by Linux CI)"
 
 # Test (BT-4939): the checkout-path normaliser behind `core-diff` snapshots,
 # including that a different relative path still shows as a difference.
