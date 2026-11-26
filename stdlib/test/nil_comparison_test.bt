@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3924: when a comparison receiver (`< > <= >=`) is not statically known to
-// be a number, character or string, codegen emits a runtime guard. Numbers,
-// characters and strings take the bare Erlang comparison BIF; every other
-// receiver is sent the operator as a message. `nil`, booleans, lists and
+// be a number, character or string, codegen emits a runtime guard. Numbers and
+// characters take the bare Erlang comparison BIF; every other receiver,
+// a `String` or a raw `Binary` included (BT-5261), is sent the operator as a
+// message. `nil`, booleans, lists and
 // tuples define no `<`, so they raise `does_not_understand` instead of being
 // silently term-ordered (`nil < 5` used to answer `false`). Symbols define
 // `< > <= >=` (alphabetical by name), so `#a < #b` keeps working.

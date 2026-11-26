@@ -64,7 +64,7 @@ impl OperatorGuard {
     ///   dispatches: `nil`/booleans/lists/tuples/binaries raise
     ///   `does_not_understand`, a `String` or `Symbol` reaches its own `<`,
     ///   and objects reach their overload (`Money>><`).
-    /// * DeclaredComparison — the declared kinds' tests, `or`ed: the number
+    /// * `DeclaredComparison` — the declared kinds' tests, `or`ed: the number
     ///   arm's BIF and, when a `String` is declared, the `String` routing
     ///   guard ([`OrderingKind::test_doc`]).
     fn predicate_doc(self, subject: &str) -> Document<'static> {

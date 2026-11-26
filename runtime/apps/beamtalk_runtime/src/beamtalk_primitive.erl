@@ -87,9 +87,10 @@ maps — return `false`. Used, for example, to tell a `Dictionary` (an
 untagged map) from a value-type instance (a tagged map).
 
 The comparison-operator codegen guard does *not* use this: it inlines a
-primitive-comparable test (`is_number` or `is_binary` → bare BIF, everything
-else → dispatch), so that non-object primitives such as `nil` raise
-`does_not_understand` instead of being silently term-ordered (BT-3924).
+kind test (`is_number` → bare BIF, everything else → dispatch; a declared
+`String` is tested with the `String` tag, BT-5261), so that non-object
+primitives such as `nil` or a raw binary raise `does_not_understand` instead
+of being silently term-ordered (BT-3924).
 
 Limitation (single-node assumption): the pid case delegates to
 `beamtalk_actor_registry:is_beamtalk_actor/1`, which reads `process_info(Pid,

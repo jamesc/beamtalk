@@ -175,8 +175,9 @@ fn every_operator_sends_its_own_hook() {
 
 /// A `String` receiver never takes the number arm's test or hook: a literal
 /// tests its right operand for a `String` instead (BT-5213,
-/// `string_symbol_comparison_right_operand.rs`), and a declared `String`
-/// dispatches a tagged String to its primitive body.
+/// `string_symbol_comparison_right_operand.rs`), and a declared `String` is
+/// tested inline with the `String` tag, its arm testing the right operand for
+/// a `String` too (BT-5261).
 #[test]
 fn a_string_receiver_and_a_declared_string_get_no_number_test() {
     let code = codegen(

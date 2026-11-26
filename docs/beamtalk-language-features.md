@@ -1108,7 +1108,7 @@ This is receiver-dispatch's mirror image, not a new arithmetic mechanism: no `ge
 - `<=` - Less than or equal: `3 <= 3` → `true`
 - `>=` - Greater than or equal: `5 >= 3` → `true`
 
-Comparisons are messages sent to the **receiver**, which decides. `Integer`, `Float`, `Character`, `String` and `Symbol` define them (numbers numerically, characters by codepoint, strings and symbols by codepoint, lexicographically); a value type can define its own (`aMoney < bMoney` reaches `Money>><`). A receiver whose class defines no ordering raises `does_not_understand` — including the non-object primitives `nil`, `true`/`false`, lists and tuples, and a raw `Binary` (a `String` is not a `Binary` instance at run time, BT-5261):
+Comparisons are messages sent to the **receiver**, which decides. `Integer`, `Float`, `Character`, `String` and `Symbol` define them (numbers numerically, characters by codepoint, strings and symbols by codepoint, lexicographically); a value type can define its own (`aMoney < bMoney` reaches `Money>><`). A receiver whose class defines no ordering raises `does_not_understand` — including the non-object primitives `nil`, `true`/`false`, lists and tuples, and a raw `Binary` (a bare BEAM binary; a `String` is the tagged string term at run time, so it reaches `String>><`, BT-5261):
 
 ```beamtalk
 #apple < #banana   // => true

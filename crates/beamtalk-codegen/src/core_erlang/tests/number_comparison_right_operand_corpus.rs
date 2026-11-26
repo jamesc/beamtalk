@@ -9,9 +9,10 @@
 //! * **Receivers:** a number, float or character literal, a `String` literal;
 //!   a parameter declared `Integer`, `Character`, `Integer | String` or
 //!   `String`, an untyped one; `self` in `Integer`, `Float`, `Character` and
-//!   `String` (BT-5213). A `String` value is the tagged
-//!   `{beamtalk_string, Bin}` tuple (BT-4170), and the declared and untyped
-//!   receivers are run with a raw binary (a `Binary`) too (BT-5261).
+//!   `String` (BT-5213); a field declared `Integer | String` (both kind
+//!   arms, BT-5261). A `String` value is the tagged `{beamtalk_string, Bin}`
+//!   tuple (BT-4170), and the `String`-accepting declared receivers and the
+//!   untyped one are run with a raw binary (a `Binary`) too (BT-5261).
 //! * **Right operands:** a proven numeric one (an integer, float or character
 //!   literal), a `String` literal (BT-5213), an untyped parameter and a
 //!   parameter declared `Integer` (tested, not trusted), each run with numbers
@@ -221,7 +222,7 @@ enum Host {
 impl Host {
     fn header(self) -> &'static str {
         match self {
-            Host::Value => "Value subclass: CmpProbe\n",
+            Host::Value => "Value subclass: CmpProbe\n  field: mixed :: Integer | String = 0\n",
             Host::Integer => "Object subclass: Integer\n",
             Host::Float => "Object subclass: Float\n",
             Host::Character => "Object subclass: Character\n",
@@ -300,6 +301,16 @@ const RECEIVERS: &[Recv] = &[
         // type is, `param_comparison_kinds`), so it takes the unknown
         // receiver's guard: no `String` arm (BT-5261).
         arms: (Arm::Number, false),
+    },
+    // A declared union *field* is a declared comparison kind (a parameter is
+    // not): its guard has both a number arm and a `String` arm (BT-5261).
+    Recv {
+        name: "declared-union-field",
+        src: "self.mixed",
+        param: None,
+        host: Host::Value,
+        values: &[V::Int(5), V::Tagged("m"), V::Str("m"), V::Atom("nil")],
+        arms: (Arm::Number, true),
     },
     Recv {
         name: "declared-string",
@@ -414,7 +425,7 @@ const RIGHTS: &[Right] = &[
         name: "declared-integer",
         src: "b",
         param: Some("b :: Integer"),
-        values: &[V::Int(4), V::Atom("nil"), V::Tagged("str")],
+        values: &[V::Int(4), V::Atom("nil"), V::Tagged("str"), V::Str("str")],
     },
 ];
 
@@ -585,10 +596,13 @@ fn methods() -> Vec<Method> {
                         if params[1] {
                             args.push(value.erl());
                         }
-                        let self_term = recv
-                            .host
-                            .self_value()
-                            .map_or_else(|| "Self".to_string(), V::erl);
+                        let self_term = if recv.src == "self.mixed" {
+                            format!("Self#{{mixed => {}}}", left.erl())
+                        } else {
+                            recv.host
+                                .self_value()
+                                .map_or_else(|| "Self".to_string(), V::erl)
+                        };
                         let call = if position.actor() {
                             format!(
                                 "bt_probe:observe(fun() -> 'bt@cmp_actor':'dispatch'('{selector}', [{}], 'self_ref', #{{n => 0}}) end)",

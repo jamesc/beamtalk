@@ -96,8 +96,8 @@ TestCase subclass: TypedComparisonReceiverTest
     self assert: good unionFieldGt
 
   testTwoKindUnionFieldIsTestedForBothKinds =>
-    // `Integer | String`: the guard is `is_number or is_binary`, so either
-    // member answers and anything else raises.
+    // `Integer | String`: the guard tests `is_number` or the `String` tag
+    // (BT-5261), so either member answers and anything else raises.
     bad := TypedComparisonProbe new: #{#mixed => self wrong}
     self should: [bad mixedFieldLt] raise: #does_not_understand
     self assert: (TypedComparisonProbe new: #{#mixed => 5}) mixedFieldLt

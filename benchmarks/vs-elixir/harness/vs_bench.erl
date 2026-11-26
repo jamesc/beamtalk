@@ -268,7 +268,7 @@ fixtures() ->
         dict => {Bt(dict), ?EX:dict()},
         dict100 => {Bt(dict100), ?EX:dict100()},
         string => {Bt(string), ?EX:string()},
-        %% 11n: both operands are the string on each side (Elixir gets the pair).
+        %% 11n, 11p: both operands are the string on each side (Elixir gets the pair).
         string_pair => {Bt(string), {?EX:string(), ?EX:string()}},
         symbol => hello,
         binary => {Bt(binary), ?EX:string()},
