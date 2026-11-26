@@ -907,17 +907,21 @@ fn negative_bignum_unit_is_out_of_range_not_too_large() {
 }
 
 #[test]
-fn bignum_too_large_for_a_float_segment_warns() {
+fn bignum_not_exact_as_a_float_warns() {
     let digits = "9".repeat(400);
     let diagnostics = diagnostics_of(&format!("<<{digits}/float>>"));
     assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
     assert_eq!(diagnostics[0].0, Severity::Warning);
     assert!(
-        diagnostics[0].1.contains("is too large to be a float"),
+        diagnostics[0]
+            .1
+            .contains("cannot be represented exactly as a float"),
         "{}",
         diagnostics[0].1
     );
-    // A bignum that an f64 holds is clean.
+    // So does one that rounds: 2^70 + 1 needs 71 significant bits.
+    assert_eq!(diagnostics_of("<<1180591620717411303425/float>>").len(), 1);
+    // A bignum an f64 holds exactly is clean.
     assert!(diagnostics_of(&format!("<<{BIG}/float>>")).is_empty());
 }
 

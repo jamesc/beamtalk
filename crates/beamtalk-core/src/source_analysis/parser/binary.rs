@@ -855,7 +855,7 @@ impl Parser {
         {
             self.diagnostics.push(Diagnostic::warning(
                 format!(
-                    "{} because '{}' is too large to be a float",
+                    "{} because '{}' cannot be represented exactly as a float",
                     direction.cannot_succeed(),
                     abbreviate_digits(digits)
                 ),

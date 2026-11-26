@@ -478,15 +478,21 @@ fn bignum_in_a_float_segment_lowers_as_a_float() {
 }
 
 #[test]
-fn bignum_float_segment_rounds_like_the_beam() {
-    // 2^70 + 2^17 + 1 has more than 53 significant bits; the BEAM's
-    // `float/1` rounds to the nearest float: the bytes 68,80,0,0,0,0,0,1
-    // (checked with `erl`).
-    let code = compile_body("<<1180591620717411434497/float>>");
-    let bytes: Vec<&str> = construction(&code)
-        .split("#<")
-        .skip(1)
-        .filter_map(|b| b.split('>').next())
-        .collect();
-    assert_eq!(bytes, ["68", "80", "0", "0", "0", "0", "0", "1"]);
+fn inexact_bignum_float_segment_is_left_to_the_runtime() {
+    // The BEAM's `float/1` on 166153499473114502559719956244594689 gives
+    // 2^117 (`<<71,64,0,0,0,0,0,0>>`, checked with `erl`), where a correctly
+    // rounding parse gives 2^117 + 2^65. A value no float equals exactly is
+    // therefore not folded: the integer stays in the segment.
+    let code = compile_body("<<166153499473114502559719956244594689/float>>");
+    assert!(
+        construction(&code).contains("#<166153499473114502559719956244594689>(64,1,'float'"),
+        "{}",
+        construction(&code)
+    );
+    // A bignum beyond any float, in a pattern, still goes through erlc.
+    let big = "9".repeat(400);
+    let code = compile_through_erlc(&format!(
+        "Object subclass: Framer\n  build: v with: p =>\n    v match: [<<{big}/float>> -> 1; _ -> 0]\n"
+    ));
+    assert!(code.contains(&format!("#<{big}>(64,1,'float'")), "{code}");
 }
