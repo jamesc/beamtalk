@@ -241,16 +241,7 @@ class_meta_from_core_erlang_not_available() ->
     ?assertEqual(not_available, beamtalk_compiler:class_meta_from_core_erlang(NotConstant)).
 
 backend_default_port() ->
-    Original = os:getenv("BEAMTALK_COMPILER"),
-    try
-        os:unsetenv("BEAMTALK_COMPILER"),
-        ?assertEqual(port, beamtalk_compiler_backend:backend())
-    after
-        case Original of
-            false -> ok;
-            Value -> os:putenv("BEAMTALK_COMPILER", Value)
-        end
-    end.
+    ?assertEqual(port, beamtalk_compiler_backend:backend()).
 
 multiple_compiles() ->
     {ok, _, [], _} = beamtalk_compiler:compile_expression(<<"1 + 2">>, <<"m1">>, []),

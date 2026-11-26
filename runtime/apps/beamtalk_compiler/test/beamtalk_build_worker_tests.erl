@@ -44,8 +44,8 @@ compile_core_erlang_compile_error_test() ->
     Result = beamtalk_build_worker:compile_core_erlang(CoreErlang),
     ?assertMatch({error, {core_compile_error, _}}, Result).
 
-%% Review finding (#3997): beamtalk_build_worker/beamtalk_compiler_server/
-%% compile.escript all drop Warnings on the error path, reasoning (in each
+%% Review finding (#3997): beamtalk_build_worker and beamtalk_compiler_server
+%% both drop Warnings on the error path, reasoning (in each
 %% one's own comment) that Warnings is unconditionally [] whenever Errors
 %% is non-empty for this from_core pipeline — because core_lint_module is
 %% literally the FIRST pass in core_passes(non_verified_core), before

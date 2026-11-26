@@ -8,7 +8,7 @@
 //! `CompileContext` and `ClassHierarchyContext` carry the cross-file inputs;
 //! `compile_source_with_bindings` runs lex → parse → analyse → codegen for one
 //! file and `write_core_erlang_with_bindings` writes the result. This is the
-//! front-end half of the former `beam_compiler.rs` (BT-4700); the escript /
+//! front-end half of the former `beam_compiler.rs` (BT-4700); the
 //! `BeamCompiler` driver stays in the parent module. Behaviour is unchanged and
 //! every item is re-exported from `beam_compiler` under its old path.
 
