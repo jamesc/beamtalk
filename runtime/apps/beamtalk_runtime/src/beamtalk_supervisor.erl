@@ -1730,15 +1730,38 @@ Is the supervisor running? Backs `isAlive` on Supervisor and DynamicSupervisor
 instances (sealed, BT-3984), which `beamtalk_message_dispatch:send/3` also
 answers directly.
 
-A local supervisor is checked with `erlang:is_process_alive/1`; a remote one
-answers `true` optimistically, as for actors (`beamtalk_pid:is_alive/1`): the
-next call to it reports `stale_handle` or `node_down`.
+A local supervisor is checked with `erlang:is_process_alive/1`; a remote
+one's node is asked, as for actors (`beamtalk_pid:probe_alive/1`, BT-5192).
+When that node cannot tell, it raises the `node_down` every other handle call
+raises for an unreachable supervisor
+(`beamtalk_supervisor_errors:supervisor_unavailable_error/3`, `reason`
+`#noconnection` or `#timeout`).
 """.
 -spec isAlive(term()) -> boolean().
-isAlive({beamtalk_supervisor, ClassName, _Module, Pid}) when is_pid(Pid) ->
-    ClassName =/= undefined andalso beamtalk_pid:is_alive(Pid);
+isAlive({beamtalk_supervisor, undefined, _Module, _Pid}) ->
+    false;
+isAlive({beamtalk_supervisor, ClassName, _Module, Pid} = Self) when is_pid(Pid) ->
+    case beamtalk_pid:probe_alive(Pid) of
+        {ok, Alive} ->
+            Alive;
+        {error, {node_down, _}} ->
+            raise_unavailable(Self, {unreachable, noconnection});
+        {error, timeout} ->
+            raise_unavailable(Self, {unreachable, timeout});
+        {error, {other, Reason}} ->
+            beamtalk_error:raise(
+                beamtalk_pid:unexpected_answer_error(ClassName, isAlive, node(Pid), Reason)
+            )
+    end;
 isAlive(_) ->
     false.
+
+-spec raise_unavailable(tuple(), supervisor_unavailable()) -> no_return().
+raise_unavailable(Self, Unavailable) ->
+    {error, Error} = beamtalk_supervisor_errors:supervisor_unavailable_error(
+        Self, isAlive, Unavailable
+    ),
+    beamtalk_error:raise(Error).
 
 -doc """
 Stop the supervisor and all its children.

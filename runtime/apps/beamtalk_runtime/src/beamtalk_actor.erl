@@ -37,13 +37,12 @@ ref := counter monitor
 counter increment   %% handle 'DOWN' message if actor dies
 ```
 
-WARNING (remote actors, ADR 0126 §7.3): for an actor on another node,
-`isAlive` answers `true` optimistically without probing the peer, and
-keeps answering `true` even after that actor has genuinely died — it
-never becomes `false` through this selector. This mirrors the internal
-liveness guard's "let the send fail with its real reason" policy, not
-a liveness probe. Use a monitor's `'DOWN'` message to detect a dead
-remote actor.
+Remote actors (ADR 0126 §7.3, BT-5192): for an actor on another node,
+`isAlive` asks that node (bounded by the remote-call timeout) and answers its
+`true`/`false`. When the node cannot tell, it raises `node_down`
+(unreachable) or `timeout` (no answer in time), never `true` or `false`.
+`kill` and `stop` classify the same way: a lost kill signal or stop request
+raises `node_down`, because across a partition the actor may still be alive.
 
 ## Where the code lives (BT-5047)
 
@@ -641,7 +640,8 @@ safe_spawn_linked(Module, InitArgs) ->
 %%% - Dead actor detection rejects futures / returns errors immediately
 %%%
 %%% WARNING: Race condition! beamtalk_pid:is_alive/1 is a snapshot check
-%%% (and answers `true` optimistically for a remote pid — ADR 0126 §7.3).
+%%% (and answers `true` optimistically for a remote pid — ADR 0126 §7.3; the
+%%% user-facing `isAlive` selector asks the node instead, BT-5192).
 %%% The actor could die between the alive check and the gen_server:cast.
 %%% For robust lifecycle management, use monitors instead of isAlive polling.
 
@@ -650,7 +650,8 @@ Send an asynchronous message to an actor, with lifecycle handling.
 
 Handles lifecycle methods locally without involving the actor process:
 - `isAlive` - checks if process is alive, resolves Future with boolean
-  (remote pid: always `true`, ADR 0126 §7.3 — see moduledoc)
+  (remote pid: its node is asked from a separate process, and the Future is
+  rejected with `node_down`/`timeout` when it cannot tell, BT-5192)
 - `monitor` - creates a monitor reference, resolves Future with ref
 - `stop` - gracefully stops the actor process, resolves Future with ok
 
@@ -737,7 +738,8 @@ Send a synchronous message to an actor, with lifecycle handling.
 Handles lifecycle methods locally without involving the actor process:
 - `pid` - returns the raw Erlang PID backing the actor
 - `isAlive` - checks if process is alive, returns boolean
-  (remote pid: always `true`, ADR 0126 §7.3 — see moduledoc)
+  (remote pid: asks its node, bounded; raises `node_down`/`timeout` when it
+  cannot tell, BT-5192)
 - `isRemote` - asks the actor for its `node` and compares it with the
   caller's node (ADR 0126 §2 — see is_remote/2)
 - `monitor` - creates a monitor reference, returns ref
@@ -881,8 +883,9 @@ stop_external(ActorPid, Reason, Timeout) ->
     end.
 
 -doc """
-Sync-send half of stop_actor/3: answers `ok` or raises the structured
-`actor_dead` error `stop` has always raised for a failed stop.
+Sync-send half of stop_actor/3: answers `ok` or raises the structured error
+for a failed stop (`beamtalk_actor_send:lifecycle_exit_error/3`: `node_down`,
+`timeout` or `actor_dead`).
 """.
 -spec sync_stop(pid(), term(), timeout(), atom()) -> ok.
 sync_stop(ActorPid, Reason, Timeout, Selector) ->
@@ -890,17 +893,14 @@ sync_stop(ActorPid, Reason, Timeout, Selector) ->
         ok ->
             ok;
         {exit, Other} ->
-            %% Preserve sync_send/3 contract: translate exits to structured errors
             beamtalk_exception_handler:reraise(
-                beamtalk_error:with_details(
-                    beamtalk_actor_send:actor_dead_error_record(Selector), #{exit_reason => Other}
-                )
+                beamtalk_actor_send:lifecycle_exit_error(ActorPid, Selector, Other)
             )
     end.
 
 -doc """
 Async-send half of stop_actor/3: resolves `FuturePid` with `ok`, or rejects
-it with the structured error `stop` has always used for a failed stop.
+it with the same structured error `sync_stop/4` raises.
 """.
 -spec async_stop(pid(), term(), timeout(), atom(), pid()) -> ok.
 async_stop(ActorPid, Reason, Timeout, Selector, FuturePid) ->
@@ -908,14 +908,9 @@ async_stop(ActorPid, Reason, Timeout, Selector, FuturePid) ->
         ok ->
             beamtalk_future:resolve(FuturePid, ok);
         {exit, Other} ->
-            %% Other stop failures (e.g., timeout) - reject Future deterministically
-            Error = beamtalk_error:new(
-                actor_dead,
-                unknown,
-                Selector,
-                beamtalk_error:chars_to_binary(io_lib:format("Actor stop failed: ~tp", [Other]))
-            ),
-            beamtalk_future:reject(FuturePid, Error)
+            beamtalk_future:reject(
+                FuturePid, beamtalk_actor_send:lifecycle_exit_error(ActorPid, Selector, Other)
+            )
     end,
     ok.
 

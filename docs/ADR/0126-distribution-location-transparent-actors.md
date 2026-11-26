@@ -713,6 +713,8 @@ c remember: cache
 |------------------|-------|----------|
 | `exit:{{nodedown, N}, _}` / `noconnection` during call | catch-all → `actor_dead` (wrong) | **`node_down`**, `details = #{node => N}` |
 | `exit:{noproc, _}` on remote pid | `actor_dead` | `actor_dead` (unchanged — the node answered, the actor is gone) |
+| remote `kill`/`stop`/`isAlive` on an unreachable node (BT-5192) | `ok` / `actor_dead` / `true` | **`node_down`** (§7.3) |
+| an `erpc` target answering outside its contract, or killed mid-call (`exit:{signal, _}`) (BT-5192) | `case_clause` / raw exit | the call site's generic remote error (`runtime_error`), naming the answer |
 | `exit:{timeout, _}` | `timeout` | `timeout` (unchanged) |
 | `exit:{noproc, _}` on a `{registered, N, Node}` / `{global, N}` ref | — | `no_such_process` (the ref-shaped branch is checked before the pid branch, matching the local `whereis` path) |
 | `badfun`/`undef` for a block's module | `erlang_error` | **`remote_code_mismatch`** |
@@ -764,6 +766,27 @@ local pids use `is_process_alive/1`; remote pids return `true`
 optimistically and let the send fail with its real reason. `lookup_class/1`
 for a remote pid uses the `class` already in the `#beamtalk_object{}` record
 instead of the local ETS registry.
+
+That optimistic answer is for the runtime's internal guards only (BT-5192).
+The user-facing lifecycle selectors on a remote pid classify failures as a
+send does (`beamtalk_call_failure:classify/2`, §7.1), so "the node cannot be
+reached" is never reported as "dead" or "alive":
+
+- `isAlive` asks the pid's node (`beamtalk_pid:ask_alive/3`, `erpc`, bounded
+  by the 5000 ms remote-call timeout) and answers its `true`/`false`; an
+  unreachable node raises `node_down` and no answer in time raises `timeout`.
+  Sent async, the node is asked from a separate process, so the send still
+  hands back its future at once. On a remote supervisor handle both failures
+  raise the `node_down` every other handle call raises (`details` `reason`
+  `#noconnection` or `#timeout`). On a node-qualified `{registered, Name,
+  Node}` ref whose node cannot be reached, `isAlive` raises `node_down`
+  instead of answering `false`.
+- `kill` answers `ok` only once a `'DOWN'` says the actor is gone; a
+  `noconnection` `'DOWN'` (the kill signal was lost) raises `node_down`.
+- `stop`, `stopWith:` and `stopWith:timeout:` raise (or, sent async, reject
+  with) `node_down` when the node is unreachable and `timeout` when the actor
+  has not finished stopping in time; any other failed stop stays
+  `actor_dead`. An already-dead actor still counts as stopped.
 
 #### 7.4 Monitors and links
 

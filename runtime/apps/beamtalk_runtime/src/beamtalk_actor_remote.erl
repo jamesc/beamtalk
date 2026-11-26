@@ -198,6 +198,18 @@ remote_spawn_erpc(Node, ClassName, NameOrUndefined, Selector, TargetFun, BuildEx
             end
     end.
 
+%% BT-5192: the answer contracts of the spawn and `named:on:` erpc targets
+%% (`beamtalk_call_failure:erpc/6`).
+-spec is_spawn_answer(term()) -> boolean().
+is_spawn_answer({ok, Pid}) -> is_pid(Pid);
+is_spawn_answer({error, _}) -> true;
+is_spawn_answer(_) -> false.
+
+-spec is_named_answer(term()) -> boolean().
+is_named_answer({ok, #beamtalk_object{}}) -> true;
+is_named_answer({error, #beamtalk_error{}}) -> true;
+is_named_answer(_) -> false.
+
 -spec remote_spawn_erpc_call(
     node(), atom(), atom() | undefined, atom(), atom(), [term()]
 ) -> {ok, pid()} | {error, #beamtalk_error{}}.
@@ -208,7 +220,8 @@ remote_spawn_erpc_call(Node, ClassName, NameOrUndefined, Selector, TargetFun, Ex
             ?BT_ACTOR_WIRE_MODULE,
             TargetFun,
             [ClassName, NameOrUndefined | ExtraArgs],
-            ?BT_REMOTE_CALL_TIMEOUT
+            ?BT_REMOTE_CALL_TIMEOUT,
+            fun is_spawn_answer/1
         )
     of
         {ok, {ok, Pid}} ->
@@ -249,7 +262,8 @@ remote_named(Node, ReceiverClass, Name) ->
                     ?BT_ACTOR_WIRE_MODULE,
                     remote_named_target,
                     [ReceiverClass, Name],
-                    ?BT_REMOTE_CALL_TIMEOUT
+                    ?BT_REMOTE_CALL_TIMEOUT,
+                    fun is_named_answer/1
                 )
             of
                 {ok, {ok, Obj}} ->
@@ -289,7 +303,12 @@ remote_all_registered(Node) ->
         ok ->
             case
                 beamtalk_call_failure:erpc(
-                    Node, ?BT_ACTOR_WIRE_MODULE, allRegistered, [undefined], ?BT_REMOTE_CALL_TIMEOUT
+                    Node,
+                    ?BT_ACTOR_WIRE_MODULE,
+                    allRegistered,
+                    [undefined],
+                    ?BT_REMOTE_CALL_TIMEOUT,
+                    fun is_list/1
                 )
             of
                 {ok, List} when is_list(List) ->

@@ -506,7 +506,12 @@ pid_class_candidates_remote_safe(Pid) when node(Pid) =:= node() ->
 pid_class_candidates_remote_safe(Pid) ->
     case
         beamtalk_call_failure:erpc(
-            node(Pid), ?BT_ACTOR_WIRE_MODULE, pid_class_candidates, [Pid], ?BT_REMOTE_CALL_TIMEOUT
+            node(Pid),
+            ?BT_ACTOR_WIRE_MODULE,
+            pid_class_candidates,
+            [Pid],
+            ?BT_REMOTE_CALL_TIMEOUT,
+            fun is_list/1
         )
     of
         {ok, Result} -> Result;
@@ -716,7 +721,8 @@ actor_started_at(Pid) ->
             ?BT_ACTOR_WIRE_MODULE,
             started_at_from_dictionary,
             [Pid],
-            ?BT_GLOBAL_CONFLICT_READ_TIMEOUT
+            ?BT_GLOBAL_CONFLICT_READ_TIMEOUT,
+            fun(Answer) -> is_integer(Answer) orelse Answer =:= undefined end
         )
     of
         {ok, Result} -> Result;

@@ -478,7 +478,7 @@ Both share this one erpc-and-catch implementation rather than a second copy
 remote_shape_manifest(Name) ->
     case
         beamtalk_call_failure:erpc(
-            Name, beamtalk_release, shape_manifest, [], ?BT_REMOTE_CALL_TIMEOUT
+            Name, beamtalk_release, shape_manifest, [], ?BT_REMOTE_CALL_TIMEOUT, fun is_map/1
         )
     of
         {ok, Manifest} when is_map(Manifest) ->

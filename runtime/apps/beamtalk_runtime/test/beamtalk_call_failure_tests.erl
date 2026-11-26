@@ -7,6 +7,8 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
+-export([kill_self/0]).
+
 classify_test() ->
     MFA = {gen_server, call, [self(), x, 5000]},
     lists:foreach(
@@ -88,6 +90,18 @@ erpc_remote_exit_test() ->
         {error, {other, bye}},
         beamtalk_call_failure:erpc(node(), erlang, exit, [bye], 1000)
     ).
+
+%% BT-5192: the process running the call is killed by an exit signal before it
+%% answers. `erpc:call/5` raises `exit:{signal, killed}`, which escaped before.
+erpc_remote_signal_test() ->
+    ?assertEqual(
+        {error, {other, {signal, killed}}},
+        beamtalk_call_failure:erpc(node(), ?MODULE, kill_self, [], 1000)
+    ).
+
+-doc "erpc target for `erpc_remote_signal_test/0`.".
+kill_self() ->
+    exit(self(), kill).
 
 erpc_other_erpc_failure_test() ->
     %% A non-function MFA is an `{erpc, badarg}` failure, not a remote exception.
