@@ -708,6 +708,44 @@ impl TypeChecker {
         }
     }
 
+    /// The environment a block literal's body is inferred in: a child of
+    /// `env` ([`Self::block_child_env`]) with the loop-head join applied for a
+    /// block that may run more than once (BT-5298, see `loop_head`), then
+    /// `narrowings` pushed as block-scoped refinements and the parameters
+    /// bound to `param_types`.
+    fn block_entry_env(
+        &mut self,
+        block: &crate::ast::Block,
+        param_types: &[InferredType],
+        narrowings: &[(&EnvKey, &InferredType)],
+        env: &TypeEnv,
+        hierarchy: &ClassHierarchy,
+        in_abstract_method: bool,
+    ) -> TypeEnv {
+        let build = |widenings: &[super::loop_head::LoopHeadWidening]| {
+            let mut block_env = Self::block_child_env(block, env);
+            Self::apply_loop_head_widenings(widenings, &mut block_env);
+            // Narrowing uses the unified refinement API; the layers are
+            // block-scoped because the child env is dropped on return.
+            for (var_key, narrowed_type) in narrowings {
+                block_env.push_refinement(RefinementLayer::block_scope(
+                    (*var_key).clone(),
+                    (*narrowed_type).clone(),
+                ));
+            }
+            for (param, ty) in block.parameters.iter().zip(param_types) {
+                block_env.set_local(param.name.clone(), ty.clone());
+            }
+            block_env
+        };
+        let widenings = self.loop_head_widenings(block, env, &build, hierarchy, in_abstract_method);
+        if !self.speculating && !block.parameters.is_empty() {
+            self.resolved_block_params
+                .insert(block.span, param_types.to_vec());
+        }
+        build(&widenings)
+    }
+
     /// Type-check a block expression with the given variables narrowed in one
     /// child environment (the facts of a condition, BT-4710).
     ///
@@ -725,25 +763,22 @@ impl TypeChecker {
         in_abstract_method: bool,
     ) -> InferredType {
         if let Expression::Block(block) = arg {
-            let mut block_env = Self::block_child_env(block, env);
-            // Narrowing uses the unified refinement API; the layers
-            // are block-scoped because the child env is dropped on return.
-            for (var_key, narrowed_type) in narrowings {
-                block_env.push_refinement(RefinementLayer::block_scope(
-                    (*var_key).clone(),
-                    (*narrowed_type).clone(),
-                ));
-            }
             // Block parameters are unannotated in the narrowing context (the
             // selectors we enter here — ifTrue:/ifFalse:/ifTrue:ifFalse: —
             // take zero-arity blocks, but be defensive for any future use).
-            let mut block_param_types: Vec<InferredType> =
-                Vec::with_capacity(block.parameters.len());
-            for param in &block.parameters {
-                let param_ty = InferredType::Dynamic(DynamicReason::UnannotatedParam);
-                block_env.set_local(param.name.clone(), param_ty.clone());
-                block_param_types.push(param_ty);
-            }
+            let block_param_types: Vec<InferredType> = block
+                .parameters
+                .iter()
+                .map(|_| InferredType::Dynamic(DynamicReason::UnannotatedParam))
+                .collect();
+            let mut block_env = self.block_entry_env(
+                block,
+                &block_param_types,
+                narrowings,
+                env,
+                hierarchy,
+                in_abstract_method,
+            );
             let deferring = std::mem::take(&mut self.defer_block_widening);
             let epoch_before = self.self_send_epoch;
             let body_ty =
@@ -1444,16 +1479,14 @@ impl TypeChecker {
         // BT-4102: explicit `:: T` annotations win over the pushed-down type,
         // which wins over `Dynamic(UnannotatedParam)`.
         let resolved = self.resolve_block_param_types(block, param_types, hierarchy);
-        let mut block_env = Self::block_child_env(block, env);
-        for (var_key, narrowed_type) in narrowings {
-            block_env.push_refinement(RefinementLayer::block_scope(
-                (*var_key).clone(),
-                (*narrowed_type).clone(),
-            ));
-        }
-        for (param, ty) in block.parameters.iter().zip(resolved.iter()) {
-            block_env.set_local(param.name.clone(), ty.clone());
-        }
+        let mut block_env = self.block_entry_env(
+            block,
+            &resolved,
+            narrowings,
+            env,
+            hierarchy,
+            in_abstract_method,
+        );
         // A block body starts a fresh send frame (see `defer_block_widening`).
         let deferring = std::mem::take(&mut self.defer_block_widening);
         let epoch_before = self.self_send_epoch;

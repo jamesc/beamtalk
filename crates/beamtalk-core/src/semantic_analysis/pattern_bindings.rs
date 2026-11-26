@@ -131,7 +131,10 @@ fn extract_pattern_bindings_impl(
         // "Undefined variable: path" error even though the pattern is
         // otherwise valid Phase A syntax.
         Pattern::Type { binding, .. } => {
-            record_binding(binding, bindings, seen, diagnostics, allow_duplicates);
+            // `_ :: T` (BT-5294) tests the class but binds nothing.
+            if binding.name != "_" {
+                record_binding(binding, bindings, seen, diagnostics, allow_duplicates);
+            }
         }
 
         // Tuple patterns: recursively extract; duplicates are not allowed (native Core Erlang patterns)

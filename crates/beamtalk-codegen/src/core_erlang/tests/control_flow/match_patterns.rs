@@ -655,20 +655,41 @@ fn test_match_type_pattern_dictionary_and_tagged_class_arms_interleave_in_one_ca
 }
 
 #[test]
-fn test_match_type_pattern_nested_in_tuple_pattern_is_codegen_error() {
-    // A `Pattern::Type` nested inside a composite pattern (here a `Tuple`)
-    // has no codegen path — `generate_type_pattern` only handles a
-    // top-level arm pattern, since its per-class runtime test needs to wrap
-    // the whole arm. Verifies this is a clean, reported codegen error, not
-    // a panic or silently-wrong output.
-    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      {s :: String, n} -> n;\n      _ -> 0\n    ]\n";
+fn test_match_type_pattern_nested_in_tuple_pattern_lowers_after_shape_match() {
+    // BT-5294: a `Pattern::Type` nested in a tuple is hoisted to a plain
+    // variable in the native tuple pattern, then class-tested afterwards
+    // (here `is_integer`), with a miss falling through to the later arms.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      {_, n :: Integer} -> n;\n      _ -> 0\n    ]\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let err = generate_module(&module, CodegenOptions::new("foo"))
-        .expect_err("nested Pattern::Type should be a codegen error, not silently accepted");
-    let message = err.to_string();
+    let (module, diags) = beamtalk_core::source_analysis::parse(tokens);
+    assert!(diags.is_empty(), "parse diagnostics: {diags:?}");
+    let code = generate_module(&module, CodegenOptions::new("foo"))
+        .expect("nested Pattern::Type should lower");
+    assert_has(
+        "type test follows the tuple shape match",
+        &code,
+        &["'erlang':'is_integer'", "{"],
+    );
+    let tuple_at = code.find("<{").expect("native tuple pattern");
+    let test_at = code.find("'erlang':'is_integer'").expect("is_integer test");
     assert!(
-        message.contains("Type pattern") && message.contains("nested"),
-        "error should describe the nested Type pattern restriction. Got: {message}"
+        tuple_at < test_at,
+        "shape match must precede the type test. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_wildcard_type_pattern_lowers() {
+    // BT-5294: `_ :: T` is a type test that binds nothing; two in one
+    // pattern must not collide on a shared `_` variable.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      {_ :: Integer, _ :: String} -> 1;\n      _ -> 0\n    ]\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, diags) = beamtalk_core::source_analysis::parse(tokens);
+    assert!(diags.is_empty(), "parse diagnostics: {diags:?}");
+    let code = generate_module(&module, CodegenOptions::new("foo")).expect("`_ :: T` should lower");
+    assert_has(
+        "both type tests are emitted",
+        &code,
+        &["'erlang':'is_integer'", "'beamtalk_string'"],
     );
 }

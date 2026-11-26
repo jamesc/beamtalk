@@ -47,7 +47,14 @@ impl Parser {
             // Wildcard: `_`
             TokenKind::Identifier(name) if name.as_str() == "_" => {
                 let span = self.advance().span();
-                Pattern::Wildcard(span)
+                if matches!(self.current_kind(), TokenKind::DoubleColon) {
+                    // `_ :: ClassName` (BT-5294): a type test that binds
+                    // nothing. Carried as a `Pattern::Type` whose binding is
+                    // the discard name `_`, which every consumer skips.
+                    self.finish_variable_or_type_pattern(Identifier::new("_", span), span)
+                } else {
+                    Pattern::Wildcard(span)
+                }
             }
 
             // Constructor pattern: UpperCaseIdent followed by keyword(s)
@@ -718,7 +725,13 @@ impl Parser {
     fn parse_constructor_binding(&mut self) -> Pattern {
         match self.current_kind() {
             TokenKind::Identifier(name) if name.as_str() == "_" => {
-                Pattern::Wildcard(self.advance().span())
+                // `Result ok: _ :: T` (BT-5294) is a type test binding nothing.
+                let span = self.advance().span();
+                if matches!(self.current_kind(), TokenKind::DoubleColon) {
+                    self.finish_variable_or_type_pattern(Identifier::new("_", span), span)
+                } else {
+                    Pattern::Wildcard(span)
+                }
             }
             // `nil` binding: mirrors `parse_pattern`'s top-level
             // `nil` handling — `nil` is a reserved identifier, not a plain
@@ -727,9 +740,8 @@ impl Parser {
             // that matches unconditionally.
             //
             // A trailing `:: ClassName` (e.g. `nil :: SomeClass`) is
-            // consumed and rejected here too — type patterns aren't supported nested
-            // inside a constructor pattern at all (see `generate_pattern`'s
-            // `Pattern::Type` codegen restriction), but leaving `::
+            // consumed and rejected here too — `nil` already fully
+            // determines the match, and leaving `::
             // ClassName` unconsumed would desync the constructor-pattern
             // keyword loop and cascade into a second "Expected '->' after
             // pattern" diagnostic, exactly like the `true`/`false` and
@@ -753,11 +765,8 @@ impl Parser {
             // arm below would silently parse `Result ok: true` as
             // `Pattern::Variable(Identifier{name: "true"})` — an
             // unconditional catch-all that matches *any* wrapped value, not
-            // a boolean-literal test. Unlike the top-level fix, the
-            // diagnostic here can't point at `x :: True`/`x :: False`
-            // (`Pattern::Type` has no codegen when nested inside a
-            // constructor pattern — see `generate_pattern`), so it points at
-            // the guard-clause idiom instead, which is already supported
+            // a boolean-literal test. The diagnostic points at the
+            // guard-clause idiom (`x :: True` also works, BT-5294), which is supported
             // (`Result ok: v when: [v =:= true]`) — spelled with the
             // explicit `=:=` (strict equality, per
             // `docs/beamtalk-language-features.md`'s Equality section)
@@ -793,33 +802,16 @@ impl Parser {
                 ));
                 Pattern::Wildcard(bad_span)
             }
-            // Variable binding: a trailing `:: ClassName` is not
-            // supported in constructor-binding position (`Pattern::Type`
-            // has no codegen when nested inside a constructor pattern — see
-            // `generate_pattern`), but leaving it unconsumed would desync
-            // the constructor-pattern keyword loop (`::` isn't a `Keyword`
-            // token) and cascade into a generic "Expected '->' after
-            // pattern" error. Consumed and rejected here with a single
-            // targeted diagnostic instead, mirroring `parse_pattern`'s
-            // `nil ::`/`true ::`/`false ::` consume-and-reject handling.
+            // Variable binding, or a type pattern `Result ok: n :: Integer`
+            // (BT-5294): a runtime class test of the wrapped value, lowered
+            // after the constructor shape matches.
             TokenKind::Identifier(_) => {
                 let token = self.advance();
                 let span = token.span();
                 let TokenKind::Identifier(name) = token.into_kind() else {
                     unreachable!()
                 };
-                if matches!(self.current_kind(), TokenKind::DoubleColon) {
-                    let double_colon_span = self.advance().span(); // consume '::'
-                    let tail_span = self.consume_type_pattern_tail();
-                    let full_span = span.merge(tail_span.unwrap_or(double_colon_span));
-                    self.diagnostics.push(Diagnostic::error(
-                        "type annotations are not supported in a constructor pattern binding position ('x :: ClassName' is not allowed here; bind the variable and test its type in a guard clause instead, e.g. 'Result ok: v when: [v :: ClassName]')",
-                        full_span,
-                    ));
-                    Pattern::Wildcard(full_span)
-                } else {
-                    Pattern::Variable(Identifier::new(name, span))
-                }
+                self.finish_variable_or_type_pattern(Identifier::new(name, span), span)
             }
             // Nested destructuring patterns (BT-5277): `Result ok: {a, b}`,
             // `Result ok: #{#k => v}`. These are self-delimiting, so they

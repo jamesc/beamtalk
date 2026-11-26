@@ -110,6 +110,9 @@ pub(crate) use inference::TypeStringContext;
 #[derive(Debug, Clone, Default)]
 pub struct TypeMap {
     types: HashMap<Span, InferredType>,
+    /// BT-5298: while a speculative pass runs, the prior entry of every span
+    /// it records, so [`TypeMap::rollback_journal`] can restore the map.
+    journal: Option<Vec<(Span, Option<InferredType>)>>,
 }
 
 impl TypeMap {
@@ -118,6 +121,7 @@ impl TypeMap {
     pub fn new() -> Self {
         Self {
             types: HashMap::new(),
+            journal: None,
         }
     }
 
@@ -148,7 +152,34 @@ impl TypeMap {
 
     /// Records an inferred type for an expression span.
     fn insert(&mut self, span: Span, ty: InferredType) {
-        self.types.insert(span, ty);
+        let prior = self.types.insert(span, ty);
+        if let Some(journal) = &mut self.journal {
+            journal.push((span, prior));
+        }
+    }
+
+    /// BT-5298: start recording every insert so it can be undone.
+    fn begin_journal(&mut self) {
+        debug_assert!(self.journal.is_none(), "speculative passes do not nest");
+        self.journal = Some(Vec::new());
+    }
+
+    /// BT-5298: undo every insert since [`TypeMap::begin_journal`], newest
+    /// first, and stop recording.
+    fn rollback_journal(&mut self) {
+        let Some(journal) = self.journal.take() else {
+            return;
+        };
+        for (span, prior) in journal.into_iter().rev() {
+            match prior {
+                Some(ty) => {
+                    self.types.insert(span, ty);
+                }
+                None => {
+                    self.types.remove(&span);
+                }
+            }
+        }
     }
 }
 
@@ -656,6 +687,23 @@ pub struct TypeChecker {
     /// [`Self::defer_block_widening`] is set.
     pub(in crate::semantic_analysis::type_checker) deferred_block_widenings:
         Vec<inference::block_outer_writes::BlockWriteWidening>,
+    /// BT-5298: the spans of the block literals that run at most once per
+    /// evaluation of their send (`ifTrue:` arms, a `value` receiver, ...).
+    /// Every other block literal's body starts from the loop-head join of
+    /// the outer locals it writes (see `inference::loop_head`).
+    pub(super) run_once_blocks: std::collections::HashSet<Span>,
+    /// BT-5298: for a block literal that runs interleaved with other
+    /// repeatable block literals of the same send (`[...] whileTrue: [...]`,
+    /// `do:separatedBy:`), those other blocks: their writes reach its loop
+    /// head too.
+    pub(super) loop_siblings: HashMap<Span, Vec<crate::ast::Block>>,
+    /// BT-5298: the parameter types each block literal's body was last
+    /// inferred with, so a later sibling's loop head can infer it again with
+    /// the same parameters.
+    pub(super) resolved_block_params: HashMap<Span, Vec<InferredType>>,
+    /// BT-5298: true during a speculative pass of a block body, whose side
+    /// effects are rolled back afterwards.
+    pub(super) speculating: bool,
 }
 
 impl TypeChecker {
@@ -688,6 +736,10 @@ impl TypeChecker {
             self_send_epoch: 0,
             in_value_type_body: false,
             deferred_block_widenings: Vec::new(),
+            run_once_blocks: std::collections::HashSet::new(),
+            loop_siblings: HashMap::new(),
+            resolved_block_params: HashMap::new(),
+            speculating: false,
             block_param_pushdown: HashMap::new(),
             unresolved_selector_sends: std::collections::HashSet::new(),
         }
@@ -719,6 +771,10 @@ impl TypeChecker {
             self_send_epoch: 0,
             in_value_type_body: false,
             deferred_block_widenings: Vec::new(),
+            run_once_blocks: std::collections::HashSet::new(),
+            loop_siblings: HashMap::new(),
+            resolved_block_params: HashMap::new(),
+            speculating: false,
             block_param_pushdown: HashMap::new(),
             unresolved_selector_sends: std::collections::HashSet::new(),
         }

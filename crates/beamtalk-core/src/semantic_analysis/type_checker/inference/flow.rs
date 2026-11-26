@@ -672,7 +672,10 @@ impl TypeChecker {
                             hierarchy,
                             self.protocol_registry.as_deref(),
                         );
-                        arm_env.set_local(binding.name.clone(), narrowed.clone());
+                        // `_ :: T` (BT-5294) binds nothing to narrow.
+                        if binding.name != "_" {
+                            arm_env.set_local(binding.name.clone(), narrowed.clone());
+                        }
                         Some(narrowed)
                     } else {
                         None

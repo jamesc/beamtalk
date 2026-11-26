@@ -37,6 +37,7 @@ impl TypeChecker {
             arguments,
             env,
         );
+        self.mark_run_once_blocks(Some(receiver), selector, arguments);
         let receiver_ty = self.infer_send_receiver(receiver, hierarchy, env, in_abstract_method);
         self.infer_message_send_with_receiver_ty(
             receiver,

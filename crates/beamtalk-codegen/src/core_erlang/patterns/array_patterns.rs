@@ -11,7 +11,7 @@ use crate::core_erlang::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::{MatchArm, Pattern};
+use beamtalk_core::ast::{Identifier, MatchArm, Pattern};
 use std::collections::HashSet;
 
 use super::match_lowering::MatchThreading;
@@ -242,6 +242,74 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// BT-5294: an `x :: T` / `_ :: T` array element — extract it, then
+    /// class-test it like a top-level type arm; a miss runs `failure_doc`.
+    #[allow(clippy::too_many_arguments)]
+    fn build_array_type_element(
+        &mut self,
+        array_var: &str,
+        elements: &[Pattern],
+        start: usize,
+        (binding, class): (&Identifier, &Identifier),
+        continuation: Document<'static>,
+        failure_doc: &Document<'static>,
+        already_bound: &mut HashSet<String>,
+    ) -> Result<Document<'static>> {
+        let discard = binding.name == "_";
+        let core_var = if discard {
+            self.fresh_temp_var("TypeElem")
+        } else {
+            Self::to_core_erlang_var(&binding.name)
+        };
+        // A repeated name needs an equality check against its first binding
+        // (array arms allow duplicates), so extract into a fresh variable.
+        let duplicate = !discard && already_bound.contains(binding.name.as_str());
+        if !discard && !duplicate {
+            already_bound.insert(binding.name.to_string());
+        }
+        let next = self.build_array_arm_body(
+            array_var,
+            elements,
+            start + 1,
+            continuation,
+            failure_doc,
+            already_bound,
+        )?;
+        let (elem_var, next) = if duplicate {
+            let dup_var = self.fresh_temp_var("TypeDup");
+            let mismatch_var = self.fresh_temp_var("Mismatch");
+            let check = docvec![
+                "case call 'erlang':'=:='(",
+                leaf::var(core_var),
+                ", ",
+                leaf::var(dup_var.clone()),
+                ") of <'true'> when 'true' -> ",
+                next,
+                " <",
+                leaf::var(mismatch_var),
+                "> when 'true' -> ",
+                failure_doc.clone(),
+                " end"
+            ];
+            (dup_var, check)
+        } else {
+            (core_var, next)
+        };
+        let tested = self.dispatch_type_pattern_strategy(&elem_var, &class.name, next, failure_doc);
+        Ok(docvec![
+            "let ",
+            leaf::var(elem_var),
+            " = ",
+            self.runtime_send_call(
+                leaf::var(array_var.to_string()),
+                "at:",
+                vec![index_lit(start + 1)]
+            ),
+            " in ",
+            tested
+        ])
+    }
+
     /// Recursively builds element-extraction `let`-bindings for an array pattern arm.
     ///
     /// Handles nested `Pattern::Array` elements by wrapping the continuation in a
@@ -337,6 +405,17 @@ impl CoreErlangGenerator {
                     already_bound,
                 )
             }
+            // BT-5294: `x :: T` / `_ :: T` element — extract the element, then
+            // class-test it like a top-level type arm; a miss falls through.
+            Pattern::Type { binding, class, .. } => self.build_array_type_element(
+                array_var,
+                elements,
+                start,
+                (binding, class),
+                continuation,
+                failure_doc,
+                already_bound,
+            ),
             elem => Err(CodeGenError::UnsupportedFeature {
                 feature: "Unsupported pattern in Array match arm element".to_string(),
                 span: Some(elem.span()),
