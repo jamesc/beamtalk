@@ -33,11 +33,11 @@ defmodule BtAttach.Facade do
   # The authorized op vocabulary and its capability class (ADR 0091 Decision 3/4).
   # `eval`/`load_source`/`save`/`flush`/`reload` inject or run code (execute);
   # the read ops trigger no user code; `kill`/`rotate_cookie` are admin.
-  # `rotate_cookie` and `subscribe_actors` are declared
-  # here (the ADR 0091 RBAC vocabulary) but have no `invoke/3` clause yet: they
-  # are kept as reserved vocabulary and answer `{:error, {:unsupported_op, op}}`
-  # once authorized. `kill`, `actors` and `sessions` dispatch the wire
-  # operations of the same names (BT-5199).
+  # `rotate_cookie` is declared here (the ADR 0091 RBAC vocabulary) but has no
+  # `invoke/3` clause yet: it is kept as reserved vocabulary and answers
+  # `{:error, {:unsupported_op, op}}` once authorized. `kill`, `actors` and
+  # `sessions` dispatch the wire operations of the same names (BT-5199), and
+  # `subscribe_actors` registers on the `actors` push stream (BT-5205).
   @ops %{
     eval: :execute,
     # BT-5081: stop the eval running in the caller's own session (the dock's
@@ -244,8 +244,6 @@ defmodule BtAttach.Facade do
   # ceiling. Each entry is implemented by dispatch, or removed from `@ops`, by the
   # issue named beside it; `rotate_cookie` is decided in BT-5206.
   @reserved_ops [
-    # BT-5205: the actor-list push stream; implemented by dispatch or removed.
-    :subscribe_actors,
     # BT-5206 decides explicitly: implemented, or removed from the vocabulary.
     :rotate_cookie
   ]
@@ -645,6 +643,11 @@ defmodule BtAttach.Facade do
 
   defp invoke(:subscribe_transcript, %{pid: pid}, _ctx), do: client().subscribe_transcript(pid)
   defp invoke(:subscribe_bindings, %{pid: pid}, _ctx), do: client().subscribe_bindings(pid)
+
+  # BT-5205: the actor-lifecycle push stream. Registers the LiveView pid on the
+  # `actors` stream so an `ActorSpawned`/`ActorStopped` pushes a refresh trigger;
+  # the subscriber then re-reads `actors`. `:read`: a subscription runs no user code.
+  defp invoke(:subscribe_actors, %{pid: pid}, _ctx), do: client().subscribe_actors(pid)
 
   # BT-2598: the class-lifecycle push stream. Registers the LiveView pid on the
   # `classes` stream so a `ClassLoaded`/`ClassRemoved` (including any hot

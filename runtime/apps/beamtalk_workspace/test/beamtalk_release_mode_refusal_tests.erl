@@ -164,7 +164,11 @@ workspace_ops_refused_in_both_release_variants_test_() ->
             <<"save-native-source">>,
             <<"save-section">>,
             <<"revert-method">>,
-            <<"flush">>
+            <<"flush">>,
+            <<"git-stage">>,
+            <<"git-unstage">>,
+            <<"git-commit">>,
+            <<"git-revert-file">>
         ],
         Caps <- [?RELEASE, ?RELEASE_WITH_COMPILER]
     ].
