@@ -16,8 +16,8 @@
 //!   `Self::other(` delegation).
 //! * **VS Code**: `op: "x"` request literals in `editors/vscode/src/` (the
 //!   `__tests__` tree excluded).
-//! * **LiveView**: `"op" => "x"`, `dispatch_<kind>("x"` and
-//!   `:dispatch, ["x"` in `editors/liveview/lib/`.
+//! * **LiveView**: `"op" => "x"`, `dispatch_<kind>("x"`, `:dispatch, ["x"`,
+//!   `:request, ["x"` and `request_op("x"` in `editors/liveview/lib/`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -168,6 +168,10 @@ pub(crate) fn liveview_ops(text: &str) -> BTreeSet<String> {
     for line in code_lines(text, "#") {
         out.extend(all_quoted_after(line, "\"op\" => "));
         out.extend(all_quoted_after(line, ":dispatch, ["));
+        // BT-5201: `beamtalk_repl_ops:request/3` is the entry point, reached
+        // through `request_op("x", ...)` and a direct `:request, ["x"` call.
+        out.extend(all_quoted_after(line, ":request, ["));
+        out.extend(all_quoted_after(line, "request_op("));
         for (idx, _) in line.match_indices("dispatch_") {
             let rest = &line[idx + "dispatch_".len()..];
             let kind_len = rest
@@ -348,12 +352,21 @@ mod tests { fn fake() { RequestBuilder::nope(); } }
     def browse_classes, do: dispatch_browse("browse-classes", %{})
     dispatch_simple("kill", %{"actor" => pid})
     # dispatch_simple("close", %{})
+    request_op("hover", params, session_pid, @rpc_interactive_timeout)
+    rpc(:beamtalk_repl_ops, :request, ["pid-stats", params, pid])
 "#;
         let got = liveview_ops(src);
-        let want: BTreeSet<String> = ["eval", "inspect", "browse-classes", "kill"]
-            .iter()
-            .map(|s| (*s).to_string())
-            .collect();
+        let want: BTreeSet<String> = [
+            "eval",
+            "inspect",
+            "browse-classes",
+            "kill",
+            "hover",
+            "pid-stats",
+        ]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
         assert_eq!(got, want);
     }
 
