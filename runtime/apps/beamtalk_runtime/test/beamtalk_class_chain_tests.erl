@@ -154,8 +154,12 @@ test_fallthrough_absent_class() ->
     ClassPid = beamtalk_class_registry:whereis_class('Class'),
     ?assert(is_pid(ClassPid)),
     ClassModule = beamtalk_object_class:module_name(ClassPid),
-    %% Kill 'Class' to test the absent case.
-    %% Use monitor + DOWN to avoid flaky timer:sleep on loaded CI nodes.
+    %% Kill 'Class' to test the absent case. beamtalk_class_monitor eagerly
+    %% restarts an abnormally-killed class (BT-5295), which would race the
+    %% assertion below and re-register 'Class' before class_send runs. Unwatch
+    %% it first (synchronous), so the kill leaves 'Class' absent until the
+    %% `after` block re-registers it. Wait on the DOWN, not a sleep.
+    ok = beamtalk_class_monitor:unwatch('Class'),
     Ref = erlang:monitor(process, ClassPid),
     exit(ClassPid, kill),
     ?awaitMessage({'DOWN', Ref, process, ClassPid, _Reason}, 1000),
