@@ -338,8 +338,9 @@ non-local return counts as a normal exit.
 With dispatch events off (the default, see the module doc) that is all it
 does: two monotonic clock reads around `Fun` and the aggregate, with no
 metadata map built at all. With them on it also emits
-`[beamtalk, actor, dispatch, start | stop | exception]` (metadata `pid`,
-`class`, `selector`, `mode`, plus `outcome` on stop) and, while trace capture
+`[beamtalk, actor, dispatch, start | stop | exception]` (metadata `pid` (a
+pid, or `{Name, Node}` for a send to a node-qualified registered ref,
+BT-5271), `class`, `selector`, `mode`, plus `outcome` on stop) and, while trace capture
 is enabled, sets the causal span id (and the trace id, for a root span) in
 the process dictionary and records a trace event.
 """.

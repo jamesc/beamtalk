@@ -6,21 +6,22 @@
 %%% **DDD Context:** Actor System Context
 
 -moduledoc """
-BT-5271: a sync send to a `{registered, Name, Node}` ref on another node goes
-to `{Name, Node}` directly unless `beamtalk_actor_send:needs_resolved_pid/1`
-says the selector is answered from the resolved pid in the caller. That list
-must cover every selector the pid send paths special-case, or such a selector
-would be sent to the actor instead of answered in the caller.
+BT-5271: a send to a `{registered, Name, Node}` ref on another node goes to
+`{Name, Node}` directly unless the selector is answered from the resolved pid
+in the caller: `beamtalk_actor_send:needs_resolved_pid/1` for a sync send,
+`cast_needs_resolved_pid/1` for a cast. Each list must cover every selector
+its pid send path special-cases, or such a selector would be sent to the
+actor instead of answered in the caller.
 
 This test reads the special-cased selectors from the compiled clauses of
 `sync_send_pid/4,5` and `cast_send_pid/4` (each clause's literal selector, and
-each selector its guard compares with) and checks each against the list.
+each selector its guard compares with) and checks each against its list.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
 
-special_cased_selectors_need_the_resolved_pid_test() ->
-    Selectors = special_cased_selectors(),
+sync_special_cased_selectors_need_the_resolved_pid_test() ->
+    Selectors = special_cased_selectors([{sync_send_pid, 4}, {sync_send_pid, 5}]),
     %% The extraction itself must find the known clauses, or the check is empty.
     ?assert(lists:member(stop, Selectors)),
     ?assert(lists:member(kill, Selectors)),
@@ -29,14 +30,21 @@ special_cased_selectors_need_the_resolved_pid_test() ->
         [], [S || S <- Selectors, not beamtalk_actor_send:needs_resolved_pid(S)]
     ).
 
+cast_special_cased_selectors_need_the_resolved_pid_test() ->
+    Selectors = special_cased_selectors([{cast_send_pid, 4}]),
+    ?assert(lists:member('continueWith:', Selectors)),
+    ?assertEqual(
+        [], [S || S <- Selectors, not beamtalk_actor_send:cast_needs_resolved_pid(S)]
+    ).
+
 ordinary_selectors_go_direct_test() ->
     ?assertNot(beamtalk_actor_send:needs_resolved_pid(getValue)),
-    ?assertNot(beamtalk_actor_send:needs_resolved_pid('setValue:')).
+    ?assertNot(beamtalk_actor_send:needs_resolved_pid('setValue:')),
+    ?assertNot(beamtalk_actor_send:cast_needs_resolved_pid('setValue:')).
 
-special_cased_selectors() ->
+special_cased_selectors(Funs) ->
     {ok, {_, [{abstract_code, {raw_abstract_v1, Forms}}]}} =
         beam_lib:chunks(beam_file(beamtalk_actor_send), [abstract_code]),
-    Funs = [{sync_send_pid, 4}, {sync_send_pid, 5}, {cast_send_pid, 4}],
     lists:usort(
         lists:append([
             clause_selectors(Clause)

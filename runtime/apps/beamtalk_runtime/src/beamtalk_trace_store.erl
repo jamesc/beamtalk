@@ -134,7 +134,6 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
 -export([sweep_pending/1]).
 -endif.
 
-%% Atomics slot offsets (per aggregate key: {Class, Selector} or {Pid, Selector})
 %% A `{Name, Node}` dispatch target: a send to a node-qualified registered
 %% ref that addresses the name directly (BT-5271), with no pid to key by.
 -define(IS_REMOTE_NAME_DEST(D),
@@ -142,6 +141,7 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
         is_atom(element(2, D)))
 ).
 
+%% Atomics slot offsets (per aggregate key: {Class, Selector} or {Pid, Selector})
 -define(SLOT_CALLS, 1).
 -define(SLOT_OK, 2).
 -define(SLOT_ERRORS, 3).

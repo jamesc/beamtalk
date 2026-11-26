@@ -37,7 +37,12 @@ them, so the send path costs the same number of calls as before the split.
 
 %% Driven directly on a `$bt_nlr` result by the unit tests.
 -ifdef(TEST).
--export([unwrap_dispatch_result/1, spawn_future_watcher/3, needs_resolved_pid/1]).
+-export([
+    unwrap_dispatch_result/1,
+    spawn_future_watcher/3,
+    needs_resolved_pid/1,
+    cast_needs_resolved_pid/1
+]).
 -endif.
 
 %% BT-4265: the helpers an actor send runs every time are inlined, so a send
@@ -1126,8 +1131,8 @@ direct_registered_send(_Ref, _Selector, _SendTimeout) ->
 %% Selectors a proxy ref answers itself or answers from the resolved pid in
 %% the caller (see direct_registered_send/3). Matched by name only, whatever
 %% the arity, so a wrong-arity send also keeps today's path.
-%% beamtalk_actor_send_selector_tests checks that every selector the pid send
-%% paths (`sync_send_pid/4,5`, `cast_send_pid/4`) special-case is listed here.
+%% beamtalk_actor_send_selector_tests checks that every selector the sync pid
+%% send paths (`sync_send_pid/4,5`) special-case is listed here.
 -spec needs_resolved_pid(atom()) -> boolean().
 needs_resolved_pid(isAlive) -> true;
 needs_resolved_pid(isRegistered) -> true;
@@ -1174,18 +1179,27 @@ resolving path. The dispatch span names `{Name, Node}`, as in
 `sync_call_registered/5`.
 """.
 -spec cast_send_registered(proxy_ref(), atom(), list()) -> ok | false.
-cast_send_registered({registered, Name, Node}, Selector, Args) when
-    Node =/= node(),
-    Selector =/= 'continueWith:',
-    Selector =/= 'continueWith:withArguments:'
-->
-    Dest = {Name, Node},
-    beamtalk_telemetry:dispatch_span(Dest, unknown, Selector, cast, fun() ->
-        ok = remote_cast(Dest, Selector, Args, get_propagated_ctx()),
-        {ok, cast}
-    end);
+cast_send_registered({registered, Name, Node}, Selector, Args) when Node =/= node() ->
+    case cast_needs_resolved_pid(Selector) of
+        true ->
+            false;
+        false ->
+            Dest = {Name, Node},
+            beamtalk_telemetry:dispatch_span(Dest, unknown, Selector, cast, fun() ->
+                ok = remote_cast(Dest, Selector, Args, get_propagated_ctx()),
+                {ok, cast}
+            end)
+    end;
 cast_send_registered(_Ref, _Selector, _Args) ->
     false.
+
+%% Selectors a cast answers from the resolved pid in the caller (see
+%% cast_send_registered/3). beamtalk_actor_send_selector_tests checks that
+%% every selector `cast_send_pid/4` special-cases is listed here.
+-spec cast_needs_resolved_pid(atom()) -> boolean().
+cast_needs_resolved_pid('continueWith:') -> true;
+cast_needs_resolved_pid('continueWith:withArguments:') -> true;
+cast_needs_resolved_pid(_Selector) -> false.
 
 -doc "Construct a structured `no_such_process` error for the given proxy ref.".
 -spec no_such_process_error(
