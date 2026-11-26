@@ -415,7 +415,9 @@ fn unguarded_declared_never_success_result_keeps_its_display() {
 ",
     );
     assert!(
-        diags.iter().any(|m| m.contains("body returns Result(Never, Symbol)")),
+        diags
+            .iter()
+            .any(|m| m.contains("body returns Result(Never, Symbol)")),
         "the message must name the value's real type: {diags:?}"
     );
 }
