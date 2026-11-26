@@ -1373,3 +1373,11 @@ the check **disabled**. `beamtalk lint foo.bt`, loose `test` files, `build-stdli
 and the bootstrap-test fixtures use the root-less installed set and do check.
 With no `erl` on `PATH` the check is disabled everywhere, and `@expect
 unresolved_ffi` is then left alone rather than reported stale.
+
+**`native/test/` helpers (BT-5251):** a package's test helpers
+(`native/test/*.erl` stems and the `_build/dev/native_test/ebin` beams, via
+`ffi_type_specs::collect_project_test_helper_modules`) are known **only to files
+under `<root>/test/`** (`is_project_test_file`), on `beamtalk test`, `lint` and
+the LSP alike. A `src/` file calling one is still reported, in `build`, `lint`
+and the LSP. The LSP loads the helper set once per session, so helpers added
+later need a restart.

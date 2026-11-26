@@ -194,6 +194,9 @@ pub struct SimpleLanguageService {
     /// workspace roots by the LSP server at startup (mirrors `native_types`).
     /// Default (unset) disables the check — no unresolved-module diagnostics.
     known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules,
+    /// Per-workspace-root `native/test/` helper modules (BT-5251), known only
+    /// to files under that root's `test/` directory — never to `src/`.
+    test_helper_modules: Vec<(Utf8PathBuf, std::collections::HashSet<String>)>,
     /// Per-workspace-root package names a `pkg@Class` qualifier may name
     /// (ADR 0070 Phase 2, BT-4928): each root's manifest `[dependencies]`,
     /// the package itself and `stdlib`, built by
@@ -286,6 +289,7 @@ impl SimpleLanguageService {
             native_types: None,
             file_native_types: HashMap::new(),
             known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules::default(),
+            test_helper_modules: Vec::new(),
             root_qualifier_packages: Vec::new(),
             project_complete: false,
             diagnostics_overrides:
@@ -306,6 +310,7 @@ impl SimpleLanguageService {
             native_types: None,
             file_native_types: HashMap::new(),
             known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules::default(),
+            test_helper_modules: Vec::new(),
             root_qualifier_packages: Vec::new(),
             project_complete: false,
             diagnostics_overrides:
@@ -409,6 +414,20 @@ impl SimpleLanguageService {
         modules: beamtalk_core::ffi_type_specs::KnownErlangModules,
     ) {
         self.known_erlang_modules = modules;
+    }
+
+    /// Sets the `native/test/` helper modules of the package at `root`
+    /// (BT-5251), replacing any earlier set for that root. They count as known
+    /// modules only for files under `<root>/test/`.
+    pub fn set_test_helper_modules(
+        &mut self,
+        root: Utf8PathBuf,
+        modules: std::collections::HashSet<String>,
+    ) {
+        self.test_helper_modules.retain(|(r, _)| *r != root);
+        if !modules.is_empty() {
+            self.test_helper_modules.push((root, modules));
+        }
     }
 
     /// Returns the project-known Erlang modules for the `unresolved_ffi`
@@ -1135,6 +1154,12 @@ impl LanguageService for SimpleLanguageService {
                 options
                     .known_erlang_modules
                     .clone_from(&self.known_erlang_modules);
+                // BT-5251: `native/test/` helpers, for test files only.
+                for (root, helpers) in &self.test_helper_modules {
+                    if beamtalk_core::ffi_type_specs::is_project_test_file(root, file) {
+                        options.known_erlang_modules.extend_modules(helpers.clone());
+                    }
+                }
                 // `current_package` so `AliasRegistry::add_pre_loaded`'s
                 // seeding-boundary exclusion (ADR 0108 Phase 5) actually has
                 // real package data to filter `pre_loaded_aliases` on below —
