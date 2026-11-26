@@ -38,6 +38,14 @@ TestCase subclass: TupleTest
     otherTuple := Erlang erlang list_to_tuple: #(#other, #x)
     self should: [otherTuple unwrap] raise: #user_error
 
+  testUnwrapWrongArityTuplesRaise =>
+    // {ok, a, b} and {error, a, b} are not result tuples: they hit the `_` arm
+    wideOk := Erlang erlang list_to_tuple: #(#ok, 1, 2)
+    self should: [wideOk unwrap] raise: #user_error
+    wideError := Erlang erlang list_to_tuple: #(#error, 1, 2)
+    self should: [wideError unwrap] raise: #user_error
+    self assert: (wideOk unwrapOr: 0) equals: 0
+
   testUnwrapOrOkReturnsValue =>
     // {ok, 99} unwrapOr: 0 returns 99
     okTuple := {#ok, 99}

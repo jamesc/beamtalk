@@ -16,7 +16,7 @@ defmodule BtAttachWeb.ReadinessController do
   Responses:
 
     * `200` — the workspace is reachable. Body includes the version report
-      (`beamtalk_version:get/0`, BT-2991) so the broker can warn/refuse on a
+      (the `info` operation's `version`, BT-2991, BT-5204) so the broker can warn/refuse on a
       runtime/protocol mismatch.
     * `503` — not reachable, with a machine-readable `reason` distinguishing
       *epmd absent*, *bad cookie*, and *dead workspace* (`BtAttach.Workspace.

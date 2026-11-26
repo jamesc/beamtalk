@@ -365,6 +365,89 @@ async fn flush_scoped_by_class_with_confirm_destructive() {
     assert!(call_text(&result).contains("1 file written"));
 }
 
+/// A `flush` request carries the scope and the confirmation as structured
+/// params and nothing is evaluated: only the exact request gets a good reply.
+#[tokio::test]
+async fn flush_dispatches_the_flush_op_with_structured_params() {
+    let summary = serde_json::json!({
+        "flushed": 0,
+        "files": [],
+        "skipped": [{"seq": 2, "class": "Gone", "reason": "destructive"}],
+        "conflicts": []
+    });
+    let (_fake, mcp) = fake_mcp(respond_only_to(
+        serde_json::json!({"op": "flush"}),
+        serde_json::json!({"value": summary.clone()}),
+    ))
+    .await;
+    let result = mcp
+        .flush(Parameters(FlushParams {
+            class: None,
+            file: None,
+            kind: None,
+            confirm_destructive: None,
+        }))
+        .await
+        .unwrap();
+    assert_ne!(result.is_error, Some(true), "{}", call_text(&result));
+    // A withheld destructive entry is visible in the answer.
+    assert!(call_text(&result).contains("\"reason\":\"destructive\""));
+
+    for (params, expected) in [
+        (
+            FlushParams {
+                class: Some("Counter".to_string()),
+                file: None,
+                kind: None,
+                confirm_destructive: Some(true),
+            },
+            serde_json::json!({
+                "op": "flush", "class": "Counter", "confirm_destructive": true
+            }),
+        ),
+        (
+            FlushParams {
+                class: None,
+                file: Some("src/counter.bt".to_string()),
+                kind: None,
+                confirm_destructive: Some(false),
+            },
+            serde_json::json!({"op": "flush", "file": "src/counter.bt"}),
+        ),
+        (
+            FlushParams {
+                class: None,
+                file: None,
+                kind: Some("#'new-class'".to_string()),
+                confirm_destructive: None,
+            },
+            serde_json::json!({"op": "flush", "kind": "new-class"}),
+        ),
+        (
+            FlushParams {
+                class: None,
+                file: None,
+                kind: None,
+                confirm_destructive: Some(true),
+            },
+            serde_json::json!({"op": "flush", "confirm_destructive": true}),
+        ),
+    ] {
+        let (_fake, mcp) = fake_mcp(respond_only_to(
+            expected.clone(),
+            serde_json::json!({"value": summary.clone()}),
+        ))
+        .await;
+        let result = mcp.flush(Parameters(params)).await.unwrap();
+        assert_ne!(
+            result.is_error,
+            Some(true),
+            "{expected}: {}",
+            call_text(&result)
+        );
+    }
+}
+
 #[tokio::test]
 async fn flush_scoped_by_kind() {
     let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;

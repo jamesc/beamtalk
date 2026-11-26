@@ -146,14 +146,17 @@ defmodule BtAttach.WorkspaceConnectTest do
     end
 
     # Each expect below passes through any call that isn't the expected
-    # beamtalk_version:get/0 rather than a bare match failure, so a stray call
+    # `info` request rather than a bare match failure, so a stray call
     # from elsewhere (e.g. a leftover SessionRegistry reap timer — the same
     # residual hazard workspace_rpc_test.exs's moduledoc documents) degrades
     # to a harmless real badrpc instead of crashing an unrelated process.
     test "a badrpc version report is :dead_workspace" do
       :meck.expect(:erpc, :call, fn
-        _node, :beamtalk_version, :get, [], _timeout -> {:badrpc, :mock_scripted}
-        node, mod, fun, args, timeout -> :meck.passthrough([node, mod, fun, args, timeout])
+        _node, :beamtalk_repl_ops, :request, ["info", _params, _pid], _timeout ->
+          {:badrpc, :mock_scripted}
+
+        node, mod, fun, args, timeout ->
+          :meck.passthrough([node, mod, fun, args, timeout])
       end)
 
       assert Workspace.readiness() == {:error, :dead_workspace}
@@ -167,8 +170,15 @@ defmodule BtAttach.WorkspaceConnectTest do
         erts_version: "15"
       }
 
+      info = %{
+        "version" => Map.new(report, fn {key, value} -> {Atom.to_string(key), value} end),
+        "node" => "workspace@host",
+        "workspace_id" => "ws-1",
+        "settings" => %{"autoflush" => false}
+      }
+
       :meck.expect(:erpc, :call, fn
-        _node, :beamtalk_version, :get, [], _timeout -> report
+        _node, :beamtalk_repl_ops, :request, ["info", _params, _pid], _timeout -> {:value, info}
         node, mod, fun, args, timeout -> :meck.passthrough([node, mod, fun, args, timeout])
       end)
 
@@ -177,7 +187,7 @@ defmodule BtAttach.WorkspaceConnectTest do
 
     test "a wholly unrecognised version-report reply degrades to :dead_workspace" do
       :meck.expect(:erpc, :call, fn
-        _node, :beamtalk_version, :get, [], _timeout -> :odd
+        _node, :beamtalk_repl_ops, :request, ["info", _params, _pid], _timeout -> :odd
         node, mod, fun, args, timeout -> :meck.passthrough([node, mod, fun, args, timeout])
       end)
 

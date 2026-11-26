@@ -25,6 +25,7 @@ defmodule BtAttachWeb.Live.DockFakeClient do
 
   forceable(eval(pid, code))
   forceable(interrupt(pid))
+  forceable(flush(opts))
   forceable(git_diff(path))
   forceable(git_revert_file(path))
   forceable(symbol_index(scope))
@@ -498,6 +499,14 @@ defmodule BtAttachWeb.Live.DockTest do
       assert socket.assigns.save_error == "not attached to workspace"
     end
 
+    test "BT-5204: the destructive flush is the `flush` operation scoped to the class and confirmed" do
+      {:noreply, _socket} =
+        Dock.handle_event("flush_destructive", %{"class" => "Foo"}, base_socket())
+
+      assert Enum.sort(BtAttachWeb.StubWorkspaceClient.last_flush_opts()) ==
+               [class: "Foo", confirm_destructive: true]
+    end
+
     test "a successful destructive flush of a remove-class row reports the default message" do
       {:noreply, socket} =
         Dock.handle_event("flush_destructive", %{"class" => "Foo"}, base_socket())
@@ -712,8 +721,8 @@ defmodule BtAttachWeb.Live.DockTest do
       assert socket.assigns.error =~ "boom"
     end
 
-    test "a destructive flush whose eval fails outright surfaces render_error/1" do
-      force_workspace_replies(%{eval: {:error, :compile_failed, "some output", []}})
+    test "a destructive flush the workspace refuses surfaces the error" do
+      force_workspace_replies(%{flush: {:error, :compile_failed}})
 
       {:noreply, socket} =
         Dock.handle_event("flush_destructive", %{"class" => "Foo"}, base_socket())
@@ -722,8 +731,8 @@ defmodule BtAttachWeb.Live.DockTest do
       assert socket.assigns.save_error =~ "compile_failed"
     end
 
-    test "a destructive flush whose eval is refused (facade short-circuit shape) surfaces facade_error/1" do
-      force_workspace_replies(%{eval: {:error, :forbidden_op}})
+    test "a destructive flush that is refused (facade short-circuit shape) surfaces facade_error/1" do
+      force_workspace_replies(%{flush: {:error, :forbidden_op}})
 
       {:noreply, socket} =
         Dock.handle_event("flush_destructive", %{"class" => "Foo"}, base_socket())

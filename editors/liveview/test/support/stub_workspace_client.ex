@@ -32,6 +32,9 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               # git panel results, so a test can exercise the post-save refresh
               # gate and the async git load without a real workspace node.
               autoflush: false,
+              # BT-5204: the opts of the most recent `flush/1`, so a test can
+              # assert the scope and confirmation the caller sent.
+              last_flush_opts: nil,
               git_status: nil,
               git_log: nil,
               # BT-2597: seeded test-runner pane results so the async run/load
@@ -396,7 +399,8 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   """
   def clear_changes, do: put(:changes, %{})
 
-  def flush do
+  def flush(opts \\ []) do
+    put(:last_flush_opts, opts)
     changes = get(:changes)
     put(:changes, %{})
 
@@ -409,6 +413,9 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
     {:ok, summary}
   end
+
+  @doc "Test helper: the opts of the most recent `flush/1` (nil before any)."
+  def last_flush_opts, do: get(:last_flush_opts)
 
   def change_history do
     diffs = get(:change_diffs) || %{}
@@ -471,6 +478,22 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # image only and the post-save git refresh is skipped — unless a test flips it
   # via `set_autoflush/1`.
   def autoflush, do: get(:autoflush) || false
+
+  # BT-5204: the `info` operation's reply, in `BtAttach.Workspace.info/0`'s shape.
+  def info do
+    {:ok,
+     %{
+       version: %{
+         runtime_version: "stub",
+         protocol_version: "2.0",
+         otp_release: "stub",
+         erts_version: "stub"
+       },
+       node: "stub@localhost",
+       workspace_id: "stub",
+       settings: %{autoflush: autoflush()}
+     }}
+  end
 
   @doc "Test helper: set the simulated `autoflush` flag."
   def set_autoflush(flag) when is_boolean(flag), do: put(:autoflush, flag)

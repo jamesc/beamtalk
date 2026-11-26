@@ -61,8 +61,8 @@ defmodule BtAttach.Workspace do
   ## Readiness handshake (ADR 0097 Implementation §1c)
 
   `readiness/0` is the RPC target behind the desktop-attach `GET /readiness`
-  endpoint: it forces `connect/0` plus one cheap RPC (`beamtalk_version:get/0`,
-  BT-2991) and distinguishes *why* an unreachable workspace failed —
+  endpoint: it forces `connect/0` plus one cheap call (the `info` operation's
+  version report, BT-2991, BT-5204) and distinguishes *why* an unreachable workspace failed —
   `:epmd_absent` (this node couldn't even publish itself to the local epmd),
   `:bad_cookie` (epmd knows the target node but the dist handshake was
   rejected), or `:dead_workspace` (epmd has no record of the target node at
@@ -154,7 +154,7 @@ defmodule BtAttach.Workspace do
   Full connectivity check for the desktop-attach `/readiness` endpoint (ADR
   0097 Implementation §1c). Calls `connect/0` (rather than re-implementing its
   steps, so the two can never drift) plus one cheap RPC — the workspace's
-  version report (`beamtalk_version:get/0`, BT-2991) — and classifies failure
+  version report (the `info` operation, BT-2991, BT-5204) — and classifies failure
   into the taxonomy the endpoint surfaces:
 
     * `{:error, :epmd_absent}`   — no local dist name server to publish to.
@@ -169,7 +169,7 @@ defmodule BtAttach.Workspace do
                                     absent, so it is *not* reported as
                                     `:epmd_absent`.
 
-  Returns `{:ok, version_report}` (see `beamtalk_version:get/0`) on success.
+  Returns `{:ok, version_report}` (the `info` operation's `version`) on success.
   """
   def readiness do
     case connect() do
@@ -1983,21 +1983,42 @@ defmodule BtAttach.Workspace do
   flush`). This is the "Save All to Disk" action — it replays the ChangeLog
   entries written by `save_method/3` into their `.bt` source files.
 
-  Calls `beamtalk_workspace_flush:flush/0` directly, which returns a term
-  contract (never raises on a normal conflict): a `FlushResult`-shaped summary
-  map on success, or `{error, #beamtalk_error{}}` on a hard runtime error. The
-  summary's `conflicts` / `skipped` lists carry recoverable conditions
-  (external-edit conflicts, non-flushable stdlib patches) for the caller to
-  render.
+  Dispatches the `flush` operation, the one implementation of flush that the
+  wire protocol and MCP's `flush` tool share, so the destructive-flush
+  confirmation rules are the operation's, not this module's. It returns a
+  `FlushResult`-shaped summary on success (never raises on a normal conflict) or
+  a structured `#beamtalk_error{}` on a hard runtime error. The summary's
+  `conflicts` / `skipped` lists carry recoverable conditions (external-edit
+  conflicts, non-flushable stdlib patches, withheld destructive entries) for the
+  caller to render.
 
-  Returns `{:ok, summary_map}` or `{:error, reason_term}`.
+  `opts` scope and confirm the flush, mirroring the operation's params:
+
+    * `:class`, `:file`, `:kind` — at most one; scope the flush to one class, one
+      source file or one ChangeEntry kind (e.g. `"new-class"`)
+    * `:confirm_destructive` — `true` also applies pending Tier 2 entries
+      (`remove-class`, `rename-class`, `rename-method`) within that scope;
+      anything but the boolean `true` leaves them withheld (reported in `skipped`)
+
+  Returns `{:ok, summary_map}` (binary keys: `"flushed"`, `"files"`,
+  `"newClasses"`, `"removedClasses"`, `"skipped"`, `"conflicts"`) or
+  `{:error, reason_term}`.
   """
-  def flush do
-    case rpc(:beamtalk_workspace_flush, :flush, [], @rpc_long_timeout) do
-      {:ok, summary} when is_map(summary) -> {:ok, summary}
-      {:error, reason} -> {:error, structure_error(reason)}
-      {:badrpc, reason} -> {:error, {:unreachable, reason}}
-      other -> {:error, {:unexpected_reply, other}}
+  def flush(opts \\ []) when is_list(opts) do
+    params =
+      for {key, param} <- [
+            class: "class",
+            file: "file",
+            kind: "kind",
+            confirm_destructive: "confirm_destructive"
+          ],
+          (value = Keyword.get(opts, key)) != nil,
+          into: %{},
+          do: {param, value}
+
+    case dispatch_browse("flush", params) do
+      {:value, summary} when is_map(summary) -> {:ok, summary}
+      other -> edit_error(other)
     end
   end
 
@@ -2006,8 +2027,8 @@ defmodule BtAttach.Workspace do
   per-method save writes through to disk immediately (`true`) or only patches the
   live image until an explicit `flush/0` (`false`, the default).
 
-  Reads `beamtalk_workspace_meta:get_setting(autoflush, false)` in a single RPC.
-  Used by the cockpit (BT-2590) to skip the post-save git refresh when autoflush
+  Read through `info/0` (one `info` operation). Used by the cockpit (BT-2590) to
+  skip the post-save git refresh when autoflush
   is off: an in-memory-only save leaves the on-disk working tree untouched, so the
   git shell-out would return an identical result. A workspace that is unreachable
   or returns a non-boolean defaults to `false` (the safe, no-extra-shell-out
@@ -2015,11 +2036,56 @@ defmodule BtAttach.Workspace do
   """
   @spec autoflush() :: boolean()
   def autoflush do
-    case rpc(:beamtalk_workspace_meta, :get_setting, [:autoflush, false]) do
-      flag when is_boolean(flag) -> flag
+    case info() do
+      {:ok, %{settings: %{autoflush: true}}} -> true
       _other -> false
     end
   end
+
+  @doc """
+  The workspace's identity and settings, through the `info` operation: its
+  version report, node name, workspace id and the settings a client needs.
+
+  Returns `{:ok, %{version: map, node: binary, workspace_id: binary,
+  settings: %{autoflush: boolean}}}` or `{:error, reason}`. `version` has the
+  `beamtalk_version:get/0` keys (`:runtime_version`, `:protocol_version`,
+  `:otp_release`, `:erts_version`).
+  """
+  @spec info() :: {:ok, map()} | {:error, term()}
+  def info do
+    # A cheap read: the short timeout, so the readiness probe stays quick.
+    case request_op("info", %{}, self(), @rpc_timeout) do
+      {:value, info} when is_map(info) -> {:ok, normalize_info(info)}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> edit_error(other)
+    end
+  end
+
+  @version_keys Map.new(
+                  ~w(runtime_version protocol_version otp_release erts_version),
+                  &{&1, String.to_atom(&1)}
+                )
+
+  # The wire shape has binary keys. The version report keeps the atom keys the
+  # readiness endpoint and its callers have always read; the rest is atomised
+  # by name, never from remote text.
+  defp normalize_info(info) do
+    version =
+      info
+      |> Map.get("version", %{})
+      |> Map.new(fn {key, value} -> {version_key(key), value} end)
+
+    settings = Map.get(info, "settings", %{})
+
+    %{
+      version: version,
+      node: Map.get(info, "node"),
+      workspace_id: Map.get(info, "workspace_id"),
+      settings: %{autoflush: Map.get(settings, "autoflush") == true}
+    }
+  end
+
+  defp version_key(key), do: Map.get(@version_keys, key, key)
 
   @doc """
   List the workspace's active change history (ADR 0082 `Workspace changes`) — the
@@ -2027,11 +2093,10 @@ defmodule BtAttach.Workspace do
   flushed to disk). This is the ChangeLog-coherence view: after `save_method/3`,
   the saved `(class, selector)` should appear here.
 
-  Reads `beamtalk_workspace_changelog_views:change_entries/0` — the same
-  `$beamtalk_class`-tagged value maps that back the `change_log.bt` /
-  `change_entry.bt` value objects — in a **single RPC**. Each entry is already a
-  plain atom-keyed map (not an opaque `#entry{}` record), so nothing fragile
-  crosses the node boundary and there is no per-entry round-trip. We keep only the
+  Dispatches the `changes` operation: every ChangeLog entry in a **single round
+  trip**, the same entries that back the `change_log.bt` / `change_entry.bt`
+  value objects, as wire-shaped maps (binary keys, `null` for an absent value).
+  Each is read into an atom-keyed map by field name, then we keep only the
   entries flagged `active` (current epoch, not orphaned, not yet flushed — the
   exact `Workspace changes` predicate) and render display rows newest-first.
 
@@ -2039,23 +2104,41 @@ defmodule BtAttach.Workspace do
   unreachable or returns an unexpected shape.
   """
   def change_history do
-    case rpc(:beamtalk_workspace_changelog_views, :change_entries, []) do
-      entries when is_list(entries) ->
-        pending_rows(entries)
+    case dispatch_browse("changes", %{}) do
+      {:value, %{"entries" => entries}} when is_list(entries) ->
+        entries |> Enum.map(&entry_from_wire/1) |> pending_rows()
 
-      {:badrpc, reason} ->
-        {:error, {:unreachable, reason}}
+      {:error, _reason} = error ->
+        error
 
       other ->
         {:error, {:unexpected_reply, other}}
     end
   end
 
+  # A ChangeEntry as the `changes` operation sends it (binary keys, `null` for
+  # an absent value) read into the atom-keyed map `pending_rows/1` renders from.
+  # Keys are mapped by name from a fixed list, so remote text never makes an atom.
+  @entry_keys Map.new(
+                ~w(seq className selector kind side intent flushable authorKind sourceFile
+                   orphan priorEpoch flushed active shadowed clean diff oldClass oldSelector),
+                &{&1, String.to_atom(&1)}
+              )
+
+  defp entry_from_wire(entry) when is_map(entry) do
+    for {key, value} <- entry, atom = Map.get(@entry_keys, key), into: %{} do
+      {atom, null_to_nil(value)}
+    end
+  end
+
+  defp null_to_nil(:null), do: nil
+  defp null_to_nil(value), do: value
+
   @doc """
   Current live snapshot of reload-induced findings (ADR 0105 Phase 1,
   BT-2779): every `beamtalk_recheck:finding()` currently recorded for any
-  caller class, via `beamtalk_workspace_findings_store:all/0` — already
-  flattened and deterministically sorted by the store itself
+  caller class, via the `reload-findings` operation — already
+  flattened and deterministically sorted by the findings store itself
   (`{owner, selector, message}`). The workspace/cockpit UI's initial-load /
   manual-refresh counterpart to the `reload_check` push stream
   (`subscribe_reload_check/1`), the same relationship `change_history/0` has
@@ -2071,16 +2154,36 @@ defmodule BtAttach.Workspace do
   """
   @spec reload_findings() :: {:ok, [map()]} | {:error, term()}
   def reload_findings do
-    case rpc(:beamtalk_workspace_findings_store, :all, []) do
-      findings when is_list(findings) ->
-        {:ok, Enum.map(findings, &normalize_finding/1)}
+    case dispatch_browse("reload-findings", %{}) do
+      {:value, %{"findings" => findings}} when is_list(findings) ->
+        {:ok, Enum.map(findings, &(&1 |> finding_from_wire() |> normalize_finding()))}
 
-      {:badrpc, reason} ->
-        {:error, {:unreachable, reason}}
+      {:error, _reason} = error ->
+        error
 
       other ->
         {:error, {:unexpected_reply, other}}
     end
+  end
+
+  # One finding as the `reload-findings` operation sends it (the wire shape the
+  # `reload_check` push frame also uses: camelCase keys, `null` for absent) read
+  # into the atom-keyed map `normalize_finding/1` takes.
+  defp finding_from_wire(finding) when is_map(finding) do
+    %{
+      owner: Map.get(finding, "owner"),
+      changed_class: Map.get(finding, "changedClass"),
+      selector: Map.get(finding, "selector"),
+      classification: Map.get(finding, "classification"),
+      severity: Map.get(finding, "severity"),
+      category: null_to_nil(Map.get(finding, "category")),
+      message: Map.get(finding, "message"),
+      note: null_to_nil(Map.get(finding, "note")),
+      sites:
+        for site <- Map.get(finding, "sites", []) do
+          %{method: Map.get(site, "method"), line: Map.get(site, "line", 0)}
+        end
+    }
   end
 
   @doc """
@@ -2281,9 +2384,10 @@ defmodule BtAttach.Workspace do
   defp maybe_append(parts, false, _text), do: parts
   defp maybe_append(parts, true, text), do: parts ++ [text]
 
-  # Render one ChangeEntry value map (atom-keyed, from `change_entries/0`) to a
-  # display row. `className` arrives as an atom and `selector` as a Symbol (atom)
-  # or `nil` for a new-class entry; `to_string/1` renders atoms verbatim. We read
+  # Render one ChangeEntry value map (atom-keyed, read from the `changes`
+  # operation's wire map by `entry_from_wire/1`) to a display row. `className` and
+  # `selector` arrive as binaries (`selector` is `nil` for a new-class entry);
+  # `to_string/1` renders either form verbatim. We read
   # every key defensively with a default so a future field addition can't crash
   # the pane.
   defp entry_to_row(entry) when is_map(entry) do
@@ -2564,17 +2668,17 @@ defmodule BtAttach.Workspace do
     if List.keymember?(names, short_name, 0), do: :bad_cookie, else: :dead_workspace
   end
 
-  # The one cheap RPC behind `readiness/0` — the workspace's version report
-  # (`beamtalk_version:get/0`, BT-2991). A `:badrpc` here (workspace died
+  # The one cheap call behind `readiness/0` — the workspace's version report from
+  # the `info` operation (BT-2991, BT-5204). An unreachable result here (workspace died
   # between `Node.connect/1` succeeding and this call landing) reports the
   # same `:dead_workspace` reason as epmd never having heard of the node.
   defp readiness_rpc do
-    case rpc(:beamtalk_version, :get, []) do
-      {:badrpc, _reason} ->
-        {:error, :dead_workspace}
-
-      report when is_map(report) ->
+    case info() do
+      {:ok, %{version: report}} when is_map(report) ->
         {:ok, report}
+
+      {:error, {:unreachable, _reason}} ->
+        {:error, :dead_workspace}
 
       # Defensive catch-all matching the rest of this module's degrade-
       # gracefully contract (e.g. eval/2's `other -> {:unexpected_reply, _}`):

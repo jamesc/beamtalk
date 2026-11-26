@@ -1,0 +1,34 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for Shipping: tuple/constructor patterns, destructuring and
+// matchExhaustive: over a closed symbol type.
+
+TestCase subclass: ShippingTest
+
+  testPriceForEachSpeed =>
+    self assert: (Shipping priceFor: #standard weight: 2500) equals: 700
+    self assert: (Shipping priceFor: #express weight: 2500) equals: 1500
+    self assert: (Shipping priceFor: #overnight weight: 2500) equals: 2500
+
+  testQuoteOk =>
+    self assert: (Shipping quote: {#parcel, #standard, 500}) equals: (Result ok: 500)
+
+  testQuoteRejectsZeroWeight =>
+    self assert: (Shipping quote: {#parcel, #standard, 0}) equals: (Result error: "weight must be positive")
+
+  testQuoteRejectsOtherShapes =>
+    self assert: (Shipping quote: {#letter, 1}) equals: (Result error: "not a parcel order")
+
+  testDescribe =>
+    self assert: (Shipping describe: (Result ok: 700)) equals: "costs 700 cents"
+    self assert: (Shipping describe: (Result error: "nope")) equals: "rejected: nope"
+
+  testTotalForCountsRejected =>
+    orders := #({#parcel, #standard, 500}, {#parcel, #express, 0}, {#parcel, #express, 1000})
+    {total, rejected} := Shipping totalFor: orders
+    self assert: total equals: 1700
+    self assert: rejected equals: 1
+
+  testQuoteRejectsUnknownSpeed =>
+    self assert: (Shipping quote: {#parcel, #sameday, 500}) equals: (Result error: "unknown speed")

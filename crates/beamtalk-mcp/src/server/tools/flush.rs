@@ -6,7 +6,7 @@
 //! Phase 3; the destructive tier is ADR 0113 Phase 2/4) and inspecting or
 //! re-validating the workspace's pending-change state.
 
-use beamtalk_core::tool_expr::{FlushFilter, flush_expr_with_confirm_destructive};
+use beamtalk_repl_protocol::FlushScope;
 use rmcp::{handler::server::wrapper::Parameters, model::CallToolResult, tool, tool_router};
 
 use crate::server::params::FlushParams;
@@ -57,21 +57,19 @@ impl BeamtalkMcp {
             "tool invoked"
         );
 
-        let expr = match (
+        let scope = match (
             params.class.as_deref().filter(|s| !s.is_empty()),
             params.file.as_deref().filter(|s| !s.is_empty()),
             params.kind.as_deref().filter(|s| !s.is_empty()),
         ) {
             (Some(class), None, None) => {
                 validate_class_name(class)?;
-                flush_expr_with_confirm_destructive(FlushFilter::Class(class), confirm_destructive)
+                FlushScope::Class(class)
             }
-            (None, Some(file), None) => {
-                flush_expr_with_confirm_destructive(FlushFilter::File(file), confirm_destructive)
-            }
+            (None, Some(file), None) => FlushScope::File(file),
             (None, None, Some(kind)) => {
-                // Allow either bare `new-class` or `#'new-class'`. We always
-                // emit a quoted-symbol literal so hyphenated kinds parse.
+                // Allow either bare `new-class` or `#'new-class'`; the operation
+                // takes the bare kind name.
                 let bare = kind.strip_prefix('#').unwrap_or(kind);
                 let bare = bare.trim_matches('\'');
                 if bare.is_empty()
@@ -86,27 +84,29 @@ impl BeamtalkMcp {
                         None,
                     ));
                 }
-                flush_expr_with_confirm_destructive(FlushFilter::Kind(bare), confirm_destructive)
+                FlushScope::Kind(bare)
             }
-            _ => flush_expr_with_confirm_destructive(FlushFilter::None, confirm_destructive),
+            _ => FlushScope::All,
         };
 
+        // The `flush` operation: the one implementation LiveView and wire
+        // clients share, including the destructive-tier confirmation rule.
         let response = self
             .client
-            .evaluate_with_options(&expr, false)
+            .flush(scope, confirm_destructive)
             .await
             .internal_err()?;
 
         check_response!(response, "Flush failed");
 
-        let text = {
-            let v = response.value_string();
-            if v.is_empty() {
-                "Flushed".to_string()
-            } else {
-                v
-            }
-        };
+        // The `FlushResult` summary (`flushed`, `files`, `skipped`,
+        // `conflicts`, ...) as JSON, so a withheld destructive entry shows as
+        // `"reason":"destructive"` and a conflict is visible.
+        let text = response
+            .value
+            .as_ref()
+            .and_then(|v| serde_json::to_string(v).ok())
+            .unwrap_or_else(|| "Flushed".to_string());
 
         timer.ok_text(format!("{text}\n{}", self.workspace_note()))
     }

@@ -857,6 +857,9 @@ this table drifts from the fixture. To refresh it after editing the op table:
 | `save-class` | `source`, `path` | — | `compiler` | `beamtalk_repl_ops_edit` |
 | `revert-method` | `class`, `selector` | `side` | `workspace` | `beamtalk_repl_ops_edit` |
 | `reload-file` | `path` | — | `compiler` | `beamtalk_repl_ops_edit` |
+| `flush` | — | `class`, `file`, `kind`, `confirm_destructive` | `workspace` | `beamtalk_repl_ops_state` |
+| `changes` | — | — | `always` | `beamtalk_repl_ops_state` |
+| `info` | — | — | `always` | `beamtalk_repl_ops_state` |
 | `sessions` | — | — | `always` | `beamtalk_repl_ops_session` |
 | `close` | — | — | `always` | `beamtalk_repl_ops_session` |
 | `health` | — | — | `always` | `beamtalk_repl_ops_session` |
@@ -967,7 +970,7 @@ the client to the `protocol_msg()` record. It is gone.
 
 ### Result shapes
 
-`save-class`'s `{value, Map}` also carries `warnings` (a list of texts) when the class went live but its ChangeLog entry could not be recorded, so `flush` will not write the file.
+`flush` takes at most one of `class`, `file` or `kind` (two is `invalid_argument`) and `confirm_destructive`; the destructive tier is applied only for a boolean `true`, and any other value is `invalid_argument`. `save-class`'s `{value, Map}` also carries `warnings` (a list of texts) when the class went live but its ChangeLog entry could not be recorded, so `flush` will not write the file.
 
 Every op returns one of these tagged terms. The tag and the arity are the
 contract; the table gives the shape per operation family.
@@ -979,6 +982,7 @@ contract; the table gives the shape per operation family.
 | Actors | `actors`, `inspect`, `kill`, `interrupt`, `pid-stats` | `{actors, [ActorMeta]}` · `{inspect, FieldMap \| binary()}` · `{status, ok}` · `{value, StatsMap}` |
 | Sessions | `sessions`, `close`, `health`, `shutdown` | `{sessions, [SessionMeta]}` (`#{id, pid}`; the wire carries `id`) · `{status, ok}` · `{health, WorkspaceId, Nonce}` |
 | Loading | `load-source`, `load-project`, `save-section`, `save-native-source`, `save-method`, `save-class`, `revert-method`, `reload-file` | `{loaded, Classes, Warnings}` · `{load_project, Classes, Errors, Summary, Warnings}` · `{value, Map}` |
+| Workspace state | `flush`, `changes`, `info` | `{value, Map}`: a `FlushResult` summary · `#{entries}` · `#{version, node, workspace_id, settings}`, wire-shaped (binary keys, `null` for absent) |
 | Developer reads | `complete`, `erlang-complete`, `hover`, `erlang-help`, `diagnostics`, `describe`, `methods`, `inherited-methods`, `list-classes`, `show-codegen`, `test`, `test-all`, `list-tests`, `load-tests` | `{completions, [binary()]}` · `{docs, binary()}` · `{diagnostics, [map()]}` · `{describe, Ops, Versions}` · `{methods, Methods, StateVars}` · `{inherited_methods, Methods}` · `{class_list, [ClassInfo]}` · `{codegen, CoreErlang, Warnings}` · `{test_results, map()}` · `{value, JsonValue}` |
 | Browse and navigation | `browse-*`, `nav-query`, `nav-symbols`, `reload-findings`, `export-traces` | `{value, JsonValue}` |
 

@@ -159,7 +159,13 @@ workspace_ops_refused_in_both_release_variants_test_() ->
             release_mode_no_workspace,
             with_capabilities(Caps, fun() -> refusal_kind(dispatch(Op, #{})) end)
         )
-     || Op <- [<<"unload">>, <<"save-native-source">>, <<"save-section">>, <<"revert-method">>],
+     || Op <- [
+            <<"unload">>,
+            <<"save-native-source">>,
+            <<"save-section">>,
+            <<"revert-method">>,
+            <<"flush">>
+        ],
         Caps <- [?RELEASE, ?RELEASE_WITH_COMPILER]
     ].
 

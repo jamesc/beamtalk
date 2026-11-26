@@ -45,7 +45,7 @@ pub(crate) fn check_match_exhaustiveness(module: &Module, diagnostics: &mut Vec<
 
 /// Returns all constructor selectors for a sealed stdlib type, or `None` if the
 /// type is not a known sealed type (exhaustiveness check does not apply).
-fn sealed_type_all_constructors(class: &str) -> Option<&'static [&'static str]> {
+pub(crate) fn sealed_type_all_constructors(class: &str) -> Option<&'static [&'static str]> {
     match class {
         "Result" => Some(&["ok:", "error:"]),
         _ => None,
@@ -61,10 +61,9 @@ fn visit_match_exhaustiveness(expr: &Expression, diagnostics: &mut Vec<Diagnosti
     // An unguarded wildcard arm suppresses exhaustiveness checking.
     // A guarded wildcard (`_ when: [cond] -> body`) is conditional and does
     // NOT guarantee coverage of all remaining cases.
-    if arms
-        .iter()
-        .any(|arm| arm.guard.is_none() && matches!(arm.pattern, Pattern::Wildcard(_)))
-    {
+    if arms.iter().any(|arm| {
+        arm.guard.is_none() && matches!(arm.pattern, Pattern::Wildcard(_) | Pattern::Variable(_))
+    }) {
         return;
     }
 
@@ -685,6 +684,16 @@ mod tests {
             diagnostics.is_empty(),
             "Expected no error when both Result arms present, got: {diagnostics:?}"
         );
+    }
+
+    /// An unguarded variable catch-all (`other -> ...`) also suppresses the check.
+    #[test]
+    fn match_exhaustiveness_variable_catch_all_suppresses_check() {
+        let src = "r match: [Result ok: v -> [v]; other -> [0]]";
+        let module = parse_ok(src);
+        let mut diagnostics = Vec::new();
+        check_match_exhaustiveness(&module, &mut diagnostics);
+        assert!(diagnostics.is_empty(), "got: {diagnostics:?}");
     }
 
     /// Wildcard arm suppresses exhaustiveness check.
