@@ -1334,17 +1334,18 @@ coerce_ffi_result(_Module, [], _Mode) ->
     [];
 coerce_ffi_result(_Module, Result, _Mode) when is_atom(Result), Result =/= ok, Result =/= error ->
     Result;
-coerce_ffi_result(_Module, #beamtalk_object{} = Obj, _Mode) ->
+coerce_ffi_result(_Module, #beamtalk_object{pid = Pid} = Obj, _Mode) when
+    is_pid(Pid), node(Pid) =/= node()
+->
     %% BT-5274: an FFI result skips the wire codec, so a class object answered
     %% by a raw FFI call or an `rpc`/`erpc` into a peer can carry the peer's
     %% class pid. Resolve it by name here, as `beamtalk_wire:decode/1` would.
     %% Top level only (the coercion stays shallow, see above); a class object
     %% nested in a returned container is resolved when it is sent a message
-    %% (`beamtalk_message_dispatch:local_class_pid/3`).
-    case beamtalk_wire:localise_class_object(Obj) of
-        {ok, Local} -> Local;
-        {error, Error} -> beamtalk_error:raise(Error)
-    end;
+    %% (`beamtalk_message_dispatch:local_class_pid/3`). An `{ok, _}` payload is
+    %% resolved by `beamtalk_result:from_tagged_tuple/1`. Only a pid on another
+    %% node takes this clause; every other object keeps the fast path below.
+    beamtalk_wire:ensure_local_class_object(Obj);
 coerce_ffi_result(_Module, Result, _Mode) when
     is_tuple(Result),
     (tuple_size(Result) =/= 2 orelse

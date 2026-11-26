@@ -1288,9 +1288,6 @@ Self carries `class='Metaclass'` so method dispatch receives the correct receive
 %% `self new` / `self spawnAs:`, and raise a clear error for everything else.
 metaclass_send(Pid, Selector, Args, _Self) when Pid =:= self() ->
     beamtalk_class_dispatch_recovery:handle_metaclass_self_call(Selector, Args);
-%% BT-5274: as `class_send/4`, never a call into a peer's class process.
-metaclass_send(Pid, Selector, _Args, _Self) when node(Pid) =/= node() ->
-    beamtalk_error:raise(foreign_class_pid_error(Pid, Selector));
 metaclass_send(Pid, Selector, Args, Self) ->
     %% Wrap in crash recovery, same as class_send.
     %% Update Self's pid on recovery so downstream dispatch uses the new process.

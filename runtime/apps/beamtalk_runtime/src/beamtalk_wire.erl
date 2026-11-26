@@ -74,7 +74,13 @@ ADR 0126 §5.1 calls out explicitly (a *builtin* collection's contents, and a
 
 -include("beamtalk.hrl").
 
--export([encode/1, decode/1, localise_class_object/1, wire_version_unsupported_error/4]).
+-export([
+    encode/1,
+    decode/1,
+    localise_class_object/1,
+    ensure_local_class_object/1,
+    wire_version_unsupported_error/4
+]).
 
 %%====================================================================
 %% Public API
@@ -127,17 +133,30 @@ localise_class_object(#beamtalk_object{class = Tag, pid = Pid} = Obj) when
     is_pid(Pid), node(Pid) =/= node(), is_atom(Tag)
 ->
     case beamtalk_class_registry:is_class_name(Tag) of
-        true ->
-            %% The tag atom is already in this node's atom table (it arrived
-            %% in `Obj`), so this adds at most one atom per such tag.
-            % elp:fixme W0023 class name derived from a class tag already on this node
-            ClassName = binary_to_atom(beamtalk_class_registry:class_display_name(Tag), utf8),
-            decode_class_ref(ClassName);
-        false ->
-            {ok, Obj}
+        true -> decode_class_ref(tag_class_name(Tag));
+        false -> {ok, Obj}
     end;
 localise_class_object(Term) ->
     {ok, Term}.
+
+-doc """
+`localise_class_object/1` for a caller that wants the value: answers the
+(possibly resolved) term, or raises the `class_not_found` error.
+""".
+-spec ensure_local_class_object(term()) -> term().
+ensure_local_class_object(Term) ->
+    case localise_class_object(Term) of
+        {ok, Local} -> Local;
+        {error, Error} -> beamtalk_error:raise(Error)
+    end.
+
+%% The class name a class object's tag names (`'Point class'` -> `'Point'`).
+%% The tag atom is already in this node's atom table (it arrived in the
+%% object), so this adds at most one atom per such tag.
+-spec tag_class_name(atom()) -> atom().
+tag_class_name(Tag) ->
+    % elp:fixme W0023 class name derived from a class tag already on this node
+    binary_to_atom(beamtalk_class_registry:class_display_name(Tag), utf8).
 
 -doc """
 Construct `#beamtalk_error{kind = wire_version_unsupported}` for a
@@ -336,11 +355,21 @@ encode_beamtalk_object(#beamtalk_object{pid = Pid} = Obj, _Path) ->
             %% the receiving node's own class registry on decode (ADR 0126
             %% §5.1/§5.5): a class object that crosses a node is that node's
             %% class of the same name, never a remote class process.
-            ClassName = beamtalk_object_class_read:class_name_safe(Pid),
-            {ok, {'$beamtalk_class_ref', ClassName}};
+            {ok, {'$beamtalk_class_ref', encode_class_name(Obj)}};
         false ->
             {ok, Obj#beamtalk_object{pid = encode_actor_pid(Pid)}}
     end.
+
+%% The name a class object is encoded under. A class object that still carries
+%% a peer's pid (one that skipped the wire, BT-5274) is named by its tag: asking
+%% for the name by pid would call into the peer's class process.
+-spec encode_class_name(#beamtalk_object{}) -> atom().
+encode_class_name(#beamtalk_object{class = Tag, pid = Pid}) when
+    is_pid(Pid), node(Pid) =/= node()
+->
+    tag_class_name(Tag);
+encode_class_name(#beamtalk_object{pid = Pid}) ->
+    beamtalk_object_class_read:class_name_safe(Pid).
 
 -spec encode_actor_pid(
     pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()}

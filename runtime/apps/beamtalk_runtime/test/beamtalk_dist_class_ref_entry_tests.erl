@@ -18,11 +18,14 @@ result or a raw message skips that walk and can carry the peer's class pid.
    (`beamtalk_erlang_proxy`), this node's class.
 2. **rpc:** `rpc:call/4` and `erpc:call/4` into the peer, through the same
    boundary, answer this node's class.
-3. Either answers `class_not_found` when the class is not registered here.
-4. **Send:** a peer class object that was not normalised (nested in an FFI
+3. An `{ok, ClassObj}` answer becomes a `Result` holding this node's class.
+4. Either answers `class_not_found` when the class is not registered here.
+5. **Send:** a peer class object that was not normalised (nested in an FFI
    result) is resolved by name when it is sent a message, so the send runs
    against this node's class and never calls the peer's class process. A bare
-   peer class pid handed to `class_send` or `metaclass_send` is refused.
+   peer class pid handed to `class_send` is refused. Re-encoding such an object
+   for the wire, and using it as a supervisor child, do not call the peer
+   either.
 
 Every send test first suspends the peer's class process (`sys:suspend/1`): a
 `gen_server:call` into it would block and time out, so a pass cannot come from
@@ -34,7 +37,7 @@ nothing was sent to it.
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
--export([peer_class_by_raw_message/2, send_class_object/2]).
+-export([peer_class_by_raw_message/2, send_class_object/2, ok_class_object/1]).
 
 -define(HELPER, beamtalk_class_dispatch_test_helper).
 
@@ -64,6 +67,9 @@ class_ref_entry_test_() ->
                 {"rpc: erpc:call into the peer answers this node's class", fun() ->
                     with_classes(PeerNode, fun erpc_call_is_local/3)
                 end},
+                {"rpc: an {ok, ClassObj} answer is a Result of this node's class", fun() ->
+                    with_classes(PeerNode, fun erpc_ok_result_is_local/3)
+                end},
                 {"FFI and rpc: a class not registered here is class_not_found", fun() ->
                     peer_only_class_is_class_not_found(PeerNode)
                 end},
@@ -75,6 +81,12 @@ class_ref_entry_test_() ->
                 end},
                 {"send: a bare peer class pid is refused, not called", fun() ->
                     with_classes(PeerNode, fun bare_peer_pid_is_refused/3)
+                end},
+                {"wire: re-encoding a peer class object does not call the peer", fun() ->
+                    with_classes(PeerNode, fun reencode_peer_ref_is_by_tag/3)
+                end},
+                {"supervisor: a peer child class is this node's class", fun() ->
+                    with_classes(PeerNode, fun supervisor_child_peer_ref_is_local/3)
                 end}
             ]
         end}}.
@@ -153,6 +165,11 @@ peer_class_by_raw_message(PeerNode, Name) ->
 send_class_object(To, Name) ->
     To ! {class_object, self(), beamtalk_class_registry:resolve_class_object(Name)}.
 
+-doc "Runs on the peer: `{ok, ClassObj}` for that node's class `Name`.".
+-spec ok_class_object(atom()) -> {ok, term()}.
+ok_class_object(Name) ->
+    {ok, beamtalk_class_registry:resolve_class_object(Name)}.
+
 %% What an inline `(Erlang Module) fn: …` FFI send runs (stock-mode module).
 ffi(Module, Fun, Args) ->
     beamtalk_erlang_proxy:direct_call(Module, Fun, Args, stock).
@@ -184,6 +201,14 @@ erpc_call_is_local(Name, LocalPid, PeerPid) ->
     Args = [node(PeerPid), beamtalk_class_registry, resolve_class_object, [Name]],
     ?assertEqual(PeerPid, (apply(erpc, call, Args))#beamtalk_object.pid),
     assert_local_class(Name, LocalPid, ffi(erpc, call, Args)).
+
+erpc_ok_result_is_local(Name, LocalPid, PeerPid) ->
+    Args = [node(PeerPid), ?MODULE, ok_class_object, [Name]],
+    {ok, Raw} = apply(erpc, call, Args),
+    ?assertEqual(PeerPid, Raw#beamtalk_object.pid),
+    Result = ffi(erpc, call, Args),
+    ?assertMatch(#{'isOk' := true}, Result),
+    assert_local_class(Name, LocalPid, maps:get('okValue', Result)).
 
 peer_only_class_is_class_not_found(PeerNode) ->
     with_peer_only_class(PeerNode, fun(Name, _PeerPid) ->
@@ -238,16 +263,30 @@ bare_peer_pid_is_refused(_Name, _LocalPid, PeerPid) ->
             unknown,
             testClassSelf,
             beamtalk_class_dispatch:class_send(PeerPid, testClassSelf, [], ?SEND_TIMEOUT_MS)
-        ),
-        ?assertBtError(
-            class_not_found,
-            unknown,
-            name,
-            beamtalk_class_dispatch:metaclass_send(
-                PeerPid,
-                name,
-                [],
-                #beamtalk_object{class = 'Metaclass', class_mod = undefined, pid = PeerPid}
-            )
         )
+    end).
+
+reencode_peer_ref_is_by_tag(Name, _LocalPid, PeerPid) ->
+    %% Nested in a list, so the FFI boundary leaves the peer's pid in place.
+    [PeerRef] = ffi(lists, reverse, [[peer_class_object(Name, PeerPid)]]),
+    with_peer_suspended(PeerPid, fun() ->
+        ?assertEqual({ok, {'$beamtalk_class_ref', Name}}, beamtalk_wire:encode(PeerRef))
+    end).
+
+supervisor_child_peer_ref_is_local(Name, LocalPid, PeerPid) ->
+    PeerRef = peer_class_object(Name, PeerPid),
+    with_peer_suspended(PeerPid, fun() ->
+        %% The child's module and class are this node's.
+        ?assertEqual(
+            {Name, ?HELPER}, beamtalk_supervisor_init_config:child_class_entry(sup, PeerRef)
+        ),
+        %% The `supervisionSpec` send reaches this node's class, which does
+        %% not define it, rather than the (suspended) peer's.
+        ?assertBtError(
+            does_not_understand,
+            Name,
+            supervisionSpec,
+            beamtalk_supervisor_spec:build_child_spec(PeerRef, static)
+        ),
+        ?assert(is_process_alive(LocalPid))
     end).

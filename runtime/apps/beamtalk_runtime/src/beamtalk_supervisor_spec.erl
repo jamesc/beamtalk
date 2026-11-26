@@ -56,7 +56,8 @@ build_child_spec(ClassObj, Mode) when
             %% A bare class, actor or supervisor alike (ADR 0135 §3): its
             %% `supervisionSpec`, then `childSpec`. A bare nested supervisor
             %% is therefore an anonymous child, like any other.
-            ChildClassPid = element(4, ClassObj),
+            %% BT-5274: a child class from another node is this node's class.
+            ChildClassPid = element(4, beamtalk_wire:ensure_local_class_object(ClassObj)),
             BtSpec = beamtalk_object_class:class_send(ChildClassPid, 'supervisionSpec', []),
             spec_to_otp(beamtalk_message_dispatch:send(BtSpec, 'childSpec', []), Mode);
         false ->

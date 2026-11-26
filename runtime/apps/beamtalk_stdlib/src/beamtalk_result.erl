@@ -93,14 +93,27 @@ beamtalk_result:from_tagged_tuple({error, enoent})
 ```
 """.
 -spec from_tagged_tuple({ok, term()} | {error, term()}) -> t().
+from_tagged_tuple({ok, #beamtalk_object{pid = Pid} = Value}) when
+    is_pid(Pid), node(Pid) =/= node()
+->
+    %% BT-5274: an `{ok, ClassObj}` from an FFI or `rpc`/`erpc` call skipped
+    %% the wire, so a class object in it can carry a peer's class pid. Both the
+    %% FFI proxy and codegen's inline Result build go through here.
+    %% An actor on another node is a legitimate remote ref and comes back
+    %% unchanged.
+    ok_result(beamtalk_wire:ensure_local_class_object(Value));
 from_tagged_tuple({ok, Value}) ->
-    #{?BT_CLASS_TAG_KEY => 'Result', 'isOk' => true, 'okValue' => Value, 'errReason' => nil};
+    ok_result(Value);
 from_tagged_tuple({error, Reason}) ->
     %% Promote error reasons to Beamtalk Exception objects so that
     %% errReason is always re-raiseable. ensure_wrapped/1 is idempotent:
     %% already-wrapped Exception maps pass through unchanged.
     ExObj = beamtalk_exception_handler:ensure_wrapped(Reason),
     #{?BT_CLASS_TAG_KEY => 'Result', 'isOk' => false, 'okValue' => nil, 'errReason' => ExObj}.
+
+-spec ok_result(term()) -> map().
+ok_result(Value) ->
+    #{?BT_CLASS_TAG_KEY => 'Result', 'isOk' => true, 'okValue' => Value, 'errReason' => nil}.
 
 -doc """
 Convert a `Result` tagged map to an Erlang `{ok, V} | {error, R}` tuple, the

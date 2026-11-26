@@ -386,7 +386,9 @@ reaches the peer's class process; a class not registered here raises
 `class_not_found`. A local pid (the common case) costs one `node/1` test.
 """.
 -spec local_class_pid(#beamtalk_object{}, term(), atom()) -> term().
-local_class_pid(_Receiver, ClassPid, _Selector) when not is_pid(ClassPid); node(ClassPid) =:= node() ->
+local_class_pid(_Receiver, ClassPid, _Selector) when
+    not is_pid(ClassPid); node(ClassPid) =:= node()
+->
     ClassPid;
 local_class_pid(Receiver, _ClassPid, Selector) ->
     case beamtalk_wire:localise_class_object(Receiver) of
