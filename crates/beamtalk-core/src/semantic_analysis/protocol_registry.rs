@@ -28,6 +28,7 @@ use crate::semantic_analysis::namespace_collision::{
     Declared, Existing, Origin, namespace_collision,
 };
 use crate::semantic_analysis::receiver_knowledge;
+use crate::semantic_analysis::stdlib_protocols;
 use crate::semantic_analysis::trait_expansion;
 use crate::semantic_analysis::type_checker::TypeChecker;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -520,6 +521,13 @@ impl ProtocolInfo {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProtocolRegistry {
     protocols: HashMap<EcoString, ProtocolInfo>,
+    /// Baked stdlib protocols seeded only so annotations and bounds naming
+    /// them are checked (BT-5333). Registry-wide scans over *the package's
+    /// own* protocols (`respondsTo:` narrowing, the visibility validator)
+    /// skip these, so seeding cannot change their results. A stdlib protocol
+    /// registered for any other reason (an `extending:` parent, a
+    /// `uses:`/pre-loaded replacement) is never listed here.
+    seeded_only: std::collections::HashSet<EcoString>,
 }
 
 impl ProtocolRegistry {
@@ -528,7 +536,15 @@ impl ProtocolRegistry {
     pub fn new() -> Self {
         Self {
             protocols: HashMap::new(),
+            seeded_only: std::collections::HashSet::new(),
         }
+    }
+
+    /// Whether `name` is a baked stdlib protocol seeded only for annotation
+    /// and bound checking (see the field doc).
+    #[must_use]
+    pub fn is_seeded_only(&self, name: &str) -> bool {
+        self.seeded_only.contains(name)
     }
 
     /// Extract `ProtocolInfo` entries from a parsed module without registering them.
@@ -640,7 +656,7 @@ impl ProtocolRegistry {
         // protocol needs its parent in this module's registry even when the
         // module declares no protocols of its own, so every file agrees on
         // what conformance to it requires.
-        self.seed_stdlib_parents(module, current_package);
+        self.seed_stdlib_parents(module, current_package, hierarchy);
         if !module.protocols.is_empty() {
             diagnostics.extend(self.register_module(module, hierarchy));
         }
@@ -658,7 +674,12 @@ impl ProtocolRegistry {
     /// tier, and is off while compiling the stdlib itself (`current_package`
     /// is `stdlib`), which carries its protocols live. Parents of a seeded
     /// protocol are seeded in turn.
-    fn seed_stdlib_parents(&mut self, module: &Module, current_package: Option<&str>) {
+    fn seed_stdlib_parents(
+        &mut self,
+        module: &Module,
+        current_package: Option<&str>,
+        hierarchy: &ClassHierarchy,
+    ) {
         let own: std::collections::HashSet<&EcoString> =
             module.protocols.iter().map(|p| &p.name.name).collect();
         let mut pending: Vec<EcoString> = module
@@ -667,6 +688,36 @@ impl ProtocolRegistry {
             .filter_map(|p| p.extending.as_ref().map(|e| e.name.clone()))
             .chain(self.protocols.values().filter_map(|p| p.extending.clone()))
             .collect();
+        self.seed_chain(&mut pending, &own, current_package, false);
+
+        // BT-5333: every other baked stdlib protocol is also seeded, so a
+        // bound (`T :: Comparable`) or annotation (`x :: Comparable`) naming
+        // one is checked rather than assumed to conform (an unknown protocol
+        // conforms). A class of the same name that is not a protocol's
+        // synthetic class entry keeps the name (as in `add_pre_loaded`).
+        let mut pending: Vec<EcoString> = stdlib_protocols::stdlib_protocol_names()
+            .iter()
+            .filter(|n| {
+                hierarchy
+                    .get_class(n)
+                    .is_none_or(|ci| ci.superclass.as_deref() == Some("Protocol"))
+            })
+            .cloned()
+            .collect();
+        self.seed_chain(&mut pending, &own, current_package, true);
+    }
+
+    /// Registers each stdlib protocol in `pending` (and, transitively, its
+    /// `extending:` parents) unless the module declares it or the registry
+    /// already holds it. `seeded_only` records the names for
+    /// [`Self::is_seeded_only`].
+    fn seed_chain(
+        &mut self,
+        pending: &mut Vec<EcoString>,
+        own: &std::collections::HashSet<&EcoString>,
+        current_package: Option<&str>,
+        seeded_only: bool,
+    ) {
         while let Some(parent) = pending.pop() {
             if own.contains(&parent) || self.protocols.contains_key(&parent) {
                 continue;
@@ -677,6 +728,9 @@ impl ProtocolRegistry {
             };
             let info = ProtocolInfo::from_definition(def);
             pending.extend(info.extending.clone());
+            if seeded_only {
+                self.seeded_only.insert(info.name.clone());
+            }
             self.protocols.insert(info.name.clone(), info);
         }
     }
@@ -815,6 +869,9 @@ impl ProtocolRegistry {
         );
         let mut found: Option<&EcoString> = None;
         for (name, info) in &self.protocols {
+            if self.is_seeded_only(name) {
+                continue;
+            }
             let selectors = info.all_required_selectors(self);
             if selectors.iter().any(|s| s.as_str() == selector) {
                 if found.is_some() {

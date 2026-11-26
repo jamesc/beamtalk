@@ -260,6 +260,7 @@ impl TypeChecker {
                 if let Some(ref ann) = method.return_type {
                     self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
                 }
+                self.check_bounds_in_body_annotations(&method.body, hierarchy, protocol_registry);
             }
 
             // Check superclass type args (e.g., `Logger(Integer) subclass: SpecialLogger`)
@@ -267,6 +268,10 @@ impl TypeChecker {
                 self.check_bounds_in_type_annotation(arg, hierarchy, protocol_registry);
             }
         }
+
+        // Top-level script / REPL statements (`b :: Boxed(X) := ...`, typed
+        // block parameters)
+        self.check_bounds_in_body_annotations(&module.expressions, hierarchy, protocol_registry);
 
         // Check standalone method definitions
         for standalone in &module.method_definitions {
@@ -278,6 +283,39 @@ impl TypeChecker {
             if let Some(ref ann) = standalone.method.return_type {
                 self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
             }
+            self.check_bounds_in_body_annotations(
+                &standalone.method.body,
+                hierarchy,
+                protocol_registry,
+            );
+        }
+    }
+
+    /// Check bounds on local-variable annotations (`b :: Boxed(X) := …`) in a
+    /// method body, including those in nested blocks (BT-5333).
+    fn check_bounds_in_body_annotations(
+        &mut self,
+        body: &[crate::ast::ExpressionStatement],
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        for statement in body {
+            crate::ast_walker::walk_expression(&statement.expression, &mut |e| match e {
+                crate::ast::Expression::Assignment {
+                    type_annotation: Some(ann),
+                    ..
+                } => {
+                    self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+                }
+                crate::ast::Expression::Block(block) => {
+                    for param in &block.parameters {
+                        if let Some(ann) = &param.type_annotation {
+                            self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+                        }
+                    }
+                }
+                _ => {}
+            });
         }
     }
 
