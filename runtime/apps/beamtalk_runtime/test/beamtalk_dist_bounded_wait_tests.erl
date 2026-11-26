@@ -14,8 +14,8 @@ long as the resolver kept retrying, and `global:register_name/3` for as long
 as another holder kept `global`'s lock. Each test makes the wait real and
 deterministic, with no sleeps:
 
-1. The resolver is pointed at a local UDP socket that never answers, with a
-   long resolver timeout, so an unbounded lookup takes well over ten seconds.
+1. `inet:getaddrs/2` is made to stall for 30 seconds (`meck`, passthrough
+   for every other `inet` function), as a resolver that never answers does.
 2. A helper process holds `global`'s own lock, so an unbounded registration
    never returns.
 
@@ -68,17 +68,20 @@ host_lookup_is_bounded_test_() ->
     {timeout, 60, ?_test(host_lookup_is_bounded())}.
 
 host_lookup_is_bounded() ->
-    %% A DNS server that receives every query and answers none.
-    {ok, Silent} = gen_udp:open(0, [binary, {ip, {127, 0, 0, 1}}, {active, false}]),
-    {ok, Port} = inet:port(Silent),
-    Saved = [{Opt, inet_db:res_option(Opt)} || Opt <- [lookup, nameservers, timeout, retry]],
+    %% A resolver that never answers in time: `inet:getaddrs/2` (the lookup the
+    %% connect policy makes) stalls far longer than the bound. Every other
+    %% `inet` function passes through. A real silent DNS server is not usable
+    %% here: depending on the platform's resolver configuration the lookup
+    %% fails fast instead of waiting on it.
+    ok = meck:new(inet, [unstick, passthrough, no_link]),
     try
-        ok = inet_db:set_lookup([dns]),
-        ok = inet_db:res_option(nameservers, [{{127, 0, 0, 1}, Port}]),
-        %% Unbounded, one lookup per address family would wait 3 x 5 s.
-        ok = inet_db:res_option(timeout, 5000),
-        ok = inet_db:res_option(retry, 3),
-        Node = 'w@bt5192-silent-resolver.example',
+        ok = meck:expect(inet, getaddrs, fun(_Host, _Family) ->
+            receive
+                never -> {error, nxdomain}
+            after 30000 -> {error, timeout}
+            end
+        end),
+        Node = 'w@bt5192-stalled-resolver.example',
         Result = with_app_env(node_resolve_timeout_ms, 300, fun() ->
             call_within(fun() -> beamtalk_node:connect_policy(Node, false) end, ?ANSWER_WITHIN_MS)
         end),
@@ -86,8 +89,7 @@ host_lookup_is_bounded() ->
         %% does not resolve.
         ?assertMatch({error, #beamtalk_error{kind = insecure_distribution}}, Result)
     after
-        [ok = inet_db:res_option(Opt, Value) || {Opt, Value} <- Saved],
-        gen_udp:close(Silent)
+        meck:unload(inet)
     end.
 
 %%====================================================================
