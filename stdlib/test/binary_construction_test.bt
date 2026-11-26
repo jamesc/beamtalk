@@ -220,6 +220,15 @@ TestCase subclass: BinaryConstructionTest
     frame := <<(payload size):16, payload/binary>>
     self assert: frame toBytes equals: #(0, 3, 97, 98, 99)
 
+  testSizeExpressionWithSend =>
+    // BT-5285: a construction size may contain a message send; it is
+    // evaluated before the binary is built (unlike a pattern size, which
+    // must be a guard expression).
+    payload := Binary fromBytes: #(1, 2, 3, 4)
+    head := <<payload:(payload size - 1)/binary>>
+    self assert: head toBytes equals: #(1, 2, 3)
+    self assert: <<7:(payload size * 4)>> bitSize equals: 16
+
   testBitsTailRoundTrip =>
     tail := (Binary fromBytes: #(234)) match: [
       <<_:3, r/bitstring>> -> r;

@@ -300,7 +300,12 @@ expr match: [
 Segment types: `name:8` (8-bit int), `name/binary` (rest as binary),
 `name/bits` (rest as possibly-unaligned bits). Segment values may be integer
 literals (`0:1`); sizes may name an earlier segment (`payload:n/binary`), a
-parameter or local, or a parenthesized expression (`v:(8 - p)`).
+parameter or local, or a parenthesized expression (`v:(8 - p)`). A pattern
+size is evaluated during the match, so it may only use literals, variables and
+`+`, `-`, `*` over them: a message send such as `body:(p size - 1)/binary` is a
+compile error. Bind the value to a variable before the match instead
+(`room := p size - 1`, then `body:(room - pad)/binary`). A size in a binary
+*construction* may contain any expression.
 
 ```beamtalk
 TestCase subclass: Ch14BinaryPatterns

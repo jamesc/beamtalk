@@ -29,6 +29,7 @@ use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{
     Block, Expression, ExpressionStatement, MatchArm, MessageSelector, Pattern, WellKnownSelector,
+    guard_operator_bif,
 };
 use beamtalk_core::source_analysis::Span;
 
@@ -1112,24 +1113,11 @@ impl CoreErlangGenerator {
             } => {
                 let left = self.generate_guard_expression(receiver)?;
                 let right = self.generate_guard_expression(&arguments[0])?;
-                let erlang_op = match op.as_str() {
-                    ">" => ">",
-                    "<" => "<",
-                    ">=" => ">=",
-                    "<=" => "=<",
-                    "=:=" => "=:=",
-                    "/=" => "/=",
-                    "=/=" => "=/=",
-                    "+" => "+",
-                    "-" => "-",
-                    "*" => "*",
-                    "/" => "/",
-                    _ => {
-                        return Err(CodeGenError::UnsupportedFeature {
-                            feature: format!("operator '{op}' in guard expression"),
-                            span: Some(expr.span()),
-                        });
-                    }
+                let Some(erlang_op) = guard_operator_bif(op) else {
+                    return Err(CodeGenError::UnsupportedFeature {
+                        feature: format!("operator '{op}' in guard expression"),
+                        span: Some(expr.span()),
+                    });
                 };
                 Ok(docvec![
                     "call 'erlang':",
