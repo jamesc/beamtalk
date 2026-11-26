@@ -606,3 +606,27 @@ fn cascade_sibling_block_rebinding_drops_narrowing() {
         "a cascade's separator may rebind `line`: {diags:?}"
     );
 }
+
+/// A cascade whose target is a block literal: its `^x` re-runs after a
+/// message's block argument rebinds the local (Claude review on #5869).
+#[test]
+fn cascade_receiver_block_rebinding_drops_narrowing() {
+    let diags = type_messages(
+        r"typed Object subclass: ZzMint
+  readLine: ms :: Integer -> Result(Binary, Object) => Result ok: <<>>
+  readHead: ms :: Integer -> Result(Tuple, Object) =>
+    line := self readLine: ms
+    n := ms
+    line isError ifTrue: [
+      [n > 0 ifTrue: [^line]. n := n - 1. n > 5] whileTrue: [line := self readLine: ms]; yourself
+    ]
+    Result ok: {#head}
+",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|m| m.contains("declares return type Result(Tuple, Object)")),
+        "the cascade's condition block re-runs after the body rebinds `line`: {diags:?}"
+    );
+}

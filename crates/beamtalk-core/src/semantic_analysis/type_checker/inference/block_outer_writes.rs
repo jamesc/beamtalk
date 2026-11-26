@@ -142,8 +142,9 @@ impl TypeChecker {
     /// exactly one arm, so their arms keep the fact.
     ///
     /// `receiver` is `None` where the receiver was already inferred (the
-    /// argument-only pass in `infer_send_arg_types`, which also covers every
-    /// message of a cascade); clearing twice is harmless.
+    /// argument-only pass in `infer_send_arg_types`, which every message of
+    /// a cascade also runs; `infer_cascade` covers the cascade's target and
+    /// all its messages together beforehand). Clearing twice is harmless.
     pub(in crate::semantic_analysis::type_checker) fn forget_error_variants_written_by_send_blocks(
         receiver: Option<&Expression>,
         selector: &crate::ast::MessageSelector,
@@ -166,9 +167,27 @@ impl TypeChecker {
         {
             return;
         }
-        let blocks: Vec<&crate::ast::Block> = receiver
-            .into_iter()
-            .chain(arguments)
+        Self::forget_error_variants_written_by_sibling_blocks(
+            receiver.into_iter().chain(arguments),
+            env,
+        );
+    }
+
+    /// BT-5290: when `exprs` hold two or more block literals that may run
+    /// interleaved, forget the error-variant fact of every local any of them
+    /// writes. Shared by a send's pre-pass above and by a cascade, whose
+    /// target block and every message's block arguments run against one
+    /// another (`[...] whileTrue: [...]; yourself`).
+    pub(in crate::semantic_analysis::type_checker) fn forget_error_variants_written_by_sibling_blocks<
+        'a,
+    >(
+        exprs: impl Iterator<Item = &'a Expression>,
+        env: &mut TypeEnv,
+    ) {
+        if !env.has_result_error_variants() {
+            return;
+        }
+        let blocks: Vec<&crate::ast::Block> = exprs
             .filter_map(|e| match e {
                 Expression::Block(block) => Some(block),
                 _ => None,
