@@ -109,24 +109,34 @@ whereis_class(ClassName) ->
     RegName = registry_name(ClassName),
     erlang:whereis(RegName).
 
--doc "Get all class processes.".
+-doc """
+Get all class processes on this node.
+
+Reads the *local* members of the `beamtalk_classes` group only (BT-5192).
+`pg` synchronises a scope with the same-named scope on every connected node,
+so `pg:get_members/1` would also return every peer's class processes, and
+each caller would then message (or block on) another node's classes; during a
+silent partition that stalls reflection for the call timeout per remote class.
+A class process is always started on the node that loads its module, so the
+local members are exactly this node's classes.
+""".
 -spec all_classes() -> [pid()].
 all_classes() ->
-    pg:get_members(beamtalk_classes).
+    pg:get_local_members(beamtalk_classes).
 
 -doc """
 Fetch all live class entries from the registry.
 
 Returns a list of {Name, ModuleName, Pid} tuples for all registered class
 processes that are still alive. Dead processes (noproc, timeout) are silently
-filtered out. Returns [] if the pg process group is not running (`pg:get_members/1` returns [] for an unstarted scope, it does not exit).
+filtered out. Returns [] if the pg process group is not running (`pg:get_local_members/1` returns [] for an unstarted scope, it does not exit).
 
 Sends no messages to local class processes (BT-3820): name and module come from the
 metadata ETS rows (`class_name_safe/1`, `module_name_safe/1`), and a dead local
 pid is dropped with `is_process_alive/1`. Only local, fully registered classes are
 returned for local members (a class still inside `init/1` is skipped until it
-finishes registering); remote pg members are resolved by call as before, see
-`class_identity/1`. This upholds the class-process
+finishes registering). `all_classes/0` lists this node's classes only, so no
+remote class is ever resolved (BT-5192). This upholds the class-process
 invariant (a class process never makes a blocking call into another class
 process while handling a call); this function runs inside class handlers
 (protocol conformance, process navigation).
@@ -163,14 +173,12 @@ live_class_entries() ->
 %% Liveness is best-effort: a class that dies right after the check is still
 %% reported, exactly as a class dying right after the old call-based read.
 %%
-%% Remote pids DO appear (pg's default scope spans a connected cluster, and the
-%% distribution snapshot walks them), so they keep the pre-BT-3820 behaviour:
-%% the node-local ETS rows cannot name them, so `class_name_safe/1` /
-%% `module_name_safe/1` fall back to a `gen_server:call` and an exit (nodedown,
-%% noproc, timeout) filters the member out. The class-process no-blocking-call
-%% invariant is therefore enforced for local classes only; a cross-node call
-%% cannot form a cycle among this node's class processes unless the peer runs
-%% the same walk against us concurrently (tracked in BT-3826).
+%% A remote pid is skipped without a message (BT-5192): class enumeration is
+%% node-local (`all_classes/0` reads `pg:get_local_members/1`), so a remote pid
+%% only reaches here from a caller passing one in, and the node-local ETS rows
+%% cannot name it. Resolving it by `gen_server:call` cost one blocking call per
+%% peer class (5 s each while the peer was silently partitioned) and broke the
+%% class-process no-blocking-call invariant across nodes.
 -spec class_identity(pid()) -> {ok, class_name(), module()} | skip.
 class_identity(Pid) when node(Pid) =:= node() ->
     case is_process_alive(Pid) of
@@ -187,14 +195,8 @@ class_identity(Pid) when node(Pid) =:= node() ->
                     end
             end
     end;
-class_identity(Pid) ->
-    try
-        Name = beamtalk_object_class_read:class_name_safe(Pid),
-        {ok, Name, beamtalk_object_class:module_name_safe(Pid)}
-    catch
-        %% noconnection/noproc/timeout, or the class dying mid-call.
-        exit:_ -> skip
-    end.
+class_identity(_RemotePid) ->
+    skip.
 
 -doc """
 Return all loaded user classes (those with a source file recorded).
@@ -202,7 +204,7 @@ Return all loaded user classes (those with a source file recorded).
 Excludes stdlib and ClassBuilder-created classes (they have no source file).
 Returns a list of {beamtalk_object, ClassTag, ModuleName, Pid} tuples for
 all user-defined classes that are still alive. Dead processes are silently
-filtered out. Returns [] if the pg process group is not running (`pg:get_members/1` returns [] for an unstarted scope, it does not exit).
+filtered out. Returns [] if the pg process group is not running (`pg:get_local_members/1` returns [] for an unstarted scope, it does not exit).
 """.
 -type user_class_entry() :: {beamtalk_object, atom(), module(), pid()}.
 -spec user_classes() -> [user_class_entry()].
