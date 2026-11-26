@@ -301,6 +301,8 @@ flush_selector_refusals(#{proj_dir := ProjDir}) ->
             #{<<"selector">> => <<"value">>, <<"file">> => <<"a.bt">>},
             #{<<"selector">> => <<"value">>, <<"kind">> => <<"new-class">>},
             #{<<"selector">> => <<>>},
+            #{<<"selector">> => <<"#">>},
+            #{<<"selector">> => <<"#''">>},
             #{<<"selector">> => 42}
         ]
     ),

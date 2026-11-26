@@ -156,7 +156,16 @@ scope(Params) ->
             %% a different axis, so combining them is refused, not ignored.
             case {File, Kind} of
                 {undefined, undefined} ->
-                    {ok, {method, selector_class(Class), bare_selector(Selector)}};
+                    case bare_selector(Selector) of
+                        <<>> ->
+                            {error,
+                                invalid_scope(
+                                    <<"flush: selector must not be empty">>,
+                                    <<"Pass selector as a non-empty String, or omit it.">>
+                                )};
+                        Bare ->
+                            {ok, {method, selector_class(Class), Bare}}
+                    end;
                 _ ->
                     {error,
                         invalid_scope(

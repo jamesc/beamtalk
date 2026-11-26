@@ -81,10 +81,10 @@ impl BeamtalkMcp {
             "tool invoked"
         );
 
-        let selector = params
-            .selector
-            .as_deref()
-            .map(|s| s.strip_prefix('#').unwrap_or(s).trim_matches('\''));
+        let selector = params.selector.as_deref().map(|s| {
+            let s = s.trim();
+            s.strip_prefix('#').unwrap_or(s).trim_matches('\'')
+        });
         if selector.is_some_and(str::is_empty) {
             return Err(rmcp::ErrorData::invalid_params(
                 "flush: 'selector' must not be empty — omit it to flush everything.",

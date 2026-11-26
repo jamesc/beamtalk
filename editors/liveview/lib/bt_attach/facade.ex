@@ -675,7 +675,9 @@ defmodule BtAttach.Facade do
   # the operation's: only a boolean `true` applies the destructive tier.
   defp invoke(:flush, params, _ctx),
     do:
-      client().flush(Keyword.new(Map.take(params, [:class, :file, :kind, :selector, :confirm_destructive])))
+      client().flush(
+        Keyword.new(Map.take(params, [:class, :file, :kind, :selector, :confirm_destructive]))
+      )
 
   # BT-5204: the workspace's version, node, workspace id and settings, through
   # the `info` operation.

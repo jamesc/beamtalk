@@ -102,7 +102,10 @@ pub fn flush_scope_for(arg: &str) -> Option<ReplFlushScope> {
         return (!path.is_empty() && !path.contains('"'))
             .then(|| ReplFlushScope::File(path.to_string()));
     }
-    if let Some((class, selector)) = arg.split_once(">>") {
+    if let Some((class, selector)) = arg
+        .split_once(">>")
+        .filter(|(class, _)| !class.trim_start().starts_with('#'))
+    {
         let class = class.trim();
         let selector = selector.trim().strip_prefix('#')?.trim().trim_matches('\'');
         return (is_class_name(class) && is_selector(selector))
@@ -353,6 +356,12 @@ mod tests {
             ("#increment", Some(Selector("increment".to_string()))),
             ("#'at:put:'", Some(Selector("at:put:".to_string()))),
             ("#+", Some(Selector("+".to_string()))),
+            ("#>>", Some(Selector(">>".to_string()))),
+            ("#'>>'", Some(Selector(">>".to_string()))),
+            (
+                "Counter>>#>>",
+                Some(ClassSelector("Counter".to_string(), ">>".to_string())),
+            ),
             (
                 "Counter>>#increment",
                 Some(ClassSelector(
