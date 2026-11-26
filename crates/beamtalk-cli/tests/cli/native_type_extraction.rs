@@ -13,6 +13,7 @@
 //! bare `Result` instead of the parameterized `Result(T, E)`.
 
 use crate::cli_common;
+use predicates::prelude::PredicateBooleanExt;
 
 #[test]
 fn native_sibling_type_reference_resolves_after_build() {
@@ -86,4 +87,52 @@ fn native_sibling_type_reference_resolves_after_build() {
         "expected native_thing:get/0 to resolve to Result(NativeThingResponse, Exception); \
          type cache contents:\n{combined}"
     );
+}
+
+/// BT-5342: `check` on a clean tree must see the `-spec`s of the package's
+/// own `native/*.erl`, exactly as it does after a build. Before the fix the
+/// FFI call was inferred as Dynamic and a `typed` class warned "untyped FFI",
+/// so `check --warnings-as-errors` depended on whether `_build` existed.
+#[test]
+fn check_on_clean_tree_sees_own_native_specs() {
+    let project = cli_common::fixture_project();
+    std::fs::create_dir_all(project.path().join("native")).unwrap();
+    std::fs::write(
+        project.path().join("native/probe_native.erl"),
+        "%% Copyright 2026 James Casey\n\
+         %% SPDX-License-Identifier: Apache-2.0\n\
+         -module(probe_native).\n\
+         -export([reset/1]).\n\
+         \n\
+         -spec reset(term()) -> nil.\n\
+         reset(_Self) -> nil.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("src/Probe.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         typed Object subclass: Probe\n\
+         \n\
+         \x20\x20reset -> Nil =>\n\
+         \x20\x20\x20\x20(Erlang probe_native) reset: self\n",
+    )
+    .unwrap();
+    assert!(
+        !project
+            .path()
+            .join("_build")
+            .join("dev")
+            .join("native")
+            .exists(),
+        "fixture must start without built native artifacts"
+    );
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["check", "--warnings-as-errors"])
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("untyped FFI").not());
 }

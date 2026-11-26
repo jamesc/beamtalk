@@ -209,8 +209,7 @@ pub(crate) struct Pass2Inputs {
 /// Resolve the Pass 2 inputs: the project-known Erlang modules (BT-4022) and
 /// the ADR 0075 type registry with its stub diagnostics. Call it after native
 /// compilation so freshly compiled native modules and dependency ebins are
-/// visible; `check` calls it without compiling anything and reads only
-/// already-built artifacts.
+/// visible; `check` compiles the native sources first too (BT-5342).
 pub(crate) fn pass2_inputs(
     env: &BuildEnvironment,
     dep_ctx: &DependencyContext,
