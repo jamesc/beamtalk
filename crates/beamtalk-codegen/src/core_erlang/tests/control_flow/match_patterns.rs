@@ -744,3 +744,108 @@ fn test_match_guarded_type_patterns_use_guard_position_case() {
         );
     }
 }
+
+// ── BT-5301: list patterns in `match:` arms and destructuring ─────────
+
+/// Codegen for `src` (which must parse cleanly), for list-pattern tests.
+fn list_pattern_core(src: &str) -> String {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (_, diags) = beamtalk_core::source_analysis::parse(tokens);
+    assert!(diags.is_empty(), "parse diagnostics: {diags:?}");
+    codegen_named(src, "foo")
+}
+
+#[test]
+fn test_match_list_patterns_lower_to_native_list_patterns() {
+    // `#()`, `#(a)`, `#(a, b | rest)` are native Core Erlang list patterns in
+    // one `case` (the all-native fast path), each with its exact shape.
+    let code = list_pattern_core(
+        "Object subclass: Foo\n  test: xs =>\n    xs match: [\n      #() -> 0;\n      #(a) -> a;\n      #(a, b | rest) -> a + b\n    ]\n",
+    );
+    assert_has(
+        "native list patterns",
+        &code,
+        &[
+            "<[]> when 'true'",
+            "<[A@]> when 'true'",
+            "<[A@, B@ | Rest@]> when 'true'",
+        ],
+    );
+}
+
+#[test]
+fn test_match_nested_cons_pattern_lowers_to_nested_native_list() {
+    let code = list_pattern_core(
+        "Object subclass: Foo\n  test: xs =>\n    xs match: [#(a | #(b | t)) -> b; _ -> 0]\n",
+    );
+    assert_has("nested cons", &code, &["<[A@ | [B@ | T@]]>"]);
+}
+
+#[test]
+fn test_match_type_pattern_nested_in_list_pattern_lowers_after_shape_match() {
+    // BT-5294 x BT-5301: `n :: Integer` inside a list pattern is hoisted to a
+    // plain variable in the native list pattern and class-tested afterwards.
+    let code = list_pattern_core(
+        "Object subclass: Foo\n  test: xs =>\n    xs match: [#(n :: Integer | _) -> n; _ -> 0]\n",
+    );
+    let shape_at = code.find("<[N@ |").expect("native cons pattern binding N");
+    let test_at = code.find("'erlang':'is_integer'").expect("is_integer test");
+    assert!(
+        shape_at < test_at,
+        "shape match must precede the type test. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_cons_destructure_binds_all_variables_from_one_native_case() {
+    let code =
+        list_pattern_core("Object subclass: Foo\n  test: xs =>\n    #(h | t) := xs\n    h\n");
+    assert_has(
+        "one case binds both variables, a miss raises #pattern_mismatch",
+        &code,
+        &[
+            "let <H@, T@> = case ",
+            "<[H@ | T@]> when 'true' -> <H@, T@>",
+            "'pattern_mismatch'",
+        ],
+    );
+}
+
+#[test]
+fn test_nested_and_annotated_cons_destructure() {
+    // A nested tail list is part of the native pattern; `k :: Integer` binds
+    // like `k` (a trusted annotation, not a runtime test, BT-5284).
+    let code = list_pattern_core(
+        "Object subclass: Foo\n  test: xs =>\n    #(k :: Integer | #(b | t)) := xs\n    k + b\n",
+    );
+    assert_has(
+        "nested cons",
+        &code,
+        &["<[K@ | [B@ | T@]]> when 'true' -> <K@, B@, T@>"],
+    );
+    assert_lacks("no runtime class test", &code, &["'is_integer'"]);
+}
+
+#[test]
+fn test_empty_list_destructure_checks_emptiness() {
+    let code = list_pattern_core("Object subclass: Foo\n  test: xs =>\n    #() := xs\n    0\n");
+    assert_has(
+        "an empty-list match",
+        &code,
+        &["<[]> when 'true' -> 'ok'", "'pattern_mismatch'"],
+    );
+}
+
+#[test]
+fn test_list_destructure_rejects_nested_array_pattern() {
+    let src = "Object subclass: Foo\n  test: xs =>\n    #(#[a] | t) := xs\n    a\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, diags) = beamtalk_core::source_analysis::parse(tokens);
+    assert!(diags.is_empty(), "parse diagnostics: {diags:?}");
+    let err = generate_module(&module, CodegenOptions::new("foo"))
+        .expect_err("an array nested in a list destructure is not native");
+    assert!(
+        format!("{err:?}").contains("nested in a list destructure"),
+        "{err:?}"
+    );
+}

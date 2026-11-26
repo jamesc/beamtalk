@@ -36,6 +36,8 @@ pub(crate) enum WellKnownClass {
     /// Positional tuple type — `Tuple(T1, ..., Tn)` for any `n >= 0`
     /// (variadic, not a fixed type-param list; BT-2254, ADR 0136, BT-4220).
     Tuple,
+    /// Linked list type — `List(T)` (BT-5301: list patterns type from it).
+    List,
     /// Integer literal type.
     Integer,
     /// String literal type.
@@ -69,6 +71,7 @@ impl WellKnownClass {
             Self::Nil => "Nil",
             Self::Block => "Block",
             Self::Tuple => "Tuple",
+            Self::List => "List",
             Self::Integer => "Integer",
             Self::String => "String",
             Self::Boolean => "Boolean",
@@ -101,6 +104,7 @@ impl WellKnownClass {
             "Nil" => Some(Self::Nil),
             "Block" => Some(Self::Block),
             "Tuple" => Some(Self::Tuple),
+            "List" => Some(Self::List),
             "Integer" => Some(Self::Integer),
             "String" => Some(Self::String),
             "Boolean" => Some(Self::Boolean),
@@ -149,6 +153,7 @@ mod tests {
             WellKnownClass::Nil,
             WellKnownClass::Block,
             WellKnownClass::Tuple,
+            WellKnownClass::List,
             WellKnownClass::Integer,
             WellKnownClass::String,
             WellKnownClass::Boolean,

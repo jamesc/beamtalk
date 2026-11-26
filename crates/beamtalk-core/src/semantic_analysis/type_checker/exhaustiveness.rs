@@ -392,6 +392,10 @@ impl TypeChecker {
             && Self::arms_use_nil_or_type_pattern(arms)
         {
             Self::nil_or_type_match_residual(scrutinee_ty, arms, hierarchy)
+        } else if Self::is_list_pattern_match(scrutinee_ty, arms) {
+            // BT-5301: a `List` is `#()` or `#(h | t)`.
+            self.check_list_asserted(arms, match_span);
+            return;
         } else if Self::is_result_constructor_match(scrutinee_ty, arms) {
             // BT-5278: `Result(T, E)` is a closed pair (`ok:` / `error:`).
             self.check_result_asserted(arms, match_span);
@@ -437,6 +441,108 @@ impl TypeChecker {
             .with_hint(
                 "Add an arm for the remaining case(s), or a `_ ->` wildcard \
                  to handle them."
+                    .to_string(),
+            )
+            .with_category(DiagnosticCategory::Type),
+        );
+    }
+
+    /// BT-5301: scrutinee is a `List` (any element type) and every arm is a
+    /// list pattern, a wildcard, or a variable binding.
+    fn is_list_pattern_match(scrutinee_ty: &InferredType, arms: &[MatchArm]) -> bool {
+        matches!(scrutinee_ty, InferredType::Known { class_name, .. }
+            if WellKnownClass::List.is(class_name))
+            && arms
+                .iter()
+                .any(|a| matches!(a.pattern, Pattern::List { .. }))
+            && arms.iter().all(|a| {
+                matches!(
+                    a.pattern,
+                    Pattern::List { .. } | Pattern::Wildcard(_) | Pattern::Variable(_)
+                )
+            })
+    }
+
+    /// BT-5301: the list lengths an unguarded arm pattern matches whatever
+    /// the elements are, or `None` when the arm is refutable for some list
+    /// of its length (a literal, tuple or type element, a guard). A nested
+    /// tail list (`#(a | #(b | t))`) counts as its flattened form
+    /// (`#(a, b | t)`).
+    fn list_arm_coverage(pattern: &Pattern) -> Option<ListCoverage> {
+        let irrefutable = |p: &Pattern| matches!(p, Pattern::Wildcard(_) | Pattern::Variable(_));
+        match pattern {
+            Pattern::Wildcard(_) | Pattern::Variable(_) => Some(ListCoverage::AtLeast(0)),
+            Pattern::List { elements, tail, .. } => {
+                if !elements.iter().all(irrefutable) {
+                    return None;
+                }
+                let n = elements.len();
+                match tail.as_deref() {
+                    None => Some(ListCoverage::Exactly(n)),
+                    Some(t) => Self::list_arm_coverage(t).map(|inner| inner.shifted(n)),
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// BT-5301: `matchExhaustive:` over a `List`.
+    ///
+    /// Each unguarded arm covers either exactly `n` elements (`#()`,
+    /// `#(a, b)`) or at least `n` (`#(h | t)`, `_`). The match is exhaustive
+    /// when every length below the smallest open arm's `n` has an exact arm,
+    /// so `#()` plus `#(h | t)` is exhaustive. An arm seen after full coverage
+    /// is flagged unreachable. The missing shapes are named in the error.
+    fn check_list_asserted(&mut self, arms: &[MatchArm], match_span: Span) {
+        let mut exact: Vec<usize> = Vec::new();
+        let mut open: Option<usize> = None;
+        let is_full = |exact: &[usize], open: Option<usize>| {
+            open.is_some_and(|m| (0..m).all(|k| exact.contains(&k)))
+        };
+        for arm in arms {
+            if is_full(&exact, open) {
+                self.diagnostics.push(
+                    Diagnostic::warning(
+                        "unreachable arm: the arms above already cover every `List`",
+                        arm.pattern.span(),
+                    )
+                    .with_category(DiagnosticCategory::Type),
+                );
+                continue;
+            }
+            if arm.guard.is_some() {
+                continue;
+            }
+            match Self::list_arm_coverage(&arm.pattern) {
+                Some(ListCoverage::Exactly(n)) => exact.push(n),
+                Some(ListCoverage::AtLeast(n)) => open = Some(open.map_or(n, |m| m.min(n))),
+                None => {}
+            }
+        }
+        if is_full(&exact, open) {
+            return;
+        }
+        let bound = open.unwrap_or_else(|| exact.iter().max().map_or(0, |m| m + 1));
+        let mut missing: Vec<String> = (0..bound)
+            .filter(|k| !exact.contains(k))
+            .map(|k| ListCoverage::Exactly(k).display())
+            .collect();
+        if open.is_none() {
+            missing.push(ListCoverage::AtLeast(bound).display());
+        }
+        let missing_str = missing
+            .iter()
+            .map(|m| format!("`{m}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!("non-exhaustive matchExhaustive: `List` shape {missing_str} not handled"),
+                match_span,
+            )
+            .with_hint(
+                "Add an arm for each missing shape, e.g. `#() -> ...` and `#(h | t) -> ...`, \
+                 or a `_ ->` wildcard."
                     .to_string(),
             )
             .with_category(DiagnosticCategory::Type),
@@ -706,5 +812,34 @@ impl TypeChecker {
             .map(|m| format!("`{m}`"))
             .collect::<Vec<_>>()
             .join(", ")
+    }
+}
+
+/// BT-5301: the list lengths one `matchExhaustive:` arm covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ListCoverage {
+    /// A list of exactly this many elements (`#()`, `#(a, b)`).
+    Exactly(usize),
+    /// A list of at least this many elements (`#(h | t)`, `_`).
+    AtLeast(usize),
+}
+
+impl ListCoverage {
+    /// The coverage of a pattern behind `n` more leading elements.
+    fn shifted(self, n: usize) -> Self {
+        match self {
+            Self::Exactly(k) => Self::Exactly(k + n),
+            Self::AtLeast(k) => Self::AtLeast(k + n),
+        }
+    }
+
+    /// The list pattern that covers exactly this shape: `#()`,
+    /// `#(_, _)`, `#(_ | _)`.
+    fn display(self) -> String {
+        match self {
+            Self::Exactly(n) => format!("#({})", vec!["_"; n].join(", ")),
+            Self::AtLeast(0) => "_".to_string(),
+            Self::AtLeast(n) => format!("#({} | _)", vec!["_"; n].join(", ")),
+        }
     }
 }

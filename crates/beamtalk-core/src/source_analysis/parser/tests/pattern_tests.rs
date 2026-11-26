@@ -891,3 +891,168 @@ fn parse_constructor_binding_array_nested_in_tuple_rejected() {
         "got: {diags:?}"
     );
 }
+
+// ── List patterns: `#()`, `#(a, b)`, `#(h | t)` (BT-5301) ─────────────
+
+/// The pattern of each arm of the single `match:` in `src`, which must parse
+/// with no diagnostics.
+fn arm_patterns(src: &str) -> Vec<Pattern> {
+    let (module, diags) = parse_source(src);
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!(
+            "expected Expression::Match, got {:?}",
+            module.expressions[0]
+        );
+    };
+    arms.iter().map(|a| a.pattern.clone()).collect()
+}
+
+/// `(element count, tail)` of a `Pattern::List`, panicking otherwise.
+fn list_shape(pattern: &Pattern) -> (usize, Option<&Pattern>) {
+    match pattern {
+        Pattern::List { elements, tail, .. } => (elements.len(), tail.as_deref()),
+        other => panic!("expected Pattern::List, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_list_patterns_in_match_arms() {
+    let arms = arm_patterns(
+        "xs match: [#() -> 0; #(a) -> a; #(a, b) -> b; #(h | t) -> h; #(a, b | rest) -> a]",
+    );
+    assert_eq!(list_shape(&arms[0]), (0, None));
+    assert_eq!(list_shape(&arms[1]), (1, None));
+    assert_eq!(list_shape(&arms[2]), (2, None));
+    let (n, tail) = list_shape(&arms[3]);
+    assert_eq!(n, 1);
+    assert!(matches!(tail, Some(Pattern::Variable(id)) if id.name == "t"));
+    let (n, tail) = list_shape(&arms[4]);
+    assert_eq!(n, 2);
+    assert!(matches!(tail, Some(Pattern::Variable(id)) if id.name == "rest"));
+}
+
+#[test]
+fn parse_nested_list_pattern_tail_and_elements() {
+    let arms =
+        arm_patterns("xs match: [#(a | #(b | t)) -> a; #(#(x, y) | _) -> x; #({#ok, v} | _) -> v]");
+    let (n, tail) = list_shape(&arms[0]);
+    assert_eq!(n, 1);
+    let (inner_n, inner_tail) = list_shape(tail.expect("a tail"));
+    assert_eq!(inner_n, 1);
+    assert!(matches!(inner_tail, Some(Pattern::Variable(id)) if id.name == "t"));
+    let Pattern::List { elements, .. } = &arms[1] else {
+        unreachable!()
+    };
+    assert_eq!(list_shape(&elements[0]), (2, None));
+    let Pattern::List { elements, .. } = &arms[2] else {
+        unreachable!()
+    };
+    assert!(matches!(elements[0], Pattern::Tuple { .. }));
+}
+
+#[test]
+fn parse_list_pattern_with_nested_type_patterns() {
+    // BT-5294: `x :: T` is a sub-pattern of a list pattern, element or tail.
+    let arms = arm_patterns(
+        "xs match: [#(n :: Integer | t) -> n; #(_ :: String, s :: String) -> s; #(h | t :: List) -> h]",
+    );
+    let Pattern::List { elements, .. } = &arms[0] else {
+        unreachable!()
+    };
+    assert!(matches!(&elements[0], Pattern::Type { binding, class, .. }
+        if binding.name == "n" && class.name == "Integer"));
+    let Pattern::List { elements, .. } = &arms[1] else {
+        unreachable!()
+    };
+    assert!(matches!(&elements[0], Pattern::Type { binding, .. } if binding.name == "_"));
+    let (_, tail) = list_shape(&arms[2]);
+    assert!(matches!(tail, Some(Pattern::Type { class, .. }) if class.name == "List"));
+}
+
+#[test]
+fn parse_list_pattern_trailing_comma() {
+    let arms = arm_patterns("xs match: [#(a, b,) -> a; _ -> 0]");
+    assert_eq!(list_shape(&arms[0]), (2, None));
+}
+
+#[test]
+fn parse_list_pattern_ellipsis_rest_is_one_targeted_error() {
+    let (_module, diags) = parse_source("xs match: [#(a, ...rest) -> a; _ -> 0]");
+    assert_eq!(diags.len(), 1, "expected one diagnostic, got: {diags:?}");
+    assert!(diags[0].message.contains("tail with `|`"), "got: {diags:?}");
+}
+
+#[test]
+fn parse_list_pattern_pipe_without_head_is_one_targeted_error() {
+    let (_module, diags) = parse_source("xs match: [#(| t) -> t; _ -> 0]");
+    assert_eq!(diags.len(), 1, "expected one diagnostic, got: {diags:?}");
+    assert!(
+        diags[0].message.contains("at least one element"),
+        "got: {diags:?}"
+    );
+}
+
+/// The pattern of the destructuring assignment `src`, which must parse with
+/// no diagnostics.
+fn destructure_pattern(src: &str) -> Pattern {
+    let (module, diags) = parse_source(src);
+    assert!(
+        diags.is_empty(),
+        "unexpected diagnostics for {src}: {diags:?}"
+    );
+    let Expression::DestructureAssignment { pattern, .. } = &module.expressions[0].expression
+    else {
+        panic!(
+            "expected a destructuring assignment, got {:?}",
+            module.expressions[0]
+        );
+    };
+    pattern.clone()
+}
+
+#[test]
+fn parse_cons_destructure_is_a_list_pattern() {
+    let cons = destructure_pattern("#(h | t) := xs");
+    let (n, tail) = list_shape(&cons);
+    assert_eq!(n, 1);
+    assert!(matches!(tail, Some(Pattern::Variable(id)) if id.name == "t"));
+    let two = destructure_pattern("#(a, b | rest) := xs");
+    assert_eq!(list_shape(&two).0, 2);
+    let nested = destructure_pattern("#(a | #(b | t)) := xs");
+    let (_, tail) = list_shape(&nested);
+    assert_eq!(list_shape(tail.expect("a tail")).0, 1);
+    let empty = destructure_pattern("#() := xs");
+    assert_eq!(list_shape(&empty), (0, None));
+    let typed = destructure_pattern("#(h :: Integer | t) := xs");
+    assert!(list_shape(&typed).1.is_some());
+}
+
+#[test]
+fn parse_fixed_list_destructure_keeps_positional_array_form() {
+    // A fixed-length `#(a, b) := xs` keeps its positional `at:` meaning,
+    // annotated (now through the pattern parser) or not.
+    for src in ["#(a, b) := xs", "#(a :: Integer, b) := xs"] {
+        assert!(
+            matches!(
+                destructure_pattern(src),
+                Pattern::Array {
+                    list_syntax: true,
+                    rest: None,
+                    ..
+                }
+            ),
+            "{src}"
+        );
+    }
+}
+
+#[test]
+fn parse_cons_literal_is_still_an_expression() {
+    let (module, diags) = parse_source("#(0 | tail) size");
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    assert!(matches!(
+        module.expressions[0].expression,
+        Expression::MessageSend { .. }
+    ));
+}

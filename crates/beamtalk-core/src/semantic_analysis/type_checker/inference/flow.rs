@@ -72,6 +72,7 @@ impl TypeChecker {
         // Variables are bound by the fallback first so every name is
         // defined; typed positions then overwrite their entry.
         Self::bind_pattern_vars(pattern, env);
+        Self::bind_list_pattern_types(pattern, value_ty, hierarchy, env);
         let Pattern::Tuple { elements, .. } = pattern else {
             return;
         };
@@ -88,6 +89,55 @@ impl TypeChecker {
                 };
                 env.set_local(id.name.clone(), bound);
             }
+        }
+    }
+
+    /// Type the variables of a list pattern (BT-5301) from a `List(T)` value:
+    /// each element variable is `T`, the tail variable is `List(T)`, and a
+    /// nested list pattern in the tail recurses. `Nil` is dropped from the
+    /// value type (a nil value does not match a list pattern). A value that
+    /// is not a parameterised `List`, or an `Object`/`Dynamic`/unresolved
+    /// element type, leaves the variables `Dynamic`, like a tuple position.
+    pub(in crate::semantic_analysis::type_checker) fn bind_list_pattern_types(
+        pattern: &Pattern,
+        value_ty: &InferredType,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+    ) {
+        let Pattern::List { elements, tail, .. } = pattern else {
+            return;
+        };
+        let list_ty = Self::non_nil_type(value_ty);
+        let InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } = &list_ty
+        else {
+            return;
+        };
+        if class_name != WellKnownClass::List.as_str() || type_args.len() != 1 {
+            return;
+        }
+        let element_ty = &type_args[0];
+        if Self::is_dynamic_position(element_ty, hierarchy) {
+            return;
+        }
+        for element in elements {
+            match element {
+                Pattern::Variable(id) => env.set_local(id.name.clone(), element_ty.clone()),
+                Pattern::List { .. } => {
+                    Self::bind_list_pattern_types(element, element_ty, hierarchy, env);
+                }
+                _ => {}
+            }
+        }
+        match tail.as_deref() {
+            Some(Pattern::Variable(id)) => env.set_local(id.name.clone(), list_ty.clone()),
+            Some(nested @ Pattern::List { .. }) => {
+                Self::bind_list_pattern_types(nested, &list_ty, hierarchy, env);
+            }
+            _ => {}
         }
     }
 
@@ -209,6 +259,11 @@ impl TypeChecker {
             }
             Pattern::Array { elements, .. } => {
                 for e in elements {
+                    Self::collect_type_patterns(e, &mut |b, c, _| visit(b, c, None));
+                }
+            }
+            Pattern::List { elements, tail, .. } => {
+                for e in elements.iter().chain(tail.as_deref()) {
                     Self::collect_type_patterns(e, &mut |b, c, _| visit(b, c, None));
                 }
             }
@@ -696,6 +751,14 @@ impl TypeChecker {
                 // ADR 0147: a map pattern types its variables from a shape
                 // scrutinee.
                 self.bind_map_pattern_types(&arm.pattern, &residual_scrutinee_ty, &mut arm_env);
+                // BT-5301: a list pattern types its variables from a
+                // `List(T)` scrutinee.
+                Self::bind_list_pattern_types(
+                    &arm.pattern,
+                    &residual_scrutinee_ty,
+                    hierarchy,
+                    &mut arm_env,
+                );
 
                 // ADR 0107 Phase A: a `binding :: ClassName`
                 // arm narrows `binding` to `ClassName`, computed the

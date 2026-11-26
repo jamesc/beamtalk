@@ -163,18 +163,6 @@ impl CoreErlangGenerator {
 
         // Guard against unsupported pattern forms reaching array-match codegen.
         for arm in arms {
-            if let Pattern::Array {
-                list_syntax: true,
-                span,
-                ..
-            } = &arm.pattern
-            {
-                return Err(CodeGenError::UnsupportedFeature {
-                    feature: "List-syntax pattern `#(...)` in match: arm is not yet supported"
-                        .to_string(),
-                    span: Some(*span),
-                });
-            }
             // Rest patterns in match arms are not yet supported (rest is only
             // supported in destructuring assignments).
             if let Pattern::Array {

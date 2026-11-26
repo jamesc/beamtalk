@@ -1452,9 +1452,9 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
             let elem_docs: Vec<Document<'static>> = elements.iter().map(unparse_pattern).collect();
             let joined = join_docs(elem_docs, ", ");
             if let Some(t) = tail {
-                docvec!["[", joined, " | ", unparse_pattern(t), "]"]
+                docvec!["#(", joined, " | ", unparse_pattern(t), ")"]
             } else {
-                docvec!["[", joined, "]"]
+                docvec!["#(", joined, ")"]
             }
         }
         Pattern::Binary { segments, .. } => unparse_binary_segments(segments, unparse_pattern),

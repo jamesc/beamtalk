@@ -1974,8 +1974,8 @@ tail := #(1, 2, 3)
 #(1 | #())         // => #(1)
 ```
 
-This is a literal form only. There is no cons *pattern* yet: `#(h | t)` is a parse error in a
-`match:` arm or on the left of `:=`. See [Not Yet Supported](#not-yet-supported).
+The same form is a pattern, in a `match:` arm and on the left of `:=`: see
+[List Patterns](#list-patterns-bt-5301).
 
 ### Tuple Literals (ADR 0136)
 
@@ -5507,7 +5507,7 @@ value match: [
 
 For exhaustiveness checking, a `b :: Binary` arm covers a `String` member of the scrutinee type, but a `Binary` member is not treated as a closed leaf (so `matchExhaustive:` over a `Binary | Nil` scrutinee cannot be proven; use `match:`).
 
-**Type patterns nest, and `_ :: T` binds nothing (BT-5294).** `x :: T` is a sub-pattern of a tuple, map, `Result ok:`/`error:` constructor, or array pattern, so "a pair whose second element is an `Integer`" is one arm: `info match: [{_, port :: Integer} -> port; _ -> 0]`, `r match: [Result ok: n :: Integer -> n; _ -> 0]`, `#[h :: Integer, t]`. `_ :: T` tests the class without naming the value: `error match: [_ :: ExitError -> #exit; _ -> #error]`. In a `match:` arm a nested test is the same runtime class test as a top-level `x :: T` (in a `:=` destructuring, `x :: T` stays an unchecked annotation, BT-5284). The shape (tuple size, constructor tag, map keys) matches first; then each type test runs in source order, left to right; then the arm's `when:` guard runs with every binding in scope (the type checker narrows each nested `x :: T` to `T` inside the arm, like a top-level `x :: T` arm, BT-5332), so a guard such as `n > 5` never sees a value the type test rejected. A miss at any step falls through to the next arm. Not supported: a type pattern in a pattern that also nests a binary pattern, in a `#( ... )` list pattern, or as a `nil`/`true`/`false` annotation.
+**Type patterns nest, and `_ :: T` binds nothing (BT-5294).** `x :: T` is a sub-pattern of a tuple, map, `Result ok:`/`error:` constructor, or array pattern, so "a pair whose second element is an `Integer`" is one arm: `info match: [{_, port :: Integer} -> port; _ -> 0]`, `r match: [Result ok: n :: Integer -> n; _ -> 0]`, `#[h :: Integer, t]`. `_ :: T` tests the class without naming the value: `error match: [_ :: ExitError -> #exit; _ -> #error]`. In a `match:` arm a nested test is the same runtime class test as a top-level `x :: T` (in a `:=` destructuring, `x :: T` stays an unchecked annotation, BT-5284). The shape (tuple size, constructor tag, map keys) matches first; then each type test runs in source order, left to right; then the arm's `when:` guard runs with every binding in scope (the type checker narrows each nested `x :: T` to `T` inside the arm, like a top-level `x :: T` arm, BT-5332), so a guard such as `n > 5` never sees a value the type test rejected. A miss at any step falls through to the next arm. It nests in a `#( ... )` list pattern too, element or tail: `#(n :: Integer | rest)` (BT-5301). Not supported: a type pattern in a pattern that also nests a binary pattern, or as a `nil`/`true`/`false` annotation.
 
 Four runtime-representation nuances (see ADR 0107 Implementation for the full codegen rationale):
 - **`Supervisor`/`DynamicSupervisor` subclasses use a distinct runtime shape.** A live supervisor reference is a 4-tuple tagged `'beamtalk_supervisor'` (not `'beamtalk_object'` like Actor subclasses, and not a tagged map like Value subclasses). `x :: MySupervisorSubclass` compiles to a tuple-tag check accepting `'beamtalk_supervisor'` at `element(1)` before comparing `element(2)` against the class name (BT-2870).
@@ -5532,6 +5532,7 @@ Four runtime-representation nuances (see ADR 0107 Implementation for the full co
 | Variable | `x` | Binds matched value to name |
 | Tuple | `{a, b}` | Destructure tuple in assignment and match arms (`{a, b}` is also a tuple literal expression — see Tuple Literals) |
 | Array | `#[a, b]` | Match and destructure an Array by exact size; nested arrays supported; element names must be distinct in destructuring (BT-5052) |
+| List | `#()`, `#(a, b)`, `#(h \| t)`, `#(a, b \| rest)` | Match a List: without `\|`, exactly that many elements; with it, at least that many, the tail binding the rest. Elements and tail are full patterns, so lists nest (`#(a \| #(b \| t))`). See [List Patterns](#list-patterns-bt-5301) (BT-5301) |
 | Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only); the rest name must not repeat an element name (BT-5050) |
 | Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
@@ -5637,7 +5638,7 @@ t match: [{#ok, v} -> v; {#error, _} -> 0]
 
 **Destructured locals are typed (BT-4487):** in a destructuring assignment, a plain-variable element of a tuple pattern takes the type of the matching position of a `Tuple(A, B)` right-hand side, the same as `t at: i` with a literal index. An `Object`, `Dynamic` or unresolved-generic position stays `Dynamic`. A right-hand side that is not a same-arity tuple (a bare `Tuple`, a different arity, a mixed union) binds `Dynamic`. A narrower declared type than the position can prove draws the usual type-mismatch warning, so narrow first with `isKindOf:`.
 
-**Annotated elements (BT-5284):** a tuple, array or map destructuring element may carry `name :: Type`, the same `::` form as the match-arm type pattern: `{_, sid :: Integer, es :: Boolean} := frame`, `#[a :: Integer, b] := xs`, `#{#id => i :: Integer} := m`. Here the annotation is the declared type of the local, trusted exactly like `x :: T := expr`: it is not a runtime class test (a match arm's `x :: T` is), so a value of another class still binds. A tuple position whose type is known and clashes with the annotation draws the usual assignment type-mismatch warning. Annotations in `#( ... )` list patterns and on a `...rest` element are not supported.
+**Annotated elements (BT-5284):** a tuple, array or map destructuring element may carry `name :: Type`, the same `::` form as the match-arm type pattern: `{_, sid :: Integer, es :: Boolean} := frame`, `#[a :: Integer, b] := xs`, `#{#id => i :: Integer} := m`. Here the annotation is the declared type of the local, trusted exactly like `x :: T := expr`: it is not a runtime class test (a match arm's `x :: T` is), so a value of another class still binds. A tuple position whose type is known and clashes with the annotation draws the usual assignment type-mismatch warning. A `#( ... )` list destructure takes them too (`#(n :: Integer | t) := xs`, `#(a :: Integer, b) := xs`, BT-5301). Annotations on a `...rest` element are not supported.
 
 **Pattern failures (BT-3943):** a destructuring assignment whose tuple size, literal slot or array shape does not match, and a `match:` with no matching arm, raise a structured `#pattern_mismatch` error (class `RuntimeError`, the offending value in the error details). A map destructure with a missing key raises `#key_error` instead.
 
@@ -5645,6 +5646,63 @@ t match: [{#ok, v} -> v; {#error, _} -> 0]
 [{#ok, _v} := {#error, 42}] on: Error do: [:e | e kind]
 // => #pattern_mismatch
 ```
+
+### List Patterns (BT-5301)
+
+`#( ... )` is a pattern as well as a literal: the pattern form of the list literal and of its
+cons form `#(head | tail)` ([List Cons Literal](#list-cons-literal), ADR 0012). It matches a
+`List` (an Erlang list) and nothing else: not an Array, a Tuple, a String or `nil`.
+
+| Pattern | Matches |
+|---------|---------|
+| `#()` | the empty list |
+| `#(a)`, `#(a, b)` | a list of exactly one, two, ... elements |
+| `#(h \| t)` | a list of at least one element; `t` is the rest (possibly `#()`) |
+| `#(a, b \| rest)` | a list of at least two elements |
+
+Elements and the tail are full patterns: literals, tuples, maps, nested lists
+(`#(a | #(b | t))`, `#(#(x, y) | _)`) and `x :: T`.
+
+```beamtalk
+pairUp: xs acc: acc =>
+  xs match: [
+    #() -> acc reversed;
+    #(a) -> (acc addFirst: {a}) reversed;
+    #(a, b | rest) -> self pairUp: rest acc: (acc addFirst: {a, b})
+  ]
+
+sum: xs :: List(Integer) -> Integer =>
+  xs matchExhaustive: [
+    #() -> 0;
+    #(h | t) -> h + (self sum: t)
+  ]
+```
+
+Over a `List(T)` scrutinee an element binds `T` and a tail binds `List(T)`. In a `match:` arm a
+nested `x :: T` is a runtime class test, like any nested type pattern (BT-5294).
+
+**Exhaustiveness.** `matchExhaustive:` over a `List` scrutinee proves the arms cover every
+length: `#()` plus `#(h | t)` is exhaustive, and so is `#()`, `#(a)`, `#(a, b | rest)`. Only an
+unguarded arm whose elements are all variables or `_` counts; a missing shape is a compile
+error that names it (`` `#()` ``, `` `#(_)` ``, `` `#(_, _ | _)` ``), and an arm after full
+coverage warns as unreachable.
+
+**Destructuring.** A cons or empty pattern on the left of `:=` matches the same way and raises
+`#pattern_mismatch` when the value is not a list of that shape:
+
+```beamtalk
+#(h | t) := #(10, 20, 30)      // h = 10, t = #(20, 30)
+#(a | #(b | t)) := #(4, 5, 6)  // a = 4, b = 5, t = #(6)
+#(h | t) := #()                // raises #pattern_mismatch
+```
+
+A fixed-length `#(a, b) := xs` keeps its older positional meaning: it reads `xs at: 1`,
+`xs at: 2`, ... from any sequence (List or Array) and ignores extra elements, annotated or not.
+Use a cons pattern for an exact list shape. As elsewhere in destructuring, `x :: T` is a trusted
+annotation, not a runtime test (BT-5284). A list destructure may nest tuple, list and map
+patterns; an array, binary or constructor pattern inside one is a compile error (match the
+value with `match:` instead). A list pattern takes its tail with `|`; `...rest` is the array
+form and is rejected inside `#( ... )`.
 
 ### Rest Patterns in Destructuring (BT-1251)
 
@@ -8007,7 +8065,6 @@ quietly ignored.
 | Parametric aliases (`type Option(T) = T \| Nil`) and recursive aliases (`type Json = ... \| List(Json)`) | Rejected with a diagnostic; they need lazy alias resolution. | [Named Type Aliases](#named-type-aliases-type-declarations-adr-0108) |
 | Rest patterns in `match:` arms (`#[a, ...rest] -> ...`) | Supported in destructuring assignment only; in a `match:` arm the compiler reports "not yet supported". | [Rest Patterns in Destructuring](#rest-patterns-in-destructuring-bt-1251) |
 | Package-bundled FFI type stubs | Only the project-local `stubs/` directory is searched; stubs shipped in a dependency are ignored, with no diagnostic. | [FFI Type Stub Files](#ffi-type-stub-files-adr-0075-phase-2) |
-| Cons patterns (`#(head \| tail)` in a `match:` arm or destructuring) | Parse error. The literal form works; the AST has a `Pattern::List` node, but the parser never builds it. | [ADR 0012](ADR/0012-list-literal-syntax.md), [List Cons Literal](#list-cons-literal) |
 
 ## Namespace and Class Visibility
 

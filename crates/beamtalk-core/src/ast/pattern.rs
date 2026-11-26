@@ -126,9 +126,12 @@ pub enum Pattern {
         span: Span,
     },
 
-    /// List pattern - matches list structure.
+    /// List pattern - matches list structure (BT-5301).
     ///
-    /// Example: `[head | tail]`
+    /// Example: `#()`, `#(a, b)`, `#(head | tail)`, `#(a, b | rest)`
+    ///
+    /// Without a tail it matches a list of exactly `elements.len()`
+    /// elements; with one, at least that many, the tail matching the rest.
     List {
         /// Head elements.
         elements: Vec<Pattern>,

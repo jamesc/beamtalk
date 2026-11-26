@@ -2645,6 +2645,41 @@ impl Parser {
         }
     }
 
+    /// Whether the `#(` at the cursor opens a list pattern followed by `:=`
+    /// that the expression-then-convert destructure path cannot express
+    /// (BT-5301): a cons (`#(h | t)`, a `|` directly inside), the empty
+    /// pattern `#()`, or one that carries a `::` annotation. A plain
+    /// `#(a, b) := xs` keeps its existing path.
+    pub(super) fn leading_list_is_pattern_destructure(&self) -> bool {
+        let mut depth: usize = 0;
+        let mut needs_pattern = matches!(self.peek_at(1), Some(TokenKind::RightParen));
+        let mut offset = 0;
+        loop {
+            match self.peek_at(offset) {
+                None | Some(TokenKind::Eof) => return false,
+                Some(TokenKind::DoubleColon) => needs_pattern = true,
+                Some(TokenKind::Pipe) if depth == 1 => needs_pattern = true,
+                Some(
+                    TokenKind::LeftBrace
+                    | TokenKind::MapOpen
+                    | TokenKind::ArrayOpen
+                    | TokenKind::LeftBracket
+                    | TokenKind::LeftParen
+                    | TokenKind::ListOpen,
+                ) => depth += 1,
+                Some(TokenKind::RightBrace | TokenKind::RightBracket | TokenKind::RightParen) => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return needs_pattern
+                            && matches!(self.peek_at(offset + 1), Some(TokenKind::Assign));
+                    }
+                }
+                Some(_) => {}
+            }
+            offset += 1;
+        }
+    }
+
     /// Checks if the current token is a specific binary selector, and consumes it if so.
     pub(super) fn match_binary_selector(&mut self, expected: &str) -> bool {
         if let TokenKind::BinarySelector(s) = self.current_kind()

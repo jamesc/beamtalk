@@ -428,6 +428,29 @@ fn match_type_pattern_round_trips() {
 }
 
 #[test]
+fn list_patterns_round_trip() {
+    // BT-5301: list patterns print as `#( ... )`, in a `match:` arm and on
+    // the left of a destructure, cons tails and nesting included.
+    let source = "Actor subclass: A\n  m: xs =>\n    #(h | t) := xs\n    #() := t\n    xs match: [#() -> 0; #(a, b) -> a; #(a | #(b | rest)) -> b; _ -> 1]";
+    let module = parse_source(source);
+    let output = unparse_module(&module);
+    for expected in [
+        "#(h | t) := xs",
+        "#() := t",
+        "#() -> 0",
+        "#(a, b) -> a",
+        "#(a | #(b | rest)) -> b",
+    ] {
+        assert!(output.contains(expected), "missing `{expected}`: {output}");
+    }
+    assert_eq!(
+        unparse_module(&parse_source(&output)),
+        output,
+        "list patterns must format idempotently"
+    );
+}
+
+#[test]
 fn cascade_short_stays_inline() {
     let source = "Actor subclass: A\n  m => self foo; bar; baz";
     let module = parse_source(source);

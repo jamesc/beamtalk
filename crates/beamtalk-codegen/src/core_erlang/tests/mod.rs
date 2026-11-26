@@ -409,6 +409,7 @@ mod hybrid_loop_nlr_corpus;
 mod inline_block_local_in_loop_corpus;
 mod keyed_fold_corpus;
 mod late_reconcile_conformance;
+mod list_pattern_corpus;
 mod local_assignment_producer;
 mod local_producer_agreement;
 mod local_producer_agreement_conditional;

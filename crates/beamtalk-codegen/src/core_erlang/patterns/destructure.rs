@@ -19,6 +19,7 @@ use super::super::util::index_lit;
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Expression, Pattern};
 
@@ -135,6 +136,7 @@ impl CoreErlangGenerator {
             Pattern::Array { .. } => "Arr",
             Pattern::Tuple { .. } => "Tup",
             Pattern::Map { .. } => "Map",
+            Pattern::List { .. } => "List",
             _ => {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "Unsupported destructuring pattern kind".to_string(),
@@ -401,6 +403,10 @@ impl CoreErlangGenerator {
                     }
                 }
             }
+            Pattern::List { .. } => {
+                let doc = self.list_destructure_doc(pattern, rhs_var, &mut bound_pairs)?;
+                docs.push(docvec![indent, doc, terminator]);
+            }
             _ => {
                 return Err(CodeGenError::UnsupportedFeature {
                     feature: "Unsupported destructuring pattern kind".to_string(),
@@ -410,5 +416,94 @@ impl CoreErlangGenerator {
         }
 
         Ok((docs, bound_pairs))
+    }
+
+    /// BT-5301: `<Vars> = case Rhs of <ListPattern> when 'true' -> <Vars>
+    /// <Other> when 'true' -> raise #pattern_mismatch end` for a list
+    /// (cons) destructure, binding every variable of the pattern at once.
+    ///
+    /// The list pattern is matched natively, so elements and the tail may be
+    /// nested tuple, list and map patterns and literals. An element `x :: T`
+    /// binds like `x`: in a destructuring assignment the annotation is a
+    /// trusted declared type, not a runtime test (BT-5284), so the hoisted
+    /// classes are dropped.
+    fn list_destructure_doc(
+        &mut self,
+        pattern: &Pattern,
+        rhs_var: &str,
+        bound_pairs: &mut Vec<(String, String)>,
+    ) -> Result<Document<'static>> {
+        if let Some(span) = Self::unsupported_list_destructure_element(pattern) {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: "array, binary or constructor pattern nested in a list destructure \
+                          — match the value with `match:` instead"
+                    .to_string(),
+                span: Some(span),
+            });
+        }
+        let mut native = pattern.clone();
+        self.hoist_nested_types(&mut native, &mut Vec::new());
+        let pattern_doc = self.generate_pattern(&native)?;
+
+        let mut vars: Vec<(String, String)> = Vec::new();
+        Self::collect_pattern_variables(pattern, |name, core_var| {
+            vars.push((name.to_string(), core_var.to_string()));
+        });
+        let var_docs = || vars.iter().map(|(_, v)| leaf::var(v.clone()));
+        let (binder, result) = match vars.len() {
+            0 => {
+                let ok = self.fresh_temp_var("ListOk");
+                (leaf::var(ok), leaf::atom("ok"))
+            }
+            1 => (leaf::var(vars[0].1.clone()), leaf::var(vars[0].1.clone())),
+            _ => (form::values(var_docs()), form::values(var_docs())),
+        };
+        let other = self.fresh_temp_var("Mismatch");
+        let raise = self.pattern_mismatch_raise_doc(
+            rhs_var,
+            "destructure",
+            "value does not match the destructuring pattern",
+        );
+        let case_doc = form::case_of(
+            leaf::var(rhs_var.to_string()),
+            [
+                form::clause([pattern_doc], None, result, Layout::Flat),
+                form::clause([leaf::var(other)], None, raise, Layout::Flat),
+            ],
+            Layout::Flat,
+        );
+        for (name, core_var) in vars {
+            self.bind_var(&name, &core_var);
+            bound_pairs.push((name, core_var));
+        }
+        Ok(docvec![binder, " = ", case_doc])
+    }
+
+    /// The span of the first element a list destructure cannot match
+    /// natively: an array (an opaque tagged map), a binary (a `String`
+    /// subject would need unwrapping) or a constructor pattern.
+    fn unsupported_list_destructure_element(
+        pattern: &Pattern,
+    ) -> Option<beamtalk_core::source_analysis::Span> {
+        match pattern {
+            Pattern::Array { span, .. }
+            | Pattern::Binary { span, .. }
+            | Pattern::Constructor { span, .. } => Some(*span),
+            Pattern::Tuple { elements, .. } => elements
+                .iter()
+                .find_map(Self::unsupported_list_destructure_element),
+            Pattern::List { elements, tail, .. } => elements
+                .iter()
+                .chain(tail.as_deref())
+                .find_map(Self::unsupported_list_destructure_element),
+            Pattern::Map { pairs, .. } => pairs
+                .iter()
+                .find_map(|p| Self::unsupported_list_destructure_element(&p.value)),
+            Pattern::Wildcard(_)
+            | Pattern::Literal(..)
+            | Pattern::Variable(_)
+            | Pattern::Nil(_)
+            | Pattern::Type { .. } => None,
+        }
     }
 }

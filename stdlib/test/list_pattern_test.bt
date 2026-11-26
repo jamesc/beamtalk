@@ -1,0 +1,178 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// List patterns (BT-5301): `#()`, `#(a, b)`, `#(h | t)`, `#(a, b | t)` and
+// nested `#(a | #(b | t))`, in `match:` arms and in destructuring
+// assignment. Without a `|` tail a match-arm list pattern matches a list of
+// exactly that length; with one, at least that many elements, the tail
+// binding the rest. A nested `x :: T` element is a runtime class test in a
+// `match:` arm (BT-5294) and a trusted annotation in a destructure (BT-5284).
+
+TestCase subclass: ListPatternTest
+
+  shape: xs =>
+    xs match: [
+      #() -> #empty;
+      #(a) -> {#one, a};
+      #(a, b) -> {#two, a, b};
+      #(a, b | rest) -> {#more, a + b, rest}
+    ]
+
+  sum: xs :: List(Integer) -> Integer =>
+    xs matchExhaustive: [
+      #() -> 0;
+      #(h | t) -> h + (self sum: t)
+    ]
+
+  // The `PriorityQueue>>pairUp:acc:` shape from beamtalk-collections.
+  pairUp: xs acc: acc =>
+    xs match: [
+      #() -> acc reversed;
+      #(a) -> (acc addFirst: {a}) reversed;
+      #(a, b | rest) -> self pairUp: rest acc: (acc addFirst: {a, b})
+    ]
+
+  swapFirstTwo: xs =>
+    xs match: [
+      #(a | #(b | t)) -> #(b, a | t);
+      _ -> xs
+    ]
+
+  firstInteger: xs =>
+    xs match: [
+      #(n :: Integer | _) -> n;
+      #(_ :: String | #(n :: Integer | _)) -> n;
+      _ -> nil
+    ]
+
+  testEmptyListMatchesEmptyPattern =>
+    self assert: (self shape: #()) equals: #empty
+
+  testSingleElementMatchesExactlyOne =>
+    self assert: (self shape: #(7)) equals: {#one, 7}
+
+  testFixedLengthPatternIsExact =>
+    self assert: (self shape: #(1, 2)) equals: {#two, 1, 2}
+
+  testConsBindsHeadsAndTail =>
+    self assert: (self shape: #(1, 2, 3, 4)) equals: {#more, 3, #(3, 4)}
+
+  testConsTailMayBeEmpty =>
+    f := [:xs |
+      xs match: [
+        #(h | t) -> {h, t};
+        _ -> #none
+      ]
+    ]
+    self assert: (f value: #(5)) equals: {5, #()}
+    self assert: (f value: #()) equals: #none
+
+  testConsDoesNotMatchNonList =>
+    f := [:v |
+      v match: [
+        #(h | _) -> h;
+        _ -> #nope
+      ]
+    ]
+    self assert: (f value: #[1, 2]) equals: #nope
+    self assert: (f value: {1, 2}) equals: #nope
+    self assert: (f value: nil) equals: #nope
+    self assert: (f value: "ab") equals: #nope
+
+  testRecursiveSumOverExhaustiveMatch =>
+    self assert: (self sum: #()) equals: 0
+    self assert: (self sum: #(4)) equals: 4
+    self assert: (self sum: #(1, 2, 3)) equals: 6
+
+  testPairUpWalk =>
+    self assert: (self pairUp: #() acc: #()) equals: #()
+    self assert: (self pairUp: #(1) acc: #()) equals: #({1})
+    self assert: (self pairUp: #(1, 2, 3, 4, 5) acc: #()) equals: #({1, 2}, {3, 4}, {5})
+
+  testNestedConsPattern =>
+    self assert: (self swapFirstTwo: #(1, 2, 3)) equals: #(2, 1, 3)
+    self assert: (self swapFirstTwo: #(1, 2)) equals: #(2, 1)
+    self assert: (self swapFirstTwo: #(1)) equals: #(1)
+    self assert: (self swapFirstTwo: #()) equals: #()
+
+  testNestedFixedListElement =>
+    f := [:xs |
+      xs match: [
+        #(#(a, b) | _) -> a + b;
+        _ -> 0
+      ]
+    ]
+    self assert: (f value: #(#(1, 2), 9)) equals: 3
+    self assert: (f value: #(#(1, 2, 3))) equals: 0
+
+  testLiteralAndTupleElements =>
+    f := [:xs |
+      xs match: [
+        #(#ok | rest) -> rest size;
+        #({#err, why} | _) -> why;
+        _ -> -1
+      ]
+    ]
+    self assert: (f value: #(#ok, 1, 2)) equals: 2
+    self assert: (f value: #({#err, 7})) equals: 7
+    self assert: (f value: #(#other)) equals: -1
+
+  testNestedTypePatternIsRuntimeTest =>
+    self assert: (self firstInteger: #(4, "x")) equals: 4
+    self assert: (self firstInteger: #("x", 5)) equals: 5
+    self assert: (self firstInteger: #("x", "y")) equals: nil
+    self assert: (self firstInteger: #()) equals: nil
+
+  testGuardSeesListBindings =>
+    f := [:xs |
+      xs match: [
+        #(h | _) when: [h > 10] -> #big;
+        #(_ | _) -> #small;
+        #() -> #none
+      ]
+    ]
+    self assert: (f value: #(11)) equals: #big
+    self assert: (f value: #(2, 30)) equals: #small
+    self assert: (f value: #()) equals: #none
+
+  testConsDestructure =>
+    #(h | t) := #(10, 20, 30)
+    self assert: h equals: 10
+    self assert: t equals: #(20, 30)
+
+  testConsDestructureTwoHeads =>
+    #(a, b | rest) := #(1, 2)
+    self assert: a + b equals: 3
+    self assert: rest equals: #()
+
+  testNestedConsDestructure =>
+    #(a | #(b | t)) := #(4, 5, 6)
+    self assert: {a, b, t} equals: {4, 5, #(6)}
+
+  testAnnotatedConsDestructureIsNotATest =>
+    // In a destructure `x :: T` is a trusted annotation, not a class test.
+    #(n :: Integer | t) := #("x", 1)
+    self assert: n equals: "x"
+    self assert: t equals: #(1)
+
+  testEmptyDestructure =>
+    #() := #()
+    self should: [#() := #(1)] raise: #pattern_mismatch
+
+  testConsDestructureOfEmptyListRaises =>
+    self should: [#(_h | _t) := #()] raise: #pattern_mismatch
+
+  testConsDestructureOfNonListRaises =>
+    self should: [#(_h | _t) := #[1, 2]] raise: #pattern_mismatch
+    self should: [#(_h | _t) := nil] raise: #pattern_mismatch
+
+  testNestedConsDestructureTooShortRaises =>
+    self should: [#(_a | #(_b | _t)) := #(1)] raise: #pattern_mismatch
+
+  testFixedListDestructureStaysPositional =>
+    // A fixed-length `#(a, b) := xs` reads `at: 1`, `at: 2` (BT-1251's
+    // positional form), annotated or not, so extra elements are ignored.
+    #(a, b) := #(1, 2, 3)
+    self assert: a + b equals: 3
+    #(c :: Integer, d) := #(4, 5, 6)
+    self assert: c + d equals: 9
