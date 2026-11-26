@@ -124,7 +124,17 @@ impl TypeChecker {
             annotated.push((binding, class, position));
         });
         for (binding, class, position) in annotated {
-            let declared = InferredType::known(class.name.clone());
+            // Resolve like `x :: T := expr` (aliases, protocols, hot-reload
+            // alias dependencies), not as a bare class name.
+            let declared = super::super::type_resolver::ResolutionContext::new(
+                self.alias_registry.as_deref(),
+                &mut self.referenced_aliases,
+            )
+            .resolve_type_annotation(
+                &crate::ast::TypeAnnotation::simple(class.name.clone(), class.span),
+                &super::super::type_resolver::SubstitutionMap::new(),
+                self.protocol_registry.as_deref(),
+            );
             if let Some(position) = position
                 && let Some(mismatch) = Self::detect_assignment_type_mismatch(
                     &position,
