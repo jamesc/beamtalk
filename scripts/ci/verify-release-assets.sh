@@ -34,7 +34,7 @@ dir="$(mktemp -d)"
 trap 'rm -rf "${dir}"' EXIT
 # gh fails when nothing matches; the count check below reports that with
 # context. Any other failure (auth, network) is shown too, not swallowed.
-if ! gh release download "${TAG}" --pattern "${PREFIX}*" --dir "${dir}" 2>"${dir}.err" >&2; then
+if ! gh release download "${TAG}" --pattern "${PREFIX}*" --dir "${dir}" >&2 2>"${dir}.err"; then
     if ! grep -q "no assets match" "${dir}.err"; then
         echo "::error::gh release download ${TAG} failed: $(cat "${dir}.err")"
         rm -f "${dir}.err"
