@@ -46,7 +46,10 @@ cat > "${tmp}/bin/gh" <<'STUB'
 # release download <tag> --pattern <glob> --dir <dir>
 [ "$1 $2" = "release download" ] || exit 2
 shopt -s nullglob
-for f in "${STUB_RELEASE}"/$5; do cp "$f" "$7/"; done
+n=0
+for f in "${STUB_RELEASE}"/$5; do cp "$f" "$7/"; n=$((n + 1)); done
+# Like gh: no matching asset is an error.
+[ "$n" -gt 0 ] || { echo "no assets match the file pattern" >&2; exit 1; }
 STUB
 chmod +x "${tmp}/bin/gh"
 

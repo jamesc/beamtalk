@@ -13,7 +13,8 @@
 #
 #   build-and-attach  (`push_rc`) release.yml's tag flow builds the image and
 #                     pushes it as ghcr.io/<owner>/beamtalk-ide:rc-<sha>, where
-#                     <sha> is the full commit. The `image` output is that push
+#                     <sha> is the full commit (`dryrun-<sha>` for a release.yml
+#                     dry run, so it never moves a real candidate's tag). The `image` output is that push
 #                     pinned by digest (…/beamtalk-ide@sha256:<digest>); it goes
 #                     into the uat dispatch payload as `ide_image`.
 #   publish           (`publish` + `image` + `version`) retags the given digest
@@ -74,10 +75,15 @@ on:
         type: string
         default: ''
       push_rc:
-        description: 'Push the build to GHCR as rc-<sha>'
+        description: 'Push the build to GHCR as <tag_prefix>-<sha>'
         required: false
         type: boolean
         default: false
+      tag_prefix:
+        description: 'With push_rc: rc for a release candidate, dryrun for a release.yml dry run'
+        required: false
+        type: string
+        default: rc
       publish:
         description: 'Publish: retag `image` as `version` and latest (no build)'
         required: false
@@ -99,7 +105,9 @@ on:
         value: ${{ jobs.docker.outputs.image }}
 
 concurrency:
-  group: liveview-docker-${{ github.ref }}-${{ inputs.publish && 'publish' || 'build' }}
+  # Keyed by what is built or published, not only the caller's ref: two
+  # release.yml runs from one branch must not cancel each other's image.
+  group: liveview-docker-${{ inputs.ref || inputs.image || github.ref }}-${{ inputs.publish && 'publish' || 'build' }}
   cancel-in-progress: true
 
 permissions:
@@ -129,15 +137,18 @@ jobs:
         env:
           OWNER: ${{ github.repository_owner }}
           PUSH_RC: ${{ github.event_name != 'pull_request' && inputs.push_rc }}
+          PREFIX: ${{ inputs.tag_prefix || 'rc' }}
         run: |
           push=false
           [ "${PUSH_RC}" = "true" ] && push=true
+          case "${PREFIX}" in rc | dryrun) ;; *) echo "::error::tag_prefix must be rc or dryrun"; exit 1 ;; esac
           {
             echo "version=$(tr -d '[:space:]' < VERSION)"
             # ghcr image refs must be lowercase.
             echo "image=ghcr.io/$(echo "${OWNER}" | tr '[:upper:]' '[:lower:]')/beamtalk-ide"
             echo "sha=$(git rev-parse HEAD)"
             echo "push=${push}"
+            echo "handle=${PREFIX}-$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
@@ -152,31 +163,32 @@ jobs:
           IMAGE: ${{ steps.params.outputs.image }}
           VERSION: ${{ steps.params.outputs.version }}
           SHA: ${{ steps.params.outputs.sha }}
+          HANDLE: ${{ steps.params.outputs.handle }}
         run: |
           docker build \
             -f editors/liveview/Dockerfile \
             --build-arg VERSION="${VERSION}" \
             --label "org.opencontainers.image.revision=${SHA}" \
             --label "org.opencontainers.image.version=${VERSION}" \
-            -t "${IMAGE}:rc-${SHA}" \
+            -t "${IMAGE}:${HANDLE}" \
             editors/liveview
 
       # The digest is the identity uat tests and promote.yml retags; the
       # rc-<sha> tag is only a handle to find it.
-      - name: Push rc-<sha> and record its digest
+      - name: Push <prefix>-<sha> and record its digest
         id: push
         if: steps.params.outputs.push == 'true'
         env:
           IMAGE: ${{ steps.params.outputs.image }}
-          SHA: ${{ steps.params.outputs.sha }}
+          HANDLE: ${{ steps.params.outputs.handle }}
         run: |
           set -euo pipefail
-          docker push "${IMAGE}:rc-${SHA}"
+          docker push "${IMAGE}:${HANDLE}"
           # Ask the registry, not the local store: this is what the tag resolves
           # to, the same lookup promote.yml makes before retagging.
-          digest="$(docker buildx imagetools inspect "${IMAGE}:rc-${SHA}" --format '{{.Manifest.Digest}}')"
+          digest="$(docker buildx imagetools inspect "${IMAGE}:${HANDLE}" --format '{{.Manifest.Digest}}')"
           if ! [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::unexpected digest '${digest}' for ${IMAGE}:rc-${SHA}"
+            echo "::error::unexpected digest '${digest}' for ${IMAGE}:${HANDLE}"
             exit 1
           fi
           pinned="${IMAGE}@${digest}"
@@ -186,7 +198,7 @@ jobs:
             echo ""
             echo "| Tag | Digest |"
             echo "|---|---|"
-            echo "| \`${IMAGE}:rc-${SHA}\` | \`${pinned##*@}\` |"
+            echo "| \`${IMAGE}:${HANDLE}\` | \`${pinned##*@}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ─── Publish: retag a tested digest as <version> and latest ────────────

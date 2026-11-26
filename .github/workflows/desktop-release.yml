@@ -156,7 +156,9 @@ on:
         required: false
 
 concurrency:
-  group: desktop-release-${{ github.ref }}-${{ inputs.publish && 'publish' || 'build' }}
+  # Keyed by tag/commit too: two release.yml runs from one branch must not
+  # cancel each other's lane and leave a half-attached pre-release.
+  group: desktop-release-${{ inputs.tag || inputs.ref || github.ref }}-${{ inputs.publish && 'publish' || 'build' }}
   cancel-in-progress: true
 
 permissions:
@@ -188,10 +190,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-latest
+          # Pinned, not floating (ADR 0154 § 3): uat tests these installers.
+          - runner: ubuntu-24.04
             platform: linux-x86_64
             bundles: appimage,deb
-          - runner: macos-latest
+          - runner: macos-15
             platform: macos-arm64
             bundles: app,dmg
           - runner: macos-15-intel

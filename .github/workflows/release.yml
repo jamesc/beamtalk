@@ -31,15 +31,13 @@
 # to. BT-5315 sets RELEASE_PUBLISH_MODE=promote, which skips them, and moves
 # those calls into promote.yml.
 #
-# workflow_dispatch is a DRY RUN of the tag flow for a tag: it builds that tag's
-# commit and attaches to its pre-release (creating it), but never
-# publishes, never moves `latest` and never dispatches uat (the payload is still
-# built and shown). It refuses a release that is no longer a pre-release. A test
-# tag (one not starting with `v`) that does not exist yet is created at the
-# dispatched commit, so a dry run needs no tag push.
-# `discard` deletes the pre-release, the tag and the rc image afterwards; it is
-# refused for a tag starting with `v`, so only a test tag (whose push never
-# started this workflow) can be discarded.
+# workflow_dispatch is a DRY RUN of the tag flow for a TEST tag (one not
+# starting with `v`, so it never starts the real flow and never collides with a
+# real candidate): it builds that tag's commit and attaches to its pre-release
+# (creating the tag at the dispatched commit if needed), but never publishes,
+# never moves `latest` and never dispatches uat (the payload is still built and
+# shown). The image is pushed as `dryrun-<sha>`, not `rc-<sha>`. `discard`
+# deletes the pre-release, the tag and that image afterwards.
 #
 # The VS Code extension has its own pipeline (release-vscode.yml) because:
 #   1. VS Code Marketplace is a different distribution channel
@@ -58,11 +56,11 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to dry-run: an existing tag, or a new test tag not starting with v (e.g. 0.0.0-test.1), created at this commit. Built and attached to its pre-release; nothing is published.'
+        description: 'Test tag to dry-run, not starting with v (e.g. 0.0.0-test.1); created at this commit if it does not exist. Built and attached to its pre-release; nothing is published.'
         required: true
         type: string
       discard:
-        description: 'Afterwards delete the pre-release, the tag and the rc image (refused for a tag starting with v)'
+        description: 'Afterwards delete the pre-release, the tag and the dry-run image'
         required: false
         type: boolean
         default: false
@@ -70,7 +68,7 @@ on:
 # One run per tag, never cancelled: a cancelled run leaves a half-attached
 # pre-release.
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.tag || github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -109,9 +107,9 @@ jobs:
           INPUT_TAG: ${{ inputs.tag }}
         run: scripts/ci/determine-version.sh "$EVENT_NAME" "$REF_TAG" "$INPUT_TAG"
 
-      # On a push the tag is the pushed commit. A dispatch names an existing tag,
-      # or a test tag (not starting with v) that does not exist yet: that one is
-      # created at the dispatched commit by the release create below.
+      # On a push the tag is the pushed commit. A dispatch names a test tag; if it
+      # does not exist yet it is created at the dispatched commit by the release
+      # create below.
       - name: Resolve the tagged commit
         id: sha
         env:
@@ -120,7 +118,7 @@ jobs:
         run: |
           set -euo pipefail
           if ! sha="$(git rev-parse --verify --quiet "refs/tags/${TAG}^{commit}")"; then
-            if [ "${EVENT_NAME}" = push ] || [[ "${TAG}" == v* ]]; then
+            if [ "${EVENT_NAME}" = push ]; then
               echo "::error::tag ${TAG} does not exist; push it first"
               exit 1
             fi
@@ -134,12 +132,14 @@ jobs:
           echo "sha=${sha}" >> "$GITHUB_OUTPUT"
           echo "Release candidate \`${TAG}\` at \`${sha}\` (${EVENT_NAME})" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Refuse to discard a release tag
-        if: inputs.discard && startsWith(steps.version.outputs.tag, 'v')
+      # A dry run must never touch a real candidate: rebuilt bytes would replace
+      # the ones uat was sent, and discard would delete it.
+      - name: Refuse a release tag in a dry run
+        if: github.event_name == 'workflow_dispatch' && startsWith(steps.version.outputs.tag, 'v')
         env:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
-          echo "::error::discard deletes the release and its tag, and ${TAG} starts with v. Dry-run a test tag such as 0.0.0-test.1 instead."
+          echo "::error::a dry run takes a test tag (not starting with v, e.g. 0.0.0-test.1); ${TAG} is a release tag, built only by its own push."
           exit 1
 
       # Never latest: the pre-release is what uat tests and promote.yml promotes.
@@ -156,7 +156,7 @@ jobs:
             if [ "${state}" = "true false" ]; then
               echo "Reusing pre-release ${TAG}."
             elif [ "${EVENT_NAME}" != push ]; then
-              # Promoted, or a draft made by hand: a dry run never clobbers its bytes.
+              # A draft or full release made by hand: a dry run never clobbers it.
               echo "::error::release ${TAG} is not a published pre-release (isPrerelease isDraft = ${state}); a dry run never touches it."
               exit 1
             else
@@ -497,6 +497,8 @@ jobs:
     with:
       ref: ${{ needs.prepare.outputs.sha }}
       push_rc: true
+      # A dry run must not move a real candidate's rc-<sha> at the same commit.
+      tag_prefix: ${{ github.event_name == 'push' && 'rc' || 'dryrun' }}
 
   # ─── Desktop app: build-and-attach (desktop-release.yml) ────────────────
   # The Tauri desktop attach client (ADR 0097, BT-5006). The Apple secrets are
@@ -541,8 +543,10 @@ jobs:
     permissions:
       contents: read
     steps:
+      # The tagged commit: otp-support.toml must match the artifacts.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
 
       - name: Build uat dispatch payload
@@ -583,12 +587,14 @@ jobs:
   # ═══ Interim publish, until promote.yml (BT-5315) ═══════════════════════
   # Today's behaviour, behind RELEASE_PUBLISH_MODE: on a tag push, while the
   # variable is not `promote`, publish every channel and mark the release
-  # latest, as publishing the release by hand used to. Never on a dry run.
+  # latest, as publishing the release by hand used to. Never on a dry run, and
+  # only once all four platform bundles are attached: no channel goes out for a
+  # release users cannot install.
   # These are exactly the calls promote.yml makes once uat passes; BT-5315
   # moves them there and sets RELEASE_PUBLISH_MODE=promote.
 
   interim-publish-vscode:
-    needs: [prepare, vscode-extension]
+    needs: [prepare, linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, vscode-extension]
     if: ${{ github.event_name == 'push' && vars.RELEASE_PUBLISH_MODE != 'promote' }}
     # write, not read: GitHub checks a called workflow's job permissions
     # statically, including its (skipped here) attach job.
@@ -602,7 +608,7 @@ jobs:
       VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
   interim-publish-ide-image:
-    needs: [prepare, ide-image]
+    needs: [prepare, linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, ide-image]
     if: ${{ github.event_name == 'push' && vars.RELEASE_PUBLISH_MODE != 'promote' }}
     permissions:
       contents: read
@@ -614,7 +620,7 @@ jobs:
       version: ${{ needs.prepare.outputs.version }}
 
   interim-publish-liveview-ide:
-    needs: [prepare, liveview-ide]
+    needs: [prepare, linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, liveview-ide]
     if: ${{ github.event_name == 'push' && vars.RELEASE_PUBLISH_MODE != 'promote' }}
     # write, not read: GitHub checks a called workflow's job permissions
     # statically, including its (skipped here) attach job.
@@ -626,7 +632,7 @@ jobs:
       tag: ${{ needs.prepare.outputs.tag }}
 
   interim-publish-desktop:
-    needs: [prepare, desktop-app]
+    needs: [prepare, linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, desktop-app]
     if: ${{ github.event_name == 'push' && vars.RELEASE_PUBLISH_MODE != 'promote' }}
     # write, not read: GitHub checks a called workflow's job permissions
     # statically, including its (skipped here) attach job.
@@ -698,21 +704,24 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
         run: gh release delete "${TAG}" --cleanup-tag --yes
 
-      # Best effort: GITHUB_TOKEN may lack admin on the package. A leftover
-      # rc-<sha> tag is harmless (nothing publishes from it), so warn only.
-      - name: Delete the rc image
+      # Best effort: GITHUB_TOKEN may lack admin on the package. Only a version
+      # whose every tag is dryrun-* is deleted, so a real rc-<sha> that happens
+      # to share the digest survives. A leftover dryrun-<sha> is harmless.
+      - name: Delete the dry-run image
         if: needs.ide-image.outputs.image != ''
         env:
           GH_TOKEN: ${{ github.token }}
           OWNER: ${{ github.repository_owner }}
+          OWNER_KIND: ${{ github.event.repository.owner.type == 'Organization' && 'orgs' || 'users' }}
           IMAGE: ${{ needs.ide-image.outputs.image }}
         run: |
           set -uo pipefail
           digest="${IMAGE##*@}"
-          base="users/${OWNER}/packages/container/beamtalk-ide/versions"
-          if id="$(gh api --paginate "${base}" --jq ".[] | select(.name == \"${digest}\") | .id")" \
+          base="${OWNER_KIND}/${OWNER}/packages/container/beamtalk-ide/versions"
+          if id="$(gh api --paginate "${base}" --jq ".[] | select(.name == \"${digest}\")
+                | select(all(.metadata.container.tags[]; startswith(\"dryrun-\"))) | .id")" \
              && [ -n "${id}" ] && gh api -X DELETE "${base}/${id}"; then
             echo "Deleted ${IMAGE}."
           else
-            echo "::warning::could not delete ${IMAGE}; remove the rc-<sha> tag by hand"
+            echo "::warning::did not delete ${IMAGE} (no permission, or it carries a non-dryrun tag); remove its dryrun-<sha> tag by hand"
           fi

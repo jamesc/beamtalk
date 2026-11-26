@@ -45,10 +45,10 @@ The archives and installers have no channel of their own: users get them when th
 
 **Who may publish.** Every publish half first runs `scripts/ci/publish-guard.sh`, which reads the repository variable `RELEASE_PUBLISH_MODE`:
 
-- unset or `legacy` (today): any caller may publish. On a tag push, `release.yml`'s `interim-*` jobs publish every channel and mark the release latest once the four platform bundles are attached. This keeps the pre-BT-5313 behaviour until `promote.yml` exists.
+- unset or `legacy` (today): any caller may publish. On a tag push, once the four platform bundles are attached, `release.yml`'s `interim-*` jobs publish every channel and mark the release latest. This keeps the pre-BT-5313 behaviour until `promote.yml` exists.
 - `promote`: only the `promote.yml` workflow on `main` may publish, and the `interim-*` jobs are skipped. `promote.yml` (BT-5315) runs the publish halves and marks the release latest after uat passes. Set the variable when it lands.
 
-**Dry run.** `release.yml`'s `workflow_dispatch` takes an existing `tag` and runs the tag flow for that tag's commit, but never publishes, never moves `latest` and never dispatches uat; it still builds the uat payload and shows it in the job summary. It refuses a release that is no longer a pre-release. To test the workflow, dispatch it on your branch with a new test tag that does not start with `v`, e.g. `0.0.0-test.1`: the tag does not need to exist (it is created at the dispatched commit, and a tag not starting with `v` never starts the real flow). With `discard: true`, it afterwards records the pre-release's assets in the summary, then deletes the pre-release, the tag and the `rc-<sha>` image.
+**Dry run.** `release.yml`'s `workflow_dispatch` takes a test `tag` (refused if it starts with `v`, so a dry run never touches a real candidate) and runs the tag flow for that tag's commit, but never publishes, never moves `latest` and never dispatches uat; it still builds the uat payload and shows it in the job summary. The image is pushed as `dryrun-<sha>`, never `rc-<sha>`. To test the workflow, dispatch it on your branch with a new test tag that does not start with `v`, e.g. `0.0.0-test.1`: the tag does not need to exist (it is created at the dispatched commit, and a tag not starting with `v` never starts the real flow). With `discard: true`, it afterwards records the pre-release's assets in the summary, then deletes the pre-release, the tag and the `dryrun-<sha>` image (best effort: it needs admin on the package).
 
 ## uat dispatch payload (ADR 0154 § 3)
 
@@ -70,12 +70,12 @@ The archives and installers have no channel of their own: users get them when th
 | `channel` | the workflow: `edge`, `nightly` or `release` |
 | `version` | `<VERSION>-edge+<short sha>` / `<VERSION>-nightly+<short sha>`; for a release the tag without `v` |
 | `tag` | `edge`, `nightly`, or the release tag |
-| `sha` | the commit the artifacts were built from (`GITHUB_SHA`) |
+| `sha` | the commit the artifacts were built from (`GITHUB_SHA`; for a release, the tagged commit `prepare` resolves) |
 | `otp` | `min-major` / `max-major` read from `otp-support.toml` |
 | `assets` | asset name → sha256 for every asset on the release except `.sha256` sidecars; for a tag this includes the LiveView IDE archives, the desktop installers and the `.vsix` |
 | `ide_image` | tags only: the `rc-<sha>` IDE image pinned by digest (`IDE_IMAGE`); absent if that image was not pushed |
 
 - **Timing.** `edge` and `nightly` dispatch after the rolling release is updated, and only from `main`. `release` dispatches from `notify-uat` on the tag push (not on `release: published`), after the VS Code, LiveView IDE, IDE image and desktop lanes, so the asset map is complete. It is gated on the four platform builds only: a failed lane contributes no assets but does not stop the dispatch. Each dispatch is its own job (`notify-uat`) so it can be re-run without rebuilding.
-- **Runner images.** `release.yml`, `edge.yml`, `nightly.yml` and `liveview-release.yml` pin `ubuntu-24.04` and `macos-15` (not `*-latest`), because uat tests each target on the image that built it. Bumping an image is a reviewed change on both sides.
+- **Runner images.** `release.yml`, `edge.yml`, `nightly.yml`, `liveview-release.yml`, `desktop-release.yml`, `release-vscode.yml` and `liveview-docker.yml` pin `ubuntu-24.04` and `macos-15` (not `*-latest`), because uat tests each target on the image that built it. Bumping an image is a reviewed change on both sides.
 - **Legacy event.** `release.yml` no longer sends `beamtalk-release`: uat accepts `beamtalk-artifact` (BT-5303), and ADR 0154 § 3 drops the old type when `release.yml` switches to the pre-release flow (BT-5313).
 - The payload is tested by `scripts/ci/test-uat-dispatch-payload.sh`; the publish guard and asset check by `scripts/ci/test-publish-guard.sh`.

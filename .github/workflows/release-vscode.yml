@@ -88,7 +88,9 @@ on:
         required: false
 
 concurrency:
-  group: release-vscode-${{ github.ref }}-${{ inputs.publish && 'publish' || 'build' }}
+  # Keyed by tag/commit too: two release.yml runs from one branch must not
+  # cancel each other's lane and leave a half-attached pre-release.
+  group: release-vscode-${{ inputs.tag || inputs.ref || github.ref }}-${{ inputs.publish && 'publish' || 'build' }}
   cancel-in-progress: true
 
 permissions:

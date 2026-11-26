@@ -32,7 +32,8 @@ hash_of() {
 
 dir="$(mktemp -d)"
 trap 'rm -rf "${dir}"' EXIT
-gh release download "${TAG}" --pattern "${PREFIX}*" --dir "${dir}" >&2
+# No match is not an error here: the count check below reports it with context.
+gh release download "${TAG}" --pattern "${PREFIX}*" --dir "${dir}" >&2 || true
 
 shopt -s nullglob
 archives=0
