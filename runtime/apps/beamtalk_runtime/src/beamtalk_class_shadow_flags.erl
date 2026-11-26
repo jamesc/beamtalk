@@ -624,8 +624,9 @@ BT-4442) under the class's tag lock, so the call site's next read of that key
 matches it.
 Declines, installing nothing, when the class is shadowed, is not registered or not alive, when the dynamic path's owner
 (`beamtalk_class_dispatch:in_caller_owner/2`) names another module or
-function, when an inherited owner has an ADR 0084 runtime fun for the
-selector (BT-4270), or when the function is not exported.
+function, when the defining class (the receiver or, BT-4270, an ancestor)
+has an ADR 0084 runtime fun for the selector, or when the function is not
+exported.
 
 The checks run once without the lock, so a call site that keeps declining
 never takes a lock per send, and again under it, after the class's
@@ -733,13 +734,17 @@ install_static_call_locked(Tag, Key, Ref) ->
     end.
 
 %% The class reference a static call of `Module:FunName/Arity` may pass, or
-%% `false`: the registered class process is alive and the dynamic path's owner
-%% (`in_caller_owner/2`, which also requires `direct_call_ok/2`) runs
-%% `Selector` sent to this class as exactly this exported function. The
-%% reference is the `ClassSelf` that path builds (`class_send_plain/3`): this
-%% class's tag, its own module and its pid. Under the tag lock it takes no
-%% lock itself: the caller installed the derived flag first, so
-%% `direct_call_ok/2` answers from it.
+%% `false`: the registered class process is alive, `direct_call_ok/2` holds
+%% (no ADR 0084 runtime fun shadows the class), and the dynamic path's owner
+%% (`in_caller_owner/2`) runs `Selector` sent to this class as exactly this
+%% exported function. ADR 0153 §5 (BT-5161) split the guard: the in-caller
+%% path runs a shadowed class's funs too, so "not shadowed" is checked here,
+%% for the static key only, and `runs_compiled_function/3` asks the fun store
+%% for the receiving class as for an ancestor. The reference is the
+%% `ClassSelf` that path builds (`class_send_plain/3`): this class's tag, its
+%% own module and its pid. Under the tag lock it takes no lock itself: the
+%% caller installed the derived flag first, so `direct_call_ok/2` answers from
+%% it.
 -spec static_call_ref(static_call_key(), atom(), atom(), arity()) ->
     #beamtalk_object{} | false.
 static_call_ref({Module, new, Tag}, ClassName, new, 0) ->
@@ -759,7 +764,10 @@ static_call_ref({Module, new, Tag}, ClassName, new, 0) ->
 static_call_ref(Key, ClassName, Selector, Arity) ->
     {Module, FunName, Tag} = key_target(Key),
     Pid = beamtalk_class_registry:whereis_class(ClassName),
-    case is_pid(Pid) andalso beamtalk_class_dispatch:in_caller_owner(Pid, Selector) of
+    case
+        is_pid(Pid) andalso direct_call_ok(Tag, ClassName) andalso
+            beamtalk_class_dispatch:in_caller_owner(Pid, Selector)
+    of
         {owner, ClassName, Tag, ClassModule, DefiningClass, Module, FunName} ->
             case
                 runs_compiled_function(ClassName, DefiningClass, Selector) andalso
@@ -823,16 +831,14 @@ key_body_holds(_DirectCallKey, _ClassName, _Module, _Selector) ->
     true.
 
 %% Whether the in-caller path runs the defining class's compiled function for
-%% `Selector` (`beamtalk_class_dispatch:run_in_caller/7`): always for a method
-%% the class defines (`direct_call_ok/2` held, so it has no runtime fun), and
-%% for an inherited one (BT-4270) only while
+%% `Selector` (`beamtalk_class_dispatch:run_in_caller/7`): only while
 %% `beamtalk_class_dispatch:class_method_body/2`, the choice
 %% `apply_class_method_body/7` makes, picks the compiled function over an ADR
-%% 0084 runtime fun. Installing such a fun is a metadata write on the defining
-%% class, whose `invalidate/1` erases this class's keys as a descendant's.
+%% 0084 runtime fun. One rule for a method the class defines and an inherited
+%% one (BT-4270; ADR 0153 §5, BT-5161). Installing such a fun is a metadata
+%% write on the defining class: its `set/2` erases the class's own keys, and
+%% its `invalidate/1` a descendant's.
 -spec runs_compiled_function(atom(), atom(), atom()) -> boolean().
-runs_compiled_function(ClassName, ClassName, _Selector) ->
-    true;
 runs_compiled_function(_ClassName, DefiningClass, Selector) ->
     beamtalk_class_dispatch:class_method_body(DefiningClass, Selector) =:= compiled.
 

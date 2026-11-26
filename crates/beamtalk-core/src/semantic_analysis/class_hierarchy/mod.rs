@@ -421,9 +421,11 @@ impl ClassHierarchy {
     /// receiver, through [`Self::class_reference_send_runs_in_caller`], which
     /// adds shadowing); codegen reads [`Self::is_direct_call_eligible`], which
     /// adds only the own-method condition. Like every compile-time verdict it
-    /// describes the classes as compiled: a class-side extension or ADR 0084
-    /// runtime fun sends the method back to the class process at run time,
-    /// which the guard of every static direct call re-checks.
+    /// describes the classes as compiled: an ADR 0084 runtime fun installed
+    /// later replaces the compiled method at run time, which the guard of
+    /// every static direct call re-checks (it turns the static call off). The
+    /// fun still runs in the caller unless the selector is process-bound
+    /// (ADR 0153 §5).
     #[must_use]
     pub fn runs_class_method_in_caller(&self, class_name: &str, selector: &str) -> bool {
         if selector == "new:"
