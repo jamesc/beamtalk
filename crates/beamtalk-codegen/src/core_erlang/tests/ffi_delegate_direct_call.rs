@@ -161,11 +161,11 @@ fn binary_bit_size_is_a_guarded_direct_call() {
         body.contains("call 'erlang':'is_binary'("),
         "the receiver is guarded by is_binary:\n{body}"
     );
-    // The error path is the delegate's: same `{Class, Selector}` context, with
-    // the pre-call class-variable snapshot a binary receiver needs.
+    // The error path is the delegate's: same `{Class, Selector}` context, after
+    // a `'none'` snapshot slot (ADR 0153: compiled code reads no snapshot).
     assert!(
-        body.contains("{'Binary', 'bitSize'}") && body.contains("_FfiSnap@"),
-        "ffi_call_raised/10 carries the delegate context and the snapshot:\n{body}"
+        body.contains("'none', {'Binary', 'bitSize'}") && !body.contains("FfiSnap"),
+        "ffi_call_raised/10 carries the delegate context and no snapshot:\n{body}"
     );
     assert!(
         body.contains("'ffi_call_raised'("),
@@ -312,17 +312,13 @@ fn ok_result_delegate_is_built_inline() {
 }
 
 /// A `Dictionary` parameter of a delegate is proved and guarded by `is_map`,
-/// with the snapshot for the retry (`ffi_call_raised/10` takes it).
+/// with no class-variable snapshot (ADR 0153).
 #[test]
 fn dictionary_param_delegate_is_guarded_by_is_map() {
     let code = native_class("  class size: d :: Dictionary -> Integer => self delegate\n");
     let body = function_body(&code, "class_size:");
     assert!(body.contains("try call 'probe_native':'size'("), "{body}");
     assert!(body.contains("call 'erlang':'is_map'(_"), "{body}");
-    assert!(
-        body.contains("= call 'beamtalk_class_vars':'snapshot'() in try call"),
-        "{body}"
-    );
     assert!(body.contains("{'Probe', 'size:'}"), "{body}");
     assert!(!body.contains("'is_binary'"), "{body}");
     // `Dynamic`-valued `Result` through the same map parameter.

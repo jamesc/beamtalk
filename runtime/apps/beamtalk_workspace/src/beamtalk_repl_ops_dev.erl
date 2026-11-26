@@ -269,7 +269,6 @@ handle_erlang_complete(Params) ->
                         case code:get_object_code(Module) of
                             {Module, _Binary, _Filename} ->
                                 %% Module is already loaded; safe to get exports.
-                                %% bt-catcher-audit: not-applicable-no-block - module_info/1 BIF
                                 try Module:module_info(exports) of
                                     Exports ->
                                         Filtered = [

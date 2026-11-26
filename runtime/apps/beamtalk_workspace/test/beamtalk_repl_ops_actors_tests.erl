@@ -213,5 +213,31 @@ kill_user_native_actor_works_test() ->
                 <<"kill">>, #{<<"actor">> => PidBin}, Msg, self()
             )
         ),
-        ok = beamtalk_test_wait:until(fun() -> not is_process_alive(Pid) end)
+        %% BT-5199: the reply comes only once the actor is gone, so a client
+        %% reading `actors` straight after it — from another process, as the
+        %% next request does — never lists the killed actor. (Signal order
+        %% only holds per sender, so the scan runs in a fresh process.)
+        Self = self(),
+        spawn(fun() -> Self ! {listed, beamtalk_workspace_actors:list()} end),
+        Listed =
+            receive
+                {listed, L} -> L
+            after 5000 -> error(no_actor_list)
+            end,
+        ?assertEqual([], [A || #{pid := P} = A <- Listed, P =:= Pid])
+    end).
+
+%% BT-5199: killing an actor that has already stopped is refused, never
+%% reported as a kill (the clients say "Killed X." only on `{status, ok}`).
+kill_stopped_actor_is_refused_test() ->
+    beamtalk_test_fake_native:with_native(['Bt5199KillTwice'], fun(Pid) ->
+        Msg = beamtalk_test_repl:make_msg(<<"kill">>, <<"s-5">>, undefined),
+        Params = #{<<"actor">> => list_to_binary(pid_to_list(Pid))},
+        ?assertEqual(
+            {status, ok}, beamtalk_repl_ops_actors:handle_term(<<"kill">>, Params, Msg, self())
+        ),
+        ?assertMatch(
+            {error, #beamtalk_error{}},
+            beamtalk_repl_ops_actors:handle_term(<<"kill">>, Params, Msg, self())
+        )
     end).

@@ -19,10 +19,9 @@
 //! └── stdlib class names (pre-indexed from lib/*.bt)
 //! ```
 
-use beamtalk_core::compilation::extension_index::ExtensionIndex;
 use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
 use beamtalk_core::semantic_analysis::{
-    AliasInfo, AliasRegistry, ClassHierarchy, ProtocolInfo, ProtocolRegistry, SemanticError,
+    AliasInfo, AliasRegistry, ClassHierarchy, ProtocolInfo, ProtocolRegistry,
 };
 use beamtalk_core::source_analysis::{Diagnostic, lex_with_eof, parse};
 use camino::{Utf8Path, Utf8PathBuf};
@@ -50,7 +49,7 @@ pub(crate) fn build_hierarchy_with_trait_origins(
     module: &beamtalk_core::ast::Module,
     current_package: Option<&str>,
     external_protocols: impl FnOnce() -> HashMap<EcoString, beamtalk_core::ast::ProtocolDefinition>,
-) -> (Result<ClassHierarchy, SemanticError>, Vec<Diagnostic>) {
+) -> (ClassHierarchy, Vec<Diagnostic>) {
     use beamtalk_core::semantic_analysis::trait_expansion;
 
     if !module.classes.iter().any(|c| !c.uses.is_empty()) {
@@ -62,12 +61,9 @@ pub(crate) fn build_hierarchy_with_trait_origins(
         &external_protocols(),
         trait_expansion::known_package(current_package),
     );
-    let (result, diags) = ClassHierarchy::build(&expanded);
-    let result = result.map(|mut hierarchy| {
-        trait_expansion::apply_origins(&mut hierarchy, &origins);
-        hierarchy
-    });
-    (result, diags)
+    let (mut hierarchy, diags) = ClassHierarchy::build(&expanded);
+    trait_expansion::apply_origins(&mut hierarchy, &origins);
+    (hierarchy, diags)
 }
 
 // `CURRENT_PROJECT_PACKAGE_MARKER` — the package stamp used for a same-project
@@ -130,6 +126,49 @@ pub(crate) fn is_dependency_checkout_file(file: &Utf8Path) -> bool {
     dependency_package_for_path(file).is_some()
 }
 
+/// What a file exports to the rest of the project; see
+/// [`ProjectIndex::file_interface`].
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct FileInterface {
+    classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    /// `(name, expansion, is_internal, package)`, span-free.
+    aliases: Vec<(EcoString, DeclaredType, bool, Option<EcoString>)>,
+    protocols: Vec<ProtocolInfo>,
+}
+
+/// A file's interface borrowed from the index (see
+/// [`ProjectIndex::file_interface_matches`]).
+struct InterfaceView<'a> {
+    classes: Vec<&'a beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
+    aliases: Vec<(&'a EcoString, DeclaredType, bool, &'a Option<EcoString>)>,
+    protocols: Vec<&'a ProtocolInfo>,
+}
+
+/// `ProtocolInfo` equality ignoring where the protocol is declared: moving a
+/// declaration does not change what other files see. Destructured
+/// exhaustively so a new field must be considered here.
+fn protocol_eq_ignoring_span(a: &ProtocolInfo, b: &ProtocolInfo) -> bool {
+    let ProtocolInfo {
+        name,
+        type_params,
+        type_param_bounds,
+        extending,
+        methods,
+        class_methods,
+        provided,
+        package,
+        span: _,
+    } = a;
+    *name == b.name
+        && *type_params == b.type_params
+        && *type_param_bounds == b.type_param_bounds
+        && *extending == b.extending
+        && *methods == b.methods
+        && *class_methods == b.class_methods
+        && *provided == b.provided
+        && *package == b.package
+}
+
 /// Cross-file project index holding a merged class hierarchy.
 ///
 /// **DDD Context:** Language Service — Aggregate Root
@@ -149,11 +188,6 @@ pub struct ProjectIndex {
     stdlib_class_names: HashSet<EcoString>,
     /// Tracks which files were loaded as stdlib sources.
     stdlib_files: HashSet<Utf8PathBuf>,
-    /// Per-file standalone extension definitions (ADR 0066).
-    ///
-    /// Tracked per file so incremental updates can drop a file's stale
-    /// extensions; merged on demand by [`Self::cross_file_extensions_for`].
-    file_extensions: HashMap<Utf8PathBuf, ExtensionIndex>,
     /// Merged type alias registry across all indexed files (ADR 0108 Phase
     /// 8) — the alias-namespace counterpart to `merged_hierarchy`.
     /// Rebuilt from [`Self::file_aliases`] on every [`Self::update_file_aliases`]
@@ -252,7 +286,6 @@ impl ProjectIndex {
             file_hierarchies: HashMap::new(),
             stdlib_class_names: HashSet::new(),
             stdlib_files: HashSet::new(),
-            file_extensions: HashMap::new(),
             merged_aliases: Arc::new(AliasRegistry::new()),
             file_aliases: HashMap::new(),
             file_protocols: HashMap::new(),
@@ -269,17 +302,9 @@ impl ProjectIndex {
     /// Each `(path, source)` pair is parsed and its class definitions are
     /// merged into the project-wide hierarchy.
     ///
-    /// Returns `(Result<Self, SemanticError>, Vec<Diagnostic>)` following the
-    /// project convention for fallible operations, even though in practice
-    /// `ClassHierarchy::build` is infallible and will always return `Ok`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SemanticError`] if `ClassHierarchy::build` fails for any
-    /// stdlib source file (cannot happen in practice).
-    pub fn with_stdlib(
-        stdlib_sources: &[(Utf8PathBuf, String)],
-    ) -> (Result<Self, SemanticError>, Vec<Diagnostic>) {
+    /// Returns `(Self, Vec<Diagnostic>)`: hierarchy construction is
+    /// infallible, so problems are reported only as diagnostics.
+    pub fn with_stdlib(stdlib_sources: &[(Utf8PathBuf, String)]) -> (Self, Vec<Diagnostic>) {
         let mut index = Self::new();
         let mut all_diagnostics = Vec::new();
         // Parse every file first so a trait declared in one stdlib file can
@@ -302,15 +327,11 @@ impl ProjectIndex {
             .map(|p| (p.name.name.clone(), p.clone()))
             .collect();
         for (path, module) in parsed {
-            let (file_hierarchy_result, hierarchy_diags) =
+            let (mut file_hierarchy, hierarchy_diags) =
                 build_hierarchy_with_trait_origins(&module, Some(STDLIB_PACKAGE_MARKER), || {
                     stdlib_protocols.clone()
                 });
             all_diagnostics.extend(hierarchy_diags);
-            let mut file_hierarchy = match file_hierarchy_result {
-                Ok(h) => h,
-                Err(e) => return (Err(e), all_diagnostics),
-            };
 
             // Register protocol definitions as synthetic class entries
             file_hierarchy.register_protocol_classes(&module);
@@ -328,13 +349,6 @@ impl ProjectIndex {
                 .file_hierarchies
                 .insert(path.clone(), file_hierarchy.clone());
             index.merged_hierarchy.merge(&file_hierarchy);
-
-            // Track standalone extensions defined in stdlib sources
-            // so they are visible to cross-file diagnostics like any other
-            // indexed file's extensions.
-            let mut extensions = ExtensionIndex::new();
-            extensions.add_module(&module, path.as_std_path());
-            index.set_file_extensions(path.clone(), extensions);
 
             // ADR 0108 Phase 8: track stdlib `type` declarations
             // too, so a stdlib-defined alias is offered in completions and
@@ -380,7 +394,7 @@ impl ProjectIndex {
             index.update_file_protocol_uses(path.clone(), &module);
         }
         index.rebuild_alias_registry();
-        (Ok(index), all_diagnostics)
+        (index, all_diagnostics)
     }
 
     /// Returns the merged class hierarchy across all files.
@@ -470,8 +484,7 @@ impl ProjectIndex {
     /// `ClassHierarchy` used for alias/class collision detection already
     /// reflects this call's class/protocol changes.
     ///
-    /// An empty `aliases` clears the file's prior entry (mirrors
-    /// [`Self::set_file_extensions`]).
+    /// An empty `aliases` clears the file's prior entry.
     ///
     /// No-ops (skips [`Self::rebuild_alias_registry`] entirely) when `file`
     /// had no tracked aliases before *and* `aliases` is empty now — this
@@ -697,31 +710,6 @@ impl ProjectIndex {
         self.merged_aliases = Arc::new(registry);
     }
 
-    /// Record the standalone extension definitions contributed by `file`
-    /// An empty index clears the file's entry. Call after
-    /// [`Self::update_file`] whenever the file is (re)indexed.
-    pub fn set_file_extensions(&mut self, file: Utf8PathBuf, extensions: ExtensionIndex) {
-        if extensions.is_empty() {
-            self.file_extensions.remove(&file);
-        } else {
-            self.file_extensions.insert(file, extensions);
-        }
-    }
-
-    /// Returns a merged extension index over every indexed file except
-    /// `file` — the extension analogue of
-    /// [`Self::cross_file_class_infos_for`].
-    #[must_use]
-    pub fn cross_file_extensions_for(&self, file: &Utf8PathBuf) -> ExtensionIndex {
-        let mut merged = ExtensionIndex::new();
-        for (path, index) in &self.file_extensions {
-            if path != file {
-                merged.merge(index);
-            }
-        }
-        merged
-    }
-
     /// Remove a file from the index.
     ///
     /// Classes defined only in this file are removed from the merged hierarchy.
@@ -732,7 +720,6 @@ impl ProjectIndex {
             // Stdlib files are never truly removed — preserve their hierarchy
             return;
         }
-        self.file_extensions.remove(file);
         let mut classes_changed = false;
         if let Some(old_names) = self.file_classes.remove(file) {
             self.file_hierarchies.remove(file);
@@ -838,8 +825,15 @@ impl ProjectIndex {
             if others.is_empty() {
                 continue;
             }
-            others.sort();
-            let winner = others[0].min(file).clone();
+            // BT-5131: a project file outranks a dependency checkout copy
+            // (`_build/deps/...`), whatever the paths sort like.
+            let rank = |p: &Utf8PathBuf| (is_dependency_checkout_file(p), p.clone());
+            others.sort_by_key(|p| rank(p));
+            let winner = if rank(file) < rank(others[0]) {
+                file.clone()
+            } else {
+                others[0].clone()
+            };
             out.push((name.clone(), others[0].clone(), winner));
         }
         out
@@ -857,25 +851,106 @@ impl ProjectIndex {
         self.file_classes.get(file).map(Vec::as_slice)
     }
 
-    /// The interface `file` exports to other files (BT-5109): every class it
-    /// defines with its full `ClassInfo` (superclass, methods and their
-    /// signatures, state), sorted by class name. Two calls compare equal
-    /// exactly when nothing another file can observe has changed, so a
-    /// method added, removed or re-typed makes them differ, while an edit to
-    /// a method body does not.
+    /// The interface `file` exports to other files (BT-5109, BT-5131): every
+    /// class it defines with its full `ClassInfo` (superclass, methods and
+    /// their signatures, state), plus its type aliases and protocols, sorted
+    /// by name. Two calls compare equal exactly when nothing another file can
+    /// observe has changed, so a method added, removed or re-typed, an alias
+    /// re-pointed or a protocol requirement edited makes them differ, while
+    /// an edit to a method body, or merely moving a declaration, does not.
     #[must_use]
-    pub fn file_interface(
+    pub fn file_interface(&self, file: &Utf8PathBuf) -> Option<FileInterface> {
+        let view = self.interface_view(file)?;
+        Some(FileInterface {
+            classes: view.classes.into_iter().cloned().collect(),
+            aliases: view
+                .aliases
+                .into_iter()
+                .map(|(name, ty, internal, package)| (name.clone(), ty, internal, package.clone()))
+                .collect(),
+            protocols: view
+                .protocols
+                .into_iter()
+                .map(|p| ProtocolInfo {
+                    span: beamtalk_core::span::Span::default(),
+                    ..p.clone()
+                })
+                .collect(),
+        })
+    }
+
+    /// Whether `file`'s current interface equals `baseline`, as
+    /// [`Self::file_interface`] would compare (a file that is not indexed,
+    /// or `None`, counts as exporting nothing) — but by reference, without
+    /// cloning the file's `ClassInfo`s (BT-5188: it runs under the service
+    /// lock after edits).
+    #[must_use]
+    pub fn file_interface_matches(
         &self,
         file: &Utf8PathBuf,
-    ) -> Option<Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>> {
-        let names = self.file_classes.get(file)?;
-        let hierarchy = self.file_hierarchies.get(file)?;
-        let mut infos: Vec<_> = names
-            .iter()
-            .filter_map(|n| hierarchy.get_class(n).cloned())
+        baseline: Option<&FileInterface>,
+    ) -> bool {
+        let empty = FileInterface::default();
+        let base = baseline.unwrap_or(&empty);
+        let Some(view) = self.interface_view(file) else {
+            return *base == empty;
+        };
+        view.classes.len() == base.classes.len()
+            && view.classes.iter().zip(&base.classes).all(|(a, b)| *a == b)
+            && view.aliases.len() == base.aliases.len()
+            && view.aliases.iter().zip(&base.aliases).all(
+                |((name, ty, internal, package), (bn, bt, bi, bp))| {
+                    *name == bn && ty == bt && internal == bi && *package == bp
+                },
+            )
+            && view.protocols.len() == base.protocols.len()
+            && view
+                .protocols
+                .iter()
+                .zip(&base.protocols)
+                .all(|(a, b)| protocol_eq_ignoring_span(a, b))
+    }
+
+    /// The borrowed parts of `file`'s interface, sorted by name; shared by
+    /// [`Self::file_interface`] and [`Self::file_interface_matches`].
+    fn interface_view(&self, file: &Utf8PathBuf) -> Option<InterfaceView<'_>> {
+        let aliases_indexed = self.file_aliases.get(file);
+        let protocols_indexed = self.file_protocols.get(file);
+        if !self.file_classes.contains_key(file)
+            && aliases_indexed.is_none()
+            && protocols_indexed.is_none()
+        {
+            return None;
+        }
+        let mut classes: Vec<&beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo> =
+            match (self.file_classes.get(file), self.file_hierarchies.get(file)) {
+                (Some(names), Some(hierarchy)) => names
+                    .iter()
+                    .filter_map(|n| hierarchy.get_class(n))
+                    .collect(),
+                _ => Vec::new(),
+            };
+        classes.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut aliases: Vec<_> = aliases_indexed
+            .into_iter()
+            .flatten()
+            .map(|i| {
+                (
+                    &i.name,
+                    DeclaredType::from(&i.annotation),
+                    i.is_internal,
+                    &i.package,
+                )
+            })
             .collect();
-        infos.sort_by(|a, b| a.name.cmp(&b.name));
-        Some(infos)
+        aliases.sort_by(|a, b| a.0.cmp(b.0));
+        let mut protocols: Vec<&ProtocolInfo> = protocols_indexed.into_iter().flatten().collect();
+        protocols.sort_by(|a, b| a.name.cmp(&b.name));
+        Some(InterfaceView {
+            classes,
+            aliases,
+            protocols,
+        })
     }
 
     /// Returns `true` if `file` was loaded as part of the stdlib source set.
@@ -1279,8 +1354,7 @@ mod tests {
             Utf8PathBuf::from("stdlib/src/Counter.bt"),
             "Object subclass: Counter\n  increment => 1".to_string(),
         )];
-        let (index_result, _) = ProjectIndex::with_stdlib(&stdlib);
-        let index = index_result.unwrap();
+        let (index, _) = ProjectIndex::with_stdlib(&stdlib);
         assert!(index.hierarchy().has_class("Counter"));
         assert!(
             index
@@ -1296,7 +1370,7 @@ mod tests {
 
         let tokens = lex_with_eof("Object subclass: Foo\n  bar => 1");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(file.clone(), &hierarchy);
 
         assert!(index.hierarchy().has_class("Foo"));
@@ -1314,14 +1388,14 @@ mod tests {
         // First version defines Foo
         let tokens = lex_with_eof("Object subclass: Foo\n  bar => 1");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(file.clone(), &hierarchy);
         assert!(index.hierarchy().has_class("Foo"));
 
         // Second version defines Bar instead
         let tokens = lex_with_eof("Object subclass: Bar\n  baz => 2");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(file.clone(), &hierarchy);
         assert!(index.hierarchy().has_class("Bar"));
         assert!(!index.hierarchy().has_class("Foo"));
@@ -1334,7 +1408,7 @@ mod tests {
 
         let tokens = lex_with_eof("Object subclass: Foo\n  bar => 1");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(file.clone(), &hierarchy);
         assert!(index.hierarchy().has_class("Foo"));
 
@@ -1348,7 +1422,7 @@ mod tests {
             Utf8PathBuf::from("stdlib/src/Counter.bt"),
             "Object subclass: Counter\n  increment => 1".to_string(),
         )];
-        let mut index = ProjectIndex::with_stdlib(&stdlib).0.unwrap();
+        let mut index = ProjectIndex::with_stdlib(&stdlib).0;
         assert!(index.hierarchy().has_class("Counter"));
 
         // Remove the stdlib file — Counter should persist because it's stdlib
@@ -1367,12 +1441,12 @@ mod tests {
 
         let tokens_a = lex_with_eof("Object subclass: ClassA\n  methodA => 1");
         let (module_a, _) = parse(tokens_a);
-        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
+        let hierarchy_a = ClassHierarchy::build(&module_a).0;
         index.update_file(Utf8PathBuf::from("a.bt"), &hierarchy_a);
 
         let tokens_b = lex_with_eof("Object subclass: ClassB\n  methodB => 2");
         let (module_b, _) = parse(tokens_b);
-        let hierarchy_b = ClassHierarchy::build(&module_b).0.unwrap();
+        let hierarchy_b = ClassHierarchy::build(&module_b).0;
         index.update_file(Utf8PathBuf::from("b.bt"), &hierarchy_b);
 
         // Both classes visible in merged hierarchy
@@ -1390,13 +1464,13 @@ mod tests {
         // a.bt defines Dup with methodA
         let tokens_a = lex_with_eof("Object subclass: Dup\n  methodA => 1");
         let (module_a, _) = parse(tokens_a);
-        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
+        let hierarchy_a = ClassHierarchy::build(&module_a).0;
         index.update_file(Utf8PathBuf::from("a.bt"), &hierarchy_a);
 
         // b.bt defines Dup with methodB
         let tokens_b = lex_with_eof("Object subclass: Dup\n  methodB => 2");
         let (module_b, _) = parse(tokens_b);
-        let hierarchy_b = ClassHierarchy::build(&module_b).0.unwrap();
+        let hierarchy_b = ClassHierarchy::build(&module_b).0;
         index.update_file(Utf8PathBuf::from("b.bt"), &hierarchy_b);
 
         // BT-5080: the winner is the sorted-first path (a.bt) regardless of
@@ -1415,7 +1489,7 @@ mod tests {
         let (module, _) = parse(lex_with_eof(&format!(
             "Object subclass: Dup\n  {method} => 1"
         )));
-        ClassHierarchy::build(&module).0.unwrap()
+        ClassHierarchy::build(&module).0
     }
 
     /// BT-5080: the winner of a class defined in two files does not depend on
@@ -1467,14 +1541,14 @@ mod tests {
             Utf8PathBuf::from("stdlib/src/Counter.bt"),
             "Object subclass: Counter\n  increment => 1".to_string(),
         )];
-        let mut index = ProjectIndex::with_stdlib(&stdlib).0.unwrap();
+        let mut index = ProjectIndex::with_stdlib(&stdlib).0;
         assert!(index.hierarchy().has_class("Counter"));
 
         // User file shadows stdlib Counter
         let user_file = Utf8PathBuf::from("user/counter.bt");
         let tokens = lex_with_eof("Object subclass: Counter\n  decrement => 1");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(user_file.clone(), &hierarchy);
 
         // User's Counter (with decrement) is now the active definition
@@ -1495,7 +1569,7 @@ mod tests {
 
         let tokens = lex_with_eof("Object subclass: MyClass\n  doStuff => 1");
         let (module, _) = parse(tokens);
-        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut hierarchy = ClassHierarchy::build(&module).0;
         // Stamp the package on the hierarchy (simulating build pipeline behaviour)
         hierarchy.stamp_package("my_app");
         index.update_file(file.clone(), &hierarchy);
@@ -1514,7 +1588,7 @@ mod tests {
 
         let tokens = lex_with_eof("Object subclass: Scratch\n  run => 1");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(file.clone(), &hierarchy);
 
         assert_eq!(
@@ -1540,14 +1614,14 @@ mod tests {
         // File A defines a protocol
         let tokens_a = lex_with_eof("Protocol define: Printable\n  asString -> String");
         let (module_a, _) = parse(tokens_a);
-        let mut hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
+        let mut hierarchy_a = ClassHierarchy::build(&module_a).0;
         hierarchy_a.register_protocol_classes(&module_a);
         index.update_file(Utf8PathBuf::from("a.bt"), &hierarchy_a);
 
         // File B defines a class
         let tokens_b = lex_with_eof("Object subclass: Foo\n  bar => 1");
         let (module_b, _) = parse(tokens_b);
-        let hierarchy_b = ClassHierarchy::build(&module_b).0.unwrap();
+        let hierarchy_b = ClassHierarchy::build(&module_b).0;
         index.update_file(Utf8PathBuf::from("b.bt"), &hierarchy_b);
 
         // Both should be visible in merged hierarchy
@@ -1567,7 +1641,7 @@ mod tests {
 
         let tokens = lex_with_eof("Protocol define: Printable\n  asString -> String");
         let (module, _) = parse(tokens);
-        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut hierarchy = ClassHierarchy::build(&module).0;
         hierarchy.register_protocol_classes(&module);
         index.update_file(Utf8PathBuf::from("proto.bt"), &hierarchy);
         assert!(index.hierarchy().has_class("Printable"));
@@ -1588,13 +1662,13 @@ mod tests {
         // File A: real class
         let tokens_a = lex_with_eof("Object subclass: Foo\n  bar => 1");
         let (module_a, _) = parse(tokens_a);
-        let hierarchy_a = ClassHierarchy::build(&module_a).0.unwrap();
+        let hierarchy_a = ClassHierarchy::build(&module_a).0;
         index.update_file(Utf8PathBuf::from("a.bt"), &hierarchy_a);
 
         // File B: protocol with same name (indexed after)
         let tokens_b = lex_with_eof("Protocol define: Foo\n  baz");
         let (module_b, _) = parse(tokens_b);
-        let mut hierarchy_b = ClassHierarchy::build(&module_b).0.unwrap();
+        let mut hierarchy_b = ClassHierarchy::build(&module_b).0;
         hierarchy_b.register_protocol_classes(&module_b);
         index.update_file(Utf8PathBuf::from("b.bt"), &hierarchy_b);
 
@@ -1620,7 +1694,7 @@ mod tests {
 
         let alias_tokens = lex_with_eof("type RestartStrategy = #temporary | #transient");
         let (alias_module, _) = parse(alias_tokens);
-        let alias_hierarchy = ClassHierarchy::build(&alias_module).0.unwrap();
+        let alias_hierarchy = ClassHierarchy::build(&alias_module).0;
         index.update_file(Utf8PathBuf::from("aliases.bt"), &alias_hierarchy);
         index.update_file_aliases(
             Utf8PathBuf::from("aliases.bt"),
@@ -1631,7 +1705,7 @@ mod tests {
         // Now repeatedly "edit" an unrelated, alias-less file.
         let plain_tokens = lex_with_eof("Object subclass: Foo\n  bar => 1");
         let (plain_module, _) = parse(plain_tokens);
-        let plain_hierarchy = ClassHierarchy::build(&plain_module).0.unwrap();
+        let plain_hierarchy = ClassHierarchy::build(&plain_module).0;
         for _ in 0..3 {
             index.update_file(Utf8PathBuf::from("foo.bt"), &plain_hierarchy);
             index.update_file_aliases(Utf8PathBuf::from("foo.bt"), Vec::new());
@@ -1650,7 +1724,7 @@ mod tests {
 
         let tokens = lex_with_eof("type RestartStrategy = #temporary | #transient | #permanent");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(file.clone(), &hierarchy);
         let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file, infos);
@@ -1665,7 +1739,7 @@ mod tests {
 
         let tokens = lex_with_eof("type Foo = Integer");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(file.clone(), &hierarchy);
         let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file.clone(), infos);
@@ -1674,7 +1748,7 @@ mod tests {
         // Re-index the same file with a differently-named alias.
         let tokens = lex_with_eof("type Bar = Symbol");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(file.clone(), &hierarchy);
         let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file, infos);
@@ -1847,7 +1921,7 @@ mod tests {
 
         let tokens = lex_with_eof("type Foo = Integer");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(dep_file.clone(), &hierarchy);
         let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(dep_file.clone(), infos);
@@ -1862,7 +1936,7 @@ mod tests {
         index.remove_file(&dep_file);
         let tokens = lex_with_eof("type Foo = Integer");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(project_file.clone(), &hierarchy);
         let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(project_file, infos);
@@ -1893,11 +1967,10 @@ mod tests {
     #[test]
     fn update_file_aliases_reopen_preserves_stdlib_package_stamp() {
         let stdlib_file = Utf8PathBuf::from("stdlib/Direction.bt");
-        let (index_result, _) = ProjectIndex::with_stdlib(&[(
+        let (mut index, _) = ProjectIndex::with_stdlib(&[(
             stdlib_file.clone(),
             "internal type Direction = #north | #south".to_string(),
         )]);
-        let mut index = index_result.unwrap();
         assert!(index.is_stdlib_file(&stdlib_file));
 
         // Simulate the LSP re-indexing the same stdlib file after a
@@ -1906,7 +1979,7 @@ mod tests {
         // `update_file_aliases` pair as any project file.
         let tokens = lex_with_eof("internal type Direction = #north | #south");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(stdlib_file.clone(), &hierarchy);
         let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(stdlib_file.clone(), infos);
@@ -1944,7 +2017,7 @@ mod tests {
 
         let tokens = lex_with_eof("internal type Direction = #north | #south");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(stdlib_file.clone(), &hierarchy);
         let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(stdlib_file, infos);
@@ -1972,7 +2045,7 @@ mod tests {
         // same-project fallback marker.
         let tokens = lex_with_eof("internal type Direction = #north | #south");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(stdlib_file.clone(), &hierarchy);
         let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(stdlib_file.clone(), infos);
@@ -2000,7 +2073,7 @@ mod tests {
 
         let tokens = lex_with_eof("internal type Foo = Integer");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(file.clone(), &hierarchy);
         let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file.clone(), infos);
@@ -2041,14 +2114,14 @@ mod tests {
 
         let tokens = lex_with_eof("internal type Foo = Integer");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(file_a.clone(), &hierarchy);
         let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file_a.clone(), infos);
 
         let tokens = lex_with_eof("internal type Foo = String");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(file_b.clone(), &hierarchy);
         let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file_b.clone(), infos);
@@ -2122,7 +2195,7 @@ mod tests {
 
         let tokens = lex_with_eof("type RestartStrategy = #temporary | #transient | #permanent");
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         index.update_file(file.clone(), &hierarchy);
         let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file.clone(), infos);
@@ -2142,12 +2215,12 @@ mod tests {
 
         let class_tokens = lex_with_eof("Object subclass: Foo\n  bar => 1");
         let (class_module, _) = parse(class_tokens);
-        let class_hierarchy = ClassHierarchy::build(&class_module).0.unwrap();
+        let class_hierarchy = ClassHierarchy::build(&class_module).0;
         index.update_file(Utf8PathBuf::from("foo.bt"), &class_hierarchy);
 
         let alias_tokens = lex_with_eof("type Foo = Integer");
         let (alias_module, _) = parse(alias_tokens);
-        let alias_hierarchy = ClassHierarchy::build(&alias_module).0.unwrap();
+        let alias_hierarchy = ClassHierarchy::build(&alias_module).0;
         index.update_file(Utf8PathBuf::from("alias_foo.bt"), &alias_hierarchy);
         let infos = AliasRegistry::extract_alias_infos(&alias_module);
         index.update_file_aliases(Utf8PathBuf::from("alias_foo.bt"), infos);
@@ -2174,7 +2247,7 @@ mod tests {
         // File A: alias `Foo` registers cleanly (no collision yet).
         let alias_tokens = lex_with_eof("type Foo = Integer");
         let (alias_module, _) = parse(alias_tokens);
-        let alias_hierarchy = ClassHierarchy::build(&alias_module).0.unwrap();
+        let alias_hierarchy = ClassHierarchy::build(&alias_module).0;
         index.update_file(Utf8PathBuf::from("alias_foo.bt"), &alias_hierarchy);
         let infos = AliasRegistry::extract_alias_infos(&alias_module);
         index.update_file_aliases(Utf8PathBuf::from("alias_foo.bt"), infos);
@@ -2184,7 +2257,7 @@ mod tests {
         // at all) later defines a colliding class `Foo`.
         let class_tokens = lex_with_eof("Object subclass: Foo\n  bar => 1");
         let (class_module, _) = parse(class_tokens);
-        let class_hierarchy = ClassHierarchy::build(&class_module).0.unwrap();
+        let class_hierarchy = ClassHierarchy::build(&class_module).0;
         index.update_file(Utf8PathBuf::from("foo.bt"), &class_hierarchy);
 
         assert!(
@@ -2200,61 +2273,6 @@ mod tests {
             index.alias_registry().has_alias("Foo"),
             "removing the colliding class should let the previously-shadowed alias \
              re-register"
-        );
-    }
-}
-
-#[cfg(test)]
-mod extension_tests {
-    use super::*;
-
-    fn parse_and_index(index: &mut ProjectIndex, path: &str, source: &str) {
-        let tokens = lex_with_eof(source);
-        let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        index.update_file(Utf8PathBuf::from(path), &hierarchy);
-        let mut extensions = ExtensionIndex::new();
-        extensions.add_module(&module, std::path::Path::new(path));
-        index.set_file_extensions(Utf8PathBuf::from(path), extensions);
-    }
-
-    #[test]
-    fn cross_file_extensions_exclude_own_file() {
-        let mut index = ProjectIndex::new();
-        parse_and_index(&mut index, "a.bt", "String >> fromA => self\n");
-        parse_and_index(&mut index, "b.bt", "String >> fromB => self\n");
-
-        let for_a = index.cross_file_extensions_for(&Utf8PathBuf::from("a.bt"));
-        assert_eq!(for_a.len(), 1, "a.bt should see only b.bt's extension");
-        let for_b = index.cross_file_extensions_for(&Utf8PathBuf::from("b.bt"));
-        assert_eq!(for_b.len(), 1, "b.bt should see only a.bt's extension");
-    }
-
-    #[test]
-    fn removed_file_extensions_disappear() {
-        let mut index = ProjectIndex::new();
-        parse_and_index(&mut index, "a.bt", "String >> fromA => self\n");
-        parse_and_index(&mut index, "b.bt", "Object subclass: B\n  m => 1\n");
-
-        index.remove_file(&Utf8PathBuf::from("a.bt"));
-        let for_b = index.cross_file_extensions_for(&Utf8PathBuf::from("b.bt"));
-        assert!(
-            for_b.is_empty(),
-            "removed file's extensions must not linger"
-        );
-    }
-
-    #[test]
-    fn empty_extension_set_clears_entry() {
-        let mut index = ProjectIndex::new();
-        parse_and_index(&mut index, "a.bt", "String >> fromA => self\n");
-        // Re-index the same file without extensions.
-        parse_and_index(&mut index, "a.bt", "Object subclass: A\n  m => 1\n");
-
-        let for_other = index.cross_file_extensions_for(&Utf8PathBuf::from("other.bt"));
-        assert!(
-            for_other.is_empty(),
-            "re-indexing without extensions must clear the stale entry"
         );
     }
 }

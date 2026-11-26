@@ -7,12 +7,9 @@
 //!
 //! This module contains validation checks that run after the main analysis
 //! pipeline. Validators are organized by concern:
-//! - `class_process_ffi_validators` — class-side methods that run
-//!   process-sensitive FFI in the class process (`class-process-ffi`,
-//!   BT-4031), or create process-owned resources in the caller
-//!   (`class-method-process-resource`, ADR 0142, BT-4302)
-//! - `class_state_abroad` — blocks that touch their home class's variables
-//!   where they run outside an invocation of it (ADR 0130 §5, BT-3712)
+//! - `class_process_ffi_validators` — class-side methods that create
+//!   process-owned resources in the caller (`class-method-process-resource`,
+//!   ADR 0142, BT-4302)
 //! - `class_validators` — class-hierarchy-dependent checks
 //! - `handleinfo_catch_all_validators` — `handleInfo:` written as a `match:`
 //!   with no catch-all arm (ADR 0134, BT-3959)
@@ -41,7 +38,6 @@
 //!   (ADR 0071)
 
 mod class_process_ffi_validators;
-mod class_state_abroad;
 mod class_validators;
 mod handleinfo_catch_all_validators;
 mod late_slot_validators;
@@ -63,13 +59,13 @@ mod visibility_validators;
 pub(crate) use class_process_ffi_validators::{
     check_class_method_ffi, ffi_call_is_process_sensitive,
 };
-pub(crate) use class_state_abroad::check_class_state_abroad;
 pub use class_validators::check_stdlib_name_shadowing;
 pub(crate) use class_validators::{
     check_abstract_instantiation, check_actor_new_usage, check_cast_on_value_type,
-    check_class_variable_access, check_data_keyword_class_kind, check_handle_scope_on_object,
-    check_new_field_names, check_object_new_usage, check_shape_version_and_migrations,
-    check_value_nil_return, check_value_slot_assignment, check_value_slot_case_collision,
+    check_class_side_self_field_access, check_data_keyword_class_kind,
+    check_handle_scope_on_object, check_new_field_names, check_object_new_usage,
+    check_shape_version_and_migrations, check_value_nil_return, check_value_slot_assignment,
+    check_value_slot_case_collision,
 };
 pub(crate) use handleinfo_catch_all_validators::check_handle_info_catch_all;
 pub(crate) use late_slot_validators::check_late_slot_declarations;
@@ -90,18 +86,18 @@ pub(crate) use match_arm_block_validators::check_match_arm_block;
 pub use match_validators::STATIC_ONLY_HANDLE_CLASSES;
 pub(crate) use match_validators::{
     check_match_exhaustiveness, check_type_pattern_classes, is_concrete_leaf_class,
-    warn_assignment_in_match_arms,
+    sealed_type_all_constructors, warn_assignment_in_match_arms,
 };
 pub(crate) use native_validators::{
-    check_cross_file_native_delegate, check_native_actor_instance_method_bodies,
-    check_native_delegate_reserved_word, check_native_delegate_return_type,
-    check_native_state_fields, check_native_subclass_declares_native,
+    check_native_actor_instance_method_bodies, check_native_delegate_reserved_word,
+    check_native_delegate_return_type, check_native_state_fields,
+    check_native_subclass_declares_native,
 };
 pub(crate) use operator_validators::check_non_overridable_operator_methods;
 pub(crate) use package_validators::check_package_qualifiers;
 pub use reserved_name_validators::MODULE_INFO_FUNCTION;
 pub(crate) use reserved_name_validators::{
-    check_class_var_reflection_shadowing, check_reserved_internal_names, check_reserved_module_info,
+    check_reserved_internal_names, check_reserved_module_info,
 };
 pub(crate) use sendability_validators::{
     check_block_capture_sendability, check_undeclared_handle_class,

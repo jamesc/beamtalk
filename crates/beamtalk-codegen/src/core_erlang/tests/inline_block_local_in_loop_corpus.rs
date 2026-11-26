@@ -114,7 +114,7 @@ const CLASS: &str = "InlineBlockLoopProbe";
 /// The class of `context`, holding `methods`.
 fn module(context: Context, methods: &str) -> String {
     match context {
-        Context::Class => format!("Object subclass: {CLASS}\n  classState: n = 0\n\n{methods}"),
+        Context::Class => format!("Object subclass: {CLASS}\n\n{methods}"),
         Context::Value => format!("Value subclass: {CLASS}\n\n{methods}"),
         Context::Actor => format!("Actor subclass: {CLASS}\n  state: n = 0\n\n{methods}"),
     }
@@ -137,9 +137,9 @@ fn method(context: Context, selector: &str, body: &str) -> String {
 
 fn fill_state(template: &str, context: Context) -> Option<String> {
     match context {
-        Context::Value if template.contains("{st}") => None,
-        Context::Value => Some(template.to_string()),
-        _ => Some(template.replace("{st}", "self.n := self.n + 1. ")),
+        Context::Value | Context::Class if template.contains("{st}") => None,
+        Context::Value | Context::Class => Some(template.to_string()),
+        Context::Actor => Some(template.replace("{st}", "self.n := self.n + 1. ")),
     }
 }
 

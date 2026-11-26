@@ -860,7 +860,6 @@ pub(crate) fn check_redundant_local_type_annotation(
         if matches!(
             annotation,
             TypeAnnotation::Union { .. }
-                | TypeAnnotation::FalseOr { .. }
                 | TypeAnnotation::Difference { .. }
                 | TypeAnnotation::Intersection { .. }
                 // A shape resolves to bare `Dictionary` until ADR 0147
@@ -994,7 +993,6 @@ pub(crate) fn find_narrowing_casts(
         if matches!(
             annotation,
             TypeAnnotation::Union { .. }
-                | TypeAnnotation::FalseOr { .. }
                 | TypeAnnotation::Difference { .. }
                 | TypeAnnotation::Intersection { .. }
                 | TypeAnnotation::Shape { .. }
@@ -1607,7 +1605,7 @@ mod tests {
             .collect();
         assert!(hard_errs.is_empty(), "Parse failed: {hard_errs:?}");
         let (hierarchy, _diags) = ClassHierarchy::build(&module);
-        (module, hierarchy.expect("hierarchy build failed"))
+        (module, hierarchy)
     }
 
     /// `super initialize` inside an Actor subclass `initialize` method warns.
@@ -2242,7 +2240,6 @@ mod tests {
             .collect();
         assert!(hard_errs.is_empty(), "Parse failed: {hard_errs:?}");
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.expect("hierarchy build failed");
         let type_map = crate::semantic_analysis::infer_types(&module, &hierarchy, None);
         let mut diagnostics = Vec::new();
         check_redundant_local_type_annotation(&module, &type_map, &mut diagnostics);
@@ -2417,7 +2414,6 @@ mod tests {
             .collect();
         assert!(hard_errs.is_empty(), "Parse failed: {hard_errs:?}");
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.expect("hierarchy build failed");
         let type_map = crate::semantic_analysis::infer_types(&module, &hierarchy, None);
         let mut diagnostics = Vec::new();
         check_narrowing_local_type_annotation(&module, &type_map, &hierarchy, &mut diagnostics);
@@ -2471,7 +2467,6 @@ mod tests {
             .collect();
         assert!(hard_errs.is_empty(), "Parse failed: {hard_errs:?}");
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.expect("hierarchy build failed");
         let aliases = std::sync::Arc::new(
             crate::semantic_analysis::AliasRegistry::from_module_declarations(&module),
         );

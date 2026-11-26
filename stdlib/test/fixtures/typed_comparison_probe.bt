@@ -58,9 +58,10 @@ Value subclass: TypedComparisonProbe
 
   mixedFieldLt -> Boolean => self.mixed < 10
 
-  /// A proven receiver (a literal) stays on the bare BIF whatever the argument.
+  /// A proven receiver (a literal) needs no receiver test, but its argument
+  /// is tested (ADR 0116 § Addendum, BT-5176).
   literalLtArg: other -> Boolean => 5 < other
 
-  /// The argument is unchecked (BT-3928): a typed receiver with a wrong-kind
-  /// argument still term-orders.
+  /// A typed receiver with a wrong-kind argument sends the argument its
+  /// reflected hook (ADR 0116 § Addendum, BT-5176), reversing BT-3928.
   intLtArg: n :: Integer other: other -> Boolean => n < other

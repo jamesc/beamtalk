@@ -33,10 +33,11 @@ defmodule BtAttach.Facade do
   # The authorized op vocabulary and its capability class (ADR 0091 Decision 3/4).
   # `eval`/`load_source`/`save`/`flush`/`reload` inject or run code (execute);
   # the read ops trigger no user code; `kill`/`rotate_cookie` are admin.
-  # `actors`, `info`, `kill`, `load_source`, `rotate_cookie`, `sessions` and
-  # `subscribe_actors` are declared here (the ADR 0091 RBAC vocabulary) but have
-  # no `invoke/3` clause yet: they are kept as reserved vocabulary and answer
-  # `{:error, {:unsupported_op, op}}` once authorized.
+  # `rotate_cookie` and `subscribe_actors` are declared
+  # here (the ADR 0091 RBAC vocabulary) but have no `invoke/3` clause yet: they
+  # are kept as reserved vocabulary and answer `{:error, {:unsupported_op, op}}`
+  # once authorized. `kill`, `actors` and `sessions` dispatch the wire
+  # operations of the same names (BT-5199).
   @ops %{
     eval: :execute,
     # BT-5081: stop the eval running in the caller's own session (the dock's
@@ -186,7 +187,7 @@ defmodule BtAttach.Facade do
     # code, so it is `:read`, safe for the Observer role.
     subscribe_classes: :read,
     # ADR 0105 Phase 1 (BT-2779): reload-induced findings. `reload_findings`
-    # reads the current live snapshot (`beamtalk_workspace_findings_store:all/0`)
+    # reads the current live snapshot (the `reload-findings` operation)
     # — pure reflection, no user code — so it is `:read`, safe for the
     # Observer role, scoped exactly like `changes`. `subscribe_reload_check`
     # registers the LiveView pid on the `reload_check` push stream so a
@@ -234,6 +235,24 @@ defmodule BtAttach.Facade do
     kill: :admin,
     rotate_cookie: :admin
   }
+
+  # Ops declared in `@ops` with no `invoke/3` clause: vocabulary reserved for the
+  # RBAC catalog that answers `{:error, {:unsupported_op, op}}` once authorized
+  # (BT-5201). This list is visible on purpose and can only shrink:
+  # `facade_parity_test.exs` fails when an op without a clause is not listed here,
+  # when a listed op gains a clause, and when this list grows past its pinned
+  # ceiling. Each entry is implemented by dispatch, or removed from `@ops`, by the
+  # issue named beside it; `rotate_cookie` is decided in BT-5206.
+  @reserved_ops [
+    # BT-5205: the actor-list push stream; implemented by dispatch or removed.
+    :subscribe_actors,
+    # BT-5206 decides explicitly: implemented, or removed from the vocabulary.
+    :rotate_cookie
+  ]
+
+  @doc "Ops in the vocabulary that have no implementation yet (see `@reserved_ops`)."
+  @spec reserved_ops() :: [atom()]
+  def reserved_ops, do: @reserved_ops
 
   @doc "The full authorized op vocabulary (catalog keys)."
   @spec ops() :: [atom()]
@@ -289,9 +308,26 @@ defmodule BtAttach.Facade do
   # no UI binding yet return `:unsupported_op` rather than silently no-op'ing.
   defp invoke(:eval, %{session_pid: pid, code: code}, _ctx), do: client().eval(pid, code)
   defp invoke(:interrupt, %{session_pid: pid}, _ctx), do: client().interrupt(pid)
+
+  # BT-5203: compile source into the live image through the `load-source`
+  # operation, in the caller's session. The source is a value, never spliced
+  # into an expression.
+  defp invoke(:load_source, %{session_pid: pid, source: source}, _ctx) do
+    if is_binary(source),
+      do: client().load_source(pid, source),
+      else: {:error, :invalid_params}
+  end
+
   defp invoke(:inspect, %{term: term}, _ctx), do: client().inspect_value(term)
   defp invoke(:bindings, %{session_pid: pid}, _ctx), do: client().list_bindings(pid)
   defp invoke(:changes, _params, _ctx), do: client().change_history()
+
+  # BT-5199: the Inspector's "Kill actor" action and the actor/session lists,
+  # each the wire operation of the same name through `beamtalk_repl_ops`.
+  # `kill` is `:admin` (Owner-only); `actors`/`sessions` are Observer reads.
+  defp invoke(:kill, %{term: term}, _ctx), do: client().kill_actor(term)
+  defp invoke(:actors, _params, _ctx), do: client().actors()
+  defp invoke(:sessions, _params, _ctx), do: client().sessions()
 
   # ADR 0105 Phase 1 (BT-2779): current live snapshot of reload-induced
   # findings — the workspace/cockpit UI's initial-load / manual-refresh
@@ -567,7 +603,17 @@ defmodule BtAttach.Facade do
   # catalogue + System Browser "Tests" group are populated (no args).
   defp invoke(:load_tests, _params, _ctx), do: client().load_tests()
 
-  defp invoke(:flush, _params, _ctx), do: client().flush()
+  # BT-5204: `flush` dispatches the `flush` operation. The optional scope
+  # (`:class`, `:file` or `:kind`) and `:confirm_destructive` ride through as the
+  # operation's own params; an absent key is not sent. The confirmation rule is
+  # the operation's: only a boolean `true` applies the destructive tier.
+  defp invoke(:flush, params, _ctx),
+    do:
+      client().flush(Keyword.new(Map.take(params, [:class, :file, :kind, :confirm_destructive])))
+
+  # BT-5204: the workspace's version, node, workspace id and settings, through
+  # the `info` operation.
+  defp invoke(:info, _params, _ctx), do: client().info()
 
   # BT-2590: the workspace `autoflush` boolean. Returns the flag directly (never a
   # `{:ok, _}` tuple — the client defaults a degraded read to `false`), so the

@@ -1274,19 +1274,15 @@ fn parenthesised_last_statements_compile_with_and_without_a_non_local_return() {
     assert!(problems.is_empty(), "{}", problems.join("\n\n"));
 }
 
-/// BT-3838 item 2: the actor / class-method counterpart of
+/// BT-3838 item 2: the actor counterpart of
 /// `parenthesised_non_last_statements_lower_exactly_like_their_bare_form`. A NON-last statement's
-/// value is discarded, so `(s)` must lower exactly like `s` in an `Actor subclass:` method and a
-/// class method too, not only in a value type.
+/// value is discarded, so `(s)` must lower exactly like `s` in an `Actor subclass:` method too,
+/// not only in a value type.
 #[test]
-fn parenthesised_non_last_statements_lower_like_bare_in_actors_and_class_methods() {
+fn parenthesised_non_last_statements_lower_like_bare_in_actors() {
     const ACTOR: &str = "Actor subclass: ParenProbe
   state: n = 0
   state: m = 0
-";
-    const CLASS: &str = "Object subclass: ParenProbe
-  classState: n = 0
-  classState: m = 0
 ";
     let forms: &[&str] = &[
         "self.m := 5",
@@ -1330,7 +1326,7 @@ fn parenthesised_non_last_statements_lower_like_bare_in_actors_and_class_methods
         }
     };
     let mut problems = Vec::new();
-    for (name, header, class_side) in [("actor", ACTOR, false), ("class method", CLASS, true)] {
+    for (name, header, class_side) in [("actor", ACTOR, false)] {
         for (k, form) in forms.iter().enumerate() {
             let bare = lower(header, class_side, k, form);
             let paren = lower(header, class_side, k, &format!("({form})"));

@@ -70,11 +70,6 @@ every_emitter_warns_when_append_fails_test_() ->
         {"remove-method", fun() ->
             E:emit_remove_change_entry(<<"C5084">>, inc, instance, <<"a">>, human)
         end},
-        {"extension remove", fun() ->
-            E:emit_extension_remove_change_entry(
-                <<"C5084">>, inc, instance, undefined, undefined, <<"a">>, human
-            )
-        end},
         {"remove-class", fun() ->
             E:emit_remove_class_change_entry(<<"C5084">>, #{}, <<"a">>, human)
         end}
@@ -162,6 +157,136 @@ retire_entries_honours_the_append_timeout_test_() ->
                 application:unset_env(beamtalk_workspace, changelog_append_timeout_ms)
             end
         end}
+    end}.
+
+%% BT-5136: an append that timed out is unconfirmed (the server still writes
+%% it), so the warning says so and does not claim the entry is missing.
+append_timeout_warning_says_unconfirmed_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(#{pid := Pid}) ->
+        {timeout, 30, fun() ->
+            ok = application:set_env(beamtalk_workspace, changelog_append_timeout_ms, 200),
+            ok = sys:suspend(Pid),
+            try
+                {warning, Text} = beamtalk_repl_loader_changelog_entries:emit_new_class_entry(
+                    <<"C5136">>, <<"src">>, <<"/p/c.bt">>
+                ),
+                ?assertNotEqual(nomatch, binary:match(Text, <<"unconfirmed">>)),
+                ?assertEqual(nomatch, binary:match(Text, <<"will not include it">>))
+            after
+                ok = sys:resume(Pid),
+                application:unset_env(beamtalk_workspace, changelog_append_timeout_ms)
+            end
+        end}
+    end}.
+
+%% BT-5136: a retire that times out is still queued, so removing the class must
+%% not also append a `remove-class` entry.
+retire_timeout_does_not_append_remove_class_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(#{pid := Pid}) ->
+        {timeout, 30, fun() ->
+            E = beamtalk_repl_loader_changelog_entries,
+            ok = E:emit_new_class_entry(<<"C5136r">>, <<"src">>, <<"/p/c.bt">>),
+            ok = application:set_env(beamtalk_workspace, changelog_append_timeout_ms, 200),
+            ok = sys:suspend(Pid),
+            try
+                Result = E:emit_remove_class_change_entry(<<"C5136r">>, #{}, <<"a">>, human),
+                ?assertMatch({warning, <<"The class was removed", _/binary>>}, Result)
+            after
+                ok = sys:resume(Pid),
+                application:unset_env(beamtalk_workspace, changelog_append_timeout_ms)
+            end,
+            %% The queued retire has run; nothing was appended after it.
+            _ = beamtalk_workspace_changelog:epoch(),
+            Kinds = [
+                beamtalk_workspace_changelog:entry_kind(En)
+             || En <- beamtalk_workspace_changelog:entries()
+            ],
+            ?assertEqual(['new-class'], Kinds)
+        end}
+    end}.
+
+%% BT-5190: a `new-class` append whose caller timed out is still queued (not in
+%% ETS) when the class is removed. The removal call queues behind it, so it sees
+%% the late entry and retires it, instead of appending a `remove-class` behind it.
+late_new_class_is_retired_not_followed_by_remove_class_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(#{pid := Pid}) ->
+        {timeout, 30, fun() ->
+            E = beamtalk_repl_loader_changelog_entries,
+            ok = application:set_env(beamtalk_workspace, changelog_append_timeout_ms, 200),
+            ok = sys:suspend(Pid),
+            try
+                ?assertMatch(
+                    {warning, <<"The change is live", _/binary>>},
+                    E:emit_new_class_entry(<<"C5190late">>, <<"src">>, <<"/p/c.bt">>)
+                ),
+                ?assertMatch(
+                    {warning, <<"The class was removed", _/binary>>},
+                    E:emit_remove_class_change_entry(<<"C5190late">>, #{}, <<"a">>, human)
+                )
+            after
+                ok = sys:resume(Pid),
+                application:unset_env(beamtalk_workspace, changelog_append_timeout_ms)
+            end,
+            %% Both queued calls have run, in order.
+            _ = beamtalk_workspace_changelog:epoch(),
+            ?assertEqual([], beamtalk_workspace_changelog:active_entries()),
+            ?assertEqual(
+                ['new-class'],
+                [
+                    beamtalk_workspace_changelog:entry_kind(En)
+                 || En <- beamtalk_workspace_changelog:entries()
+                ]
+            ),
+            [Entry] = beamtalk_workspace_changelog:entries(),
+            ?assert(beamtalk_workspace_changelog:entry_cancelled(Entry))
+        end}
+    end}.
+
+%% BT-5190: a removal whose caller timed out is decided by the server, so the
+%% class's pending entries are never left behind a removal that was never
+%% recorded: a plain flush would otherwise write the removed class.
+timed_out_removal_leaves_nothing_flushable_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(#{pid := Pid}) ->
+        {timeout, 30, fun() ->
+            E = beamtalk_repl_loader_changelog_entries,
+            ok = E:emit_new_class_entry(<<"C5190t">>, <<"src">>, <<"/p/c.bt">>),
+            ok = application:set_env(beamtalk_workspace, changelog_append_timeout_ms, 200),
+            ok = sys:suspend(Pid),
+            try
+                {warning, Text} = E:emit_remove_class_change_entry(
+                    <<"C5190t">>, #{}, <<"a">>, human
+                ),
+                ?assertNotEqual(nomatch, binary:match(Text, <<"unconfirmed">>))
+            after
+                ok = sys:resume(Pid),
+                application:unset_env(beamtalk_workspace, changelog_append_timeout_ms)
+            end,
+            _ = beamtalk_workspace_changelog:epoch(),
+            ?assertEqual([], beamtalk_workspace_changelog:flushable_pending()),
+            ?assertEqual([], beamtalk_workspace_changelog:active_entries())
+        end}
+    end}.
+
+%% BT-5190: a class with no pending `new-class` is recorded as a removal, in the
+%% same server call.
+remove_of_a_flushed_class_appends_remove_class_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Ctx) ->
+        fun() ->
+            E = beamtalk_repl_loader_changelog_entries,
+            ok = E:emit_remove_class_change_entry(
+                <<"C5190f">>,
+                #{flushable => false, not_flushable_reason => <<"dynamic">>},
+                <<"a">>,
+                human
+            ),
+            ?assertEqual(
+                ['remove-class'],
+                [
+                    beamtalk_workspace_changelog:entry_kind(En)
+                 || En <- beamtalk_workspace_changelog:active_entries()
+                ]
+            )
+        end
     end}.
 
 %% BT-5084 item 9: removing a never-flushed new class retires its entries

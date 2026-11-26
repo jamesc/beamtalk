@@ -519,7 +519,36 @@ impl TypeCache {
             },
             std::process::id()
         ));
-        if let Err(e) = std::fs::write(tmp.as_std_path(), &json) {
+        // Exclusive create (`create_new`): never write through a pre-created
+        // file or symlink at the predictable temp name (BT-5135). A stale
+        // leftover from a crashed run with a recycled pid is removed once.
+        // Owner-only (BT-5185): the shared tier lives outside the project. A
+        // failed write removes the half-written temp file rather than leaving
+        // it in the cache directory.
+        let write_exclusive = || -> std::io::Result<()> {
+            use std::io::Write;
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt as _;
+                options.mode(0o600);
+            }
+            let mut f = options.open(tmp.as_std_path())?;
+            f.write_all(json.as_bytes()).inspect_err(|_| {
+                drop(f);
+                let _ = std::fs::remove_file(tmp.as_std_path());
+            })
+        };
+        let written = write_exclusive().or_else(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                let _ = std::fs::remove_file(tmp.as_std_path());
+                write_exclusive()
+            } else {
+                Err(e)
+            }
+        });
+        if let Err(e) = written {
             debug!("Failed to write type cache temp for {module_name}: {e}");
             return;
         }
@@ -1364,6 +1393,23 @@ fn probe_otp_installation() -> Result<OtpDiscovery> {
     })
 }
 
+/// Insert the stems of the `.erl` files directly in `dir` (non-recursive) into
+/// `out` — the one `native/*.erl` / `native/test/*.erl` source scan.
+fn collect_erl_stems(dir: &Utf8Path, out: &mut std::collections::HashSet<String>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file()
+            && path.extension().is_some_and(|ext| ext == "erl")
+            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+        {
+            out.insert(stem.to_string());
+        }
+    }
+}
+
 /// Insert the `.beam` file stems of `ebin_dir` into `out`.
 fn collect_beam_stems(ebin_dir: &std::path::Path, out: &mut std::collections::HashSet<String>) {
     let Ok(entries) = std::fs::read_dir(ebin_dir) else {
@@ -1379,7 +1425,66 @@ fn collect_beam_stems(ebin_dir: &std::path::Path, out: &mut std::collections::Ha
     }
 }
 
+/// The compiled `native/test/` helper ebin of the package at `project_root`
+/// (`_build/dev/native_test/ebin`, BT-5186), when the package still has a
+/// `native/test/` directory and the ebin exists — the one rule for which
+/// helper modules a package's tests may call and be typed against. A package
+/// that dropped `native/test/` gets `None`, so stale helper beams are never
+/// treated as known modules (specs already extracted from them stay in the
+/// shared type cache until it is cleaned). The LSP and `lint` reach the helpers
+/// through [`collect_project_test_helper_modules`] (BT-5251).
+#[must_use]
+pub fn project_test_helper_ebin_dir(project_root: &Utf8Path) -> Option<Utf8PathBuf> {
+    let helpers = BuildLayout::new(project_root).native_test_ebin_dir();
+    (project_root.join("native").join("test").is_dir() && helpers.is_dir()).then_some(helpers)
+}
+
+/// The Erlang modules only a package's *tests* may call: the `native/test/`
+/// helpers (BT-5251).
+///
+/// The union of the `native/test/*.erl` file stems (known before any build,
+/// non-recursive like `native/*.erl`) and the `.beam` stems of
+/// [`project_test_helper_ebin_dir`]. Deliberately not part of
+/// [`collect_project_known_erlang_modules`]: a `src/` call to a test helper
+/// must stay unresolved, so surfaces add this set only for files under
+/// `test/` ([`is_project_test_file`]).
+#[must_use]
+pub fn collect_project_test_helper_modules(
+    project_root: &Utf8Path,
+) -> std::collections::HashSet<String> {
+    let mut modules = std::collections::HashSet::new();
+    collect_erl_stems(&project_root.join("native").join("test"), &mut modules);
+    if let Some(ebin) = project_test_helper_ebin_dir(project_root) {
+        collect_beam_stems(ebin.as_std_path(), &mut modules);
+    }
+    modules
+}
+
+/// Whether `file` is a test source of the package at `project_root`, i.e.
+/// lives under `<root>/test/` — the files that may call `native/test/`
+/// helpers (BT-5251).
+///
+/// Both paths are canonicalised, `file` even when it does not exist (falling back to the spelling given), so a
+/// relative `lint test/x.bt`, a symlinked checkout or macOS `/var` vs
+/// `/private/var` all compare equal, as `is_under_stubs_dir` does.
+#[must_use]
+pub fn is_project_test_file(project_root: &Utf8Path, file: &Utf8Path) -> bool {
+    // Lenient: a test file the editor has open may not exist on disk yet, and
+    // its spelling must still match the canonical root (Windows 8.3 short names
+    // in a temp dir, macOS `/var` vs `/private/var`).
+    let canon = |p: &Utf8Path| {
+        crate::paths::canonicalize_lenient(p.as_std_path())
+            .unwrap_or_else(|| p.as_std_path().to_path_buf())
+    };
+    canon(file).starts_with(canon(project_root).join("test"))
+}
+
 /// Collect the ebin directories for a project's native and path dependencies.
+///
+/// Not the package's `native/test/` helpers: those are added only for its
+/// tests, via [`project_test_helper_ebin_dir`]. (Their extracted specs do land
+/// in the shared project type cache, which [`load_type_cache_registry`] reads
+/// whole, as they did when the helpers lived in the native ebin.)
 ///
 /// Scans the standard `_build/` layout for a project rooted at `project_root`:
 /// - `_build/deps/*/ebin/` — Beamtalk path-dependency ebin dirs
@@ -1515,20 +1620,7 @@ pub fn collect_project_known_erlang_modules(
     }
 
     // Tier 2: the package's own `native/*.erl` sources (pre-build fallback).
-    if let Ok(entries) = std::fs::read_dir(project_root.join("native")) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let is_erl = path.is_file() && path.extension().is_some_and(|ext| ext == "erl");
-            if !is_erl {
-                continue;
-            }
-            if let Ok(utf8) = Utf8PathBuf::from_path_buf(path)
-                && let Some(stem) = utf8.file_stem()
-            {
-                known.insert(stem.to_string());
-            }
-        }
-    }
+    collect_erl_stems(&project_root.join("native"), &mut known);
 
     debug!(
         count = known.len(),
@@ -1593,8 +1685,10 @@ pub fn collect_installed_erlang_modules() -> KnownErlangModules {
     }
 }
 
-/// Whether `dir` is the package's own compiled `native/` ebin
-/// (`_build/dev/native/ebin`), as opposed to a path/git dependency
+/// Whether `dir` is the package's own compiled native output — its `native/`
+/// ebin (`_build/dev/native/ebin`) or, under `beamtalk test`, its
+/// `native/test/` helper ebin (`_build/dev/native_test/ebin`, BT-5186) — as
+/// opposed to a path/git dependency
 /// (`_build/deps/*/ebin`) or a hex/rebar3 dependency
 /// (`_build/dev/native/default/lib/*/ebin`). Only the former may prove
 /// result-coercion-free FFI calls (BT-4507).
@@ -1745,8 +1839,25 @@ pub fn extend_with_ebin_type_specs(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use std::fs;
     use tempfile::TempDir;
+
+    /// BT-5186: helper beams count only while the package has `native/test/`.
+    #[test]
+    fn test_helper_ebin_is_only_known_while_native_test_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        let helpers = BuildLayout::new(&root).native_test_ebin_dir();
+        std::fs::create_dir_all(&helpers).unwrap();
+        assert_eq!(project_test_helper_ebin_dir(&root), None, "no native/test/");
+        std::fs::create_dir_all(root.join("native/test")).unwrap();
+        assert_eq!(project_test_helper_ebin_dir(&root), Some(helpers.clone()));
+        assert!(
+            !collect_project_dependency_ebin_dirs(&root).contains(&helpers),
+            "build, lint and the LSP do not scan the test helper ebin"
+        );
+    }
 
     // -----------------------------------------------------------------------
     // Runtime discovery (moved from beamtalk-cli's repl_startup)
@@ -2142,9 +2253,80 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_helper_modules_cover_sources_and_ebin_but_not_project_set() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_dir = root.join("native").join("test");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(src_dir.join("src_helper.erl"), b"-module(src_helper).").unwrap();
+        let ebin = root
+            .join("_build")
+            .join("dev")
+            .join("native_test")
+            .join("ebin");
+        std::fs::create_dir_all(&ebin).unwrap();
+        std::fs::write(ebin.join("beam_helper.beam"), b"fake beam").unwrap();
+
+        let helpers = collect_project_test_helper_modules(&root);
+        assert!(helpers.contains("src_helper") && helpers.contains("beam_helper"));
+        let project = collect_project_known_erlang_modules(&root);
+        assert!(
+            !project.contains("src_helper") && !project.contains("beam_helper"),
+            "src/ must not see test helpers: {project:?}"
+        );
+    }
+
+    #[test]
+    fn is_project_test_file_only_under_test_dir() {
+        let root = Utf8PathBuf::from("/p");
+        assert!(is_project_test_file(
+            &root,
+            Utf8Path::new("/p/test/a_test.bt")
+        ));
+        assert!(!is_project_test_file(&root, Utf8Path::new("/p/src/a.bt")));
+        assert!(!is_project_test_file(
+            &root,
+            Utf8Path::new("/p/testing/a.bt")
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn is_project_test_file_resolves_symlinks() {
+        let temp = TempDir::new().unwrap();
+        let real = Utf8PathBuf::from_path_buf(temp.path().join("pkg")).unwrap();
+        std::fs::create_dir_all(real.join("test")).unwrap();
+        std::fs::write(real.join("test").join("a.bt"), b"").unwrap();
+        let link = Utf8PathBuf::from_path_buf(temp.path().join("link")).unwrap();
+        std::os::unix::fs::symlink(real.as_std_path(), link.as_std_path()).unwrap();
+        // Root canonical, file spelled through the symlink (and vice versa).
+        assert!(is_project_test_file(&real, &link.join("test").join("a.bt")));
+        assert!(is_project_test_file(&link, &real.join("test").join("a.bt")));
+    }
+
     // -----------------------------------------------------------------------
     // TypeCache tests (ADR 0075)
     // -----------------------------------------------------------------------
+
+    /// BT-5185: a cache entry is created owner-only, and no staging file is
+    /// left beside it.
+    #[cfg(unix)]
+    #[test]
+    fn type_cache_entry_is_private_and_leaves_no_temp() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let temp = TempDir::new().unwrap();
+        let cache_dir = Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
+        let cache = TypeCache::new(cache_dir.clone());
+        cache.store("lists", Utf8Path::new("/x/lists.beam"), 1, 0, "line");
+        let entries: Vec<_> = std::fs::read_dir(&cache_dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect();
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        let mode = std::fs::metadata(&entries[0]).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0, "mode {mode:o}");
+    }
 
     #[test]
     fn type_cache_store_and_lookup() {

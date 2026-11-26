@@ -233,8 +233,8 @@ eager_restart_test_() ->
                          || {_, P, _, _} <- supervisor:which_children(beamtalk_class_sup)
                         ],
                         ?assert(lists:member(NewPid, Children)),
-                        %% restart_class's warning about dropped hot patches /
-                        %% class-var state was logged.
+                        %% restart_class's warning about dropped hot patches
+                        %% was logged.
                         ?assertEqual(
                             ok, beamtalk_test_wait:until(fun restart_warning_received/0)
                         )

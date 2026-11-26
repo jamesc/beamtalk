@@ -91,7 +91,7 @@ fn test_return_type_mismatch_warns() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
@@ -125,7 +125,7 @@ fn test_return_type_match_no_warning() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
@@ -163,7 +163,7 @@ fn test_return_type_skip_primitive_methods() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
@@ -193,7 +193,7 @@ fn test_return_type_no_annotation_no_warning() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
@@ -365,7 +365,7 @@ fn test_keyword_arg_type_mismatch_warns() {
         ],
         vec![class_def],
     );
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let arg_warnings: Vec<_> = checker
         .diagnostics()
@@ -417,7 +417,7 @@ fn test_keyword_arg_type_match_no_warning() {
         ],
         vec![class_def],
     );
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let arg_warnings: Vec<_> = checker
         .diagnostics()
@@ -479,7 +479,7 @@ fn test_parametric_block_arg_type_mismatch_warns() {
         ],
         vec![class_def],
     );
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let arg_warnings: Vec<_> = checker
         .diagnostics()
@@ -540,7 +540,7 @@ fn test_parametric_block_arg_type_match_no_warning() {
         ],
         vec![class_def],
     );
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let arg_warnings: Vec<_> = checker
         .diagnostics()
@@ -591,7 +591,7 @@ fn test_override_incompatible_param_type_warns() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![parent, child]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let override_warnings: Vec<_> = checker
         .diagnostics()
@@ -642,7 +642,7 @@ fn test_override_compatible_param_type_no_warning() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![parent, child]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let override_warnings: Vec<_> = checker
         .diagnostics()
@@ -700,7 +700,7 @@ fn test_override_parametric_incompatible_param_type_warns() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![parent, child]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let override_warnings: Vec<_> = checker
         .diagnostics()
@@ -740,7 +740,7 @@ fn test_all_type_warnings_are_severity_warning() {
         )],
         vec![class_def],
     );
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     for diag in checker.diagnostics() {
         assert_eq!(
@@ -777,7 +777,7 @@ typed Value subclass: Thing
     nil
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let arg_warnings: Vec<_> = diags
         .iter()
@@ -807,7 +807,7 @@ typed Value subclass: Thing
     nil
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let arg_warnings: Vec<_> = diags
         .iter()
@@ -838,7 +838,7 @@ typed Value subclass: Thing
     nil
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         diags.is_empty(),
@@ -857,7 +857,7 @@ typed Value subclass: Thing
 fn test_cascade_block_param_propagation_still_works_with_arg_check() {
     let source = "typed Object subclass: T\n  field: nums :: List(Integer)\n  m -> List(Integer) =>\n    self.nums\n      sort: [:a :b | a < b];\n      yourself";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let dynamic_warnings: Vec<_> = diags
         .iter()
@@ -913,7 +913,7 @@ fn test_return_type_skip_defer_reply_methods() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()

@@ -83,51 +83,6 @@ fn in_object(body: &str) -> String {
 // §6: a Tier 2 block value with no return channel
 // ---------------------------------------------------------------------------
 
-/// A class with class variables: its class methods run in its class process
-/// (ADR 0142 §1), so a block passed to one runs in another process.
-const STATEFUL: &str = "Object subclass: CvS\n  classState: k = 0\n  class ap: b => b value\n\n";
-
-#[test]
-fn section6_literal_block_to_user_hom_in_class_method_is_an_error() {
-    let src = format!(
-        "{STATEFUL}{}",
-        in_class("r := CvS ap: [t := t + 1. 1]\n#[r, t]")
-    );
-    let diags = adr0131_diagnostics(&src);
-    let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
-    assert_eq!(s6.len(), 1, "{diags:?}");
-    let d = s6[0];
-    assert_eq!(d.severity, Severity::Error);
-    // ADR 0133 / ADR 0142: `CvS` declares class variables, so `ap:` runs in
-    // the class's process.
-    assert_eq!(
-        d.message.as_str(),
-        "`t` is assigned in a block passed to a class method (`ap:`); it would run in another \
-         process"
-    );
-    let hint = d.hint.as_deref().unwrap_or_default();
-    assert!(
-        hint.contains("return the new value from the block and assign it where it is called"),
-        "{hint}"
-    );
-    // Points at the assignment, with a note at the block and the construct
-    // list.
-    assert_eq!(d.span.start() as usize, src.find("t := t + 1. 1]").unwrap());
-    let block_start = src.find("[t := t + 1. 1]").unwrap();
-    assert!(
-        d.notes
-            .iter()
-            .any(|n| n.span.is_some_and(|s| s.start() as usize == block_start))
-    );
-    assert!(
-        d.notes
-            .iter()
-            .any(|n| n.message.contains("(ADR 0133)") && n.message.contains("inject:into:")),
-        "{:?}",
-        d.notes
-    );
-}
-
 /// ADR 0133 § Error examples: the same diagnostic for every escaping shape,
 /// naming the shape, reported at the assignment.
 #[test]
@@ -147,14 +102,6 @@ fn escaping_block_messages_name_the_shape() {
             in_value("self forEach: [:o | t := t + o]\nt"),
             "`t` is assigned in a block passed to `forEach:`, which is not a construct the \
              compiler threads it through",
-        ),
-        (
-            format!(
-                "{STATEFUL}{}",
-                in_value("CvS onEvent: [:e | t := t + 1]\nt")
-            ),
-            "`t` is assigned in a block passed to a class method (`onEvent:`); it would run in \
-             another process",
         ),
         (
             // ADR 0142 §1: `CvA` has no class variables, so its class methods
@@ -1035,29 +982,6 @@ fn do_assignment_is_accepted_in_every_context() {
 }
 
 #[test]
-fn field_assignment_of_non_producer_in_class_method_is_an_error() {
-    // o5's shape with a construct that is not a producer yet (an `on:do:` is one
-    // since BT-3817, a `value:` whose block the producer lowers since BT-4263):
-    // the tuple would be stored in the class variable.
-    let class = |body: &str| {
-        format!(
-            "Object subclass: Cm\n  classState: n = 0\n\n  class probe =>\n    t := 0\n{body}    t\n"
-        )
-    };
-    let src = class(&format!(
-        "    {NON_PRODUCER_VALUE_PRELUDE}    self.n := {NON_PRODUCER_VALUE}\n"
-    ));
-    let diags = adr0131_diagnostics(&src);
-    let p0 = value_send_errors(&diags);
-    assert_eq!(p0.len(), 1, "{diags:?}");
-    assert!(p0[0].message.contains("the value of a field assignment"));
-    // BT-4263: accepted when the block is one the producer lowers (`argFieldMix`
-    // in adr0131eval_block_test.bt answers `#[1, 1]`).
-    let src = class("    self.n := [:v | t := t + v] value: 1\n");
-    assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
-}
-
-#[test]
 fn nested_assignment_crossing_a_block_is_an_error() {
     // An assignment inside a loop body whose construct writes a method-level
     // local needs the loop to thread it on. A construct that is not a
@@ -1847,13 +1771,11 @@ fn field_write_value_sites_are_producers_in_class_and_actor_methods() {
         "#(1, 2) detect: [:x | x > 5] ifNone: [t := t + 1. 0]",
         "0 max: ((1 to: 3 do: [:i | t := t + i]) isNil ifTrue: [1] ifFalse: [2])",
     ] {
-        let class = format!(
-            "Object subclass: Cm\n  classState: n = 0\n\n  class probe =>\n    t := 0\n    u := 0\n    self.n := {value}\n    #[self.n, t, u]\n"
-        );
         let actor = format!(
             "Actor subclass: Ac\n  state: n = 0\n\n  probe =>\n    t := 0\n    u := 0\n    self.n := {value}\n    #[self.n, t, u]\n"
         );
-        for src in [class, actor] {
+        {
+            let src = actor;
             let diags = adr0131_diagnostics(&src);
             // The last value is a conditional's receiver: still rejected.
             let expect_rejected = value.contains("ifTrue:");
@@ -1877,15 +1799,12 @@ fn field_write_value_sites_stop_at_returns_assignments_and_blocks() {
         // A cascade on the value.
         "self.n := (#(1, 2) collect: [:x | t := t + x]) size; yourself\nt",
     ] {
-        let class = format!(
-            "Object subclass: Cm\n  classState: n = 0\n\n  class probe =>\n    t := 0\n{}\n",
-            indent(body)
-        );
         let actor = format!(
             "Actor subclass: Ac\n  state: n = 0\n\n  probe =>\n    t := 0\n{}\n",
             indent(body)
         );
-        for src in [class, actor] {
+        {
+            let src = actor;
             let diags = adr0131_diagnostics(&src);
             assert_eq!(
                 of_category(&diags, DiagnosticCategory::UnthreadedLocalWrite).len(),
@@ -1906,15 +1825,12 @@ fn field_write_value_sites_include_the_statements_of_an_arm_and_a_loop_body() {
         "true ifTrue: [self.n := (#(1, 2) collect: [:x | t := t + x]) size]\nt",
         "1 to: 2 do: [:i | self.n := (#(1, 2) collect: [:x | t := t + x]) size]\nt",
     ] {
-        let class = format!(
-            "Object subclass: Cm\n  classState: n = 0\n\n  class probe =>\n    t := 0\n{}\n",
-            indent(body)
-        );
         let actor = format!(
             "Actor subclass: Ac\n  state: n = 0\n\n  probe =>\n    t := 0\n{}\n",
             indent(body)
         );
-        for src in [class, actor] {
+        {
+            let src = actor;
             let diags = adr0131_diagnostics(&src);
             assert!(diags.is_empty(), "{src}: {diags:?}");
         }
@@ -2301,9 +2217,7 @@ fn adr0131_phase0_summary_is_checked_in() {
 #[test]
 fn block_value_chains_past_the_measured_depth_are_producers() {
     let header = |context: &str| match context {
-        "class" => {
-            "Object subclass: P\n  classState: n = 0\n  class plain => 0\n  class probe: c =>\n"
-        }
+        "class" => "Object subclass: P\n  class plain => 0\n  class probe: c =>\n",
         "value" => "Value subclass: P\n  plain => 0\n  probe: c =>\n",
         _ => "Actor subclass: P\n  state: n = 0\n  plain => 0\n  probe: c =>\n",
     };
@@ -2919,10 +2833,10 @@ fn section6_field_stored_literal_that_writes_a_field_is_accepted() {
 }
 
 /// BT-3922: in a class method a `Dictionary` lookup handler that writes only a
-/// class variable writes it in place (ADR 0130), so it is not an escape;
+/// field is not an escape;
 /// `stdlib/test/lookup_field_write_test.bt` proves the write survives.
 #[test]
-fn section6_lookup_handler_that_writes_a_class_variable_is_not_an_escape() {
+fn section6_lookup_handler_that_writes_a_class_side_field_is_not_an_escape() {
     for (body, actor_errors) in [
         (
             "self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. nil]\nnil",
@@ -5008,10 +4922,6 @@ fn bt4287_an_actor_state_fold_as_an_operand_in_a_fold_body_is_accepted() {
         let errors = analysis_errors(&src, &[]);
         assert!(errors.is_empty(), "{src}: {errors:?}");
     }
-    // Class methods answer right too.
-    let class = "Object subclass: Cm\n  classState: n = 0\n  classState: items = #(1, 2)\n\n  class bump =>\n    self.n := self.n + 1\n    self.n\n\n  class probe =>\n    #(1, 2) do: [:x | x + (self.items inject: 0 into: [:b :y | b + self bump])]\n    self.n\n";
-    let errors = analysis_errors(class, &[]);
-    assert!(errors.is_empty(), "{errors:?}");
 }
 
 /// BT-4310 (found in the BT-4287 review; was PIN-BUG
@@ -5072,11 +4982,6 @@ fn bt4310_an_actor_state_fold_at_an_unsequenced_operand_is_accepted() {
         let errors = analysis_errors(&src, &[]);
         assert!(errors.is_empty(), "{src}: {errors:?}");
     }
-    let class = format!(
-        "Object subclass: Cm\n  classState: n = 0\n  classState: items = #(1, 2)\n\n  class bump =>\n    self.n := self.n + 1\n    self.n\n\n  class probe =>\n    r := ({fold} > 3) ifTrue: [1] ifFalse: [0]\n    r\n"
-    );
-    let errors = analysis_errors(&class, &[]);
-    assert!(errors.is_empty(), "{errors:?}");
 }
 
 /// BT-4288 (BT-4003 item 5): a `^` in the body of a loop or collection

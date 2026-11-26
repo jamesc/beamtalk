@@ -121,7 +121,6 @@ impl TypeChecker {
 
             if is_typed {
                 self.check_typed_state_annotations(&class.state, &class.name.name);
-                self.check_typed_state_annotations(&class.class_variables, &class.name.name);
                 // Enable Dynamic inference warnings for typed classes
                 self.typed_class_context = Some(class.name.name.clone());
             }
@@ -245,6 +244,7 @@ impl TypeChecker {
         // Check top-level expressions last — method return types are now available.
         self.block_written_locals =
             super::binary_string_compare::block_written_locals(&module.expressions);
+        self.collected_returns.clear();
         let outer_off = std::mem::replace(
             &mut self.discarded_update_off,
             self.skip_module_expression_lint,
@@ -418,7 +418,9 @@ impl TypeChecker {
         self.stash_return_position_block_pushdown(method);
         self.block_written_locals =
             super::binary_string_compare::block_written_locals(&method.body);
+        self.collected_returns.clear();
         let body_type = self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
+        let collected_returns = std::mem::take(&mut self.collected_returns);
         // BT-4235: on the value-type body path a trailing `self.x := v` answers
         // the updated `self` (BT-833), with or without statement-level
         // parentheses (BT-4092), not `v`. A body that already diverged keeps
@@ -431,19 +433,38 @@ impl TypeChecker {
         } else {
             body_type
         };
-        let body_type = {
-            let returned = self.tail_match_return_types(&method.body);
-            if returned.is_empty() {
-                body_type
-            } else {
-                let mut all = vec![body_type];
-                all.extend(returned);
-                InferredType::union_of(&all)
-            }
+        let tail_returned = self.tail_match_return_types(&method.body);
+        let body_type = if tail_returned.is_empty() {
+            body_type
+        } else {
+            let mut all = vec![body_type];
+            all.extend(tail_returned.iter().cloned());
+            InferredType::union_of(&all)
         };
         let body_type =
             self.resolve_self_delegate_return_type(method, body_type, class_name, hierarchy);
         self.check_return_type(method, &body_type, class_name, hierarchy);
+        // BT-5283: every other `^` (early return, non-local return in a block,
+        // match arm) answers the method too, so each distinct type is checked
+        // against the declared return type on its own — not unioned into the
+        // tail type, which would route the tail through the typed-class-only
+        // union check and hide a mismatch it reports today. `Dynamic` is
+        // skipped (an untyped `^x` says nothing); only a declared return type
+        // is checked, so an undeclared method's inferred type is unchanged.
+        if method.return_type.is_some() {
+            let mut seen: Vec<InferredType> = tail_returned;
+            // A body that ends in `^expr` is already checked as the body type.
+            seen.push(body_type.clone());
+            for ty in collected_returns {
+                if matches!(ty, InferredType::Dynamic(_) | InferredType::Never)
+                    || seen.contains(&ty)
+                {
+                    continue;
+                }
+                self.check_return_type(method, &ty, class_name, hierarchy);
+                seen.push(ty);
+            }
+        }
         if check_override {
             self.check_override_param_compatibility(method, class_name, is_class_method, hierarchy);
             self.check_override_return_compatibility(
@@ -818,7 +839,10 @@ impl TypeChecker {
             ),
             // Returns propagate the value type
             Expression::Return { value, .. } => {
-                self.infer_expr(value, hierarchy, env, in_abstract_method)
+                let ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
+                // BT-5283: every `^` answers the enclosing method.
+                self.collected_returns.push(ty.clone());
+                ty
             }
             // Cascades: all messages dispatch to the UNDERLYING receiver of
             // the first send, not to its return value — see

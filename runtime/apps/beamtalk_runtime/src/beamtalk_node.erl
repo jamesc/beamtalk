@@ -26,8 +26,10 @@ Membership changes are observed through `beamtalk_node_monitor`'s
 ## Connect policy (ADR 0126 §9 item 2)
 
 `connect` (and `ping`, which auto-connects) to a host that is not this host
-succeeds only when this node runs TLS distribution (`-proto_dist inet_tls`
-or `inet6_tls`); otherwise it answers
+succeeds only when this node runs TLS distribution with peer verification
+(`-proto_dist inet_tls` or `inet6_tls`, with `{verify, verify_peer}` on both
+sides and `{fail_if_no_peer_cert, true}` on the server side; ADR 0126
+amendment D2, `beamtalk_dist_tls:enabled/0`); otherwise it answers
 `#beamtalk_error{kind = insecure_distribution}`. "This host" means the host
 part names `localhost` or this machine's own hostname, or every address it
 resolves to is a loopback address or one of this machine's interface
@@ -39,6 +41,7 @@ selectors (ADR 0126 Phase 2) apply the same rule rather than re-deriving it.
 """.
 
 -include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 %% Class methods (`self delegate` calls the first keyword, colon stripped)
 -export([current/0, named/1, connected/0]).
@@ -73,11 +76,22 @@ selectors (ADR 0126 Phase 2) apply the same rule rather than re-deriving it.
     remote_shape_manifest/1
 ]).
 
+%% Exported for EUnit only (BT-5173); not part of the runtime surface.
+-export([bounded_sync/2]).
+
 -type t() :: #{?BT_CLASS_TAG_KEY := 'Node', name := node()}.
 -export_type([t/0]).
 
+%% Upper bound on the `global:sync/0` every successful `connect` waits for (BT-5173, BT-5179).
+-define(GLOBAL_SYNC_TIMEOUT_MS, 5000).
+
+%% Default upper bound on each address family's host lookup `connect_policy/2`
+%% makes (BT-5192); `node_resolve_timeout_ms` (application env) overrides it.
+-define(HOST_RESOLVE_TIMEOUT_MS, 2000).
 -define(INVALID_NAME_HINT, <<"expected name@host">>).
--define(INSECURE_HINT, <<"configure TLS distribution (ADR 0091) or use a tunnel">>).
+-define(INSECURE_HINT,
+    <<"configure TLS distribution with peer verification (ADR 0126 §9) or use a tunnel"/utf8>>
+).
 
 %%% ============================================================================
 %%% Class Methods
@@ -129,6 +143,13 @@ Establish a connection to this node, applying the §9 host policy first
 connection answers `Result error:` with `kind = insecure_distribution`; an
 unreachable node (or a local node that is not itself distributed) answers
 `kind = node_down`. Connecting to the current node is a no-op success.
+Every successful `connect` answers only after OTP `global` has synced names
+with the peer (so a `scope: #global` name registered on it is visible at
+once, BT-5156), including when the node was already connected by `ping`,
+Erlang's auto-connect or raw `net_kernel` (BT-5179). The wait is bounded at
+5 seconds: on timeout a warning is logged and `connect` still answers ok
+(BT-5173). `ping` never syncs: it is a liveness probe. Callers that call
+`connect` in a tight loop can check `isConnected` first to skip the sync.
 """.
 -spec connect(t()) -> beamtalk_result:t().
 connect(#{?BT_CLASS_TAG_KEY := 'Node', name := Name} = Self) ->
@@ -173,7 +194,8 @@ isCurrent(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}) ->
 `net_adm:ping/1` — `true` iff the node answered (and is now connected). The
 current node always answers. Because a ping auto-connects, it applies the
 same §9 host policy as `connect`: an off-host node without TLS distribution
-answers `false` without touching the network.
+answers `false` without touching the network. It does not wait for
+`global` to sync names (unlike `connect`, BT-5173).
 """.
 -spec ping(t()) -> boolean().
 ping(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}) ->
@@ -460,7 +482,7 @@ Both share this one erpc-and-catch implementation rather than a second copy
 remote_shape_manifest(Name) ->
     case
         beamtalk_call_failure:erpc(
-            Name, beamtalk_release, shape_manifest, [], ?BT_REMOTE_CALL_TIMEOUT
+            Name, beamtalk_release, shape_manifest, [], ?BT_REMOTE_CALL_TIMEOUT, fun is_map/1
         )
     of
         {ok, Manifest} when is_map(Manifest) ->
@@ -477,10 +499,11 @@ remote_shape_manifest(Name) ->
 The ADR 0126 §9 item 2 connect guard, as a pure-ish decision: `ok` if a
 connection to `Node` may be attempted, or `{error, #beamtalk_error{kind =
 insecure_distribution}}` if `Node`'s host is not this host and `TlsEnabled`
-is false. Host resolution uses `inet:getaddrs/2`; an IP-literal host, and a
-name under the RFC 6761 `invalid` TLD, are decided without any lookup. A
-host that does not resolve at all cannot be proven local, so it falls under
-the policy too.
+is false. Host resolution uses `inet:getaddrs/2`, bounded per address
+family (`resolve/2`, BT-5192); an IP-literal host, and a name under the
+RFC 6761 `invalid` TLD, are decided without any lookup. A host that does not
+resolve at all, or not in time, cannot be proven local, so it falls under the
+policy too.
 """.
 -spec connect_policy(node(), boolean()) -> ok | {error, #beamtalk_error{}}.
 connect_policy(_Node, true) ->
@@ -511,15 +534,15 @@ connect_policy(Node, false) ->
     end.
 
 -doc """
-Whether this node runs TLS distribution: `-proto_dist inet_tls` (or
-`inet6_tls`) on the command line / in `vm.args`.
+Whether this node runs TLS distribution with peer verification: `-proto_dist
+inet_tls` (or `inet6_tls`), and TLS options that set `{verify, verify_peer}`
+on both sides and `{fail_if_no_peer_cert, true}` on the server side (ADR 0126
+amendment D2, BT-5233). `-proto_dist inet_tls` alone authenticates nothing,
+so it does not count. See `beamtalk_dist_tls:enabled/0`.
 """.
 -spec tls_distribution() -> boolean().
 tls_distribution() ->
-    case init:get_argument(proto_dist) of
-        {ok, Values} -> lists:any(fun(V) -> lists:suffix("_tls", V) end, lists:append(Values));
-        error -> false
-    end.
+    beamtalk_dist_tls:enabled().
 
 %%% ============================================================================
 %%% Internal
@@ -529,6 +552,14 @@ tls_distribution() ->
 do_connect(Self, Name) ->
     case net_kernel:connect_node(Name) of
         true ->
+            %% OTP `global` shares names with a new peer in the background;
+            %% wait for that (bounded) so a `scope: #global` name is visible
+            %% from the peer as soon as `connect` answers (BT-5156, BT-5173).
+            %% Always run, even when already connected (BT-5179): a connection
+            %% made by `ping`/auto-connect/FFI did not wait for the sync.
+            %% A sync failure or timeout does not undo the connection, so
+            %% still answer ok.
+            bounded_sync(fun global:sync/0, ?GLOBAL_SYNC_TIMEOUT_MS),
             {ok, Self};
         false ->
             {error,
@@ -542,6 +573,30 @@ do_connect(Self, Name) ->
                     Name,
                     <<"This node is not distributed; start it with a node name (--sname/--name)">>
                 )}
+    end.
+
+-doc """
+Run `SyncFun` in a monitored process and wait at most `TimeoutMs` for it.
+On timeout the process is killed and a warning logged; on a crash a warning
+is logged. Always answers `ok` — a failed sync never fails `connect`.
+""".
+-spec bounded_sync(fun(() -> term()), non_neg_integer()) -> ok.
+bounded_sync(SyncFun, TimeoutMs) ->
+    case beamtalk_bounded:run(SyncFun, TimeoutMs) of
+        {ok, _} ->
+            ok;
+        timeout ->
+            ?LOG_WARNING(
+                "Node connect: global:sync() did not finish; answering ok anyway",
+                #{timeout_ms => TimeoutMs, domain => [beamtalk, runtime]}
+            ),
+            ok;
+        Failed ->
+            ?LOG_WARNING(
+                "Node connect: global:sync() failed",
+                #{reason => Failed, domain => [beamtalk, runtime]}
+            ),
+            ok
     end.
 
 -spec node_down_error(node(), binary()) -> #beamtalk_error{}.
@@ -654,11 +709,39 @@ is_special_use_invalid(Host) ->
     Labels = string:lexemes(string:lowercase(Host), "."),
     Labels =/= [] andalso lists:last(Labels) =:= "invalid".
 
+-doc """
+`Host`'s addresses in `Family`, or `[]` when it has none or the lookup fails.
+
+Bounded per family (BT-5192): `inet:getaddrs/2` has no timeout of its own, and
+an unresponsive resolver stalled `connect` (and every `connect_policy/2`
+caller: `spawnOn:`, `named:on:`, `ping`) for as long as it kept retrying. Each
+family's lookup gets `node_resolve_timeout_ms` (application env, default
+`?HOST_RESOLVE_TIMEOUT_MS`) through `beamtalk_bounded:run/2`, whichever
+resolver is configured. A family that has not answered by then contributes no
+addresses, as a failed lookup always did, so a slow IPv6 lookup does not throw
+away a host's IPv4 answer. A host left with no addresses cannot be proven
+local, so the policy refuses it without TLS.
+""".
 -spec resolve(string(), inet | inet6) -> [inet:ip_address()].
 resolve(Host, Family) ->
-    case inet:getaddrs(Host, Family) of
-        {ok, Addrs} -> Addrs;
-        {error, _} -> []
+    Timeout = application:get_env(
+        beamtalk_runtime, node_resolve_timeout_ms, ?HOST_RESOLVE_TIMEOUT_MS
+    ),
+    case beamtalk_bounded:run(fun() -> inet:getaddrs(Host, Family) end, Timeout) of
+        {ok, {ok, Addrs}} ->
+            Addrs;
+        {ok, {error, _}} ->
+            [];
+        timeout ->
+            ?LOG_WARNING("Node connect: host lookup did not finish in time", #{
+                host => Host, family => Family, timeout_ms => Timeout, domain => [beamtalk, runtime]
+            }),
+            [];
+        Failed ->
+            ?LOG_WARNING("Node connect: host lookup failed", #{
+                host => Host, family => Family, reason => Failed, domain => [beamtalk, runtime]
+            }),
+            []
     end.
 
 -spec is_local_addr(inet:ip_address()) -> boolean().

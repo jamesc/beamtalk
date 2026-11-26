@@ -7,7 +7,7 @@ use crate::ast::{Identifier, ShapeField, TypeAnnotation};
 use crate::source_analysis::{Span, Token, TokenKind};
 
 use super::declarations::is_comma;
-use super::{Diagnostic, Parser};
+use super::{Diagnostic, MAX_EXPRESSION_DEPTH, MAX_NESTING_DEPTH, Parser};
 
 /// Tri-state result for `skip_double_colon_type` lookahead.
 ///
@@ -76,7 +76,64 @@ impl Parser {
     /// type name is tolerated (the offset stops at the `(`) so the parser can
     /// emit the specific diagnostic — matching the pre-existing lookahead
     /// behaviour.
+    ///
+    /// Its recursion (generic arguments, grouping parentheses, and the
+    /// method-header check a shape type makes on each later line) is bounded
+    /// by [`MAX_NESTING_DEPTH`] through [`Self::bounded_type_lookahead`]
+    /// (BT-5181).
     fn skip_type_operand(&self, offset: usize) -> Option<usize> {
+        self.bounded_type_lookahead(offset, || self.skip_type_operand_unguarded(offset))
+    }
+
+    /// Runs one recursive type-lookahead step at `offset` one level deeper.
+    /// Past [`MAX_NESTING_DEPTH`] levels the operand at `offset` is skipped
+    /// by bracket counting instead ([`Self::skip_type_operand_flat`]), so a
+    /// well-formed header is still recognised and the parse itself reports
+    /// the nesting, without recursing further (BT-5181).
+    fn bounded_type_lookahead(
+        &self,
+        offset: usize,
+        step: impl FnOnce() -> Option<usize>,
+    ) -> Option<usize> {
+        let depth = self.lookahead_depth.get();
+        if depth >= MAX_NESTING_DEPTH {
+            return self.skip_type_operand_flat(offset);
+        }
+        self.lookahead_depth.set(depth + 1);
+        let result = step();
+        self.lookahead_depth.set(depth);
+        result
+    }
+
+    /// Skips the type operand at `offset` — a bracketed group, or a type
+    /// name with an optional bracketed argument list — by counting brackets,
+    /// without recursion. Answers `None` if the group is not closed.
+    fn skip_type_operand_flat(&self, offset: usize) -> Option<usize> {
+        let mut o = offset;
+        if is_type_name_token(self.peek_at(o)) {
+            o = self.skip_type_name_with_metatype(o);
+            if !matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
+                return Some(o);
+            }
+        }
+        let mut depth = 0usize;
+        loop {
+            match self.peek_at(o)? {
+                kind if kind.is_opening_bracket() => depth += 1,
+                kind if kind.is_closing_bracket() => depth = depth.checked_sub(1)?,
+                TokenKind::Eof => return None,
+                _ if depth == 0 => return None,
+                _ => {}
+            }
+            o += 1;
+            if depth == 0 {
+                return Some(o);
+            }
+        }
+    }
+
+    /// [`Self::skip_type_operand`] without the depth bound.
+    fn skip_type_operand_unguarded(&self, offset: usize) -> Option<usize> {
         if matches!(self.peek_at(offset), Some(TokenKind::LeftParen)) {
             return self.skip_grouped_type(offset);
         }
@@ -186,6 +243,13 @@ impl Parser {
     /// `:: Bound` portion when present (ADR 0068 Phase 2d). Also handles `class`
     /// metatype suffixes in type argument position: `List(Actor class)`.
     pub(super) fn skip_paren_type_params(&self, offset: usize) -> Option<usize> {
+        // Recursive through `skip_type_param`'s bounded-parameter branch
+        // (`T :: P(T :: P(...`), which does not pass `skip_type_operand`.
+        self.bounded_type_lookahead(offset, || self.skip_paren_type_params_unguarded(offset))
+    }
+
+    /// [`Self::skip_paren_type_params`] without the depth bound.
+    fn skip_paren_type_params_unguarded(&self, offset: usize) -> Option<usize> {
         debug_assert!(matches!(self.peek_at(offset), Some(TokenKind::LeftParen)));
         let mut o = offset + 1; // past `(`
         // Handle empty parens `()`
@@ -365,6 +429,52 @@ impl Parser {
     /// `\`/`&` tier is handled by
     /// [`parse_difference_type`](Self::parse_difference_type).
     pub(super) fn parse_type_annotation(&mut self) -> TypeAnnotation {
+        // Generic arguments, grouping parentheses and shape fields all
+        // recurse through here, so it runs one nesting level deeper
+        // (BT-5181). Past the limit the rest of the type operand is skipped.
+        let start = self.current_token().span();
+        self.with_nesting(
+            start,
+            |p| {
+                let end = p.skip_type_for_recovery();
+                TypeAnnotation::Simple(Identifier::new("Error", start.merge(end)))
+            },
+            |p| p.bounded_type_level(Self::parse_type_annotation_unguarded),
+        )
+    }
+
+    /// Consumes a type — operands joined by `|`, `&` or `\` — without
+    /// recursion, for recovery once a type annotation is nested too deep.
+    /// Answers the span of the last token consumed.
+    fn skip_type_for_recovery(&mut self) -> Span {
+        let mut end = self.skip_type_operand_for_recovery();
+        while self.is_type_chain_operator(0) {
+            self.advance();
+            end = self.skip_type_operand_for_recovery();
+        }
+        end
+    }
+
+    /// Consumes one type operand — a name with its generic arguments, a
+    /// parenthesised group or a shape — without recursion, for recovery
+    /// once a type annotation is nested too deep. Answers the span of the
+    /// last token consumed.
+    fn skip_type_operand_for_recovery(&mut self) -> Span {
+        let mut end = self.current_token().span();
+        if is_type_name_token(Some(self.current_kind())) {
+            end = self.advance().span();
+            if !matches!(self.current_kind(), TokenKind::LeftParen) {
+                return end;
+            }
+        }
+        if self.current_kind().is_opening_bracket() {
+            end = self.skip_bracketed_group();
+        }
+        end
+    }
+
+    /// [`Self::parse_type_annotation`] without the nesting guard.
+    fn parse_type_annotation_unguarded(&mut self) -> TypeAnnotation {
         // Unions are n-ary and associative, so a grouped union member —
         // `(A | B) | C`, only reachable via grouping parens — is
         // spliced into the enclosing union rather than nested. This keeps
@@ -428,8 +538,20 @@ impl Parser {
         // `\`) — `None` until the first `&`/`\` is seen. Used to reject a
         // same-tier operator switch without explicit grouping (ADR 0102 §3).
         let mut chain_is_and: Option<bool> = None;
+        // `A & B & C ...` builds a left-deep tree, so the chain is capped
+        // like a flat chain of sends (BT-5181).
+        let mut links = 0usize;
 
         while let TokenKind::BinarySelector(op) = self.current_kind() {
+            let op = op.clone();
+            let is_chain_operator = matches!(op.as_str(), "\\" | "&" | "\\\\");
+            if is_chain_operator && !self.chain_may_grow(&mut links, self.current_token().span()) {
+                // Past the chain limit: consume the rest without building it.
+                self.advance();
+                let rest = self.parse_single_type_annotation();
+                crate::ast_walker::dismantle_type_annotation(rest);
+                continue;
+            }
             match op.as_str() {
                 // `\` — the difference operator, `&` — the intersection
                 // operator. Both share this precedence tier.
@@ -476,6 +598,13 @@ impl Parser {
             }
         }
 
+        if links > MAX_EXPRESSION_DEPTH {
+            // A too-long chain becomes one error type, like a too-long chain
+            // of sends (see `finish_chain`).
+            let span = ty.span().merge(self.previous_token_span());
+            crate::ast_walker::dismantle_type_annotation(ty);
+            return TypeAnnotation::Simple(Identifier::new("Error", span));
+        }
         ty
     }
 
@@ -501,7 +630,7 @@ impl Parser {
             // - `TypeAnnotation::type_name()` (the unparser) already
             //   re-derives parens where precedence demands them — the
             //   `Difference`/`Intersection` arms parenthesise a nested
-            //   `Union`/`FalseOr`/opposite-operator operand — so a group that
+            //   `Union`/opposite-operator operand — so a group that
             //   changed the parse (e.g. `(A & B) \ C`) round-trips, while a
             //   redundant group (e.g. `(Integer)`) collapses away, which is
             //   fine since it doesn't change the AST shape.
@@ -522,7 +651,11 @@ impl Parser {
                 self.error("Expected ')' to close grouping parentheses in type annotation");
                 inner.span()
             };
-            return inner.with_span(start.merge(end));
+            // The group's tree is the one the nested level measured, so its
+            // recorded depth moves with the span (BT-5237).
+            let span = start.merge(end);
+            self.type_depths.respan_last(inner.span(), span);
+            return inner.with_span(span);
         }
         if let TokenKind::Identifier(name) = self.current_kind() {
             let span = self.current_token().span();

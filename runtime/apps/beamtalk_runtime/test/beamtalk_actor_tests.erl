@@ -452,59 +452,6 @@ actor_crash_during_processing_test() ->
 
     gen_server:stop(Actor).
 
-%% instance-side extension crash safety at the actor/gen_server level.
-%%
-%% Mirrors beamtalk_class_dispatch_tests:test_class_extension_crash_does_not_kill_class_process/0
-%% and actor_crash_during_processing_test/0 above, but for a crashing
-%% EXTENSION reached via a genuine `gen_server:call/2` send
-%% (beamtalk_dispatch_tests:test_extension_raises_reraised/0 already covers
-%% the same crash one layer down, via a direct beamtalk_dispatch:lookup/5
-%% call with no live actor process involved).
-%%
-%% Previously, beamtalk_dispatch:invoke_extension/4 re-raised a crashing
-%% extension's bare Erlang exception instead of catching it, and
-%% beamtalk_actor:dispatch_via_hierarchy/4's try/catch only matched `exit:`
-%% patterns from the class-registry lookup itself (noproc/normal/timeout),
-%% never the `error:` class an extension body raises — so the re-raise
-%% escaped uncaught all the way up through handle_call/3 and crashed the
-%% actor's gen_server, unlike an equivalent crash in a regular compiled/
-%% runtime-installed method (already caught by dispatch_user_method/4).
-%% invoke_extension/6 now catches and converts via the same
-%% ensure_wrapped/4 classification invoke_method/6 already uses for a
-%% compiled-method crash reached via the same hierarchy walk, so the
-%% guarantee below matches the class-side one established elsewhere.
-instance_side_extension_crash_test() ->
-    ok = beamtalk_extensions:init(),
-    {ok, Counter} = test_counter:start_link(0),
-
-    %% Register on 'Counter' — the $beamtalk_class test_counter's __methods__
-    %% map does NOT contain this selector, so dispatch falls through the
-    %% hierarchy walk into the extension registry, mirroring a real
-    %% `Counter extend [ bt3199CrashExt [ ... ] ]` open-class body (ADR 0066).
-    CrashFun = fun(_Args, _Self, _State) -> error(bt3199_deliberate_crash) end,
-    ok = beamtalk_extensions:register('Counter', bt3199CrashExt, CrashFun, test_owner),
-
-    try
-        %% The caller gets a clean structured error, not a raw exit.
-        Result2 = gen_server:call(Counter, {bt3199CrashExt, []}),
-        ?assertBtErrorTuple(runtime_error, _, bt3199CrashExt, Result2),
-
-        %% The actor survives and keeps processing messages normally.
-        ?assert(is_process_alive(Counter)),
-        ?assertEqual(0, gen_server:call(Counter, {getValue, []}))
-    after
-        (try
-            beamtalk_extensions:unregister('Counter', bt3199CrashExt, false)
-        catch
-            _:_ -> ok
-        end),
-        (try
-            gen_server:stop(Counter)
-        catch
-            _:_ -> ok
-        end)
-    end.
-
 large_state_handling_test() ->
     %% Test actor with large state (simulating memory pressure)
     LargeData = lists:duplicate(10000, {data, lists:seq(1, 100)}),
@@ -4516,3 +4463,51 @@ wire_erpc_targets(Path) ->
         {match, Ms} -> [list_to_atom(M) || [[C | _] = M] <- Ms, C >= $a];
         nomatch -> []
     end.
+
+%%% ============================================================================
+%%% BT-5192: lifecycle failure classification
+%%% ============================================================================
+
+%% `isAlive` on a node-qualified proxy whose node cannot be reached cannot tell
+%% whether the name is registered: `node_down`, not `false`.
+bt5192_proxy_is_alive_on_unreachable_node_raises_node_down_test() ->
+    Node = node(beamtalk_dist_test_helper:unreachable_pid(bt5192_ghost)),
+    ?assertBtErrorDetails(
+        node_down,
+        _,
+        isAlive,
+        #{node := Node},
+        beamtalk_actor:sync_send({registered, bt5192_some_name, Node}, isAlive, [])
+    ).
+
+%% A local actor's own exit reason never reads as "node unreachable" or "the
+%% stop timed out": the actor is dead.
+bt5192_local_stop_failure_is_actor_dead_test() ->
+    Local = self(),
+    lists:foreach(
+        fun(Reason) ->
+            ?assertMatch(
+                #beamtalk_error{kind = actor_dead, details = #{exit_reason := Reason}},
+                beamtalk_actor_send:lifecycle_exit_error(Local, stop, Reason)
+            )
+        end,
+        [noconnection, {nodedown, node()}, {timeout, {gen_server, call, []}}]
+    ),
+    %% The stop's own wait running out is a timeout.
+    ?assertMatch(
+        #beamtalk_error{kind = timeout},
+        beamtalk_actor_send:lifecycle_exit_error(Local, stop, timeout)
+    ).
+
+%% Async `isAlive` on a node-qualified proxy whose node cannot be reached
+%% rejects its future with `node_down` (asked off the sender).
+bt5192_async_proxy_is_alive_on_unreachable_node_rejects_node_down_test() ->
+    Node = node(beamtalk_dist_test_helper:unreachable_pid(bt5192_ghost)),
+    Future = beamtalk_future:new(),
+    ok = beamtalk_actor:async_send({registered, bt5192_some_name, Node}, isAlive, [], Future),
+    ?assertThrow(
+        {future_rejected, #beamtalk_error{
+            kind = node_down, selector = isAlive, details = #{node := Node}
+        }},
+        beamtalk_future:await(Future, 10000)
+    ).

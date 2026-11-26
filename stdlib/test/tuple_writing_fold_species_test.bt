@@ -1,0 +1,47 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5167: a `collect:` / `select:` / `reject:` whose block writes an outer
+// local is folded in place; over a `Tuple` it must answer a `Tuple`, as the
+// pure path does.
+
+TestCase subclass: TupleWritingFoldSpeciesTest
+
+  writingCollect: t =>
+    n := 0
+    r := t
+      collect: [:x |
+        n := n + 1
+        x * 2
+      ]
+    r
+
+  writingSelect: t =>
+    n := 0
+    r := t
+      select: [:x |
+        n := n + 1
+        x > 1
+      ]
+    r
+
+  writingReject: t =>
+    n := 0
+    r := t
+      reject: [:x |
+        n := n + 1
+        x > 1
+      ]
+    r
+
+  testWritingCollectAnswersTuple =>
+    self assert: (self writingCollect: {1, 2, 3}) equals: {2, 4, 6}
+
+  testWritingSelectAnswersTuple =>
+    self assert: (self writingSelect: {1, 2, 3}) equals: {2, 3}
+
+  testWritingRejectAnswersTuple =>
+    self assert: (self writingReject: {1, 2, 3}) equals: {1}
+
+  testPureCollectAnswersTuple =>
+    self assert: ({1, 2, 3} collect: [:x | x * 2]) equals: {2, 4, 6}

@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-11-10) — all three rules shipped on every surface; WS3 landed via BT-4608/BT-4611 (accepted 2026-07-10; proposed 2026-06-27)
 
+> **Superseded in part by [ADR 0152](0152-remove-cross-file-extension-methods.md) (2026-11-24), the WS3 guard.** The `dependency_extensions_unknown` guard in receiver classification, and the dependency-extension loading (BT-4608, BT-4611) behind it, no longer apply: a dependency cannot extend a class, so a receiver from a dependency that failed to load is no longer treated as possibly extended. The guard and its plumbing are deleted in a later phase of that ADR.
+
 **Implementation status (2026-11-10):** all three rules are implemented.
 Rule 1 and Rule 3 landed via BT-2793. Rule 2 landed via BT-2796 (WS2:
 `KnowledgeScope` completeness contract + parse-error guard), BT-2795 (WS1:

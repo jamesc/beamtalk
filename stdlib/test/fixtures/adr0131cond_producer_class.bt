@@ -13,7 +13,6 @@
 // stdlib/test/adr0131cond_producer_test.bt.
 
 Object subclass: Adr0131CondProducerClass
-  classState: n = 0
 
   class plain => 0
 

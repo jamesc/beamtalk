@@ -300,9 +300,6 @@ name, measurements and metadata, in the emitting process.
 - **Re-entrancy:** while a handler is running, a nested emit that reaches the
   same handler again in this process (a handler on actor dispatch events that
   itself sends to an actor, say) skips it instead of recursing without bound.
-- **Class variables (ADR 0130 §4):** `telemetry` catches a raising handler and
-  detaches it, so the block runs under `beamtalk_class_vars:protect/1`: if it
-  ran at home and raises, its class-variable writes are discarded.
 """.
 -spec handle_event([atom()], map(), map(), #{
     block := fun((list(), map(), map()) -> term()), id := term()
@@ -314,9 +311,7 @@ handle_event(EventName, Measurements, Metadata, #{block := Block, id := Id}) ->
         undefined ->
             put(Key, true),
             try
-                _ = beamtalk_class_vars:protect(fun() ->
-                    Block(EventName, Measurements, Metadata)
-                end),
+                _ = Block(EventName, Measurements, Metadata),
                 ok
             after
                 erase(Key)
@@ -347,9 +342,21 @@ metadata map built at all. With them on it also emits
 `class`, `selector`, `mode`, plus `outcome` on stop) and, while trace capture
 is enabled, sets the causal span id (and the trace id, for a root span) in
 the process dictionary and records a trace event.
+
+A send to a node-qualified registered ref that addresses `{Name, Node}`
+directly has no pid (BT-5271). Such a send is only made while dispatch
+events are off (`beamtalk_actor_send:direct_registered_send/3` resolves the
+pid while they are on), so it records the aggregate only. If the events are
+turned on mid-send it still emits none: the events' `pid` is always a pid, so
+a handler that treats it as one cannot raise on it (and `telemetry`
+permanently detaches a handler that raises).
 """.
--spec dispatch_span(pid(), atom(), atom(), sync | async | cast, fun(() -> {term(), atom()})) ->
+-spec dispatch_span(
+    pid() | {atom(), node()}, atom(), atom(), sync | async | cast, fun(() -> {term(), atom()})
+) ->
     term().
+dispatch_span(Pid, Class, Selector, Mode, Fun) when not is_pid(Pid) ->
+    run_recorded(Pid, Class, Selector, Mode, Fun);
 dispatch_span(Pid, Class, Selector, Mode, Fun) ->
     case dispatch_events_enabled() andalso erlang:function_exported(telemetry, execute, 3) of
         false ->
@@ -476,8 +483,6 @@ run_traced_span(EventPrefix, StartMeta0, Fun, OnExit) ->
         #{monotonic_time => StartTime, system_time => erlang:system_time()},
         StartMeta
     ),
-    %% bt-catcher-audit: not-applicable-reraises - every clause emits an event and
-    %% re-raises the original class/reason/stacktrace (an NLR included)
     try Fun() of
         {Result, StopMeta} ->
             emit_stop(EventPrefix, StartTime, with_span_context(StopMeta, Ctx), OnExit),
@@ -517,8 +522,6 @@ stores.
 """.
 run_recorded(Pid, Class, Selector, Mode, Fun) ->
     StartTime = erlang:monotonic_time(nanosecond),
-    %% bt-catcher-audit: not-applicable-reraises - every clause records the exit and
-    %% re-raises the original class/reason/stacktrace (an NLR included)
     try Fun() of
         {Result, Outcome} ->
             Duration = erlang:monotonic_time(nanosecond) - StartTime,

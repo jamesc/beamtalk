@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-03-24). Supersedes [ADR 0031](0031-flat-namespace-for-v01.md) (Flat Namespace for v0.1).
 
+> **Superseded in part by [ADR 0152](0152-remove-cross-file-extension-methods.md) (2026-11-24), cross-package extensions.** The `pkg@Target >> selector => ...` qualifier, and the WS3 amendments that carry a dependency's extensions to a consumer's type checker (including the `dependency_extensions_unknown` guard), no longer apply, because cross-file extension methods are removed. The limitation near the end of this ADR that extension conflicts between dependencies are unresolvable also no longer applies. That limitation says `package@Class` does not qualify extension targets; this was wrong: the parser accepted `package@Class >> selector` and `StandaloneMethodDefinition.package` carried the qualifier (`crates/beamtalk-core/src/ast/class.rs`, `source_analysis/parser/methods.rs`), and it is now a compile error like any cross-file `>>`.
+
 **Note (2026-07-26):** the "Alternative: Registry-Based Dependencies (Hex.pm)" deferred below shipped in minimal, non-hex.pm form via the library registry epic (BT-2977) — see [ADR 0073](0073-package-distribution-and-discovery.md)'s "Amendment (2026-07-26)" for what was built and how it relates to what this section deferred.
 
 **Note (2026-11-23, BT-5113):** this ADR was written when the REPL had `:load` and `:reload` commands. They no longer exist (`:load path` is a parse error). Today use `Workspace load: "path"` for one file (a directory raises `eisdir`), `ClassName reload` for one class, and `:sync` for the whole project. The decision text below is unchanged.
@@ -135,7 +137,7 @@ When `strict-deps = true`, referencing a transitive dependency's class is a comp
 If two dependencies export the same class name, the compiler emits an **error** — not a warning, not silent shadowing:
 
 ```text
-error[E0301]: Class name 'Parser' is exported by multiple dependencies
+error: Class name 'Parser' is exported by multiple dependencies
   --> src/app.bt:5:12
    |
    = note: 'Parser' is defined in package 'json' (json@Parser)

@@ -95,20 +95,6 @@ pub(super) fn class_registered_name(class_name: &str) -> String {
     s
 }
 
-/// Builds a stable, self-contained extension binding name `"_Ext{idx}"`.
-///
-/// Using the per-module loop index keeps snapshot values stable across unrelated
-/// codegen changes that would otherwise shift the global temp-var counter.
-/// Collision with `fresh_var("Ext")` (yielding `_Ext1`, `_Ext2`, …) is not a
-/// concern in practice because no call site uses `"Ext"` as a `fresh_var` base.
-pub(super) fn ext_var(idx: usize) -> String {
-    // "_Ext" is 4 bytes; reserve a few more for the digits.
-    let mut s = String::with_capacity(8);
-    s.push_str("_Ext");
-    let _ = write!(s, "{idx}");
-    s
-}
-
 /// Generate a `'beamtalk_class' = [{...}]` attribute fragment for the
 /// module attributes section. Returns `Document::Nil` when classes is empty.
 pub(super) fn beamtalk_class_attribute(classes: &[ClassDefinition]) -> Document<'static> {
@@ -158,7 +144,7 @@ pub(super) fn index_lit(n: usize) -> Document<'static> {
     int_lit(i64::try_from(n).unwrap_or(i64::MAX))
 }
 
-/// ADR 0124 §2/B2: `true` when `decl` (a `state:` or `classState:`
+/// ADR 0124 §2/B2: `true` when `decl` (a `state:`
 /// declaration) must be left out of an `init/1` state literal entirely,
 /// rather than emitted as `<name> => 'nil'` or its default — i.e. a `late`
 /// slot with no declared default. Its key then starts absent from the map
@@ -170,12 +156,10 @@ pub(super) fn index_lit(n: usize) -> Document<'static> {
 /// a real assignment, so the slot still starts present, exactly like an
 /// eager one; only being unassigned is what `late` excuses.
 ///
-/// Shared by every state-literal emitter across `core_erlang` (instance-side
-/// `init/1` in `gen_server::state`, and the class-side `classState` map in
-/// `class_registry`/`gen_server::native_facade`) per AGENTS.md's no-
-/// duplicate-implementations rule — this is the one place that decides
-/// "does this slot's key appear at all", so those four loops can't drift out
-/// of sync on the rule.
+/// Shared by every state-literal emitter across `core_erlang` (`init/1` in
+/// `gen_server::state`) per AGENTS.md's no-duplicate-implementations rule —
+/// this is the one place that decides "does this slot's key appear at all",
+/// so those loops can't drift out of sync on the rule.
 pub(super) fn omit_late_defaultless_slot(decl: &StateDeclaration) -> bool {
     decl.slot_kind == SlotKind::Late && decl.default_value.is_none()
 }
@@ -559,13 +543,6 @@ mod tests {
         assert_eq!(metaclass_tag("Array"), "Array class");
         assert_eq!(metaclass_tag("Object"), "Object class");
         assert_eq!(metaclass_tag("MyApp"), "MyApp class");
-    }
-
-    #[test]
-    fn test_ext_var_formats_index() {
-        assert_eq!(ext_var(0), "_Ext0");
-        assert_eq!(ext_var(1), "_Ext1");
-        assert_eq!(ext_var(42), "_Ext42");
     }
 
     #[test]

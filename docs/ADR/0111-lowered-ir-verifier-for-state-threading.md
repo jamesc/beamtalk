@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-08-11)
 
+> **Amended by [ADR 0153](0153-remove-class-variables.md) (2026-11-25), the class-variable catch entry.** `CatchWithoutClassVarRestore` and the `ClassVarSnapshot` catch entry are removed from `ThreadedIr`. The `on:do:` catch boundary is a plain `try`/`catch` (`CatchNlrNotPassedThrough`, `CatchWithoutStateRestore`, `CatchFilterNotClosed`).
+
 > **Amended by [ADR 0130](0130-class-variables-live-in-the-class-process.md) (2026-10-06).** The `ClassVars` storage family is removed from `ThreadedIr`: class variables are written in place in the class process, so there is nothing to thread, and `VersionPrefix::ClassVars`, the `ClassVars` loop and fold slots, `ShadowWriteMissing` and the shadow-write flag on `Bind` are deleted. The `State` and `SelfVt` families, non-local return and the verifier are unchanged. `ThreadedStmt::OnDoCatch` is the one node that carries class-variable semantics now, and `verify()` reports `VerifyError::CatchWithoutClassVarRestore` for a catch whose non-NLR arm does not begin with `restore/1` (both `$bt_nlr` arms first). The addenda below describe `ClassVars` threading and the ADR 0110 shadow write as history.
 
 > **Amended by Addendum 17 (2026-10-09, BT-3724, BT-3778).** Release-build verifier findings are surfaced by the CLI build path, the compiler port (including REPL/MCP expression eval) and `.btscript` test compilation as `internal:` warnings (category `InternalVerifier`); they never fail a build.

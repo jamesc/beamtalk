@@ -124,19 +124,16 @@ An `equals:` *send* to a primitive receiver (BT-4416).
 `Receiver` is a primitive value (`Integer`, `Float`, `Binary`, `String`,
 `Symbol`, `Boolean`, `nil`, `List`, `Block`, `Bitstring`). The full dynamic
 send walks the receiver's dispatch chain — `Binary` → `Collection` → `Value`
-→ `Object` — with an extension-registry probe at every level, ~0.8µs per
-call, to arrive at `Object>>equals:`, which is `=:=`.
+→ `Object` — ~0.8µs per call, to arrive at `Object>>equals:`, which is `=:=`.
 
 Two shortcuts, both preserving the send's answer:
 
 1. **Raw hit.** By the reflexivity contract above, `X =:= Y` implies
    `X equals: Y`, so a raw hit answers `true` with no dispatch at all.
 2. **Raw miss, default `equals:`.** If no class on the receiver's chain
-   overrides `equals:` — no compiled method below `Object` and no extension
-   at any level — the send would run `Object>>equals:`, i.e. `=:=`, which
+   overrides `equals:` — no compiled method below `Object` — the send would run `Object>>equals:`, i.e. `=:=`, which
    just answered `false`. Whether the chain is default is memoised per class
-   in `beamtalk_class_derived_cache`, which every extension `register`/
-   `unregister` and every class write flushes, so an override installed later
+   in `beamtalk_class_derived_cache`, which every class write flushes, so an override installed later
    is seen by the next send.
 
 Anything else — an override exists, or the chain is not yet published —

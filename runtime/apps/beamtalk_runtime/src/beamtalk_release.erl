@@ -45,7 +45,7 @@ staging `shapes.json`, so a live `shapeManifest` and the release's own
 "the project's" (AGENTS.md's no-duplicate-implementations rule).
 """.
 
--export([info/0, shape_manifest/0, shapeManifest/0]).
+-export([info/0, shape_manifest/0, shapeManifest/0, project_class_shape_entry/1]).
 
 -ifdef(TEST).
 %% Exported for EUnit coverage of the internal pieces without booting a real
@@ -99,6 +99,29 @@ shape_manifest() ->
         #{},
         project_class_names()
     ).
+
+-doc """
+`ClassName`'s `shape_manifest/0` entry alone, without building the whole
+manifest: the class's `beamtalk_release_shapes:class_shape_entry/1`, or
+`undefined` when it has no live class process or is not a project class
+(the same scope `shape_manifest/0` uses: a live class whose module passes
+`is_release_class_module/1`). Used by
+`beamtalk_node_monitor`'s reload-time skew check, which needs one class.
+""".
+-spec project_class_shape_entry(atom()) -> beamtalk_release_shapes:shape_entry() | undefined.
+project_class_shape_entry(ClassName) ->
+    case
+        beamtalk_class_registry:whereis_class(ClassName) =/= undefined andalso
+            beamtalk_class_metadata:lookup_module(ClassName)
+    of
+        {ok, Module} ->
+            case beamtalk_module_activation:is_release_class_module(Module) of
+                true -> beamtalk_release_shapes:class_shape_entry(ClassName);
+                false -> undefined
+            end;
+        _NotLive ->
+            undefined
+    end.
 
 -doc "camelCase alias for the `(Erlang beamtalk_release) shapeManifest` FFI call — see the moduledoc.".
 -spec shapeManifest() -> #{atom() => beamtalk_release_shapes:shape_entry()}.

@@ -67,3 +67,134 @@ node_arg_to_atom_wrong_class_returns_type_error_test() ->
         #{'$beamtalk_class' => 'String', name => 'peer@example'}
     ),
     ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result).
+
+%%% -----------------------------------------------------------------------
+%%% Origin-side error paths that need no live peer
+%%%
+%%% These run on a non-distributed test node (TLS distribution off), so
+%%% `connect_policy/2` refuses any off-host node and answers `ok` for a
+%%% `localhost` peer; an `erpc` to a `localhost` peer that is not running
+%%% then fails with `noconnection`, i.e. the node-down path.
+%%% -----------------------------------------------------------------------
+
+-define(OFF_HOST, 'peer@remote.invalid').
+-define(DOWN_PEER, 'bt_actor_remote_absent@localhost').
+
+remote_spawn_refused_off_host_is_tagged_with_class_and_selector_test() ->
+    ?assertMatch(
+        {error, #beamtalk_error{
+            kind = insecure_distribution, class = 'Counter', selector = 'spawnOn:'
+        }},
+        beamtalk_actor_remote:remote_spawn(?OFF_HOST, 'Counter', undefined, 'spawnOn:')
+    ).
+
+remote_spawn_with_refused_before_encoding_test() ->
+    %% A refused connection is reported without running the wire-encode, so
+    %% an unencodable InitArgs still yields the policy error.
+    ?assertMatch(
+        {error, #beamtalk_error{
+            kind = insecure_distribution, class = 'Counter', selector = 'spawnWith:on:'
+        }},
+        beamtalk_actor_remote:remote_spawn_with(
+            ?OFF_HOST, 'Counter', undefined, too_deep(), 'spawnWith:on:'
+        )
+    ).
+
+remote_spawn_with_encode_failure_is_tagged_and_never_reaches_network_test() ->
+    %% Peer is on-host (policy allows it) and absent: if encoding did not fail
+    %% first, the result would be node_down rather than not_serialisable.
+    ?assertMatch(
+        {error, #beamtalk_error{
+            kind = not_serialisable, class = 'Counter', selector = 'spawnWith:on:'
+        }},
+        beamtalk_actor_remote:remote_spawn_with(
+            ?DOWN_PEER, 'Counter', undefined, too_deep(), 'spawnWith:on:'
+        )
+    ).
+
+remote_spawn_node_down_test() ->
+    {error, Err} = beamtalk_actor_remote:remote_spawn(
+        ?DOWN_PEER, 'Counter', undefined, 'spawnOn:'
+    ),
+    ?assertEqual(beamtalk_actor_send:node_down_error_record(?DOWN_PEER, 'spawnOn:'), Err).
+
+remote_spawn_with_node_down_test() ->
+    {error, Err} = beamtalk_actor_remote:remote_spawn_with(
+        ?DOWN_PEER, 'Counter', 'worker', #{a => 1}, 'spawnWith:as:on:'
+    ),
+    ?assertEqual(
+        beamtalk_actor_send:node_down_error_record(?DOWN_PEER, 'spawnWith:as:on:'), Err
+    ).
+
+remote_named_refused_off_host_test() ->
+    ?assertMatch(
+        {error, #beamtalk_error{
+            kind = insecure_distribution, class = 'Counter', selector = 'named:on:'
+        }},
+        beamtalk_actor_remote:remote_named(?OFF_HOST, 'Counter', worker)
+    ).
+
+remote_named_node_down_test() ->
+    {error, Err} = beamtalk_actor_remote:remote_named(?DOWN_PEER, 'Counter', worker),
+    ?assertEqual(beamtalk_actor_send:node_down_error_record(?DOWN_PEER, 'named:on:'), Err).
+
+remote_all_registered_refused_off_host_test() ->
+    ?assertMatch(
+        {error, #beamtalk_error{
+            kind = insecure_distribution, class = 'Actor', selector = 'allRegisteredOn:'
+        }},
+        beamtalk_actor_remote:remote_all_registered(?OFF_HOST)
+    ).
+
+remote_all_registered_node_down_test() ->
+    {error, Err} = beamtalk_actor_remote:remote_all_registered(?DOWN_PEER),
+    ?assertEqual(
+        beamtalk_actor_send:node_down_error_record(?DOWN_PEER, 'allRegisteredOn:'), Err
+    ).
+
+%%% -----------------------------------------------------------------------
+%%% Target-side error paths (run locally; the erpc worker is just a process)
+%%% -----------------------------------------------------------------------
+
+remote_spawn_target_unknown_class_test() ->
+    ?assertMatch(
+        {error, #beamtalk_error{kind = class_not_found, class = 'BtNoSuchRemoteClass'}},
+        beamtalk_actor_remote:remote_spawn_target('BtNoSuchRemoteClass', undefined)
+    ),
+    %% The class is resolved before the name is considered.
+    ?assertMatch(
+        {error, #beamtalk_error{kind = class_not_found}},
+        beamtalk_actor_remote:remote_spawn_target('BtNoSuchRemoteClass', worker)
+    ).
+
+remote_spawn_with_target_unknown_class_test() ->
+    ?assertMatch(
+        {error, #beamtalk_error{kind = class_not_found, class = 'BtNoSuchRemoteClass'}},
+        beamtalk_actor_remote:remote_spawn_with_target('BtNoSuchRemoteClass', undefined, #{a => 1})
+    ).
+
+remote_spawn_with_target_undecodable_args_test() ->
+    %% A class ref naming a class this node does not have fails the decode,
+    %% before the target class is even looked up.
+    ?assertMatch(
+        {error, #beamtalk_error{kind = class_not_found, class = 'BtNoSuchArgClass'}},
+        beamtalk_actor_remote:remote_spawn_with_target(
+            'BtNoSuchRemoteClass', undefined, {'$beamtalk_class_ref', 'BtNoSuchArgClass'}
+        )
+    ).
+
+remote_named_target_unknown_class_test() ->
+    Result = beamtalk_actor_remote:remote_named_target('BtNoSuchRemoteClass', bt_no_such_name),
+    ?assertMatch({error, #beamtalk_error{}}, Result).
+
+%%% -----------------------------------------------------------------------
+%%% Helpers
+%%% -----------------------------------------------------------------------
+
+%% A list nested deeper than the wire walk's recursion cap (not_serialisable).
+too_deep() ->
+    lists:foldl(
+        fun(_, Acc) -> [Acc] end,
+        [],
+        lists:seq(1, beamtalk_shape_migration:max_pack_depth() + 1)
+    ).

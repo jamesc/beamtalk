@@ -36,7 +36,8 @@
 //! variable, so the construction itself only names variables and literals.
 
 use super::binary_segments::{
-    SegmentDirection, expand_utf_string_literals, folded_float_bytes, int_to_f64, segment_spec_tail,
+    SegmentDirection, expand_utf_string_literals, float_segment_value, folded_float_bytes,
+    segment_spec_tail,
 };
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
@@ -234,12 +235,7 @@ impl CoreErlangGenerator {
             // `float/1` to an integer there), folded to its bytes when the
             // size and endianness are constant, as `erlc` folds it.
             SegmentValue::Literal(lit) if seg_type == BinarySegmentType::Float => {
-                let float = match lit {
-                    Literal::Float(f) => Some(*f),
-                    Literal::Integer(v) => Some(int_to_f64(*v)),
-                    Literal::Character(c) => Some(f64::from(u32::from(*c))),
-                    _ => None,
-                };
+                let float = float_segment_value(lit);
                 match float {
                     Some(f) => {
                         if let Some(bytes) = folded_float_bytes(f, seg) {

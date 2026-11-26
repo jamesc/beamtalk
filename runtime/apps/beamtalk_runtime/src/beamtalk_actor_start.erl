@@ -21,6 +21,14 @@ before the split.
 
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
+
+%% Default upper bound on a `global:register_name/3` (BT-5192);
+%% `global_register_timeout_ms` (application env) overrides it.
+-define(GLOBAL_REGISTER_TIMEOUT_MS, 5000).
+%% How long `register_global/2` waits for `global` to drop an exited holder
+%% before its one retry, and how often it looks.
+-define(GLOBAL_DROP_WAIT_MS, 1000).
+-define(GLOBAL_DROP_POLL_MS, 10).
 -export([
     async_init_and_loop/2,
     await_initialize/1,
@@ -93,8 +101,6 @@ await_initialize(Pid, MonRef) ->
     ok | {error, term()}.
 
 await_initialize_sys(Pid, MonRef, SysCall, Mode) ->
-    %% bt-catcher-audit: not-applicable-no-block - SysCall is a local fun
-    %% wrapping a sys:get_state/replace_state call, never a Beamtalk block
     try SysCall(Pid) of
         _State ->
             settle_monitor(Mode, MonRef)
@@ -331,7 +337,10 @@ as the resolver. A losing race (`no` — another process already holds
 ordinary, not a conflict, teardown) and reports `{already_started,
 ExistingPid}`, the exact shape `spawn_named_scoped/4` already translates to
 `name_registered` for the `local` path, so no separate error-mapping arm is
-needed for `global`.
+needed for `global`. The registration is bounded (`register_global/2`,
+BT-5192): one that does not finish in time stops the actor
+(`stop_refused_global/1`) and reports `{register_timeout, Name}`, which
+`spawn_named_scoped/5` turns into `#timeout`.
 
 `Link` is `linked` for every caller above. `unlinked` (BT-3992,
 spawn_named_for_caller/4) drops the link to the caller inside
@@ -369,14 +378,18 @@ safe_spawn_gen_named(global, Link, Name, Module, InitArgs) ->
         )
     of
         {ok, Pid} ->
-            case
-                global:register_name(Name, Pid, fun ?BT_ACTOR_WIRE_MODULE:resolve_global_conflict/3)
-            of
+            case register_global(Name, Pid) of
                 yes ->
                     {ok, Pid};
                 no ->
                     gen_server:stop(Pid, normal, 5000),
-                    {error, {already_started, global:whereis_name(Name)}}
+                    {error, {already_started, global:whereis_name(Name)}};
+                timeout ->
+                    ok = stop_refused_global(Pid),
+                    {error, {register_timeout, Name}};
+                {raised, Class, Reason, Stack} ->
+                    ok = stop_refused_global(Pid),
+                    erlang:raise(Class, Reason, Stack)
             end;
         {error, Reason} ->
             {error, Reason}
@@ -428,7 +441,9 @@ nothing; a start that loses the race to another holder is stopped
 {already_started, Holder}}`, which `spawn_named_scoped/5` turns into
 `#name_registered`. A registration that fails with no holder (the backing
 process registered itself under another name, or already died) is
-`{error, {register_failed, Name}}`. `Link = unlinked` drops the start link
+`{error, {register_failed, Name}}`, and a `global` registration that does not
+finish in time (`register_global/2`, BT-5192) stops the process and is
+`{error, {register_timeout, Name}}`. `Link = unlinked` drops the start link
 before exits stop being trapped (`maybe_unlink_started/2`).
 
 The backing `start_link/1` must link the new process to its caller, as
@@ -485,8 +500,6 @@ name_holder({global, Name}) ->
 start_native_trapped(Backing, Config, Registration, Link) ->
     OldTrap = erlang:process_flag(trap_exit, true),
     Result =
-        %% bt-catcher-audit: not-applicable-no-block - Backing:start_link/1
-        %% is a hand-written Erlang start function, never a Beamtalk block
         try Backing:start_link(Config) of
             {ok, Pid} when is_pid(Pid) -> register_native_started(Registration, Pid);
             {error, Reason} -> {error, Reason};
@@ -588,7 +601,9 @@ native_stop_observer_wait(MonRef, Pid, Class) ->
 %% BT-4577: register a just-started native actor under its name, or stop it
 %% when the name cannot be registered.
 -spec register_native_started(none | {local | global, atom()}, pid()) ->
-    {ok, pid()} | {error, {already_started, pid() | port()} | {register_failed, atom()}}.
+    {ok, pid()}
+    | {error,
+        {already_started, pid() | port()} | {register_failed, atom()} | {register_timeout, atom()}}.
 
 register_native_started(none, Pid) ->
     {ok, Pid};
@@ -600,10 +615,117 @@ register_native_started({local, Name} = Registration, Pid) ->
     end;
 register_native_started({global, Name} = Registration, Pid) ->
     ok = record_native_start_time(Pid),
-    case global:register_name(Name, Pid, fun ?BT_ACTOR_WIRE_MODULE:resolve_global_conflict/3) of
-        yes -> {ok, Pid};
-        no -> refuse_unregistered_native(Registration, Pid)
+    case register_global(Name, Pid) of
+        yes ->
+            {ok, Pid};
+        no ->
+            refuse_unregistered_native(Registration, Pid);
+        timeout ->
+            ok = stop_unregistered_native(Pid),
+            {error, {register_timeout, Name}};
+        {raised, Class, Reason, Stack} ->
+            ok = stop_unregistered_native(Pid),
+            erlang:raise(Class, Reason, Stack)
     end.
+
+-doc """
+`global:register_name/3` of `Pid` under `Name`, with `resolve_global_conflict/3`
+as the conflict resolver, waiting at most `global_register_timeout_ms`
+(application env, default `?GLOBAL_REGISTER_TIMEOUT_MS`) for an answer
+(BT-5192).
+
+`global` registers under its cluster-wide lock and waits for as long as
+another holder keeps it (a registration, a `global:trans/2`, a partition-heal
+name sync). The call runs through `beamtalk_bounded:run/2`, so the caller gets
+`timeout` instead of blocking indefinitely; every caller then stops `Pid`. A
+raise inside `global` comes back as `{raised, Class, Reason, Stack}` for the
+caller to re-raise after stopping `Pid`.
+
+A timed-out request stays queued in `global`'s registrar and may still
+register `Pid` once the lock frees. `Pid` is stopped by then, and `global`
+drops the name of an exited process, but until it has done so a new
+registration of the same name sees that dead holder and answers `no`. So a
+`no` whose holder is a dead process on this node waits (bounded) for `global`
+to drop it and tries once more.
+""".
+-spec register_global(atom(), pid()) ->
+    yes | no | timeout | {raised, error | exit | throw, term(), list()}.
+register_global(Name, Pid) ->
+    case bounded_register_global(Name, Pid) of
+        no ->
+            case global:whereis_name(Name) of
+                Holder when is_pid(Holder), node(Holder) =:= node() ->
+                    case is_process_alive(Holder) of
+                        true ->
+                            no;
+                        false ->
+                            await_global_name_dropped(Name, Holder, ?GLOBAL_DROP_WAIT_MS),
+                            bounded_register_global(Name, Pid)
+                    end;
+                _ ->
+                    no
+            end;
+        Answer ->
+            Answer
+    end.
+
+-spec bounded_register_global(atom(), pid()) ->
+    yes | no | timeout | {raised, error | exit | throw, term(), list()}.
+bounded_register_global(Name, Pid) ->
+    Timeout = application:get_env(
+        beamtalk_runtime, global_register_timeout_ms, ?GLOBAL_REGISTER_TIMEOUT_MS
+    ),
+    Register = fun() ->
+        global:register_name(Name, Pid, fun ?BT_ACTOR_WIRE_MODULE:resolve_global_conflict/3)
+    end,
+    case beamtalk_bounded:run(Register, Timeout) of
+        {ok, Answer} ->
+            Answer;
+        {raised, _, _, _} = Raised ->
+            Raised;
+        {down, Reason} ->
+            {raised, exit, Reason, []};
+        timeout ->
+            ?LOG_WARNING("Global name registration did not finish in time", #{
+                name => Name, timeout_ms => Timeout, domain => [beamtalk, runtime]
+            }),
+            timeout
+    end.
+
+%% Wait until `global` no longer lists the exited `Holder` under `Name`, or
+%% `WaitMs` has passed; `global` drops it once it handles the holder's exit.
+-spec await_global_name_dropped(atom(), pid(), integer()) -> ok.
+await_global_name_dropped(_Name, _Holder, WaitMs) when WaitMs =< 0 ->
+    ok;
+await_global_name_dropped(Name, Holder, WaitMs) ->
+    case global:whereis_name(Name) of
+        Holder ->
+            receive
+            after ?GLOBAL_DROP_POLL_MS -> ok
+            end,
+            await_global_name_dropped(Name, Holder, WaitMs - ?GLOBAL_DROP_POLL_MS);
+        _ ->
+            ok
+    end.
+
+%% Stop a compiled actor whose global registration did not complete, without
+%% raising and within a bound: a graceful stop (its `terminate/2` runs) for up
+%% to 5 s, then a kill. The start link is removed first, so neither the stop
+%% nor the kill reaches the caller, and an `'EXIT'` it already delivered is
+%% dropped.
+-spec stop_refused_global(pid()) -> ok.
+stop_refused_global(Pid) ->
+    unlink(Pid),
+    try
+        beamtalk_stop:stop(Pid, normal, 5000)
+    catch
+        exit:_ -> exit(Pid, kill)
+    end,
+    receive
+        {'EXIT', Pid, _} -> ok
+    after 0 -> ok
+    end,
+    ok.
 
 %% BT-4956: give a `native:` actor the `'$beamtalk_actor_started_at'` key that a
 %% compiled actor's generated `init/1` writes (BT-4937), so
@@ -617,7 +739,7 @@ register_native_started({global, Name} = Registration, Pid) ->
 %% the backing module already wrote is left alone. A backing process that does
 %% not answer the system message within a second stays untimed until it drains
 %% its queue, and meanwhile behaves as before BT-4956: the other side wins, or
-%% `random_exit_name/3` if neither has one. The stamp it then writes still
+%% the lower-node tie-break if neither has one. The stamp it then writes still
 %% carries the registration time, taken before the request.
 -spec record_native_start_time(pid()) -> ok.
 

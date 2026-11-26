@@ -1,0 +1,100 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5167: an inlined (writing) `to:do:` / `timesRepeat:` counted loop with a
+// nil / non-number limit or count raises `type_error` instead of comparing by
+// term order (which looped forever with a writing block).
+
+TestCase subclass: CountedLoopNilLimitTest
+
+  writingToDo: limit =>
+    s := 0
+    1 to: limit do: [:i | s := s + i]
+    s
+
+  writingTimesRepeat: count =>
+    s := 0
+    count timesRepeat: [s := s + 1]
+    s
+
+  testWritingToDoNilLimitRaises =>
+    self should: [self writingToDo: nil] raise: #type_error
+
+  testWritingToDoNilLimitMessage =>
+    msg := [self writingToDo: nil] on: Exception do: [:e | e message]
+    self assert: msg equals: "Interval limit must be a number"
+
+  // BT-5190: a nil count is a nil receiver, which does not understand
+  // `timesRepeat:` on the pure path either.
+  testWritingTimesRepeatNilRaises =>
+    self should: [self writingTimesRepeat: nil] raise: #does_not_understand
+
+  testWritingToDoStillRuns => self assert: (self writingToDo: 4) equals: 10
+
+  testWritingTimesRepeatStillRuns =>
+    self assert: (self writingTimesRepeat: 3) equals: 3
+
+  // BT-5167: the inlined (writing) and stdlib (pure) `to:by:do:` raise the same
+  // error shape: class, selector and message.
+  pureToByDo: limit =>
+    1
+      to: limit
+      by: 1
+      do: [:i | i]
+
+  writingToByDo: limit =>
+    s := 0
+    1
+      to: limit
+      by: 1
+      do: [:i | s := s + i]
+    s
+
+  testInlinedAndStdlibLimitErrorsHaveTheSameShape =>
+    pure := [self pureToByDo: nil] on: Exception do: [:e | e]
+    writing := [self writingToByDo: nil] on: Exception do: [:e | e]
+    self assert: writing class equals: pure class
+    self assert: writing selector equals: pure selector
+    self assert: writing message equals: pure message
+
+  // BT-5175: the pure (read-only block) `to:do:` raises on a nil limit instead
+  // of looping forever, with the same error shape as the writing path.
+  pureToDo: limit => 1 to: limit do: [:i | i]
+
+  testPureToDoNilLimitRaises =>
+    self should: [self pureToDo: nil] raise: #type_error
+
+  testPureToDoNilLimitMatchesWritingPath =>
+    pure := [self pureToDo: nil] on: Exception do: [:e | e]
+    writing := [self writingToDo: nil] on: Exception do: [:e | e]
+    self assert: writing class equals: pure class
+    self assert: writing selector equals: pure selector
+    self assert: writing message equals: pure message
+
+  // BT-5175: a Float step works on both paths, and the loop completes.
+  pureFloatStep =>
+    1
+      to: 3
+      by: 0.5
+      do: [:i | i]
+
+  collectedFloatSteps =>
+    seen := #()
+    1
+      to: 3
+      by: 0.5
+      do: [:i | seen := seen add: i]
+    seen
+
+  testFloatStepInlinedCollectsAllValues =>
+    self assert: self collectedFloatSteps size equals: 5
+
+  testFloatStepPureCompletes => self assert: self pureFloatStep equals: nil
+
+  testFloatStepNegativePure =>
+    self
+      assert: (3
+        to: 1
+        by: -0.5
+        do: [:i | i])
+      equals: nil

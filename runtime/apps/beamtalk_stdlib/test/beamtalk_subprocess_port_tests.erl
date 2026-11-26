@@ -235,3 +235,108 @@ ensure_binary_env_mixed_valid_invalid_test() ->
             'run:'
         )
     ).
+
+%%% ============================================================================
+%%% Parked writeLine: callers (BT-5248)
+%%% ============================================================================
+
+%% Callers parked by await_write/2 are answered in order; fail_pending_writes/2
+%% answers the rest, so none is left waiting once the port is gone.
+parked_writes_are_answered_in_order_and_failed_on_close_test() ->
+    %% gen_server From tuples whose replies come back to this process.
+    S0 = #{},
+    F1 = {self(), make_ref()},
+    F2 = {self(), make_ref()},
+    F3 = {self(), make_ref()},
+    S1 = beamtalk_subprocess_port:await_write(
+        F3, beamtalk_subprocess_port:await_write(F2, beamtalk_subprocess_port:await_write(F1, S0))
+    ),
+    %% Queued, then written (BT-5269): only then does the caller get nil.
+    S2 = beamtalk_subprocess_port:write_written(
+        beamtalk_subprocess_port:write_queued('Subprocess', S1)
+    ),
+    {_, R1} = F1,
+    ?assertEqual(
+        ok,
+        receive
+            {R1, nil} -> ok
+        after 1000 -> timeout
+        end
+    ),
+    S3 = beamtalk_subprocess_port:write_dropped('Subprocess', <<"full">>, S2),
+    {_, R2} = F2,
+    receive
+        {R2, {error, #beamtalk_error{kind = runtime_error}}} -> ok
+    after 1000 -> error(no_drop_reply)
+    end,
+    ?assertEqual(<<"full">>, maps:get(stdin_dropped, S3)),
+    S4 = beamtalk_subprocess_port:fail_pending_writes('Subprocess', S3),
+    {_, R3} = F3,
+    receive
+        {R3, {error, #beamtalk_error{kind = port_closed}}} -> ok
+    after 1000 -> error(no_close_reply)
+    end,
+    ?assertEqual(0, queue:len(maps:get(stdin_waiters, S4))).
+
+%%% ============================================================================
+%%% Queued writeLine: callers wait for the writer thread's report (BT-5269)
+%%% ============================================================================
+
+%% A queued caller is not answered until its line is written; when the writer
+%% thread fails, it and every caller queued behind it raise, a caller whose
+%% write is acknowledged as queued after that raises at once, and the loss is
+%% sticky for later writes.
+queued_writes_wait_for_the_writer_and_all_fail_with_it_test() ->
+    [F1, F2, F3] = Froms = [{self(), make_ref()} || _ <- [1, 2, 3]],
+    S1 = lists:foldl(fun beamtalk_subprocess_port:await_write/2, #{}, Froms),
+    S2 = beamtalk_subprocess_port:write_queued(
+        'Subprocess', beamtalk_subprocess_port:write_queued('Subprocess', S1)
+    ),
+    %% Queued is not written: nobody has been answered yet.
+    ?assertEqual(
+        none,
+        receive
+            {_Ref, _} -> got_reply
+        after 100 -> none
+        end
+    ),
+    S3 = beamtalk_subprocess_port:write_failed('Subprocess', <<"child gone">>, S2),
+    lists:foreach(
+        fun({_, Ref}) ->
+            receive
+                {Ref, {error, #beamtalk_error{kind = runtime_error} = Err}} ->
+                    ?assertEqual(
+                        {beamtalk_string, <<"writeLine: failed: the line was not written">>},
+                        Err#beamtalk_error.message
+                    )
+            after 1000 -> error(no_failed_reply)
+            end
+        end,
+        [F1, F2]
+    ),
+    ?assertEqual(<<"child gone">>, maps:get(stdin_dropped, S3)),
+    %% F3's write is acknowledged as queued after the writer failed: it can
+    %% never be written, so it raises now.
+    S4 = beamtalk_subprocess_port:write_queued('Subprocess', S3),
+    {_, R3} = F3,
+    receive
+        {R3, {error, #beamtalk_error{kind = runtime_error}}} -> ok
+    after 1000 -> error(no_late_queued_reply)
+    end,
+    ?assertEqual(0, queue:len(maps:get(stdin_waiters, S4))),
+    ?assertEqual(0, queue:len(maps:get(stdin_unwritten, S4))).
+
+%% Callers whose lines are queued but not yet written are failed when the port
+%% goes away, like callers still awaiting the queued answer.
+fail_pending_writes_answers_queued_unwritten_callers_test() ->
+    F1 = {self(), make_ref()},
+    S1 = beamtalk_subprocess_port:write_queued(
+        'Subprocess', beamtalk_subprocess_port:await_write(F1, #{})
+    ),
+    S2 = beamtalk_subprocess_port:fail_pending_writes('Subprocess', S1),
+    {_, R1} = F1,
+    receive
+        {R1, {error, #beamtalk_error{kind = port_closed}}} -> ok
+    after 1000 -> error(no_close_reply)
+    end,
+    ?assertEqual(0, queue:len(maps:get(stdin_unwritten, S2))).

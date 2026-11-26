@@ -179,9 +179,6 @@ pub(in crate::core_erlang) struct ClassContext {
     /// Identity of the class currently being compiled (if any).
     /// Set from the AST class definition at the start of module generation.
     pub(in crate::core_erlang) class_identity: Option<util::ClassIdentity>,
-    /// Names of class variables in the current class.
-    /// Used to distinguish class variable access from instance field access in class methods.
-    pub class_var_names: std::collections::HashSet<String>,
     /// Selector names of class methods in the current class.
     /// Used to route self-sends to class method functions vs module exports.
     pub class_method_selectors: std::collections::HashSet<String>,
@@ -258,12 +255,6 @@ pub(in crate::core_erlang) struct ClassContext {
     /// `class_super_dispatch` for `super`) keyed on this class name, not
     /// through a direct module call.
     pub builder_class_method_class: Option<String>,
-    /// BT-3762: the class-side extension's *target* class while its method is
-    /// lowered (the extension module's own class identity is not the target).
-    /// Read through [`CoreErlangGenerator::class_var_home`]: it names the class
-    /// in the "class variables are per class" diagnostic and keys a class-side
-    /// `super` send (BT-4001).
-    pub extension_target_class: Option<String>,
 }
 
 /// ADR 0084: Snapshot of the class-method-relevant `ClassContext`
@@ -275,7 +266,6 @@ pub(in crate::core_erlang) struct ClassContext {
 pub(in crate::core_erlang) struct SavedClassMethodCtx {
     had_context: bool,
     in_class_method: bool,
-    class_var_names: std::collections::HashSet<String>,
     class_method_selectors: std::collections::HashSet<String>,
     class_slot_constructor_selector: Option<String>,
     builder_class_method_class: Option<String>,
@@ -307,7 +297,6 @@ impl ClassContext {
     pub(in crate::core_erlang) fn new() -> Self {
         Self {
             class_identity: None,
-            class_var_names: std::collections::HashSet::new(),
             class_method_selectors: std::collections::HashSet::new(),
             class_module_registry: beamtalk_core::semantic_analysis::ClassModuleRegistry::new(),
             shadowed_class_names: beamtalk_core::semantic_analysis::ShadowedClassNames::default(),
@@ -318,7 +307,6 @@ impl ClassContext {
             in_class_method: false,
             stdlib_mode: false,
             builder_class_method_class: None,
-            extension_target_class: None,
         }
     }
 }
@@ -364,19 +352,16 @@ impl ValueTypeContext {
 impl CoreErlangGenerator {
     /// ADR 0084: Enter the class-method lowering context for a
     /// programmatic `ClassBuilder` cascade's `classMethods:` funs, returning the
-    /// prior state to restore. Sets `in_class_method`, the class-variable names
-    /// (from the cascade's `classVars:` keys), and the builder class name used
-    /// for runtime self/`super` dispatch. Safe whether or not an enclosing class
+    /// prior state to restore. Sets `in_class_method` and the builder class
+    /// name used for runtime self/`super` dispatch. Safe whether or not an enclosing class
     /// is being compiled — a context created here is dropped on exit.
     pub(in crate::core_erlang) fn enter_builder_class_method_context(
         &mut self,
         class_name: &str,
-        class_var_names: &[String],
     ) -> SavedClassMethodCtx {
         let saved = SavedClassMethodCtx {
             had_context: self.class_context.is_some(),
             in_class_method: self.in_class_method(),
-            class_var_names: self.class_var_names().clone(),
             class_method_selectors: self.class_method_selectors().clone(),
             class_slot_constructor_selector: self.class_slot_constructor_selector().cloned(),
             builder_class_method_class: self.builder_class_method_class(),
@@ -385,7 +370,6 @@ impl CoreErlangGenerator {
             current_method_param_types: self.current_method_param_types.clone(),
         };
         self.set_in_class_method(true);
-        *self.class_var_names_mut() = class_var_names.iter().cloned().collect();
         // class_method_selectors is intentionally left empty: in builder mode
         // `generate_class_method_self_send` routes EVERY self-send through
         // `class_self_dispatch_local` (the fun has no `class_<sel>` export) before
@@ -404,7 +388,6 @@ impl CoreErlangGenerator {
     ) {
         if saved.had_context {
             self.set_in_class_method(saved.in_class_method);
-            *self.class_var_names_mut() = saved.class_var_names;
             *self.class_method_selectors_mut() = saved.class_method_selectors;
             self.set_class_slot_constructor_selector(saved.class_slot_constructor_selector);
             self.set_builder_class_method_class(saved.builder_class_method_class);

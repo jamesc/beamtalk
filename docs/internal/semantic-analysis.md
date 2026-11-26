@@ -62,10 +62,6 @@ Semantic analysis validates the AST after parsing, checking for errors that can'
   - Validates primitive constraints on classes
   - **10 tests**
 
-- **Error types**: `crates/beamtalk-core/src/semantic_analysis/error.rs`
-  - `SemanticError` and `SemanticErrorKind`
-  - Error types: undefined variables, unused variables, mutated captures, escaping blocks
-
 - **Type checker**: `crates/beamtalk-core/src/semantic_analysis/type_checker.rs`
   - Stub for future gradual typing (Phase 3)
 
@@ -137,8 +133,7 @@ crates/beamtalk-core/src/semantic_analysis/
 │   └── builtins.rs        # ✅ Built-in classes and protocols
 ├── primitive_validator.rs # ✅ Primitive constraint validation
 ├── method_validators.rs   # ✅ Selector-specific argument validation
-├── type_checker.rs        # ⏳ Stub for future gradual typing (Phase 3)
-└── error.rs               # ✅ Semantic error types
+└── type_checker.rs        # ⏳ Stub for future gradual typing (Phase 3)
 ```
 
 ## Key Types
@@ -389,10 +384,10 @@ Fix: Extract the mutation into a method:
 ```
 
 Only the `addTo{Field}:` method extraction is offered: this diagnostic is
-shared by the Actor, ValueType, and ClassVar producers of the "field
+shared by the Actor and ValueType producers of the "field
 assignment in an unsupported block" error, and the inline
 `items do: [:item | self.sum := ...]` rewrite is only valid for the Actor
-case — in ValueType and ClassVar context it reproduces the same error
+case — in ValueType context it reproduces the same error
 (BT-3491).
 
 ### Local Mutation in Closure

@@ -37,13 +37,18 @@ use super::closure::{AppClosure, StagedApp};
 pub fn stage_apps(release_dir: &Utf8Path, closure: &AppClosure) -> Result<Vec<Utf8PathBuf>> {
     let lib_dir = release_dir.join("lib");
     let mut staged_ebins = Vec::with_capacity(closure.staged_apps.len());
+    let mut priv_budget = PrivBudget::new();
     for app in &closure.staged_apps {
-        staged_ebins.push(stage_one_app(&lib_dir, app)?);
+        staged_ebins.push(stage_one_app(&lib_dir, app, &mut priv_budget)?);
     }
     Ok(staged_ebins)
 }
 
-fn stage_one_app(lib_dir: &Utf8Path, app: &StagedApp) -> Result<Utf8PathBuf> {
+fn stage_one_app(
+    lib_dir: &Utf8Path,
+    app: &StagedApp,
+    priv_budget: &mut PrivBudget,
+) -> Result<Utf8PathBuf> {
     let dest = lib_dir
         .join(format!("{}-{}", app.name, app.vsn))
         .join("ebin");
@@ -118,9 +123,16 @@ fn stage_one_app(lib_dir: &Utf8Path, app: &StagedApp) -> Result<Utf8PathBuf> {
         .source_ebins
         .iter()
         .filter_map(|src| src.parent().map(|p| p.join("priv")));
-    for priv_src in sibling_privs.chain(app.source_priv.iter().cloned()) {
+    // The project's own `priv/` is the user's, so it may itself be a link
+    // to any directory; a dependency's sibling `priv/` may not.
+    let sources = sibling_privs.map(|p| (p, PrivSource::Dependency)).chain(
+        app.source_priv
+            .iter()
+            .map(|p| (p.clone(), PrivSource::Project)),
+    );
+    for (priv_src, kind) in sources {
         if priv_src.is_dir() {
-            copy_dir_recursive(&priv_src, &app_dir.join("priv"))
+            stage_priv_dir(&priv_src, &app_dir.join("priv"), kind, priv_budget)
                 .wrap_err_with(|| format!("Failed to stage '{priv_src}' into '{app_dir}/priv'"))?;
         }
     }
@@ -214,7 +226,10 @@ pub fn generate_sys_config(
 /// Erlang distribution, no baked-in cookie (ADR 0125 §1.2/§1.6). A user
 /// `[release] vm-args` file, if present, is appended after the generated
 /// base so its flags (the last of a repeated flag wins, per `erl`'s own
-/// arg-file reading) take precedence.
+/// arg-file reading) take precedence — except application parameters
+/// (`-kernel Par Val` and the like), where `erl` keeps the *first* one. The
+/// launcher relies on that: under `RELEASE_DISTRIBUTION=tls` it passes its
+/// own `-kernel inet_dist_use_interface` ahead of `-args_file` (BT-5233).
 ///
 /// **No `-sname` here** — deliberately, unlike an ordinary repeated flag.
 /// `erl` special-cases `-sname`/`-name`: given twice, it logs "Multiple
@@ -677,6 +692,227 @@ pub fn copy_erts(
     Ok(dest)
 }
 
+/// Upper bound on the files and directories one release stages from all
+/// `priv/` sources together (BT-5187): a directory symlink such as
+/// `priv/big -> /` must fail fast, not walk a filesystem.
+const MAX_PRIV_ENTRIES: u64 = 100_000;
+/// Upper bound on the bytes one release stages from all `priv/` sources.
+const MAX_PRIV_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+
+/// What is left of the [`MAX_PRIV_ENTRIES`]/[`MAX_PRIV_BYTES`] allowance
+/// while a release's `priv/` trees are staged.
+pub(super) struct PrivBudget {
+    entries: u64,
+    bytes: u64,
+}
+
+impl PrivBudget {
+    pub(super) fn new() -> Self {
+        Self::with_limits(MAX_PRIV_ENTRIES, MAX_PRIV_BYTES)
+    }
+
+    fn with_limits(entries: u64, bytes: u64) -> Self {
+        Self { entries, bytes }
+    }
+
+    fn take(&mut self, path: &std::path::Path, bytes: u64) -> Result<()> {
+        if self.entries == 0 {
+            miette::bail!(
+                "priv/ staging stopped at '{}': more than {MAX_PRIV_ENTRIES} files and \
+                 directories in total (a directory symlink to somewhere large?)",
+                path.display()
+            );
+        }
+        if bytes > self.bytes {
+            miette::bail!(
+                "priv/ staging stopped at '{}': more than {MAX_PRIV_BYTES} bytes in total \
+                 (a symlink to somewhere large?)",
+                path.display()
+            );
+        }
+        self.entries -= 1;
+        self.bytes -= bytes;
+        Ok(())
+    }
+}
+
+/// Who a `priv/` source belongs to, which decides where its own symlink (if
+/// it is one) may point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PrivSource {
+    /// The project's own `<project_root>/priv/`: the user's, so it may be a
+    /// link to any directory.
+    Project,
+    /// A staged app's sibling `priv/` (a dependency's, or the toolchain's):
+    /// if a link, only to a directory itself named `priv`.
+    Dependency,
+}
+
+/// Stage one `priv/` source directory into `dest` (BT-5134, BT-5187).
+///
+/// A release's `priv/` must be self-contained, so symlinks are *resolved*
+/// (their target's content is copied), but only within the package that owns
+/// the `priv/`: the canonical directory holding it. A link whose target
+/// resolves outside that root (a dependency's `priv/cred -> ~/.ssh/id_rsa`)
+/// is an error, as are dangling links, links back to an enclosing directory,
+/// and special files (FIFOs, devices, sockets), which would block or stream
+/// forever. A dependency's `priv/` directory itself may be a symlink (rebar3
+/// links an app's `_build` `priv/` to its source tree) only to a directory
+/// that is itself named `priv`; the project's own may point anywhere (see
+/// [`PrivSource`]). Either way the package root is the canonical directory
+/// holding the resolved `priv/`. All sources together share one
+/// [`PrivBudget`].
+///
+/// When several `priv/` sources merge into one app, a same-named file with
+/// different content is a collision error instead of a silent overwrite.
+pub(super) fn stage_priv_dir(
+    priv_src: &Utf8Path,
+    dest: &Utf8Path,
+    kind: PrivSource,
+    budget: &mut PrivBudget,
+) -> Result<()> {
+    let canonical = std::fs::canonicalize(priv_src.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| format!("'{priv_src}' is a broken symlink or unreadable"))?;
+    let is_link = priv_src
+        .symlink_metadata()
+        .is_ok_and(|m| m.file_type().is_symlink());
+    if kind == PrivSource::Dependency
+        && is_link
+        && canonical.file_name().is_none_or(|n| n != "priv")
+    {
+        miette::bail!(
+            "'{priv_src}' is a symlink to '{}', which is not a package's priv/ directory — \
+             refusing to stage it into the release.",
+            canonical.display()
+        );
+    }
+    let Some(root) = canonical.parent() else {
+        miette::bail!("'{priv_src}' resolves to a filesystem root — refusing to stage it.");
+    };
+    copy_priv_dir(&canonical, dest, root, budget, &mut vec![canonical.clone()])
+}
+
+/// Copy the canonical directory `src` (the last entry of `stack`, the
+/// canonical directories being walked) into `dest`.
+fn copy_priv_dir(
+    src: &std::path::Path,
+    dest: &Utf8Path,
+    root: &std::path::Path,
+    budget: &mut PrivBudget,
+    stack: &mut Vec<std::path::PathBuf>,
+) -> Result<()> {
+    if stack.len() > 32 {
+        miette::bail!("'{}' is nested too deeply", src.display());
+    }
+    std::fs::create_dir_all(dest.as_std_path())
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to create '{dest}'"))?;
+    for entry in std::fs::read_dir(src)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to read '{}'", src.display()))?
+    {
+        let entry = entry.into_diagnostic()?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let src_path = src.join(&name);
+        let dest_path = dest.join(&name);
+        let link_meta = std::fs::symlink_metadata(&src_path)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to read '{}'", src_path.display()))?;
+        // Resolve a symlink to its canonical target, which must stay inside
+        // the package root.
+        let (target, meta) = if link_meta.file_type().is_symlink() {
+            let target = std::fs::canonicalize(&src_path)
+                .into_diagnostic()
+                .wrap_err_with(|| {
+                    format!("'{}' is a broken symlink or unreadable", src_path.display())
+                })?;
+            if !target.starts_with(root) {
+                miette::bail!(
+                    "'{}' is a symlink to '{}', outside its package '{}' — refusing to copy \
+                     it into the release. Copy the file into priv/ instead.",
+                    src_path.display(),
+                    target.display(),
+                    root.display()
+                );
+            }
+            let meta = std::fs::metadata(&target)
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to read '{}'", target.display()))?;
+            (target, meta)
+        } else {
+            (src_path.clone(), link_meta)
+        };
+        if meta.is_dir() {
+            if src.starts_with(&target) || stack.contains(&target) {
+                miette::bail!(
+                    "'{}' links back to '{}', a directory already being copied (a symlink loop)",
+                    src_path.display(),
+                    target.display()
+                );
+            }
+            budget.take(&src_path, 0)?;
+            stack.push(target.clone());
+            let copied = copy_priv_dir(&target, &dest_path, root, budget, stack);
+            stack.pop();
+            copied?;
+            continue;
+        }
+        if !meta.is_file() {
+            miette::bail!(
+                "'{}' is not a regular file or directory (a FIFO, device or socket) — \
+                 refusing to copy it into the release.",
+                src_path.display()
+            );
+        }
+        if dest_path.exists() {
+            // Compared by streaming, charged against the budget like a copy.
+            budget.take(&src_path, meta.len())?;
+            let same = same_file_contents(&target, dest_path.as_std_path())
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to compare '{}'", src_path.display()))?;
+            if !same {
+                miette::bail!(
+                    "priv/ collision: '{}' would overwrite a different file already \
+                     staged at '{dest_path}' from another priv/ source",
+                    src_path.display()
+                );
+            }
+            continue;
+        }
+        budget.take(&src_path, meta.len())?;
+        std::fs::copy(&target, dest_path.as_std_path())
+            .into_diagnostic()
+            .wrap_err_with(|| {
+                format!("Failed to copy '{}' to '{dest_path}'", src_path.display())
+            })?;
+    }
+    Ok(())
+}
+
+/// Whether two files hold the same bytes, compared in fixed-size chunks
+/// (sizes first) rather than by reading either whole into memory.
+fn same_file_contents(a: &std::path::Path, b: &std::path::Path) -> std::io::Result<bool> {
+    use std::io::Read;
+    if std::fs::metadata(a)?.len() != std::fs::metadata(b)?.len() {
+        return Ok(false);
+    }
+    let mut a = std::io::BufReader::new(std::fs::File::open(a)?);
+    let mut b = std::io::BufReader::new(std::fs::File::open(b)?);
+    let mut buf_a = [0u8; 8192];
+    let mut buf_b = [0u8; 8192];
+    loop {
+        let n = a.read(&mut buf_a)?;
+        if n == 0 {
+            return Ok(b.read(&mut buf_b)? == 0);
+        }
+        b.read_exact(&mut buf_b[..n])?;
+        if buf_a[..n] != buf_b[..n] {
+            return Ok(false);
+        }
+    }
+}
+
 /// Recursively copy every file and subdirectory under `src` into `dest`
 /// (created if absent), preserving Unix executable permissions (ERTS's
 /// `bin/` binaries must stay executable) — the one recursive-copy leaf
@@ -887,6 +1123,7 @@ pub fn append_shape_manifests_to_tarball(
     tar_path: &Utf8Path,
     release_dir: &Utf8Path,
     release_vsn: &str,
+    project_ebins: &[Utf8PathBuf],
 ) -> Result<()> {
     let shapes_rel = Utf8PathBuf::from("releases")
         .join(release_vsn)
@@ -894,7 +1131,28 @@ pub fn append_shape_manifests_to_tarball(
     let provenance_rel = Utf8PathBuf::from("releases")
         .join(release_vsn)
         .join("beamtalk-provenance.json");
-    append_files_to_tarball(tar_path, release_dir, &[shapes_rel, provenance_rel])
+    let mut rel_files = vec![shapes_rel, provenance_rel];
+    // `systools:make_tar/2` archives only the modules an app's `.app` lists,
+    // and the native Erlang beams staged next to a project's/dependency's own
+    // beams are not listed — so the tarball silently lacked them while the
+    // directory had them (BT-5134). Add every staged `.beam` the archive does
+    // not already hold (`write_tarball_with_appended` skips present entries).
+    for ebin in project_ebins {
+        let Ok(rel_ebin) = ebin.strip_prefix(release_dir) else {
+            continue;
+        };
+        let Ok(entries) = std::fs::read_dir(ebin.as_std_path()) else {
+            continue;
+        };
+        let mut beams: Vec<Utf8PathBuf> = entries
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "beam"))
+            .map(|e| rel_ebin.join(e.file_name().to_string_lossy().as_ref()))
+            .collect();
+        beams.sort();
+        rel_files.extend(beams);
+    }
+    append_files_to_tarball(tar_path, release_dir, &rel_files)
 }
 
 /// Rewrite the gzip'd tar at `tar_path` with `rel_files` (paths relative to
@@ -940,6 +1198,7 @@ fn write_tarball_with_appended(
         flate2::Compression::default(),
     ));
 
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let entries = archive
         .entries()
         .into_diagnostic()
@@ -954,6 +1213,7 @@ fn write_tarball_with_appended(
             .into_diagnostic()
             .wrap_err("Archive entry has an unreadable path")?
             .into_owned();
+        seen.insert(to_forward_slash(&path.to_string_lossy()));
         let link = entry
             .link_name()
             .into_diagnostic()
@@ -968,6 +1228,9 @@ fn write_tarball_with_appended(
     }
 
     for rel in rel_files {
+        if seen.contains(&to_forward_slash(rel.as_str())) {
+            continue;
+        }
         builder
             .append_path_with_name(
                 base_dir.join(rel).as_std_path(),
@@ -1062,7 +1325,7 @@ pub fn stage_compiler_port_binary(release_dir: &Utf8Path) -> Result<Utf8PathBuf>
 /// Returns an error if `erl` cannot be spawned or the extractor reports a
 /// failure (`beamtalk_stdlib` — and so `beamtalk_runtime` — could not be
 /// started; nothing can be extracted without it), or a project module was
-/// compiled for a different `class_var_abi` than the runtime being staged
+/// compiled for a different `module_abi` than the runtime being staged
 /// (ADR 0130: the extractor prints each refused module, naming it and saying
 /// to recompile, and the release build fails).
 pub fn write_shapes_json(
@@ -1272,7 +1535,7 @@ mod tests {
             .unwrap();
         builder.into_inner().unwrap().finish().unwrap();
 
-        append_shape_manifests_to_tarball(&tar_path, &release_dir, "1.0.0").unwrap();
+        append_shape_manifests_to_tarball(&tar_path, &release_dir, "1.0.0", &[]).unwrap();
 
         let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(
             fs::File::open(tar_path.as_std_path()).unwrap(),
@@ -1311,7 +1574,7 @@ mod tests {
         let before = fs::read(tar_path.as_std_path()).unwrap();
 
         // The release dir has no manifests, so the append step fails.
-        let err = append_shape_manifests_to_tarball(&tar_path, &root.join("missing"), "1.0.0");
+        let err = append_shape_manifests_to_tarball(&tar_path, &root.join("missing"), "1.0.0", &[]);
         assert!(err.is_err());
         assert_eq!(fs::read(tar_path.as_std_path()).unwrap(), before);
         assert!(!root.join("app.tar.gz.scratch").exists());
@@ -1901,5 +2164,274 @@ mod tests {
             content.contains("orders\\\">>}, {evil, true}, {workspace_id, <<\\\"orders"),
             "release name must be escaped as a single binary literal: {content}"
         );
+    }
+
+    /// BT-5134: `priv/` symlinks are resolved, broken ones refused, and
+    /// differing same-name files from two sources reported.
+    #[test]
+    #[cfg(unix)]
+    fn copy_priv_dir_resolves_symlinks_and_reports_collisions() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let a = root.join("a");
+        let b = root.join("b");
+        let out = root.join("out");
+        fs::create_dir_all(a.join("sub").as_std_path()).unwrap();
+        fs::create_dir_all(b.as_std_path()).unwrap();
+        fs::write(a.join("real.txt").as_std_path(), "real").unwrap();
+        std::os::unix::fs::symlink("real.txt", a.join("link.txt").as_std_path()).unwrap();
+        std::os::unix::fs::symlink("sub", a.join("dirlink").as_std_path()).unwrap();
+        fs::write(a.join("sub/x").as_std_path(), "x").unwrap();
+        stage_priv_dir(&a, &out, PrivSource::Dependency, &mut PrivBudget::new()).unwrap();
+        assert!(
+            !out.join("link.txt")
+                .symlink_metadata()
+                .unwrap()
+                .is_symlink()
+        );
+        assert_eq!(
+            fs::read_to_string(out.join("link.txt").as_std_path()).unwrap(),
+            "real"
+        );
+        assert!(out.join("dirlink/x").is_file());
+
+        // Identical duplicate is fine; differing content is a collision.
+        fs::write(b.join("real.txt").as_std_path(), "real").unwrap();
+        stage_priv_dir(&b, &out, PrivSource::Dependency, &mut PrivBudget::new()).unwrap();
+        fs::write(b.join("real.txt").as_std_path(), "other").unwrap();
+        let err =
+            stage_priv_dir(&b, &out, PrivSource::Dependency, &mut PrivBudget::new()).unwrap_err();
+        assert!(err.to_string().contains("collision"), "{err}");
+
+        // Dangling link.
+        let c = root.join("c");
+        fs::create_dir_all(c.as_std_path()).unwrap();
+        std::os::unix::fs::symlink("missing", c.join("dangling").as_std_path()).unwrap();
+        assert!(
+            stage_priv_dir(
+                &c,
+                &root.join("out2"),
+                PrivSource::Dependency,
+                &mut PrivBudget::new()
+            )
+            .is_err()
+        );
+    }
+
+    /// Stage a project whose `priv/` (at `<root>/proj/priv`) has been
+    /// populated by `setup`, returning the staging result, the release dir
+    /// it targeted and the temp dir guard.
+    #[cfg(unix)]
+    fn stage_project_priv(
+        setup: impl FnOnce(&Utf8Path, &Utf8Path),
+    ) -> (Result<Vec<Utf8PathBuf>>, Utf8PathBuf, TempDir) {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let project = root.join("proj");
+        let ebin = project.join("_build/dev/ebin");
+        let priv_dir = project.join("priv");
+        fs::create_dir_all(ebin.as_std_path()).unwrap();
+        fs::create_dir_all(priv_dir.as_std_path()).unwrap();
+        fs::write(ebin.join("orders.app").as_std_path(), "app").unwrap();
+        setup(&root, &priv_dir);
+        let mut staged = app("orders", "1.0.0", &ebin);
+        staged.source_priv = Some(priv_dir);
+        let closure = AppClosure {
+            host_apps: vec![],
+            staged_apps: vec![staged],
+        };
+        let release_dir = root.join("release");
+        (stage_apps(&release_dir, &closure), release_dir, temp)
+    }
+
+    /// BT-5187: a `priv/` symlink to a file outside the package (a
+    /// dependency's `priv/cred -> ~/.ssh/id_rsa`) is refused, not copied.
+    #[test]
+    #[cfg(unix)]
+    fn stage_apps_refuses_priv_symlink_out_of_the_package() {
+        let (result, release_dir, _temp) = stage_project_priv(|root, priv_dir| {
+            fs::write(root.join("secret").as_std_path(), "id_rsa").unwrap();
+            std::os::unix::fs::symlink(
+                root.join("secret").as_std_path(),
+                priv_dir.join("cred").as_std_path(),
+            )
+            .unwrap();
+        });
+        let err = result.unwrap_err();
+        assert!(
+            format!("{err:?}").contains("outside its package"),
+            "{err:?}"
+        );
+        assert!(!release_dir.join("lib/orders-1.0.0/priv/cred").exists());
+    }
+
+    /// BT-5187: a directory link such as `priv/big -> /` is refused at once.
+    #[test]
+    #[cfg(unix)]
+    fn stage_apps_refuses_priv_dir_symlink_to_the_filesystem_root() {
+        let (result, _, _temp) = stage_project_priv(|_, priv_dir| {
+            std::os::unix::fs::symlink("/", priv_dir.join("big").as_std_path()).unwrap();
+        });
+        let err = result.unwrap_err();
+        assert!(
+            format!("{err:?}").contains("outside its package"),
+            "{err:?}"
+        );
+    }
+
+    /// BT-5187: a link back to an enclosing directory is a loop error, not a
+    /// 32-level-deep copy.
+    #[test]
+    #[cfg(unix)]
+    fn stage_apps_refuses_priv_symlink_loop() {
+        let (result, release_dir, _temp) = stage_project_priv(|_, priv_dir| {
+            fs::write(priv_dir.join("a.txt").as_std_path(), "a").unwrap();
+            std::os::unix::fs::symlink(".", priv_dir.join("loop").as_std_path()).unwrap();
+        });
+        let err = result.unwrap_err();
+        assert!(format!("{err:?}").contains("symlink loop"), "{err:?}");
+        assert!(!release_dir.join("lib/orders-1.0.0/priv/loop/loop").exists());
+    }
+
+    /// BT-5187 (review): two directory links pointing at each other
+    /// (`a/l -> ../b`, `b/l -> ../a`) are a loop, reported as one.
+    #[test]
+    #[cfg(unix)]
+    fn stage_apps_refuses_mutual_priv_dir_symlinks() {
+        let (result, _, _temp) = stage_project_priv(|_, priv_dir| {
+            fs::create_dir_all(priv_dir.join("a").as_std_path()).unwrap();
+            fs::create_dir_all(priv_dir.join("b").as_std_path()).unwrap();
+            std::os::unix::fs::symlink("../b", priv_dir.join("a/l").as_std_path()).unwrap();
+            std::os::unix::fs::symlink("../a", priv_dir.join("b/l").as_std_path()).unwrap();
+        });
+        let err = result.unwrap_err();
+        assert!(format!("{err:?}").contains("symlink loop"), "{err:?}");
+    }
+
+    /// BT-5187 (review): the project's own `priv/` may be a link to a
+    /// directory with any name (`priv -> assets`); its contents still may
+    /// not link outside it.
+    #[test]
+    #[cfg(unix)]
+    fn stage_priv_dir_lets_the_project_priv_link_anywhere() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        fs::create_dir_all(root.join("proj/assets").as_std_path()).unwrap();
+        fs::write(root.join("proj/assets/logo.png").as_std_path(), "png").unwrap();
+        let priv_dir = root.join("proj/priv");
+        std::os::unix::fs::symlink("assets", priv_dir.as_std_path()).unwrap();
+        stage_priv_dir(
+            &priv_dir,
+            &root.join("out"),
+            PrivSource::Project,
+            &mut PrivBudget::new(),
+        )
+        .unwrap();
+        assert!(root.join("out/logo.png").is_file());
+        assert!(
+            stage_priv_dir(
+                &priv_dir,
+                &root.join("out2"),
+                PrivSource::Dependency,
+                &mut PrivBudget::new(),
+            )
+            .is_err()
+        );
+    }
+
+    /// BT-5187: a FIFO (or a link to one) in `priv/` is refused rather than
+    /// blocking the build on a read that never ends.
+    #[test]
+    #[cfg(unix)]
+    fn stage_apps_refuses_priv_special_files() {
+        for via_link in [false, true] {
+            let (result, _, _temp) = stage_project_priv(|_, priv_dir| {
+                let fifo = priv_dir.join("pipe");
+                let status = std::process::Command::new("mkfifo")
+                    .arg(fifo.as_std_path())
+                    .status()
+                    .unwrap();
+                assert!(status.success());
+                if via_link {
+                    std::os::unix::fs::symlink("pipe", priv_dir.join("link").as_std_path())
+                        .unwrap();
+                }
+            });
+            let err = result.unwrap_err();
+            assert!(format!("{err:?}").contains("not a regular file"), "{err:?}");
+        }
+    }
+
+    /// BT-5187: a symlinked `priv/` itself must point at a `priv/` directory
+    /// (rebar3's layout), never at an arbitrary directory such as `~/.ssh`.
+    #[test]
+    #[cfg(unix)]
+    fn stage_priv_dir_only_follows_a_priv_dir_symlink_to_a_priv_dir() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        fs::create_dir_all(root.join("src_app/priv").as_std_path()).unwrap();
+        fs::write(root.join("src_app/priv/x").as_std_path(), "x").unwrap();
+        fs::create_dir_all(root.join("dotssh").as_std_path()).unwrap();
+        fs::write(root.join("dotssh/id_rsa").as_std_path(), "k").unwrap();
+        fs::create_dir_all(root.join("build_app").as_std_path()).unwrap();
+        let good = root.join("build_app/priv");
+        std::os::unix::fs::symlink(root.join("src_app/priv").as_std_path(), good.as_std_path())
+            .unwrap();
+        stage_priv_dir(
+            &good,
+            &root.join("out"),
+            PrivSource::Dependency,
+            &mut PrivBudget::new(),
+        )
+        .unwrap();
+        assert!(root.join("out/x").is_file());
+
+        fs::create_dir_all(root.join("evil_app").as_std_path()).unwrap();
+        let evil = root.join("evil_app/priv");
+        std::os::unix::fs::symlink(root.join("dotssh").as_std_path(), evil.as_std_path()).unwrap();
+        let err = stage_priv_dir(
+            &evil,
+            &root.join("out2"),
+            PrivSource::Dependency,
+            &mut PrivBudget::new(),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("not a package's priv/"), "{err}");
+        assert!(!root.join("out2/id_rsa").exists());
+    }
+
+    /// BT-5187: staging stops once the entry or byte budget is spent.
+    #[test]
+    fn stage_priv_dir_enforces_entry_and_byte_caps() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let priv_dir = root.join("app/priv");
+        fs::create_dir_all(priv_dir.as_std_path()).unwrap();
+        for i in 0..3 {
+            fs::write(priv_dir.join(format!("f{i}")).as_std_path(), "0123456789").unwrap();
+        }
+        let err = stage_priv_dir(
+            &priv_dir,
+            &root.join("out1"),
+            PrivSource::Dependency,
+            &mut PrivBudget::with_limits(2, u64::MAX),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("files and"), "{err}");
+        let err = stage_priv_dir(
+            &priv_dir,
+            &root.join("out2"),
+            PrivSource::Dependency,
+            &mut PrivBudget::with_limits(100, 25),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("bytes in total"), "{err}");
+        stage_priv_dir(
+            &priv_dir,
+            &root.join("out3"),
+            PrivSource::Dependency,
+            &mut PrivBudget::with_limits(3, 30),
+        )
+        .unwrap();
     }
 }

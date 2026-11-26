@@ -13,13 +13,13 @@ and the pending-load-error table it drains.
   same class: every loader clears the class's parked entries immediately before
   its own `code:load_binary/3`, so a drain only sees errors from its own attempt (absent a concurrent load of
   the same class, which this module does not cover).
-* A module whose `-on_load` gate refuses on a stale `class_var_abi` surfaces as
+* A module whose `-on_load` gate refuses on a stale `module_abi` surfaces as
   a structured `abi_mismatch` from `install_reload_result/2`, not as
   `{load_error, on_load_failure}`.
 
 The compiler always emits the current ABI, so the stale-ABI module is
 hand-assembled at test time exactly as an older compiler shaped it: a
-`__beamtalk_meta/0` without `class_var_abi` and an `-on_load` hook that
+`__beamtalk_meta/0` without `module_abi` and an `-on_load` hook that
 registers through the ClassBuilder.
 """.
 
@@ -59,7 +59,7 @@ teardown(_) ->
     ets:delete_all_objects(beamtalk_pending_load_errors),
     ok.
 
-%% A module with no `class_var_abi` in its meta and an on_load registration
+%% A module with no `module_abi` in its meta and an on_load registration
 %% hook (what an older compiler emitted).
 stale_abi_binary() ->
     compile_source(

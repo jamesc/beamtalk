@@ -127,3 +127,62 @@ fn class_extension_on_native_actor_folds() {
         "Got:\n{core}"
     );
 }
+
+/// ADR 0152: a `>>` whose target the file does not define is a compile error
+/// in a file compile and in an inline class definition, instance and class
+/// side. (It used to be dropped with a "Standalone method targets unknown
+/// class" warning.)
+#[test]
+fn cross_file_extension_is_an_error_in_file_and_inline_compiles() {
+    for source in [
+        "Object subclass: Adr152A\n  base => 1\n\nString >> shout => 2\n",
+        "Object subclass: Adr152B\n  base => 1\n\nString class >> shout => 2\n",
+    ] {
+        assert_error_containing(&handle_compile(&compile_request(source)), "ADR 0152");
+        assert_error_containing(
+            &handle_compile_expression(&compile_expression_request(source)),
+            "ADR 0152",
+        );
+    }
+}
+
+/// ADR 0152: a file holding only cross-file extensions fails with the same
+/// error (it used to fail with "No class or protocol definition found").
+#[test]
+fn extension_only_file_reports_the_cross_file_error() {
+    assert_error_containing(
+        &handle_compile(&compile_request("String >> shout => 2\n")),
+        "cross-file extension methods were removed",
+    );
+}
+
+/// ADR 0152: the live-definition path is not touched. A lone `Foo >> sel => ...`
+/// typed at the REPL still compiles to a method definition, for a class this
+/// input does not define.
+#[test]
+fn live_method_definition_is_not_a_cross_file_error() {
+    let response = handle_compile_expression(&compile_expression_request(
+        "Counter >> setValue: v => self.value := v",
+    ));
+    let Term::Map(ref m) = response else {
+        panic!("Expected a map response, got: {response:?}");
+    };
+    assert_eq!(
+        map_get(m, "kind").and_then(term_to_atom).as_deref(),
+        Some("method_definition"),
+        "{response:?}"
+    );
+}
+
+/// ADR 0152: a `>>` on a protocol is not a same-file extension (nothing folds it
+/// into the protocol), so it is rejected in a file and in an inline definition
+/// that also holds a class.
+#[test]
+fn extension_on_same_file_protocol_is_an_error() {
+    let source = "Object subclass: Adr152Host\n  base => 1\n\nProtocol define: Adr152Proto\n  size -> Integer\n\nAdr152Proto >> extra => 1\n";
+    assert_error_containing(&handle_compile(&compile_request(source)), "ADR 0152");
+    assert_error_containing(
+        &handle_compile_expression(&compile_expression_request(source)),
+        "ADR 0152",
+    );
+}

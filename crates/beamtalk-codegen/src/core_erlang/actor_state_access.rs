@@ -10,8 +10,7 @@
 //! no threaded `State`: it runs inside the actor, between a bracketed call's
 //! store and reload ([`super::synced_call`]), or in some other process. Its
 //! field reads and writes therefore go through `beamtalk_actor_state`, the one
-//! owner of the cell, exactly as a class method's class-variable access goes
-//! through `beamtalk_class_vars` (ADR 0130): in place, with nothing rebound.
+//! owner of the cell: in place, with nothing rebound.
 //!
 //! Inside a closure the generator is in *cell mode*
 //! ([`CoreErlangGenerator::in_cell_closure`]): [`CoreErlangGenerator::in_actor_instance_context`]
@@ -403,13 +402,13 @@ impl CoreErlangGenerator {
     /// this gate.
     pub(in crate::core_erlang) fn on_do_cell_boundary(
         &self,
-        ex_class_var: &str,
+        ex_class_term: &str,
         pre_region_state: &str,
         at: Span,
     ) -> Option<CellBoundary> {
         if self.cell_is_live() {
             return Some(CellBoundary::Snapshot(ErlangVar::new(
-                [ex_class_var, "CellSnap"].concat(),
+                [ex_class_term, "CellSnap"].concat(),
             )));
         }
         if !self.synced_calls_active() {

@@ -5,7 +5,8 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
-use super::{call_self_p0, generate_comparison_bif, param, wrap_string_result};
+use super::{call_self_p0, generate_ordering_comparison_bif, param, wrap_string_result};
+use crate::core_erlang::operators::OrderingKind;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -31,7 +32,9 @@ fn unwrap_var(var: &str) -> Document<'static> {
 pub(crate) fn generate_string_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
         // Comparison (ADR 0002: Erlang operators)
-        "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => generate_comparison_bif(selector, params),
+        "=:=" | "/=" | "=/=" | "<" | ">" | "<=" | ">=" => {
+            generate_ordering_comparison_bif(OrderingKind::String, selector, params)
+        }
         // Concatenation, length, access, case, whitespace, reverse
         "++" | "," | "length" | "at:" | "first" | "last" | "uppercase" | "lowercase"
         | "asciiLowercase" | "capitalize" | "trim" | "trimLeft" | "trimRight" | "reverse" => {
@@ -340,7 +343,7 @@ mod tests {
                     &["Other"],
                     "call 'erlang':'=:='(Self, Other)",
                 ),
-                ("test_lt", "<", &["Other"], "call 'erlang':'<'(Self, Other)"),
+                // `<` is pinned by `string_and_symbol_ordering_primitives_test_the_argument` (BT-5213).
                 // Transform group
                 (
                     "test_concat",

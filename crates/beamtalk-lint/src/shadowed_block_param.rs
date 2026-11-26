@@ -23,8 +23,7 @@
 //!   items do: [:x | x + 1]  // Warning: block parameter x shadows method param x
 //! ```
 
-use std::collections::HashSet;
-
+use crate::scope::LintScope;
 use crate::{LintContext, LintPass};
 use beamtalk_core::ast::{
     BinarySegment, Block, Expression, ExpressionStatement, MethodDefinition, Module, StringSegment,
@@ -47,52 +46,6 @@ impl LintPass for ShadowedBlockParamPass {
             let mut method_scope = LintScope::new();
             check_method(method, &mut method_scope, diagnostics);
         }
-    }
-}
-
-// ── Scope tracking ────────────────────────────────────────────────────────────
-
-/// Lightweight scope stack used only for shadowing detection.
-///
-/// Each level holds the set of variable names defined at that depth.
-struct LintScope {
-    levels: Vec<HashSet<String>>,
-}
-
-impl LintScope {
-    fn new() -> Self {
-        Self {
-            levels: vec![HashSet::new()],
-        }
-    }
-
-    fn push(&mut self) {
-        self.levels.push(HashSet::new());
-    }
-
-    fn pop(&mut self) {
-        debug_assert!(
-            self.levels.len() > 1,
-            "LintScope::pop called with only root scope"
-        );
-        if self.levels.len() > 1 {
-            self.levels.pop();
-        }
-    }
-
-    /// Define `name` in the current (innermost) scope level.
-    fn define(&mut self, name: &str) {
-        if let Some(top) = self.levels.last_mut() {
-            top.insert(name.to_string());
-        }
-    }
-
-    /// Returns `true` if `name` is defined in any currently visible scope level.
-    ///
-    /// This is called *before* pushing the block's own scope, so every level
-    /// in the stack is an outer scope relative to the block being entered.
-    fn is_defined_in_any_scope(&self, name: &str) -> bool {
-        self.levels.iter().any(|level| level.contains(name))
     }
 }
 
@@ -298,7 +251,7 @@ fn check_block(block: &Block, scope: &mut LintScope, diagnostics: &mut Vec<Diagn
     // Check BEFORE pushing the block scope — we want to see outer names only.
     for param in &block.parameters {
         let name = param.name.as_str();
-        if scope.is_defined_in_any_scope(name) {
+        if scope.is_bound(name) {
             diagnostics.push(
                 Diagnostic::lint(
                     format!("block parameter `{name}` shadows an outer variable"),
@@ -373,12 +326,27 @@ mod tests {
         assert!(diags.is_empty(), "Expected no lints, got: {diags:?}");
     }
 
-    /// Variables from one method do not leak into the next method.
+    /// `check_method` leaves the scope it was given exactly as it found it
+    /// (BT-5132). Run against a *shared* scope, a method's parameter and
+    /// locals must not survive into the next method: the pass calls it on
+    /// fresh scopes today, but the invariant is what keeps methods isolated,
+    /// and a leak here makes the second lint below fire.
     #[test]
-    fn method_locals_do_not_leak_into_other_methods() {
-        let src = "Object subclass: Foo\n  a => x := 1. x\n  b => items do: [:x | x]";
-        let diags = lint(src);
-        assert!(diags.is_empty(), "Expected no lints, got: {diags:?}");
+    fn check_method_does_not_leave_bindings_in_a_shared_scope() {
+        let src = "Object subclass: Foo\n  a: x => y := 1. y\n  b => items do: [:x | x]. items do: [:y | y]";
+        let (module, parse_diags) = parse(lex_with_eof(src));
+        assert!(parse_diags.is_empty(), "{parse_diags:?}");
+        let mut scope = LintScope::new();
+        let mut diags = Vec::new();
+        for method in module.all_methods() {
+            check_method(method, &mut scope, &mut diags);
+        }
+        assert!(
+            diags.is_empty(),
+            "bindings leaked across methods: {diags:?}"
+        );
+        assert_eq!(scope.depth(), 1, "scope depth restored");
+        assert!(scope.root_is_empty(), "root scope untouched");
     }
 
     /// Match-arm pattern variables are in scope for blocks in the arm body.

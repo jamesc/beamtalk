@@ -859,9 +859,6 @@ fn check_unbound_type_vars(
                 check_unbound_type_vars(member, hierarchy, alias_name, diagnostics);
             }
         }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            check_unbound_type_vars(inner, hierarchy, alias_name, diagnostics);
-        }
         TypeAnnotation::Difference { base, excluded, .. } => {
             check_unbound_type_vars(base, hierarchy, alias_name, diagnostics);
             check_unbound_type_vars(excluded, hierarchy, alias_name, diagnostics);
@@ -1134,9 +1131,6 @@ fn collect_alias_references(
                 collect_alias_references(member, aliases, out, record);
             }
         }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            collect_alias_references(inner, aliases, out, record);
-        }
         TypeAnnotation::Difference { base, excluded, .. } => {
             collect_alias_references(base, aliases, out, record);
             collect_alias_references(excluded, aliases, out, record);
@@ -1349,7 +1343,6 @@ mod tests {
             ..empty_module()
         };
         let (hierarchy, hierarchy_diags) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         assert!(hierarchy_diags.is_empty());
         let protocol_registry = ProtocolRegistry::new();
         let mut registry = AliasRegistry::new();
@@ -1458,7 +1451,6 @@ mod tests {
             ..empty_module()
         };
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let protocol_registry = ProtocolRegistry::new();
         let mut registry = AliasRegistry::new();
         let diags = registry.register_module(&module, &hierarchy, &protocol_registry);
@@ -1949,7 +1941,6 @@ mod tests {
             ..empty_module()
         };
         let (hierarchy, _) = ClassHierarchy::build(&class_module);
-        let hierarchy = hierarchy.unwrap();
         let protocol_registry = ProtocolRegistry::new();
         let mut registry = AliasRegistry::new();
         registry.register_test_alias(AliasInfo {

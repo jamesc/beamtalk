@@ -567,7 +567,6 @@ fn test_bt897_subdirectory_module_name_consistency() {
         }],
         methods: vec![],
         class_methods: vec![],
-        class_variables: vec![],
         type_params: vec![],
         superclass_type_args: vec![],
         uses: vec![],
@@ -2613,24 +2612,6 @@ fn test_field_operation_codegen_table() {
                 Has("'immutable_value'"),
             ],
         },
-        // BT-4148: `Cls fieldAt: #x` / `Cls fieldAt: #x put: v` from outside the
-        // class route through `beamtalk_message_dispatch:send/3`, which reaches
-        // the class gen_server's `dispatch_class_method` `fieldAt:` clauses.
-        FieldCase {
-            label: "fieldAt: and fieldAt:put: on class receiver delegate to message dispatch",
-            src: concat!(
-                "Object subclass: Holder\n",
-                "  classState: count = 0\n\n",
-                "  probe => Holder fieldAt: #count\n",
-                "  poke => Holder fieldAt: #count put: 3\n",
-            ),
-            expect: &[
-                Dispatches("'fieldAt:'"),
-                Dispatches("'fieldAt:put:'"),
-                // Prefix only: covers both `fieldAt:` and `fieldAt:put:`.
-                NoSyncSend("'fieldAt:"),
-            ],
-        },
         // `self fieldNames` inside an actor must NOT route through sync_send.
         // Self is a #beamtalk_object{..., pid: self()} tuple; sync_send(self()) would be
         // gen_server:call(self(), ...) → deadlock. Must use beamtalk_primitive:send(State).
@@ -3106,18 +3087,18 @@ fn test_self_call_error_branch_threads_selector_class_breadcrumb() {
              breadcrumb map. Got:\n{code}"
         )
     });
-    let class_var = &captures[1];
+    let class_term = &captures[1];
 
     // The 'class' value must come from a runtime lookup, not a literal
     // 'Srv' atom — the actor's actual runtime class is resolved via
     // beamtalk_actor:lookup_class/1, fixing the inheritance mismatch.
     let lookup_binding = regex::Regex::new(&format!(
-        r"let {class_var} = call 'beamtalk_actor':'lookup_class'\(call 'erlang':'self'\(\)\) in"
+        r"let {class_term} = call 'beamtalk_actor':'lookup_class'\(call 'erlang':'self'\(\)\) in"
     ))
     .unwrap();
     assert!(
         lookup_binding.is_match(&code),
-        "Breadcrumb 'class' variable {class_var} must be bound from a \
+        "Breadcrumb 'class' variable {class_term} must be bound from a \
          runtime beamtalk_actor:lookup_class(self()) call. Got:\n{code}"
     );
 }
@@ -3781,16 +3762,15 @@ fn test_bt2276_class_methods_accepted_values_compile_table() {
     }
 }
 
-/// BT-4806: the former `test_class_method_self_send_{in_sealed_class_is_guarded,in_open_class_passes_and_rebinds_nothing,in_open_class_with_class_vars_has_no_unwrap}`
+/// BT-4806: the former `test_class_method_self_send_{in_sealed_class_is_guarded,in_open_class_passes_and_rebinds_nothing,in_open_class_with_fields_has_no_unwrap}`
 /// trio (ADR 0130 §3 / BT-4301). A class-side self-send is a guarded direct call plus a
-/// runtime walk, and passes nothing and rebinds nothing: no `ClassVars` argument, no
-/// `{class_var_result, ..}` unwrap.
+/// runtime walk, and passes nothing and rebinds nothing: no extra argument and no result unwrap.
 #[test]
 #[allow(clippy::type_complexity)] // a data table: one entry per former test
 fn test_class_method_self_send_shape_table() {
     // (label, source, function whose body is inspected (whole module when None),
     //  must contain, must not contain)
-    let cases: [(&str, &str, Option<&str>, &[&str], &[&str]); 3] = [
+    let cases: [(&str, &str, Option<&str>, &[&str], &[&str]); 2] = [
         (
             // A sealed class's self-send passes its own `ClassSelf` to the guarded direct
             // call and to the walk alike.
@@ -3814,15 +3794,7 @@ fn test_class_method_self_send_shape_table() {
                 "'class_self_send'(",
                 "'foo', [])",
             ],
-            &["ClassVars", "class_var_result"],
-        ),
-        (
-            // A subclass override reached by the walk may write class variables, in place.
-            "open class with class vars has no unwrap",
-            "Object subclass: OpenCls\n  classState: n = 0\n  class foo => 1\n\n  class bar => self foo\n",
-            None,
-            &[],
-            &["class_var_result"],
+            &["ClassVars"],
         ),
     ];
     for (label, src, function, has, lacks) in cases {
@@ -4307,38 +4279,25 @@ fn test_spawn_with_args_validates_map_argument() {
     );
 }
 
-// --- ADR 0130 §2/§3: class variables are read and written in place; class
-// methods and class-side self-sends neither take nor return them ---
+// --- ADR 0153: a class has no slots; class methods and class-side self-sends
+// neither read nor write class state ---
 
-/// ADR 0130 §2: a class-var write inside a `classMethods:` fun is an in-place
-/// `put` (inlined), with the runtime helper as the miss path.
+/// ADR 0153: a `self.x := v` inside a `classMethods:` fun is rejected (the
+/// builder's `classVars:` names no longer make `self.x` a class variable).
 #[test]
-fn test_builder_class_var_mutation_is_an_in_place_put() {
+fn test_builder_class_method_field_write_is_rejected() {
     let src = "Object classBuilder name: #ShadowB; superclass: Object; \
-               classVars: #{ #runs => 0 }; \
                classMethods: #{ #bump => [:self | self.runs := self.runs + 1] }; register";
-    let code = try_codegen(src).expect("mutating classMethods block must compile");
-    assert_has(
-        "builder class-method write should be an inlined in-place put",
-        &code,
-        &["call 'erlang':'put'(_CVKey", "call 'maps':'put'('runs', "],
-    );
-    assert_has(
-        "builder class-method write should fall back to the runtime helper.",
-        &code,
-        &["call 'beamtalk_class_vars':'put'(ClassSelf, 'runs', "],
-    );
-    assert_lacks(
-        "nothing is threaded or returned beside the result",
-        &code,
-        &["ClassVars", "class_var_result"],
+    assert!(
+        try_codegen(src).is_err(),
+        "a class-side field write must not compile"
     );
 }
 
 /// ADR 0130 §3 / BT-4301: a `ClassBuilder` `super` / self-send passes the LIVE
 /// receiver (`ClassSelf` itself), so a subclass receiver runs the superclass
-/// method under its own class-variable key instead of the static builder
-/// class's, and the runtime rebuilds nothing from a tag.
+/// method as itself instead of as the static builder class, and the runtime
+/// rebuilds nothing from a tag.
 #[test]
 fn test_builder_super_and_self_send_pass_live_receiver() {
     let src = "Object classBuilder name: #BT3709Sup; superclass: Object; \
@@ -4463,51 +4422,12 @@ fn test_class_method_behaviour_protocol_self_send_uses_class_self_send() {
     assert_all_compile_through_erlc(&rows);
 }
 
-/// BT-4001: a `super` send in a class-side extension (`Target class >> sel`)
-/// is keyed on the extension's *target*, not on the class (if any) whose file
-/// hosts the extension, so the walk starts at the target's superclass.
-#[test]
-fn test_class_side_extension_super_is_keyed_on_the_target() {
-    let hosts = ["", "Object subclass: Host\n  foo => 1\n"];
-    let bodies = [
-        "Target class >> run => super peek: 1",
-        "Target class >> run => #(1, 2) collect: [:x | super peek: x]",
-    ];
-    let mut rows = Vec::new();
-    for host in hosts {
-        for body in bodies {
-            let src = format!("{host}{body}\n");
-            let code = super::compile(&src)
-                .unwrap_or_else(|e| panic!("class-side extension super must compile: {e}\n{src}"));
-            assert_has(
-                &format!("extension `super` must be keyed on the target class:\n{src}"),
-                &code,
-                &["call 'beamtalk_class_dispatch':'class_super_dispatch'('Target', 'peek:', ["],
-            );
-            assert_lacks(
-                &format!(
-                    "extension `super` must not use the host class or the instance path:\n{src}"
-                ),
-                &code,
-                &[
-                    "class_super_dispatch'('Host'",
-                    "'beamtalk_dispatch':'super'",
-                    "'beamtalk_dispatch':'super_reply'",
-                ],
-            );
-            rows.push((src, code));
-        }
-    }
-    assert_all_compile_through_erlc(&rows);
-}
-
 /// A builder cascade lexically inside a block still lowers the fun as a class
 /// method's own top frame (`block_depth` is reset and restored around it).
 #[test]
-fn test_builder_cascade_at_block_depth_still_lowers_in_place_access() {
+fn test_builder_cascade_at_block_depth_still_lowers_a_class_method_fun() {
     let src = "Object classBuilder name: #ShadowBlk; superclass: Object; \
-               classVars: #{ #runs => 0 }; \
-               classMethods: #{ #bump => [:self | self.runs := self.runs + 1] }; register";
+               classMethods: #{ #twice => [:self | self bump] }; register";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
     let expr = module
@@ -4520,12 +4440,12 @@ fn test_builder_cascade_at_block_depth_still_lowers_in_place_access() {
     generator.block_depth = 1; // Simulate the cascade sitting inside a block
     let code = generator
         .expression_doc(&expr)
-        .expect("mutating classMethods block must compile")
+        .expect("classMethods block must compile")
         .to_pretty_string();
     assert_has(
-        "builder fun lowered from inside a block should still write in place.",
+        "builder fun lowered from inside a block is a class-method fun.",
         &code,
-        &["call 'erlang':'put'(_CVKey"],
+        &["'twice' => fun (ClassSelf)"],
     );
     assert_eq!(
         generator.block_depth, 1,
@@ -4558,110 +4478,9 @@ fn test_open_class_static_class_self_send_is_a_plain_direct_call() {
         assert_lacks(
             "static open-class call is a plain direct call",
             baz,
-            &["ClassVars", "class_var_result"],
+            &["ClassVars"],
         );
     }
-}
-
-/// ADR 0130 §2: `clearField:` and `hasField:` on a class variable are helper
-/// calls at any nesting depth: in a loop, in a conditional, at top level.
-#[test]
-fn test_class_side_clear_and_has_field_lower_to_helper_calls_at_any_depth() {
-    let src = concat!(
-        "Object subclass: CvClearEverywhere\n",
-        "  classState: current = 0\n\n",
-        "  class clearTop =>\n",
-        "    self clearField: #current\n",
-        "    nil\n\n",
-        "  class clearLoop =>\n",
-        "    flag := true\n",
-        "    [flag] whileTrue: [\n",
-        "      self clearField: #current\n",
-        "      flag := false\n",
-        "    ]\n",
-        "    nil\n\n",
-        "  class clearIfPresent =>\n",
-        "    (self hasField: #current)\n",
-        "      ifTrue: [self clearField: #current]\n",
-        "    nil\n",
-    );
-    let code = codegen_source(src);
-    // BT-4070: four, not three — `clearIfPresent`'s `ifTrue:` is pure and
-    // inlines, so its `clearField:` lowers once in the taken arm AND once
-    // in the fallback arm's closure.
-    assert_eq!(
-        code.matches("call 'beamtalk_class_vars':'clear'(ClassSelf, ")
-            .count(),
-        4,
-        "every clearField: is a clear/2 helper call. Got:\n{code}"
-    );
-    assert_has(
-        "hasField: is a has/2 helper call.",
-        &code,
-        &["call 'beamtalk_class_vars':'has'(ClassSelf, "],
-    );
-    assert_lacks(
-        "no threaded map surgery on a ClassVars map",
-        &code,
-        &["'maps':'remove'", "ClassVars"],
-    );
-}
-
-/// BT-4421: class-method `self fieldAt:` / `self fieldAt:put:` read and write
-/// the class variable in place (`field_at` / `field_at_put` helper calls), on
-/// an Actor class too (whose class methods share `CodeGenContext::Actor`), at
-/// body level, in a block (a read takes the block's capture, ADR 0130 §5)
-/// and as an operand — never a `class_send` back into the class's own
-/// `gen_server`, nor the instance-side state-threaded `fieldAt:put:`.
-#[test]
-fn test_class_side_field_at_lowers_to_in_place_helper_calls() {
-    let src = concat!(
-        "Actor subclass: CvFieldAtInPlace\n",
-        "  classState: total = 0\n\n",
-        "  class readTotal => self fieldAt: #total\n\n",
-        "  class writeTotal: v =>\n",
-        "    self fieldAt: #total put: v\n",
-        "    self.total\n\n",
-        "  class sumInto: items =>\n",
-        "    items do: [:each | self fieldAt: #total put: (self fieldAt: #total) + each]\n",
-        "    nil\n\n",
-        "  class orderedSum => (self fieldAt: #total put: 5) + (self fieldAt: #total)\n",
-    );
-    let code = codegen_source(src);
-    assert_has(
-        "a method-level fieldAt: is a field_at/2 helper call.",
-        &code,
-        &["call 'beamtalk_class_vars':'field_at'(ClassSelf, "],
-    );
-    assert_has(
-        "fieldAt:put: is a field_at_put/3 helper call.",
-        &code,
-        &["call 'beamtalk_class_vars':'field_at_put'(ClassSelf, "],
-    );
-    // The `do:` block reads with `fieldAt:`, so it binds a capture and its
-    // read is the 3-arity captured-fallback form.
-    assert_has(
-        "a block that reads with fieldAt: binds a capture.",
-        &code,
-        &["call 'beamtalk_class_vars':'capture'(ClassSelf, "],
-    );
-    let three_arity_read = code
-        .split("call 'beamtalk_class_vars':'field_at'(ClassSelf, ")
-        .skip(1)
-        .any(|rest| {
-            let args = &rest[..rest.find(')').unwrap_or(rest.len())];
-            args.contains(", ")
-        });
-    assert!(
-        three_arity_read,
-        "the block's fieldAt: read passes its capture. Got:\n{code}"
-    );
-    // (The selectors still appear in the class's xref metadata.)
-    assert_lacks(
-        "no fieldAt: message send or state-threaded fieldAt:put:",
-        &code,
-        &["'fieldAt:', [", "'fieldAt:put:', ["],
-    );
 }
 
 // --- direct Value construction (cross-class `new` / keyword ctors) ---
@@ -5112,7 +4931,6 @@ fn test_new1_verdict_agrees_across_files_with_sibling_parent() {
     ]);
     let cases = [
         ("Object subclass: Base\n", true),
-        ("Object subclass: Base\n  classState: n = 0\n", false),
         ("Actor subclass: Base\n", false),
         ("Value subclass: Base\n", true),
     ];
@@ -5129,8 +4947,7 @@ fn test_new1_verdict_agrees_across_files_with_sibling_parent() {
             let codegen_in_caller = !published_bound(&code);
             // A sibling caller's view: its own module, plus the same injection.
             let caller = parse("Object subclass: Caller\n");
-            let (h, _) = ClassHierarchy::build(&caller);
-            let mut h = h.expect("hierarchy");
+            let (mut h, _) = ClassHierarchy::build(&caller);
             let mut infos = ClassHierarchy::extract_class_infos(&fwd);
             if use_infos {
                 infos.extend(ClassHierarchy::extract_class_infos(&base));
@@ -5150,9 +4967,10 @@ fn test_new1_verdict_agrees_across_files_with_sibling_parent() {
 }
 
 /// BT-4644: a superclass-index stub ancestor (`add_external_superclasses`)
-/// has unknown class variables, so `chain_has_class_variables` answers `true`
-/// and neither codegen nor analysis treats the subclass's explicit `new:` as
-/// in-caller. Both must agree through the self-sufficient `generate_module`
+/// is a cross-file parent with an unknown surface, so neither codegen nor
+/// analysis treats the subclass's explicit `new:` as in-caller (ADR 0153
+/// removed the class-variable half of that doubt; the constructor chain rule
+/// still fails closed). Both must agree through the self-sufficient `generate_module`
 /// path with a sibling superclass known only from `class_superclass_index`.
 #[test]
 fn test_stub_ancestor_new1_is_process_bound_and_verdicts_agree() {
@@ -5181,11 +4999,10 @@ fn test_stub_ancestor_new1_is_process_bound_and_verdicts_agree() {
     // Analysis side, as `generate_module` builds it: register `Kid`, inject
     // the index stub, then ask about `Kid`.
     let (built, _) = ClassHierarchy::build(&module);
-    let mut hierarchy = built.expect("hierarchy builds");
+    let mut hierarchy = built;
     let _ = hierarchy.add_external_superclasses(&index);
-    assert!(hierarchy.chain_has_class_variables("Sibling"));
-    assert!(hierarchy.chain_has_class_variables("Kid"));
-    assert!(!hierarchy.runs_class_method_in_caller("Sibling", "foo"));
+    // An ordinary class method of the stub runs in the caller (ADR 0153).
+    assert!(hierarchy.runs_class_method_in_caller("Sibling", "foo"));
     assert_eq!(
         hierarchy.runs_class_method_in_caller("Kid", "new:"),
         !published_bound,

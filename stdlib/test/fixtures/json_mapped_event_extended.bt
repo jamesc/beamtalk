@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for BT-5191; see json_mapping_test.bt.
+
+// Adds a field and extends the parent's mapping with it.
+JsonMappedEvent subclass: JsonMappedEventExtended
+  field: extra = "added"
+
+  class jsonMapping -> JsonMapping => super jsonMapping |> mapField: #extra

@@ -24,10 +24,14 @@ other while keeping both DRY.
 * `spawn_child/4,5` — spawn a subprocess through the port
 * `kill_child/2` — send kill command to a subprocess
 * `write_stdin/3` — write data to subprocess stdin
+* `submit_write/6`, `await_write/2` — park a `writeLine:` caller
+* `write_queued/2`, `write_written/1`, `write_failed/3`, `write_dropped/3`,
+  `fail_pending_writes/2` — answer parked callers from the port's events
 * `close/1` — close the exec port
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -export([
     flush_and_collect/2,
@@ -38,7 +42,15 @@ other while keeping both DRY.
     spawn_child/4, spawn_child/5,
     kill_child/2,
     write_stdin/3,
-    close/1
+    close/1,
+    submit_write/6,
+    await_write/2,
+    write_queued/2,
+    write_written/1,
+    write_failed/3,
+    write_dropped/3,
+    stdin_dropped_error/2,
+    fail_pending_writes/2
 ]).
 
 %% Exported for white-box tests only (no production caller).
@@ -185,6 +197,162 @@ kill_child(Port, ChildId) ->
 -spec write_stdin(port(), non_neg_integer(), binary()) -> true.
 write_stdin(Port, ChildId, Data) ->
     beamtalk_exec_port:write_stdin(Port, ChildId, Data).
+
+-doc """
+Send `Line` to the child's stdin and park `From` until the port answers
+(BT-5259).
+
+`port_command` raises `badarg` when the exec port has already died. That must
+not crash the owning gen_server: the caller gets a structured `port_closed`
+error (with the raise reason in its details) and parked writers are failed.
+The result is `{port_dead, Err, State}`: the owner then tears down its readers
+and marks the port closed, exactly as for an unexpected `exit_status`.
+""".
+-spec submit_write(atom(), port(), non_neg_integer(), binary(), term(), map()) ->
+    {noreply, map()} | {port_dead, #beamtalk_error{}, map()}.
+submit_write(Class, Port, ChildId, Line, From, State) ->
+    try write_stdin(Port, ChildId, Line) of
+        true -> {noreply, await_write(From, State)}
+    catch
+        error:Reason ->
+            Err = beamtalk_error:with_details(
+                beamtalk_error:new(port_closed, Class, 'writeLine:'),
+                #{reason => Reason}
+            ),
+            %% The caller finishes the teardown (readers, EOF, port_closed),
+            %% as its exit_status handler does.
+            {port_dead, Err, fail_pending_writes(Class, State)}
+    end.
+
+-doc """
+Park `From`, a `writeLine:` caller, until the exec port says whether its line
+reached the child's stdin pipe (BT-5248, BT-5269).
+
+A write is answered in two steps, each in order. The command thread answers
+every `write_stdin` once: `stdin_queued` when it was accepted (the caller
+moves to `stdin_unwritten`), `error` when it was dropped (the caller raises).
+The writer thread then answers each queued write once: `stdin_written` when
+the line is in the pipe (the caller gets `nil`), or `stdin_failed` when the
+child exited or closed its stdin first (that caller and every one queued
+behind it raise). So no caller is told `nil` for a line that was then lost
+before reaching the pipe.
+""".
+-spec await_write(term(), map()) -> map().
+await_write(From, State) ->
+    State#{stdin_waiters => queue:in(From, stdin_waiters(State))}.
+
+-doc """
+The oldest parked write was queued by the exec port: its caller waits on for
+the writer thread's report. If the writer thread has already failed, the line
+will never be written, so the caller raises now.
+""".
+-spec write_queued(atom(), map()) -> map().
+write_queued(Class, State) ->
+    case queue:out(stdin_waiters(State)) of
+        {{value, From}, Rest} ->
+            S1 = State#{stdin_waiters => Rest},
+            case S1 of
+                #{stdin_dropped := Reason} ->
+                    %% Not sent by beamtalk-exec (no write is queued after a
+                    %% refusal or `stdin_failed`); guards a protocol violation.
+                    gen_server:reply(From, {error, line_not_written_error(Class, Reason)}),
+                    S1;
+                _ ->
+                    S1#{stdin_unwritten => queue:in(From, stdin_unwritten(S1))}
+            end;
+        {empty, _} ->
+            State
+    end.
+
+-doc "The oldest queued write is in the child's stdin pipe: its caller gets `nil`.".
+-spec write_written(map()) -> map().
+write_written(State) ->
+    case queue:out(stdin_unwritten(State)) of
+        {{value, From}, Rest} ->
+            gen_server:reply(From, nil),
+            State#{stdin_unwritten => Rest};
+        {empty, _} ->
+            State
+    end.
+
+-doc """
+The writer thread could not write the oldest queued line (the child exited or
+closed its stdin, BT-5269): it and every line queued behind it are lost, so
+each of their callers gets the `runtime_error` a dropped line gets. Every
+later `writeLine:` raises too.
+""".
+-spec write_failed(atom(), binary(), map()) -> map().
+write_failed(Class, Reason, State) ->
+    Err = line_not_written_error(Class, Reason),
+    lists:foreach(
+        fun(From) -> gen_server:reply(From, {error, Err}) end,
+        queue:to_list(stdin_unwritten(State))
+    ),
+    mark_stdin_dropped(Reason, State#{stdin_unwritten => queue:new()}).
+
+-doc """
+The `runtime_error` a `writeLine:` raises once the exec port has dropped a
+write: kind and hint (`Reason` from the port) shared by the dropped call and
+every later one.
+""".
+-spec stdin_dropped_error(atom(), binary()) -> #beamtalk_error{}.
+stdin_dropped_error(Class, Reason) ->
+    beamtalk_error:new(
+        runtime_error, Class, 'writeLine:', <<"stdin write failed: ", Reason/binary>>
+    ).
+
+-doc """
+The oldest parked write was dropped: its caller gets a `runtime_error` saying
+the line was not written. Every later `writeLine:` raises too.
+""".
+-spec write_dropped(atom(), binary(), map()) -> map().
+write_dropped(Class, Reason, State) ->
+    S1 =
+        case queue:out(stdin_waiters(State)) of
+            {{value, From}, Rest} ->
+                gen_server:reply(From, {error, line_not_written_error(Class, Reason)}),
+                State#{stdin_waiters => Rest};
+            {empty, _} ->
+                State
+        end,
+    mark_stdin_dropped(Reason, S1).
+
+%% The error a writeLine: whose own line was lost raises.
+line_not_written_error(Class, Reason) ->
+    beamtalk_error:with_message(
+        stdin_dropped_error(Class, Reason),
+        <<"writeLine: failed: the line was not written">>
+    ).
+
+%% Sticky: the first loss's reason is kept for every later writeLine:.
+mark_stdin_dropped(Reason, State) ->
+    case maps:is_key(stdin_dropped, State) of
+        true -> State;
+        false -> State#{stdin_dropped => Reason}
+    end.
+
+-doc """
+The port is gone (child exited, or closed) before it answered the parked
+writes: their callers get `port_closed`, since nothing confirms those lines
+reached the child.
+""".
+-spec fail_pending_writes(atom(), map()) -> map().
+fail_pending_writes(Class, State) ->
+    lists:foreach(
+        fun(From) ->
+            gen_server:reply(From, {error, beamtalk_error:new(port_closed, Class, 'writeLine:')})
+        end,
+        queue:to_list(stdin_waiters(State)) ++ queue:to_list(stdin_unwritten(State))
+    ),
+    State#{stdin_waiters => queue:new(), stdin_unwritten => queue:new()}.
+
+-spec stdin_waiters(map()) -> queue:queue(term()).
+stdin_waiters(State) ->
+    maps:get(stdin_waiters, State, queue:new()).
+
+-spec stdin_unwritten(map()) -> queue:queue(term()).
+stdin_unwritten(State) ->
+    maps:get(stdin_unwritten, State, queue:new()).
 
 -doc "Close the exec port (terminates all managed subprocesses).".
 -spec close(port()) -> true.

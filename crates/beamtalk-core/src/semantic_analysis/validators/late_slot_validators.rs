@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Semantic Analysis
 //!
-//! `late` is a declaration-level modifier on `state:`/`classState:` marking a
+//! `late` is a declaration-level modifier on `state:` marking a
 //! slot that is legitimately unassigned after `initialize`. This module
 //! covers the four Errors that are new to B1:
 //! - `late field:` on a Value (`late` has no meaning for a fully-constructed,
@@ -27,8 +27,7 @@ use crate::semantic_analysis::{AliasRegistry, ProtocolRegistry};
 use crate::source_analysis::Diagnostic;
 
 /// Runs every `late`-declaration check (ADR 0124 §1, §5) over a module's
-/// instance (`state`/`field`) and class-variable (`classState`)
-/// declarations.
+/// instance (`state`/`field`) declarations.
 pub(crate) fn check_late_slot_declarations(
     module: &Module,
     hierarchy: &ClassHierarchy,
@@ -38,7 +37,7 @@ pub(crate) fn check_late_slot_declarations(
 ) {
     for class in &module.classes {
         let resolved_kind = hierarchy.resolve_class_kind(class.name.name.as_str());
-        for decl in class.state.iter().chain(class.class_variables.iter()) {
+        for decl in &class.state {
             check_late_slot_declaration(
                 decl,
                 resolved_kind,
@@ -350,20 +349,6 @@ mod tests {
         assert!(diagnostics_for(src).is_empty());
     }
 
-    #[test]
-    fn late_class_state_on_object_type_is_error() {
-        // The `classState:` path shares the same admission check.
-        let src = "typed Actor subclass: TranscriptStream native: beamtalk_transcript_stream\n  late classState: current :: Object\n\n  class current => self.current";
-        let diagnostics = diagnostics_for(src);
-        assert_eq!(
-            diagnostics.len(),
-            1,
-            "Expected 1 error for late classState on :: Object, got: {diagnostics:?}"
-        );
-        assert_eq!(diagnostics[0].severity, Severity::Error);
-        assert!(diagnostics[0].message.contains("admits `Nil`"));
-    }
-
     // ── late with a default value ─────────────────────────────────────────
 
     #[test]
@@ -378,22 +363,6 @@ mod tests {
         );
         assert_eq!(diagnostics[0].severity, Severity::Error);
         assert!(diagnostics[0].message.contains("has a default value"));
-    }
-
-    // ── late classState: ──────────────────────────────────────────────────
-
-    #[test]
-    fn late_class_state_without_type_is_error() {
-        let src = "typed Actor subclass: TranscriptStream native: beamtalk_transcript_stream\n  late classState: current\n\n  class current => self.current";
-        let diagnostics = diagnostics_for(src);
-        assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
-        assert!(diagnostics[0].message.contains("requires a type"));
-    }
-
-    #[test]
-    fn late_class_state_well_formed_ok() {
-        let src = "typed Actor subclass: TranscriptStream native: beamtalk_transcript_stream\n  late classState: current :: TranscriptStream\n\n  class current => self.current";
-        assert!(diagnostics_for(src).is_empty());
     }
 
     // ── eager declarations are untouched ──────────────────────────────────

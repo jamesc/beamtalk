@@ -39,7 +39,7 @@ pub fn run(
 
     // Analyse through `beamtalk lint`'s pipeline (BT-4718), so coverage is
     // measured against the context `build`/`lint` type-check with: the whole
-    // package's classes, protocols, extensions and aliases (not only the
+    // package's classes, protocols and aliases (not only the
     // targets'), the dependencies' metadata, the FFI registry with
     // dependency stubs, and the package's compiler options. A hand-built
     // context here once missed all of those and reported every send to a

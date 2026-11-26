@@ -23,7 +23,6 @@
 //! [`Pass1Cache`] because `detect_changes` runs for every build — including
 //! manifest-less single-file builds, where `Pass1Cache` never applies.
 
-use beamtalk_core::compilation::extension_index::ExtensionIndex;
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 use camino::{Utf8Path, Utf8PathBuf};
 use ecow::EcoString;
@@ -63,7 +62,9 @@ const CACHE_FILENAME: &str = ".beamtalk-pass1-cache.json";
 /// v8: Pass 1 infos carry the real `in_caller_new1` body shape (it was always
 /// `false` there), so v7 entries would hide it from cross-file callers
 /// (BT-4640).
-const CACHE_VERSION: u32 = 8;
+/// v9: entries no longer carry per-file extension definitions (ADR 0152).
+/// v10: `MethodInfo` dropped its single-variant `kind` field (BT-5220).
+const CACHE_VERSION: u32 = 10;
 
 /// On-disk representation of the Pass 1 metadata cache.
 ///
@@ -117,8 +118,6 @@ pub(crate) struct IncrementalPass1Result {
     pub class_superclass_index: HashMap<String, String>,
     /// Merged `ClassInfo` vector.
     pub all_class_infos: Vec<ClassInfo>,
-    /// Merged project-wide extension index.
-    pub extension_index: ExtensionIndex,
     /// Cached ASTs for files that were re-scanned in this build.
     pub cached_asts: HashMap<Utf8PathBuf, super::build::CachedAst>,
     /// Whether the manifest changed and forced a full cache invalidation.
@@ -590,7 +589,6 @@ pub(crate) fn incremental_build_class_module_index(
         class_module_index: index.class_module_index,
         class_superclass_index: index.class_superclass_index,
         all_class_infos: index.all_class_infos,
-        extension_index: index.extension_index,
         cached_asts,
         manifest_invalidated,
         source_hashes,
@@ -1040,16 +1038,16 @@ mod tests {
 }
 
 #[cfg(test)]
-mod extension_cache_tests {
+mod incremental_cache_round_trip_tests {
     use super::*;
     use tempfile::TempDir;
 
-    /// Extensions must survive the Pass 1 cache round-trip — first
-    /// build scans and saves them; a second build with unchanged files must
-    /// restore the same project-wide extension index from cache alone, and a
-    /// deleted file's cached extensions must disappear.
+    /// A class and the content hashes of its file must survive the Pass 1
+    /// cache round-trip — the first build scans and saves them; a second
+    /// build with unchanged files restores them from the cache alone, and a
+    /// deleted file's cached class must disappear.
     #[test]
-    fn extensions_survive_incremental_cache_round_trip() {
+    fn classes_and_hashes_survive_incremental_cache_round_trip() {
         let temp = TempDir::new().unwrap();
         let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
         let src = root.join("src");
@@ -1057,12 +1055,12 @@ mod extension_cache_tests {
         let build_dir = root.join("build");
         std::fs::create_dir_all(&build_dir).unwrap();
 
-        let ext_file = src.join("string_shout.bt");
-        std::fs::write(&ext_file, "String >> shoutLouder => self\n").unwrap();
+        let first_file = src.join("widget.bt");
+        std::fs::write(&first_file, "Object subclass: Widget\n  m => 1\n").unwrap();
         let plain_file = src.join("plain.bt");
         std::fs::write(&plain_file, "Object subclass: Plain\n  m => 1\n").unwrap();
 
-        let source_files = vec![ext_file.clone(), plain_file.clone()];
+        let source_files = vec![first_file.clone(), plain_file.clone()];
 
         // First build: cache miss, everything scanned.
         let first = incremental_build_class_module_index(
@@ -1074,7 +1072,7 @@ mod extension_cache_tests {
             false,
         )
         .unwrap();
-        assert_eq!(first.extension_index.len(), 1, "extension scanned");
+        assert!(first.class_module_index.contains_key("Widget"));
         // Pass 1 hands back every scanned file's content hash so
         // Pass 2 (`detect_changes`) can reuse it instead of re-hashing.
         assert_eq!(
@@ -1083,12 +1081,12 @@ mod extension_cache_tests {
             "source_hashes covers every source file, not just stale ones"
         );
         assert_eq!(
-            first.source_hashes.get(ext_file.as_str()),
-            content_hash_of(&ext_file).as_ref(),
+            first.source_hashes.get(first_file.as_str()),
+            content_hash_of(&first_file).as_ref(),
             "returned hash must match the file's actual content hash"
         );
 
-        // Second build: all files fresh — extensions must come from the cache.
+        // Second build: all files fresh — classes must come from the cache.
         let second = incremental_build_class_module_index(
             &source_files,
             Some(&src),
@@ -1098,20 +1096,9 @@ mod extension_cache_tests {
             false,
         )
         .unwrap();
-        assert_eq!(
-            second.extension_index.len(),
-            1,
-            "extension restored from cache on a fully-fresh build"
-        );
-        // Regrouping by file must find the entry under its original path
-        // (byte-exact path identity — see ExtensionIndex::entries_for_file).
-        assert_eq!(
-            second
-                .extension_index
-                .entries_for_file(ext_file.as_std_path())
-                .len(),
-            1,
-            "cached extension regroups under its defining file"
+        assert!(
+            second.class_module_index.contains_key("Widget"),
+            "class restored from cache on a fully-fresh build"
         );
         // Even on an all-fresh (cache-hit) build, every file is
         // still hashed once so `source_hashes` stays complete for Pass 2 —
@@ -1122,9 +1109,9 @@ mod extension_cache_tests {
             "source_hashes stays complete on an all-fresh build"
         );
 
-        // Third build: the defining file is deleted — its cached extensions
-        // must not linger.
-        std::fs::remove_file(&ext_file).unwrap();
+        // Third build: the defining file is deleted — its cached class must
+        // not linger.
+        std::fs::remove_file(&first_file).unwrap();
         let remaining = vec![plain_file];
         let third = incremental_build_class_module_index(
             &remaining,
@@ -1136,8 +1123,8 @@ mod extension_cache_tests {
         )
         .unwrap();
         assert!(
-            third.extension_index.is_empty(),
-            "deleted file's cached extensions must disappear"
+            !third.class_module_index.contains_key("Widget"),
+            "deleted file's cached class must disappear"
         );
     }
 }

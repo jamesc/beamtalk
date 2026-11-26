@@ -4,8 +4,8 @@
 //! BT-4260: a value type's `dispatch/3` default arm asks BT-4280's memoised
 //! `beamtalk_dispatch:inherited_target/2` verdict and, on
 //! `{'value', Owner, Module}`, calls the owner's `dispatch/3` directly instead
-//! of walking the superclass `dispatch/3` chain with an extension lookup per
-//! level. Every other verdict takes the unchanged route, and the module
+//! of walking the superclass `dispatch/3` chain. Every other verdict calls
+//! the superclass's `dispatch/3`, and the module
 //! exports the strictly-local `has_method_local/1` probe `resolve_owner/2`
 //! walks with.
 
@@ -45,13 +45,12 @@ fn value_default_arm_asks_the_inherited_verdict_first() {
     );
     let slow = &arm[slow_at..];
     assert!(
-        slow.contains("call 'beamtalk_extensions':'lookup'('Bt4260Point', Selector)")
-            && slow.contains("call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)"),
-        "every other verdict keeps the extension lookup and superclass delegation. Got:\n{slow}"
+        slow.contains("call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)"),
+        "every other verdict delegates to the superclass. Got:\n{slow}"
     );
     assert!(
-        arm.contains("<{'ext', InhExtOwner}> when 'true' ->"),
-        "BT-5002: an owner-extension verdict calls the extension. Got:\n{arm}"
+        !arm.contains("beamtalk_extensions") && !arm.contains("'ext'"),
+        "ADR 0152: the default arm consults no extension registry. Got:\n{arm}"
     );
     assert_eq!(
         arm.matches("InhModule:'dispatch'").count(),
@@ -66,18 +65,22 @@ fn selectors_the_superclass_defines_skip_the_verdict() {
     // so), so it is one hop away from a `Value subclass:`.
     let code = codegen("Value subclass: Bt4260Sub\n  own => 3\n");
     let arm = default_arm(&code);
+    let one_hop = arm
+        .find("<'printString'> when 'true' ->")
+        .unwrap_or_else(|| panic!("no one-hop arm for printString in:\n{arm}"));
     assert!(
-        arm.contains("<'printString'> when 'true' -> 'slow'"),
-        "a selector the superclass defines takes the unchanged route. Got:\n{arm}"
+        arm[one_hop..]
+            .trim_start_matches(|c| c != '\n')
+            .trim_start()
+            .starts_with("call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)"),
+        "a selector the superclass defines goes straight to its dispatch/3. Got:\n{arm}"
     );
     assert!(
-        !arm.contains("<'isKindOf:'> when 'true' -> 'slow'"),
+        !arm.contains("<'isKindOf:'> when 'true' ->"),
         "a selector only Object defines is not one hop away. Got:\n{arm}"
     );
     assert!(
-        arm.contains(
-            "<_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('Bt4260Sub', Selector)"
-        ),
+        arm.contains("call 'beamtalk_dispatch':'inherited_target'('Bt4260Sub', Selector)"),
         "every other selector asks the verdict. Got:\n{arm}"
     );
 }
@@ -108,9 +111,9 @@ fn value_type_exports_and_defines_the_local_probe() {
     let body = &local[..local.find("\n\n").unwrap_or(local.len())];
     assert!(
         body.contains("'probe'")
-            && body.contains("call 'beamtalk_extensions':'has'('Bt4260Probe', Selector)")
+            && !body.contains("beamtalk_extensions")
             && !body.contains(":'has_method'("),
-        "the local probe lists the class's own selectors and extensions and never delegates. Got:\n{body}"
+        "the local probe lists the class's own selectors and never delegates. Got:\n{body}"
     );
 }
 

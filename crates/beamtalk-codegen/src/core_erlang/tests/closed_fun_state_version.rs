@@ -8,9 +8,9 @@
 //! fold fun did not restore the generator's state version on exit, so inside a `StateAcc`
 //! loop the enclosing loop's next statement read (and rebound from) a `StateAcc1` that was
 //! only bound inside the fold fun: the `ThreadedIr` verifier's `UnboundVersion` /
-//! `NonLinearVersion` pair, found by the class-variable agreement corpus (seeds
-//! 4288439136652914866, 12525934088575929805 and 15420763691539516991 in
-//! `tests/class_var_agreement.rs`).
+//! `NonLinearVersion` pair, found by the since-removed class-variable agreement
+//! corpus (seeds 4288439136652914866, 12525934088575929805 and 15420763691539516991;
+//! the corpus was deleted in BT-5151).
 //!
 //! BT-3771 audited every other closed-`fun` lowering for the same shape. A closed `fun`
 //! restores the enclosing `state_version` in one of two shared places, never per call site:
@@ -152,13 +152,11 @@ fn inject_fold_with_conditional_local_write_inside_stateacc_loop() {
     // plan); the fold fun's `ifTrue:ifFalse:` writes the block-local `v`.
     check(
         "Object subclass: FoldProbe
-  classState: n = 0
-
   class h0: x -> Integer => 3
 
   class probe -> Integer =>
     i := 0. [i < 2] whileTrue: [#(1, 4) inject: 0 into: [:a :e | 4 < 5 ifTrue: [self h0: a. 2] ifFalse: [v := 1]. i]. i := i + 1]
-    self.n
+    i
 ",
     );
 }
@@ -179,13 +177,11 @@ const ENCLOSING: &[Enclosing] = &[
     Enclosing {
         name: "class_stateacc_loop",
         header: "Object subclass: ClosedFunProbe
-  classState: n = 0
-
   class h0: x -> Integer => 3
 ",
         method: "  class probe{i} -> Integer =>
     i := 0. [i < 2] whileTrue: [self h0: i. EXPR. i := i + 1]
-    self.n
+    i
 ",
     },
     // An actor method whose `State{N}` chain runs through `EXPR`.

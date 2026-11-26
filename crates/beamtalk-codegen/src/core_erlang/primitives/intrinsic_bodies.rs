@@ -99,8 +99,6 @@ enum IntrinsicBody {
 /// Data table driving [`CoreErlangGenerator::generate_primitive`]'s
 /// structural-intrinsic dispatch — see [`IntrinsicBody`]'s doc.
 static INTRINSIC_BODIES: &[(&str, IntrinsicBody)] = &[
-    ("classOf", IntrinsicBody::Placeholder),
-    ("doesNotUnderstand", IntrinsicBody::Placeholder),
     ("dynamicSend", IntrinsicBody::Placeholder),
     ("dynamicSendWithArgs", IntrinsicBody::Placeholder),
     ("respondsTo", IntrinsicBody::Placeholder),
@@ -113,14 +111,7 @@ static INTRINSIC_BODIES: &[(&str, IntrinsicBody)] = &[
     // method bodies are placeholders exactly like `fieldAt`/`fieldAtPut` above.
     ("hasField", IntrinsicBody::Placeholder),
     ("clearField", IntrinsicBody::Placeholder),
-    ("printString", IntrinsicBody::Placeholder),
     ("hash", IntrinsicBody::Hash),
-    ("conditional", IntrinsicBody::Placeholder),
-    ("conditionalTrue", IntrinsicBody::Placeholder),
-    ("conditionalFalse", IntrinsicBody::Placeholder),
-    ("shortCircuitAnd", IntrinsicBody::Placeholder),
-    ("shortCircuitOr", IntrinsicBody::Placeholder),
-    ("booleanNot", IntrinsicBody::Placeholder),
     ("basicNew", IntrinsicBody::BasicNew),
     ("basicNewWith", IntrinsicBody::BasicNewWith),
     (
@@ -188,14 +179,6 @@ static INTRINSIC_BODIES: &[(&str, IntrinsicBody)] = &[
         },
     ),
     ("repeat", IntrinsicBody::Repeat),
-    ("listDo", IntrinsicBody::Placeholder),
-    ("listCollect", IntrinsicBody::Placeholder),
-    ("listSelect", IntrinsicBody::Placeholder),
-    ("listReject", IntrinsicBody::Placeholder),
-    ("listInjectInto", IntrinsicBody::Placeholder),
-    ("futureAwait", IntrinsicBody::Placeholder),
-    ("futureAwaitTimeout", IntrinsicBody::Placeholder),
-    ("futureAwaitForever", IntrinsicBody::Placeholder),
     ("onDo", IntrinsicBody::OnDo),
     ("ensure", IntrinsicBody::Ensure),
     ("error", IntrinsicBody::Error),

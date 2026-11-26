@@ -142,9 +142,52 @@ ops() ->
             [<<"old_name">>, <<"before_selector">>, <<"before_side">>],
             workspace
         ),
+        %% Code editing (BT-5203): structured-param writes shared by LiveView,
+        %% MCP and wire clients; no Beamtalk source is assembled from the params.
+        %% Each wraps the chokepoint `compile:source:`, `newClass:at:`,
+        %% `changes revert:` and `reload` already converge on.
+        e(
+            <<"save-method">>,
+            beamtalk_repl_ops_edit,
+            [<<"class">>, <<"selector">>, <<"source">>],
+            [<<"author">>, <<"author_kind">>],
+            compiler,
+            <<"Durably install a method; `source` is the body right of `=>`.">>
+        ),
+        e(<<"save-class">>, beamtalk_repl_ops_edit, [<<"source">>, <<"path">>], [], compiler),
+        e(
+            <<"revert-method">>,
+            beamtalk_repl_ops_edit,
+            [<<"class">>, <<"selector">>],
+            [<<"side">>],
+            workspace
+        ),
+        e(<<"reload-file">>, beamtalk_repl_ops_edit, [<<"path">>], [], compiler),
+        %% Workspace state (BT-5204): the Changes pane, flush and the workspace
+        %% facts a client needs, shared by LiveView, MCP and wire clients. The
+        %% findings snapshot is the `reload-findings` op below.
+        e(
+            <<"flush">>,
+            beamtalk_repl_ops_state,
+            [],
+            [<<"class">>, <<"file">>, <<"kind">>, <<"confirm_destructive">>],
+            workspace,
+            <<
+                "Write pending ChangeLog entries to disk. At most one of `class`, `file`, "
+                "`kind` scopes it; `confirm_destructive: true` also applies Tier 2 entries."
+            >>
+        ),
+        e(<<"changes">>, beamtalk_repl_ops_state, [], [], always),
+        e(
+            <<"info">>,
+            beamtalk_repl_ops_state,
+            [],
+            [],
+            always,
+            <<"Version, node, workspace id and the settings a client needs.">>
+        ),
         %% --- Sessions ---
         e(<<"sessions">>, beamtalk_repl_ops_session, [], [], always),
-        e(<<"clone">>, beamtalk_repl_ops_session, [], [], always),
         e(<<"close">>, beamtalk_repl_ops_session, [], [], always),
         e(<<"health">>, beamtalk_repl_ops_session, [], [], always),
         e(<<"shutdown">>, beamtalk_repl_ops_session, [<<"cookie">>], [], always),

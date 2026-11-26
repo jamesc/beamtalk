@@ -93,6 +93,9 @@ sealed typed Binary subclass: String
 
   /// Test if the receiver sorts before another string.
   ///
+  /// `<`, `>`, `<=` and `>=` order a String only against a String: any other
+  /// argument (a number, a Symbol, `nil`, ...) raises a `type_error` (BT-5213).
+  ///
   /// ## Examples
   /// ```beamtalk
   /// "abc" < "xyz"      // => true

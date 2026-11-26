@@ -200,7 +200,6 @@ pub(crate) fn compile_file_with_surface(
         scanned_protocols = surface.scanned_protocols,
         scanned_aliases = surface.scanned_aliases,
         alias_seeding = surface.alias_seeding,
-        extensions_unknown = surface.extensions_unknown,
         consulted = surface.names.len(),
         names = ?surface.names,
         "Consulted analysis surface"

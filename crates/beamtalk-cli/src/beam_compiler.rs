@@ -4,19 +4,17 @@
 //! BEAM bytecode compiler integration.
 //!
 //! This module handles compilation of Core Erlang (.core) files to BEAM bytecode (.beam).
-//! It supports two backends selected via the `BEAMTALK_COMPILER` environment variable:
-//!
-//! - **Port** (default): Starts a BEAM node with `beamtalk_build_worker` for in-memory
-//!   compilation via `core_scan → core_parse → compile:forms`. No escript needed.
-//! - **Escript** (legacy fallback): Invokes the embedded `compile.escript`. Used when
-//!   the runtime is not compiled, or when `BEAMTALK_COMPILER=escript`.
+//! A BEAM node running `beamtalk_build_worker` compiles in memory via
+//! `core_scan → core_parse → compile:forms` (ADR 0022). There is no other backend: if the
+//! runtime (the `beamtalk_compiler` app) is missing, compilation fails with an
+//! actionable error rather than falling back.
 //!
 //! # Architecture
 //!
 //! The compilation process:
 //! 1. Generate Core Erlang from AST using `beamtalk_codegen::core_erlang`
 //! 2. Write .core files to build directory
-//! 3. Batch compile .core → .beam via the selected backend
+//! 3. Batch compile .core → .beam via the build worker
 //! 4. Collect results and report success/failure
 //!
 //! # Example
@@ -35,8 +33,6 @@ use crate::commands::util::to_forward_slash;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use tracing::{debug, info, instrument, warn};
@@ -49,66 +45,6 @@ pub use compile_source::{
 pub(crate) use compile_source::{
     analyse_source_with_bindings, compile_source_with_bindings, diagnostics_are_errors,
 };
-
-/// Embedded compile.escript for batch compilation.
-const COMPILE_ESCRIPT: &str = include_str!("../templates/compile.escript");
-
-/// Atomic counter for generating unique escript filenames.
-///
-/// This ensures each temporary escript file has a unique name, preventing
-/// collisions when multiple compilation processes run in parallel.
-static ESCRIPT_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// Create `path` exclusively (`O_EXCL`, so an existing file or symlink there is
-/// an error, never followed) with mode 0700 on Unix, and write `content`.
-fn write_private_executable(path: &std::path::Path, content: &[u8]) -> std::io::Result<()> {
-    use std::io::Write as _;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o700);
-    }
-    let mut file = options.open(path)?;
-    file.write_all(content)
-}
-
-/// Compiler backend for Core Erlang → BEAM compilation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CompilerBackend {
-    /// Port backend: starts a BEAM node with `beamtalk_build_worker`
-    /// for in-memory compilation (default, ADR 0022 Phase 3).
-    Port,
-    /// Escript backend: uses the embedded `compile.escript` (legacy fallback).
-    Escript,
-}
-
-/// Resolve the compiler backend from the `BEAMTALK_COMPILER` environment variable.
-///
-/// - `"escript"` → [`CompilerBackend::Escript`] (legacy fallback)
-/// - Anything else (including unset) → [`CompilerBackend::Port`] (default)
-pub fn resolve_backend() -> CompilerBackend {
-    match std::env::var("BEAMTALK_COMPILER").as_deref() {
-        Ok("escript") => CompilerBackend::Escript,
-        Ok(other) => {
-            eprintln!("Warning: unknown BEAMTALK_COMPILER value '{other}', defaulting to port");
-            CompilerBackend::Port
-        }
-        _ => CompilerBackend::Port,
-    }
-}
-
-/// Sentinel prefix in error messages indicating the Port backend's runtime
-/// is not available. Used by `compile_batch` to decide whether to fall back
-/// to the escript backend.
-const RUNTIME_UNAVAILABLE_PREFIX: &str = "Port backend requires";
-
-/// Check whether an error indicates the Port backend's runtime is unavailable.
-fn is_runtime_unavailable_error(err: &miette::Report) -> bool {
-    let msg = format!("{err}");
-    msg.starts_with(RUNTIME_UNAVAILABLE_PREFIX)
-}
 
 pub(crate) use beamtalk_codegen::core_erlang::escape_erlang_string;
 
@@ -142,8 +78,8 @@ fn write_core_erlang_bytes(bytes: impl AsRef<[u8]>, output_path: &Utf8Path) -> R
 
 /// BEAM bytecode compiler.
 ///
-/// Handles compilation of Core Erlang to BEAM bytecode using the embedded
-/// compile.escript and the system's erlc compiler.
+/// Handles compilation of Core Erlang to BEAM bytecode through the
+/// `beamtalk_build_worker` BEAM node.
 #[derive(Debug)]
 pub struct BeamCompiler {
     /// Output directory for BEAM files.
@@ -171,8 +107,8 @@ impl BeamCompiler {
 
     /// Compiles Core Erlang files to BEAM bytecode.
     ///
-    /// This method batch compiles multiple .core files in parallel using the
-    /// embedded compile.escript.
+    /// This method batch compiles multiple .core files with one
+    /// `beamtalk_build_worker` BEAM node.
     ///
     /// # Arguments
     ///
@@ -185,10 +121,10 @@ impl BeamCompiler {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - escript is not found in PATH
-    /// - The escript fails to execute
+    /// - The Beamtalk runtime (`beamtalk_compiler` app / `beamtalk_build_worker`) is missing
+    /// - The BEAM node fails to start or execute
     /// - Compilation errors occur in any module
-    /// - stdin, stdout, or stderr cannot be captured from the escript process
+    /// - stdin, stdout, or stderr cannot be captured from the worker process
     ///
     /// # Example
     ///
@@ -205,162 +141,58 @@ impl BeamCompiler {
     /// ```
     #[instrument(skip_all, fields(file_count = core_files.len(), output_dir = %self.output_dir))]
     pub fn compile_batch(&self, core_files: &[Utf8PathBuf]) -> Result<Vec<Utf8PathBuf>> {
-        let backend = resolve_backend();
+        use beamtalk_cli::repl_startup;
+
         debug!(
-            "Starting batch compilation of {} Core Erlang files (backend: {:?})",
+            "Starting batch compilation of {} Core Erlang files",
             core_files.len(),
-            backend,
         );
 
-        // ADR 0125 §3.1: both backends boot `erl` on the toolchain's `.beam`
+        // ADR 0125 §3.1: the build worker boots `erl` on the toolchain's `.beam`
         // files, which do not load below the support window's floor.
         crate::commands::build_stamp::require_supported_otp()?;
 
-        // Ensure output directory exists before dispatching to either backend.
+        // Ensure the output directory exists before starting the worker.
         std::fs::create_dir_all(&self.output_dir)
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to create output directory '{}'", self.output_dir))?;
 
-        match backend {
-            CompilerBackend::Port => {
-                // Try Port backend, fall back to escript if runtime not available
-                match self.compile_batch_port(core_files) {
-                    Ok(result) => Ok(result),
-                    Err(e) if is_runtime_unavailable_error(&e) => {
-                        info!("Port backend unavailable, falling back to escript");
-                        self.compile_batch_escript(core_files)
-                    }
-                    Err(e) => Err(e),
-                }
-            }
-            CompilerBackend::Escript => self.compile_batch_escript(core_files),
-        }
-    }
-
-    /// Compile via the Port backend: starts a BEAM node with `beamtalk_build_worker`.
-    ///
-    /// Uses in-memory compilation via `core_scan → core_parse → compile:forms`
-    /// (no escript needed). Requires Erlang/OTP and the runtime to be compiled.
-    #[instrument(skip_all, fields(file_count = core_files.len()))]
-    fn compile_batch_port(&self, core_files: &[Utf8PathBuf]) -> Result<Vec<Utf8PathBuf>> {
-        use beamtalk_cli::repl_startup;
-
-        info!("Using Port backend for Core Erlang → BEAM compilation");
+        info!("Compiling Core Erlang → BEAM via beamtalk_build_worker");
 
         // Find runtime and build -pa paths (canonicalize for absolute paths,
         // since the BEAM node runs from temp_dir).
-        // Output directory is guaranteed to exist (created in compile_batch).
-        let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout().map_err(|_| {
-            miette::miette!(
-                "Port backend requires the Beamtalk runtime.\n\
-                     Falling back to escript: set BEAMTALK_COMPILER=escript\n\
-                     Or build the runtime: cd runtime && rebar3 compile"
-            )
+        let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout().map_err(|e| {
+            runtime_missing_error("the Beamtalk runtime directory", &format!("Details: {e}"))
         })?;
 
         let runtime_dir = beamtalk_core::paths::canonicalize(&runtime_dir)
             .into_diagnostic()
             .wrap_err_with(|| {
-                format!("{RUNTIME_UNAVAILABLE_PREFIX} a resolvable runtime directory")
+                format!(
+                    "Failed to resolve the Beamtalk runtime directory '{}'",
+                    runtime_dir.display()
+                )
             })?;
 
         let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+        let compiler_ebin = require_build_worker(&paths.compiler_ebin)?;
 
-        // Check that the compiler app is compiled and includes the build worker
-        if !repl_startup::has_beam_files(&paths.compiler_ebin) {
-            return Err(miette::miette!(
-                "{} compiled compiler at {}.\n\
-                 Build it with: cd runtime && rebar3 compile\n\
-                 Or use escript backend: BEAMTALK_COMPILER=escript",
-                RUNTIME_UNAVAILABLE_PREFIX,
-                paths.compiler_ebin.display()
-            ));
-        }
-        if !paths
-            .compiler_ebin
-            .join("beamtalk_build_worker.beam")
-            .exists()
-        {
-            return Err(miette::miette!(
-                "{} beamtalk_build_worker module.\n\
-                 Rebuild: cd runtime && rebar3 compile\n\
-                 Or use escript backend: BEAMTALK_COMPILER=escript",
-                RUNTIME_UNAVAILABLE_PREFIX,
-            ));
-        }
+        // Only the compiler ebin is needed (it contains beamtalk_build_worker).
+        let pa_args = vec![
+            "-pa".to_string(),
+            to_forward_slash(&compiler_ebin.display().to_string()),
+        ];
 
-        // Build -pa arguments: only compiler ebin needed (contains beamtalk_build_worker)
-        let compiler_path = to_forward_slash(&paths.compiler_ebin.display().to_string());
-
-        let pa_args = vec!["-pa".to_string(), compiler_path];
-
-        // Start BEAM node with beamtalk_build_worker
         // -mode minimal: only loads kernel+stdlib, skips scanning other -pa dirs at boot
         // -boot no_dot_erlang: skips .erlang config file
         debug!("Spawning BEAM node with beamtalk_build_worker");
         let mut child = beamtalk_package::native_type_specs::spawn_build_worker_node(&pa_args)
             .wrap_err("Failed to start BEAM node for compilation.\nIs Erlang/OTP installed?")?;
 
-        // From here, the protocol is identical to the escript backend
         self.drive_compilation_protocol(&mut child, core_files)
     }
 
-    /// Compile via the legacy escript backend.
-    #[instrument(skip_all, fields(file_count = core_files.len()))]
-    fn compile_batch_escript(&self, core_files: &[Utf8PathBuf]) -> Result<Vec<Utf8PathBuf>> {
-        // Check if escript is available
-        check_escript_available()?;
-
-        // Output directory is guaranteed to exist (created in compile_batch).
-
-        // BT-5070: the script goes into a private temp directory (random name,
-        // mode 0700, removed on drop) and is created exclusively, so another
-        // local user cannot pre-plant a symlink or file at a predictable path
-        // in the shared temp dir. Pid + counter keep the name unique within
-        // this process for debuggability.
-        let temp_dir = std::env::temp_dir();
-        let counter = ESCRIPT_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let script_dir = tempfile::Builder::new()
-            .prefix("beamtalk_compile_")
-            .tempdir_in(&temp_dir)
-            .into_diagnostic()
-            .wrap_err("Failed to create private directory for compile escript")?;
-        let escript_path = script_dir.path().join(format!(
-            "beamtalk_compile_{}_{}.escript",
-            std::process::id(),
-            counter
-        ));
-        debug!(
-            "Writing escript to temporary file: {}",
-            escript_path.display()
-        );
-        write_private_executable(&escript_path, COMPILE_ESCRIPT.as_bytes())
-            .into_diagnostic()
-            .wrap_err("Failed to write compile escript")?;
-
-        // Start the escript process with explicit working directory
-        // Use temp_dir as working directory to avoid getcwd() errors
-        // when test temp directories are deleted before subprocess completes
-        debug!("Spawning escript process");
-        let mut child = Command::new("escript")
-            .arg(&escript_path)
-            .current_dir(&temp_dir)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .into_diagnostic()
-            .wrap_err("Failed to spawn escript process")?;
-
-        let result = self.drive_compilation_protocol(&mut child, core_files);
-
-        // `script_dir` (and the escript inside) is removed on drop.
-        drop(script_dir);
-
-        result
-    }
-
-    /// Drive the stdin/stdout compilation protocol shared by both backends.
+    /// Drive the stdin/stdout compilation protocol with the build worker.
     ///
     /// Protocol:
     ///   INPUT:  Erlang term: `{OutputDir, [CoreFile1, CoreFile2, ...]}`
@@ -478,10 +310,42 @@ impl BeamCompiler {
     }
 }
 
+/// Build the one actionable error for a missing Port runtime: what is
+/// missing, where it was looked for, and how to install or build it.
+fn runtime_missing_error(what: &str, detail: &str) -> miette::Report {
+    miette::miette!(
+        "Cannot compile Beamtalk: {what} is missing.\n\
+         {detail}\n\
+         To fix it:\n\
+         - installed copy: reinstall Beamtalk (the runtime lives in <prefix>/lib/beamtalk/lib/beamtalk_compiler/ebin)\n\
+         - source checkout: run `just build` (or `cd runtime && rebar3 compile`)\n\
+         - or set BEAMTALK_RUNTIME_DIR to a runtime directory that contains rebar.config"
+    )
+}
+
+/// Check that `compiler_ebin` holds the compiled compiler app and its
+/// `beamtalk_build_worker` module; returns the directory on success.
+fn require_build_worker(compiler_ebin: &std::path::Path) -> Result<&std::path::Path> {
+    let looked_in = format!("Looked in: {}", compiler_ebin.display());
+    if !beamtalk_cli::repl_startup::has_beam_files(compiler_ebin) {
+        return Err(runtime_missing_error(
+            "the compiled beamtalk_compiler app",
+            &looked_in,
+        ));
+    }
+    if !compiler_ebin.join("beamtalk_build_worker.beam").exists() {
+        return Err(runtime_missing_error(
+            "the beamtalk_build_worker module",
+            &looked_in,
+        ));
+    }
+    Ok(compiler_ebin)
+}
+
 /// Format the Erlang term input for the compilation protocol.
 ///
 /// Produces `{OutputDir, [CoreFile1, CoreFile2, ...]}.\n` with absolute,
-/// Erlang-escaped paths. Uses absolute paths since escript runs from `temp_dir`.
+/// Erlang-escaped paths. Uses absolute paths since the worker node runs from `temp_dir`.
 fn format_compilation_input(
     output_dir: &Utf8PathBuf,
     core_files: &[Utf8PathBuf],
@@ -532,36 +396,6 @@ pub fn discover_native_modules(project_root: &Utf8Path) -> Result<Vec<String>> {
     }
 
     beamtalk_cli::path_util::erl_module_names_in(&native_dir)
-}
-
-/// Checks if escript is available in the system PATH.
-///
-/// # Errors
-///
-/// Returns an error with installation instructions if escript is not found.
-pub fn check_escript_available() -> Result<()> {
-    // Try to find escript in PATH using 'which' (Unix) or 'where' (Windows)
-    let which_cmd = if cfg!(windows) { "where" } else { "which" };
-    let result = Command::new(which_cmd)
-        .arg("escript")
-        .output()
-        .into_diagnostic();
-
-    match result {
-        Ok(output) if output.status.success() => Ok(()),
-        _ => {
-            miette::bail!(
-                "escript not found in PATH. Please install Erlang/OTP.\n\
-                 \n\
-                 Installation instructions:\n\
-                 - Ubuntu/Debian: sudo apt-get install erlang\n\
-                 - macOS: brew install erlang\n\
-                 - Windows: Download from https://www.erlang.org/downloads\n\
-                 \n\
-                 After installation, make sure escript is in your PATH."
-            );
-        }
-    }
 }
 
 /// Generates Core Erlang from a Beamtalk module and writes it to a file.
@@ -670,197 +504,72 @@ mod tests {
         assert_eq!(compiler.output_dir, output_dir);
     }
 
+    /// A missing runtime is one actionable error: what is missing, where it
+    /// was looked for, and how to fix it (BT-5198; no escript fallback).
     #[test]
-    fn test_compile_batch_creates_output_dir() {
-        // Only run if escript is available
-        if check_escript_available().is_err() {
-            println!("Skipping test - escript not installed");
-            return;
-        }
-
+    fn missing_compiler_runtime_error_names_what_where_and_how() {
         let temp = TempDir::new().unwrap();
-        let output_dir = Utf8PathBuf::from_path_buf(temp.path().join("build")).unwrap();
-        let compiler = BeamCompiler::new(output_dir.clone());
+        let ebin = temp.path().join("lib/beamtalk_compiler/ebin");
+        let err = require_build_worker(&ebin).expect_err("no ebin must be an error");
+        let msg = format!("{err}");
+        assert!(msg.contains("beamtalk_compiler app"), "what: {msg}");
+        assert!(msg.contains(&ebin.display().to_string()), "where: {msg}");
+        assert!(msg.contains("just build"), "how (checkout): {msg}");
+        assert!(msg.contains("reinstall"), "how (install): {msg}");
+        assert!(
+            !msg.to_lowercase().contains("escript"),
+            "no fallback hint: {msg}"
+        );
 
-        // Create a simple Core Erlang module
-        let core_content = r"module 'test' ['init'/1, 'handle_cast'/2, 'handle_call'/3, 'code_change'/3, 'dispatch'/3, 'method_table'/0]
-  attributes ['behaviour' = ['gen_server']]
+        // Compiled app present but without the build worker: same shape.
+        std::fs::create_dir_all(&ebin).unwrap();
+        std::fs::write(ebin.join("beamtalk_compiler.beam"), b"x").unwrap();
+        let msg = format!("{}", require_build_worker(&ebin).unwrap_err());
+        assert!(msg.contains("beamtalk_build_worker module"), "{msg}");
+        assert!(msg.contains(&ebin.display().to_string()), "{msg}");
 
-'init'/1 = fun (_Args) ->
-    let InitialState = ~{'$beamtalk_class' => 'Test', '__methods__' => ~{}~}~
-    in {'ok', InitialState}
-
-'handle_cast'/2 = fun (Msg, State) ->
-    {'noreply', State}
-
-'handle_call'/3 = fun (Msg, _From, State) ->
-    {'reply', 'ok', State}
-
-'code_change'/3 = fun (_OldVsn, State, _Extra) ->
-    {'ok', State}
-
-'dispatch'/3 = fun (Selector, Args, State) ->
-    {'reply', {'error', 'does_not_understand'}, State}
-
-'method_table'/0 = fun () ->
-    ~{}~
-
-end
-";
-
-        let core_file = Utf8PathBuf::from_path_buf(temp.path().join("test.core")).unwrap();
-        fs::write(&core_file, core_content).unwrap();
-
-        let result = compiler.compile_batch(&[core_file]);
-
-        // Check that output directory was created and compilation succeeded
-        assert!(output_dir.exists());
-        result.expect("compile_batch should succeed when escript is available");
+        // With the worker present it passes.
+        std::fs::write(ebin.join("beamtalk_build_worker.beam"), b"x").unwrap();
+        assert!(require_build_worker(&ebin).is_ok());
     }
 
-    /// A deliberately-malformed Core Erlang module — `foo/1`
-    /// references `State`, which is never a parameter or let-bound — must
-    /// fail with a readable `core_lint` message naming the unbound
-    /// variable, actually reaching this process's stderr (and therefore
-    /// this error message), not a raw term dump or a silently-dropped
-    /// stdout line (`compile.escript`'s `worker_loop/2` used to rely on
-    /// `report_errors`, which prints via the compiling process's default
-    /// group leader — verified empirically to land on stdout, invisible to
-    /// `read_compilation_output`'s protocol-marker-only parser). Exercises
-    /// the same acceptance criterion the Port-backend `EUnit` tests
-    /// (`beamtalk_build_worker_tests`/`beamtalk_compiler_server_tests`
-    /// `compile_core_erlang_unbound_var_test`) cover for the other backend —
-    /// together they demonstrate the two backends stay in parity.
+    /// BT-5198: the retired backend selector is ignored, not honoured. With
+    /// the old `escript` value set and no runtime available, `compile_batch`
+    /// must fail with the missing-runtime error instead of falling back to a
+    /// legacy backend (which used to compile successfully here).
     #[test]
-    fn test_compile_batch_escript_core_lint_unbound_var() {
-        if check_escript_available().is_err() {
-            println!("Skipping test - escript not installed");
-            return;
-        }
-
+    #[serial_test::serial(env_var)]
+    fn retired_backend_env_var_does_not_enable_a_fallback() {
         let temp = TempDir::new().unwrap();
-        let output_dir = Utf8PathBuf::from_path_buf(temp.path().join("build")).unwrap();
-        fs::create_dir_all(&output_dir).unwrap();
-        let compiler = BeamCompiler::new(output_dir);
+        // A runtime dir with rebar.config but nothing built under it.
+        std::fs::write(temp.path().join("rebar.config"), b"{deps, []}.\n").unwrap();
+        let out = Utf8PathBuf::from_path_buf(temp.path().join("out")).unwrap();
+        let core = Utf8PathBuf::from_path_buf(temp.path().join("m.core")).unwrap();
+        fs::write(&core, "module 'm' [] attributes []\nend\n").unwrap();
 
-        let core_content = r"module 'bt_cli_unbound_var' ['foo'/1]
-  attributes []
-  'foo'/1 = fun (X) ->
-    let Y = call 'erlang':'+' (X, State)
-    in Y
-end
-";
-
-        let core_file = Utf8PathBuf::from_path_buf(temp.path().join("bad.core")).unwrap();
-        fs::write(&core_file, core_content).unwrap();
-
-        let result = compiler.compile_batch_escript(&[core_file]);
-        let err = result.expect_err("malformed Core Erlang must fail to compile");
-        let message = format!("{err}");
-        assert!(
-            message.contains("unbound variable"),
-            "expected a readable core_lint message, got: {message}"
-        );
-        assert!(
-            message.contains("'State'"),
-            "expected the offending variable name in the message, got: {message}"
-        );
-        assert!(
-            !message.contains("{unbound_var,"),
-            "expected readable prose, not a raw term dump: {message}"
-        );
-    }
-
-    /// Returns every `"..."` substring on `line` (assumes no escaped
-    /// quotes inside — true for every literal these conformance tests
-    /// extract). `line.split('"')` alternates outside/inside segments
-    /// starting outside, so the inside ones are every other element from
-    /// index 1.
-    fn quoted_strings(line: &str) -> Vec<&str> {
-        line.split('"').skip(1).step_by(2).collect()
-    }
-
-    fn line_containing<'a>(source: &'a str, needle: &str) -> &'a str {
-        source
-            .lines()
-            .find(|l| l.contains(needle))
-            .unwrap_or_else(|| panic!("no line containing {needle:?} in source"))
-    }
-
-    /// Concatenates a `"lit1"\n"lit2"\n...` Erlang string-literal
-    /// concatenation: starting at the first line containing `marker`,
-    /// every immediately-following line that is itself a bare quoted
-    /// segment (trimmed, starts and ends with `"`) is appended; stops at
-    /// the first line that isn't.
-    fn erlang_string_concat_from(source: &str, marker: &str) -> String {
-        let start = source
-            .find(marker)
-            .unwrap_or_else(|| panic!("marker {marker:?} not found in source"));
-        let mut out = String::new();
-        for line in source[start..].lines() {
-            let trimmed = line.trim();
-            if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
-                out.push_str(&trimmed[1..trimmed.len() - 1]);
-            } else if !out.is_empty() {
-                break;
+        let saved: Vec<_> = ["BEAMTALK_RUNTIME_DIR", "BEAMTALK_COMPILER"]
+            .iter()
+            .map(|k| (*k, std::env::var_os(k)))
+            .collect();
+        // SAFETY: serialized via #[serial(env_var)]; restored below.
+        unsafe {
+            std::env::set_var("BEAMTALK_RUNTIME_DIR", temp.path());
+            std::env::set_var("BEAMTALK_COMPILER", "escript");
+        }
+        let result = BeamCompiler::new(out).compile_batch(&[core]);
+        for (k, v) in saved {
+            // SAFETY: see above.
+            unsafe {
+                match v {
+                    Some(v) => std::env::set_var(k, v),
+                    None => std::env::remove_var(k),
+                }
             }
         }
-        out
-    }
 
-    /// Review finding (#3997): `compile.escript`'s `print_bug_header/0` and
-    /// its `demangle`-via-`re:replace` in `print_messages/2` are hand-copied
-    /// from `beamtalk_compile_diagnostics:bug_header/0`/
-    /// `demangle_class_methods/1` (the escript cannot depend on that
-    /// module — see its own moduledoc), tagged only with a "mirrors X"
-    /// comment and no test enforcing the two stay identical. This
-    /// conformance test is that enforcement: it extracts both copies of
-    /// each literal from the actual source files (not a third hand-copied
-    /// expectation) and asserts they are byte-for-byte equal, so an edit to
-    /// either copy that isn't mirrored in the other fails this test instead
-    /// of silently drifting.
-    #[test]
-    fn test_escript_bug_header_and_demangle_match_beamtalk_compile_diagnostics() {
-        let diagnostics_erl_path = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../runtime/apps/beamtalk_compiler/src/beamtalk_compile_diagnostics.erl");
-        let diagnostics_erl = fs::read_to_string(&diagnostics_erl_path)
-            .unwrap_or_else(|e| panic!("failed to read {diagnostics_erl_path}: {e}"));
-
-        // bug_header/0 vs print_bug_header/0.
-        let marker = "\"Beamtalk compiler bug: code generation produced Core Erlang that \"";
-        let erl_header = erlang_string_concat_from(&diagnostics_erl, marker);
-        let escript_header = erlang_string_concat_from(COMPILE_ESCRIPT, marker);
-        assert!(
-            !erl_header.is_empty(),
-            "failed to extract bug_header/0's text"
-        );
-        assert_eq!(
-            erl_header, escript_header,
-            "compile.escript's print_bug_header/0 has drifted from \
-             beamtalk_compile_diagnostics:bug_header/0 — keep them byte-identical"
-        );
-
-        // demangle_class_methods/1 vs print_messages/2's inline re:replace.
-        let needle = "'class_(";
-        let erl_line = line_containing(&diagnostics_erl, needle);
-        let escript_line = line_containing(COMPILE_ESCRIPT, needle);
-        let erl_quoted = quoted_strings(erl_line);
-        let escript_quoted = quoted_strings(escript_line);
-        assert_eq!(
-            erl_quoted.len(),
-            2,
-            "expected exactly the regex pattern + replacement on beamtalk_compile_diagnostics.erl's re:replace line, got: {erl_line:?}"
-        );
-        assert_eq!(
-            escript_quoted.len(),
-            2,
-            "expected exactly the regex pattern + replacement on compile.escript's re:replace line, got: {escript_line:?}"
-        );
-        assert_eq!(
-            erl_quoted, escript_quoted,
-            "compile.escript's demangle re:replace pattern/replacement has drifted from \
-             beamtalk_compile_diagnostics:demangle_class_methods/1 — keep them byte-identical"
-        );
+        let msg = format!("{}", result.expect_err("must not fall back to escript"));
+        assert!(msg.contains("beamtalk_compiler app"), "{msg}");
+        assert!(msg.contains("just build"), "{msg}");
     }
 
     // Tests for is_valid_module_name
@@ -922,64 +631,6 @@ end
         // Special characters
         let result = write_core_erlang(&module, "foo-bar", &output_path);
         assert!(result.is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn write_private_executable_is_exclusive_0700_and_refuses_symlink() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("a.escript");
-        write_private_executable(&path, b"#!/usr/bin/env escript\n").unwrap();
-        assert_eq!(
-            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-            0o700
-        );
-        // An existing file is never overwritten.
-        assert!(write_private_executable(&path, b"x").is_err());
-        // A pre-planted symlink is not followed.
-        let victim = dir.path().join("victim");
-        std::fs::write(&victim, b"keep").unwrap();
-        let link = dir.path().join("b.escript");
-        std::os::unix::fs::symlink(&victim, &link).unwrap();
-        assert!(write_private_executable(&link, b"pwned").is_err());
-        assert_eq!(std::fs::read(&victim).unwrap(), b"keep");
-    }
-
-    #[test]
-    fn test_escript_counter_uniqueness_parallel() {
-        use std::collections::HashSet;
-        use std::sync::Mutex;
-
-        // Test that ESCRIPT_COUNTER produces unique values even when called from multiple threads
-        let values = std::sync::Arc::new(Mutex::new(HashSet::new()));
-        let mut handles = vec![];
-
-        // Spawn 10 threads that each fetch 100 counter values
-        for _ in 0..10 {
-            let values_clone = std::sync::Arc::clone(&values);
-            let handle = std::thread::spawn(move || {
-                for _ in 0..100 {
-                    let counter = ESCRIPT_COUNTER.fetch_add(1, Ordering::Relaxed);
-                    let mut set = values_clone.lock().unwrap();
-                    // Each counter value should be unique
-                    assert!(
-                        set.insert(counter),
-                        "Counter value {counter} was not unique"
-                    );
-                }
-            });
-            handles.push(handle);
-        }
-
-        // Wait for all threads to complete
-        for handle in handles {
-            handle.join().unwrap();
-        }
-
-        // Verify we got exactly 1000 unique values
-        let final_set = values.lock().unwrap();
-        assert_eq!(final_set.len(), 1000, "Expected 1000 unique counter values");
     }
 
     // ---- ADR 0072 Phase 1: discover_native_modules tests ----

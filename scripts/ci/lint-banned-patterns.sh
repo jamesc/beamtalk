@@ -43,6 +43,7 @@ PATTERNS=(
   "self-name|rust|crates/beamtalk-core/src|\.name == \"self\"|Expression::is_self()"
   "chain-any|rust-any|crates/beamtalk-core/src|superclass_chain\(.*\)\.any\(|is_subclass_of"
   "sentinel-key-literal|erl-src|runtime/apps runtime/perf|'(\\\$beamtalk_class%OR%__class_mod__%OR%__skip_initialize__)'|?BT_CLASS_TAG_KEY / ?BT_CLASS_MOD_KEY / ?BT_SKIP_INITIALIZE_KEY (beamtalk_sentinel_tags.hrl, generated from sentinel_tags.rs)"
+  "raw-home-env|rust-any|crates/beamtalk-cli/src|(set_var%OR%remove_var)\([[:space:]]*\"BEAMTALK_HOME\"|BeamtalkHomeOverride::new / ::with_value (commands/test_support.rs): a bare set_var/remove_var strips BEAMTALK_HOME from every concurrent real_home_guard holder, whose writes then land in the real \$HOME/.beamtalk (BT-5272)"
   "try-stop|erl|runtime/apps|try[[:space:]]+gen_server:stop|beamtalk_test_proc:stop/1 or beamtalk_test_class:stop/1"
 )
 

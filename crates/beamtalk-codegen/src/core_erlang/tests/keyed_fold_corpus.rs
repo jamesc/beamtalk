@@ -161,6 +161,41 @@ fn a_filter_that_conses_twice_is_reported_on_every_select_and_reject() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// BT-5190: every `select:` / `reject:` program reports `fault`'s `error` and no other program does.
+fn assert_filter_fault_reported(fault: Fault, error: &str) {
+    let mut wrong = Vec::new();
+    for (name, src, _) in programs() {
+        let is_filter = name.contains("select:") || name.contains("reject:");
+        let report = verifier_report(&src, Some(fault));
+        match (is_filter, report) {
+            (true, Some(r)) if r.contains(error) => {}
+            (false, None) => {}
+            (expected, other) => wrong.push(format!("{name}: filter {expected}: {other:?}")),
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+#[test]
+fn a_filter_that_conses_nothing_is_reported_on_every_select_and_reject() {
+    assert_filter_fault_reported(Fault::FilterConsNothing, "FoldResultListUndeclared");
+}
+
+#[test]
+fn a_filter_that_conses_in_both_arms_is_reported_on_every_select_and_reject() {
+    assert_filter_fault_reported(Fault::FilterConsBothArms, "FoldResultListUndeclared");
+}
+
+#[test]
+fn a_filter_with_swapped_arms_is_reported_on_every_select_and_reject() {
+    assert_filter_fault_reported(Fault::FilterArmsSwapped, "FoldResultListUndeclared");
+}
+
+#[test]
+fn a_filter_that_conses_the_wrong_item_is_reported_on_every_select_and_reject() {
+    assert_filter_fault_reported(Fault::FilterConsWrongItem, "FoldResultListWrongItem");
+}
+
 #[test]
 fn a_path_that_ignores_the_family_wrapper_is_reported_exactly_where_there_is_one() {
     let mut wrong = Vec::new();

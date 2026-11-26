@@ -24,12 +24,12 @@ removal) forward there.
     precheck_method/4,
     remove_method/4,
     emit_remove_change_entry/5,
-    emit_extension_remove_change_entry/7,
     rewrite_sites/2,
     validate_sites/2,
     emit_rewrite_change_entry/2,
     capture_class_removal_snapshot/1,
-    emit_remove_class_change_entry/4
+    emit_remove_class_change_entry/4,
+    report_late_hot_reload_failure/3
 ]).
 
 -include("beamtalk_repl_loader.hrl").
@@ -67,22 +67,6 @@ remove_method(ClassNameBin, Selector, Side, StdlibPolicy) ->
 emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
     ?ENTRIES:emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind).
 
--spec emit_extension_remove_change_entry(
-    binary(),
-    atom() | binary(),
-    instance | class,
-    atom() | undefined,
-    binary() | undefined,
-    binary(),
-    human | agent
-) -> beamtalk_workspace_callback:emit_result().
-emit_extension_remove_change_entry(
-    ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
-) ->
-    ?ENTRIES:emit_extension_remove_change_entry(
-        ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
-    ).
-
 -spec rewrite_sites(
     beamtalk_repl_loader_rewrite:rewrite_site() | undefined,
     [beamtalk_repl_loader_rewrite:rewrite_site()]
@@ -110,3 +94,9 @@ capture_class_removal_snapshot(ClassNameBin) ->
     beamtalk_workspace_callback:emit_result().
 emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
     ?ENTRIES:emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind).
+
+-spec report_late_hot_reload_failure(atom(), pid(), {error, term()}) -> ok.
+report_late_hot_reload_failure(ModuleName, Pid, {error, {left_suspended, _}} = Failure) ->
+    beamtalk_repl_loader_activate:report_late_suspended(ModuleName, Pid, Failure);
+report_late_hot_reload_failure(_ModuleName, _Pid, _Failure) ->
+    ok.

@@ -1,14 +1,6 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-/// A registered extension resolved by `liveExtensionsIn:`: the live target
-/// class (or metaclass), the selector, and the extension's source text.
-internal type SystemNavigationExtensionRecord = #{
-  #class => Object,
-  #selector => Symbol,
-  #source => String
-}
-
 /// SystemNavigation — Class-registry navigation queries ("who implements X",
 /// "where is X used").
 ///
@@ -197,84 +189,6 @@ sealed typed Object subclass: SystemNavigation
   /// ```
   class usersOf: aProtocolName :: Symbol -> List(Behaviour) =>
     Protocol usersOf: aProtocolName
-
-  // ===== Package & Extension Ownership Queries =====
-
-  /// Return the packages (ADR 0070) that contribute extension methods (ADR 0066)
-  /// to `aClass` — answers "who extends class X?".
-  ///
-  /// Extension *owners* are package/library names, not classes (the registry
-  /// records the owning package — see `beamtalk_extensions:register/4`), so each
-  /// owner is returned as a `Package` object. This mirrors how the other
-  /// navigation queries return rich objects (classes as `Behaviour`) rather than
-  /// bare name atoms. Backed by the reverse index
-  /// (`beamtalk_extensions:extenders_of/1`, BT-2202), which is deduplicated and
-  /// sorted: a package contributing ten extensions to `aClass` appears once.
-  /// Owners that are not currently-loaded packages are skipped (`Package named:`
-  /// would otherwise raise). Returns `[]` (not an error) when nothing extends
-  /// `aClass`; raises a typed error if `aClass` is a Symbol/String rather than a
-  /// class object.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// SystemNavigation extendersOf: String  // => [(Package named: "my_lib"), ...]
-  /// SystemNavigation extendersOf: NeverExtended  // => []
-  /// ```
-  class extendersOf: aClass :: Behaviour -> List(Package) =>
-    targetName := self requireClassName: aClass selector: "extendersOf:"
-    loaded := Package all
-    owners := self extensionOwnersOf: targetName
-    owners
-      inject: List new
-      into: [:acc :ownerAtom |
-        ownerName := ownerAtom asString
-        (loaded includes: ownerName) ifTrue: [
-          acc add: (Package named: ownerName)
-        ] ifFalse: [acc]
-      ]
-
-  /// Return the extension methods (ADR 0066) that the package `aPackage`
-  /// (ADR 0070) contributes — answers "what does library Y add, and to which
-  /// classes?". The inverse of `extendersOf:`.
-  ///
-  /// Each result is a Dictionary `#{#class => ExtendedClass, #selector =>
-  /// Selector}` — one per extension method, shaped like the `sendersOf:` /
-  /// `referencesTo:` records. The `#class` value is the *extended* class object
-  /// (a real class, resolved via `resolveExtensionClass:`), not a name symbol,
-  /// so callers can navigate from it. An extension whose target class has been
-  /// removed is dropped rather than reported with a Symbol `#class` (BT-4418).
-  /// The argument is a `Package` because
-  /// extension owners are packages, not classes. Backed by
-  /// `beamtalk_extensions:extensions_by/1` (BT-2202). Returns `[]` (not an error)
-  /// when `aPackage` contributes no extensions; raises a typed error if
-  /// `aPackage` is not a Package object.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// SystemNavigation extensionsBy: (Package named: "my_lib")
-  /// // => [#{#class => String, #selector => #asJson}, ...]
-  /// ```
-  class extensionsBy: aPackage :: Package -> List(Dictionary) =>
-    (aPackage isKindOf: Package)
-      ifFalse: [
-        self error: "SystemNavigation extensionsBy: requires a Package object, e.g. (Package named: aPackageName)."
-      ]
-    pairs := self extensionPairsBy: aPackage name asAtom
-    self extensionRecordsFrom: pairs
-
-  /// Map `{extendedClassTag, selector}` pairs (as answered by
-  /// `beamtalk_extensions:extensions_by/1`) onto `#{#class, #selector}`
-  /// records for `extensionsBy:`. A pair whose target class no longer resolves
-  /// (removed since the pairs were read) is dropped (BT-4418).
-  class extensionRecordsFrom: pairs :: List(Tuple) -> List(Dictionary) =>
-    pairs
-      inject: List new
-      into: [:acc :pair |
-        extClass := self resolveExtensionClass: (pair at: 1)
-        extClass isNil ifTrue: [
-          acc
-        ] ifFalse: [acc add: #{#class => extClass, #selector => (pair at: 2)}]
-      ]
 
   /// Validate that `aClass` is a class/metaclass object and return its name
   /// Symbol, raising a typed error otherwise. `aSelector` names the calling
@@ -493,9 +407,7 @@ sealed typed Object subclass: SystemNavigation
     sends
       inject: List new
       into: [:acc :s |
-        sentSel := s at: 1
-        line := s at: 2
-        recv := s at: 3
+        {sentSel, line, recv} := s
         // Skip Erlang FFI sends — same exclusion as `unusedSelectors`. An
         // `Erlang foo` chain is an Erlang call routed through the DNU bridge,
         // not a Beamtalk message send, so its "selectors" (module + function
@@ -536,15 +448,6 @@ sealed typed Object subclass: SystemNavigation
   ///   that class only, and the runtime logs one `xref_miss` warning. The
   ///   partition is computed runtime-side by `beamtalk_xref:senders_of_bt/1`.
   ///
-  /// Extension methods (ADR 0066) are scanned when registered with source via
-  /// `beamtalk_extensions:register/5` (BT-2196), unchanged by the migration —
-  /// extensions are not yet part of the index (lands in a later phase). The
-  /// `#class` for an extension hit is the extended target class (or the
-  /// metaclass object resolved from the `#'Target class'` marker for
-  /// `Target class` extensions); an extension whose target class has been
-  /// removed is skipped (BT-4418). `register/4` registrations without source
-  /// remain invisible to the source-text scan.
-  ///
   /// Raises an error if the argument is not a Symbol. Returns an empty
   /// collection if no senders are found (not an error).
   ///
@@ -581,9 +484,7 @@ sealed typed Object subclass: SystemNavigation
           in: cls class
           into: withInstance
       ]
-    // BT-2196: walk source-bearing extensions registered via `register/5`.
-    // Extensions are not in the index yet, so this scan is unconditional.
-    self collectExtensionSendersFor: aSelector into: fallbackScan
+    fallbackScan
 
   /// Resolve an xref sender row's owning class (a class-name Symbol) and side
   /// flag to the class object the result record exposes as `#class`.
@@ -593,10 +494,8 @@ sealed typed Object subclass: SystemNavigation
   /// `cls class` convention (BT-2195).
   ///
   /// Answers `nil` when the owner no longer resolves — a class removed after
-  /// the xref rows were read. Every caller drops such a row (BT-4111), and the
-  /// extension walks drop an entry whose target no longer resolves through
-  /// `resolveExtensionClass:` (BT-4418), so a query never reports a raw owner
-  /// Symbol in place of a class — neither for indexed rows nor extension hits.
+  /// the xref rows were read. Every caller drops such a row (BT-4111), so a
+  /// query never reports a raw owner Symbol in place of a class.
   ///
   /// BT-4095: the class-side hit resolves the metaclass tag (`#'Foo class'`)
   /// through the registry, rather than sending `isKindOf:` and `class` to the
@@ -720,8 +619,7 @@ sealed typed Object subclass: SystemNavigation
   /// from the live runtime ETS subscription table, this answers "which event
   /// classes does `aClass` *publish*" by mining the `announce:` /
   /// `announceAndWait:` / `announceAndWait:timeout:` call sites out of
-  /// `aClass`'s own method bodies (instance side + class side + extension
-  /// methods that target `aClass`). The result is the distinct set of resolved
+  /// `aClass`'s own method bodies (instance side + class side). The result is the distinct set of resolved
   /// announcement classes, sorted by name for a stable snapshot; `[]` when
   /// `aClass` emits nothing statically resolvable.
   ///
@@ -764,7 +662,7 @@ sealed typed Object subclass: SystemNavigation
   /// resolved announcement class:
   /// - `#class` — the publisher class whose method contains the emission (the
   ///   class object for an instance-side hit, the metaclass object for a
-  ///   class-side hit, or the resolved extension target for an extension hit)
+  ///   class-side hit)
   /// - `#selector` — the selector of the method that contains the emission
   /// - `#line` — the 1-based line number within the method source where the
   ///   `announce:` send appears
@@ -777,8 +675,7 @@ sealed typed Object subclass: SystemNavigation
   /// for the advisory-analysis discipline).
   ///
   /// Scope mirrors `sendersOf:`'s source-scan: `aClass`'s instance side and
-  /// class side, plus source-bearing extension methods (ADR 0066 / BT-2196) that
-  /// target `aClass`. Unlike `sendersOf:`, this query is not index-backed: the
+  /// class side. Unlike `sendersOf:`, this query is not index-backed: the
   /// xref index records selectors and lines but not argument types, so each
   /// method source is re-parsed via the compiler to resolve the event argument.
   ///
@@ -794,8 +691,7 @@ sealed typed Object subclass: SystemNavigation
   class announcementSitesSentBy: aClass :: Behaviour -> List(Dictionary) =>
     self requireClassName: aClass selector: "announcementSitesSentBy:"
     instanceScan := self collectAnnounceSitesIn: aClass into: List new
-    bothScan := self collectAnnounceSitesIn: aClass class into: instanceScan
-    self collectExtensionAnnounceSitesFor: aClass into: bothScan
+    self collectAnnounceSitesIn: aClass class into: instanceScan
 
   /// Append announcement emission sites found in any method of `aScope` (a class
   /// or metaclass) to `result`. Returns the (possibly extended) result list.
@@ -842,8 +738,7 @@ sealed typed Object subclass: SystemNavigation
     sites
       inject: result
       into: [:acc :site |
-        line := site at: 1
-        announcementName := site at: 2
+        {line, announcementName} := site
         cls := self findClass: announcementName
         isAnnouncement := self isAnnouncementClass: cls
         isAnnouncement
@@ -885,62 +780,6 @@ sealed typed Object subclass: SystemNavigation
       ]
     hits isEmpty not
 
-  /// Append announcement emission sites found in every source-bearing extension
-  /// method (ADR 0066 / BT-2196) that targets `aClass` to `result`. Returns the
-  /// (possibly extended) result.
-  ///
-  /// Mirrors `collectExtensionSendersFor:into:`, but — because the query is
-  /// scoped to one publisher class rather than one selector — only extensions
-  /// whose target is `aClass` (instance side) or `aClass class`
-  /// (class side) are scanned. Extension target identity is matched on the
-  /// registry tag itself, so both an instance-side tag (`#Foo`) and a
-  /// metaclass tag (`#'Foo class'`) are recognised. Extensions registered via
-  /// `register/4` (no source) are invisible, as elsewhere.
-  ///
-  /// BT-4111: non-matching extensions are skipped on their tag alone, without
-  /// resolving or sending anything to their target class, and a matching
-  /// target removed since the extension table was read is skipped too.
-  class collectExtensionAnnounceSitesFor: aClass :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
-    // `List add:` is functional (returns a new list), so capture the result
-    // rather than mutating in place: the pair is `[aClass name, aClass class
-    // name]` — the instance-side and class-side tags a matching extension can
-    // carry.
-    targetNames := (List new add: aClass name) add: aClass class name
-    extEntries := self allExtensionsWithSource
-    extEntries
-      inject: result
-      into: [:acc :entry |
-        extClassTag := entry at: 1
-        extSelector := entry at: 2
-        extSource :: String := entry at: 3
-        extClass := (self extensionTag: extClassTag targets: targetNames) ifTrue: [
-          self findClass: extClassTag
-        ] ifFalse: [nil]
-        extClass notNil
-          ifTrue: [
-            // `extSource` is bound `:: String` above to re-assert the
-            // source-text invariant the seam erases (BT-2254).
-            self
-              appendAnnounceSitesIn: extSource
-              class: extClass
-              methodSelector: extSelector
-              into: acc
-          ]
-          ifFalse: [acc]
-      ]
-
-  /// Whether the extension registry tag `extClassTag` names `aClass` or
-  /// `aClass class` — i.e. the extension extends the publisher under query.
-  ///
-  /// `targetNames` is the precomputed `[aClass name, aClass class name]` pair.
-  /// A tag equals the `name` of the class it resolves to, for both an
-  /// instance-side tag (`#Foo`) and a metaclass tag (`#'Foo class'`), so the
-  /// tag is compared directly. BT-4111: comparing the tag rather than the
-  /// resolved class's `name` sends nothing to the extension's target class,
-  /// which may have been removed concurrently.
-  class extensionTag: extClassTag :: Symbol targets: targetNames :: List(Symbol) -> Boolean =>
-    targetNames includes: extClassTag
-
   // ===== References To (ADR 0087) =====
 
   /// Return a collection of references to the given class.
@@ -973,14 +812,6 @@ sealed typed Object subclass: SystemNavigation
   ///   falls back to the legacy source-scan (`collectReferencesFor:in:into:`)
   ///   for that class only, and the runtime logs one `xref_miss` warning. The
   ///   partition is computed runtime-side by `beamtalk_xref:references_to_bt/1`.
-  ///
-  /// Extension methods (ADR 0066) are scanned when registered with source via
-  /// `beamtalk_extensions:register/5` (BT-2196), unchanged by the migration —
-  /// extensions are not yet part of the index. The `#class` for an
-  /// extension hit is the extended target class (or its metaclass object for
-  /// `Target class` extensions); an extension whose target class has been
-  /// removed is skipped (BT-4418). `register/4` registrations without source
-  /// remain invisible.
   ///
   /// Argument must be a class object (a `Behaviour`). Passing a Symbol or
   /// String — the most common mistake, since `sendersOf:` takes a Symbol —
@@ -1034,7 +865,7 @@ sealed typed Object subclass: SystemNavigation
     indexScan := self indexedSiteRecordsFrom: indexedRows into: List new
     // Miss-policy fallback: source-scan only the loaded-but-unindexed classes,
     // walking both instance and class side as the legacy scan did (BT-2195).
-    classScan := self
+    self
       liveClassesIn: (self classesNamed: fallbackClasses)
       inject: indexScan
       into: [:acc :cls |
@@ -1050,9 +881,6 @@ sealed typed Object subclass: SystemNavigation
           in: cls class
           into: withInstance
       ]
-    // BT-2196: walk source-bearing extensions registered via `register/5`.
-    // Extensions are not in the index yet, so this scan is unconditional.
-    self collectExtensionReferencesFor: targetName into: classScan
 
   /// Append references to a class (identified by `targetName`) found in any
   /// instance method of `aScope` (a class) to `result`. Returns the (possibly
@@ -1096,8 +924,7 @@ sealed typed Object subclass: SystemNavigation
   /// Return a collection of methods that READ the named field.
   ///
   /// Each result is a Dictionary with three keys:
-  /// - `#class` — the class whose method reads the slot (the class object for
-  ///   an instance-side hit, the metaclass object for a class-side hit)
+  /// - `#class` — the class whose method reads the slot
   /// - `#selector` — the selector of the method that reads the slot
   /// - `#line` — the 1-based line number within the method source where the
   ///   read appears
@@ -1109,18 +936,16 @@ sealed typed Object subclass: SystemNavigation
   /// variable `x` is not an field and is ignored. A method that
   /// reads `aSym` multiple times produces one record per occurrence.
   ///
-  /// Scope: walks `aClass` and every class in `aClass allSubclasses` (a
-  /// subclass inherits the slot, so methods it defines can touch it), and on
-  /// each of those walks both the instance side (`cls`) and the class side
-  /// (`cls class`, the metaclass) so class-side methods that touch a class-side
-  /// field (`classState:`) are covered too.
+  /// Scope: walks the instance-side methods of `aClass` and of every class in
+  /// `aClass allSubclasses` (a subclass inherits the slot, so methods it
+  /// defines can touch it). A class has no class-side fields (class variables
+  /// were removed, ADR 0153), so class-side methods are not walked.
   ///
   /// `aSym` must be a Symbol naming the slot; passing anything else raises a
-  /// typed error. The slot must be declared on `aClass` — if `aSym` is neither
-  /// in `aClass allFieldNames` (instance-side slots, inherited included) nor
-  /// found by the source scan (which catches class-side slots, not reflectable
-  /// today), a typed error is raised so a typo surfaces rather than silently
-  /// returning `[]`. A declared-but-untouched instance slot returns `[]`.
+  /// typed error. The slot must be declared on `aClass` — if `aSym` is not in
+  /// `aClass allFieldNames` (inherited included), a typed error is raised so a
+  /// typo surfaces rather than silently returning `[]`. A declared-but-untouched
+  /// slot returns `[]`.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -1138,8 +963,7 @@ sealed typed Object subclass: SystemNavigation
   /// variable.
   ///
   /// Each result is a Dictionary with three keys:
-  /// - `#class` — the class whose method writes the slot (the class object for
-  ///   an instance-side hit, the metaclass object for a class-side hit)
+  /// - `#class` — the class whose method writes the slot
   /// - `#selector` — the selector of the method that writes the slot
   /// - `#line` — the 1-based line number within the method source where the
   ///   write appears
@@ -1149,10 +973,10 @@ sealed typed Object subclass: SystemNavigation
   /// appears in BOTH result sets (write on the LHS, read on the RHS). A method
   /// that writes `aSym` multiple times produces one record per occurrence.
   ///
-  /// Scope and validation are identical to `fieldReadersOf:in:`: walks
-  /// `aClass` plus `aClass allSubclasses` on both the instance and class sides,
-  /// requires `aSym` to be a declared Symbol slot, and returns `[]` for a
-  /// declared-but-never-written slot.
+  /// Scope and validation are identical to `fieldReadersOf:in:`: walks the
+  /// instance side of `aClass` plus `aClass allSubclasses`, requires `aSym` to
+  /// be a declared Symbol slot, and returns `[]` for a declared-but-never-written
+  /// slot.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -1170,11 +994,10 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// `wantReaders` selects which access kind to collect (reads when `true`,
   /// writes when `false`). Validates the arguments, builds the scope (`aClass`
-  /// + `aClass allSubclasses`), walks each scope on both the instance and class
-  /// sides, then applies slot validation: `aSym` must be a declared slot of
-  /// `aClass` — instance-side (`allFieldNames`) or class-side
-  /// (`allClassVarNames`, BT-2238), inherited included. An undeclared name
-  /// raises a typed error (typo guard); a real-but-untouched slot returns `[]`.
+  /// + `aClass allSubclasses`), walks the instance side of each scope, then
+  /// applies slot validation: `aSym` must be a declared field of `aClass`
+  /// (`allFieldNames`, inherited included). An undeclared name raises a typed
+  /// error (typo guard); a real-but-untouched slot returns `[]`.
   class collectFieldAccessesOf: aSym :: Symbol in: aClass :: Behaviour readers: wantReaders :: Boolean -> List(Dictionary) =>
     selector := wantReaders ifTrue: [
       "fieldReadersOf:in:"
@@ -1185,39 +1008,9 @@ sealed typed Object subclass: SystemNavigation
       ]
     self requireClassName: aClass selector: selector
     scopes := aClass allSubclasses addFirst: aClass
-    // Collect instance-side and class-side hits separately. Validation is
-    // declaration-based against `aClass` itself: an instance slot must be in
-    // `aClass allFieldNames`, a class-side slot in `aClass allClassVarNames`
-    // (both inherited-included) — a slot declared only on a *subclass* must NOT
-    // satisfy a query against `aClass`. (BT-2238 made class-side slots
-    // reflectable; earlier this leaned on a class-side scan hit.)
-    instanceHits := scopes
-      inject: List new
-      into: [:acc :cls |
-        self
-          collectFieldAccessesFor: aSym
-          in: cls
-          readers: wantReaders
-          into: acc
-      ]
-    classHits := scopes
-      inject: List new
-      into: [:acc :cls |
-        self
-          collectFieldAccessesFor: aSym
-          in: cls class
-          readers: wantReaders
-          into: acc
-      ]
-    // Validation: accept an instance slot of `aClass` (declared or inherited,
-    // via `allFieldNames`) or a class-side slot (declared or inherited, via
-    // `allClassVarNames`, BT-2238). Otherwise it is a typo (or a subclass-only
-    // slot that `aClass` does not declare) and we raise. Declaration-based on
-    // both sides — no longer dependent on a class-side scan hit, so an
-    // untouched-but-declared class-side slot returns `[]` instead of raising.
-    ((aClass allFieldNames includes: aSym) or: [
-      aClass allClassVarNames includes: aSym
-    ])
+    // Validation is declaration-based against `aClass` itself: a slot
+    // declared only on a *subclass* must NOT satisfy a query against `aClass`.
+    (aClass allFieldNames includes: aSym)
       ifFalse: [
         self
           error: "SystemNavigation "
@@ -1227,7 +1020,15 @@ sealed typed Object subclass: SystemNavigation
             ++ " is not a field declared on "
             ++ aClass name asString
       ]
-    instanceHits ++ classHits
+    scopes
+      inject: List new
+      into: [:acc :cls |
+        self
+          collectFieldAccessesFor: aSym
+          in: cls
+          readers: wantReaders
+          into: acc
+      ]
 
   /// Append field access records found in any method of `aScope`
   /// (a class or metaclass) to `result`. Returns the (possibly extended) list.
@@ -1289,17 +1090,15 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// Each result is a Dictionary with three keys:
   /// - `#class` — the class whose method contains the call (the class object for
-  ///   an instance-side hit, the metaclass object for a class-side hit, or the
-  ///   resolved extension target for an extension hit)
+  ///   an instance-side hit, the metaclass object for a class-side hit)
   /// - `#selector` — the selector of the method that contains the call
   /// - `#line` — the 1-based line number within the method source where the
   ///   call appears
   ///
   /// A method that calls the function multiple times produces one record per
   /// occurrence. Iterates the navigation scope (`allClasses`) and walks both
-  /// instance-side and class-side method dictionaries (BT-2195), plus
-  /// source-bearing extension methods (ADR 0066 / BT-2196), so stdlib and user
-  /// classes are covered on all three. Returns an empty collection if no call
+  /// instance-side and class-side method dictionaries (BT-2195), so stdlib and
+  /// user classes are covered on both. Returns an empty collection if no call
   /// sites are found (not an error).
   ///
   /// ## Examples
@@ -1318,7 +1117,7 @@ sealed typed Object subclass: SystemNavigation
     targetModule := parsed at: #module
     targetFunction := parsed at: #function
     targetArity := parsed at: #arity
-    classScan := self
+    self
       liveClassesIn: self allClasses
       inject: List new
       into: [:acc :cls |
@@ -1340,12 +1139,6 @@ sealed typed Object subclass: SystemNavigation
           in: cls class
           into: withInstance
       ]
-    // BT-2196: walk source-bearing extensions registered via `register/5`.
-    self
-      collectExtensionFfiSitesFor: targetModule
-      function: targetFunction
-      arity: targetArity
-      into: classScan
 
   /// Parse an FFI spec String into its components, raising on a malformed shape.
   ///
@@ -1380,10 +1173,9 @@ sealed typed Object subclass: SystemNavigation
 
   /// Raise the shared malformed-spec error for `ffiSitesFor:` / `parseFfiSpec:`.
   ///
-  /// Always raises (kind `#user_error`); `error:` returns `Never`, so this
-  /// still type-checks as returning a value when its result is used in an
-  /// expression position (e.g. inside `ifTrue:` of `parseFfiSpec:`).
-  class raiseFfiSpecError: aSpec :: String -> Object =>
+  /// Always raises (kind `#user_error`); declared `-> Never` so `^self
+  /// raiseFfiSpecError:` in `parseFfiSpec:` is not an `Object` return.
+  class raiseFfiSpecError: aSpec :: String -> Never =>
     self
       error: "SystemNavigation ffiSitesFor: expects a spec of the form ""module:function"" or ""module:function/arity"", got: "
         ++ aSpec
@@ -1429,22 +1221,6 @@ sealed typed Object subclass: SystemNavigation
         acc add: #{#class => ownerClass, #selector => methodSel, #line => line}
       ]
 
-  /// Append FFI call sites of `module`:`function` found in every extension
-  /// method source (ADR 0066 / BT-2196) to `result`. Returns the (possibly
-  /// extended) result. Mirrors `collectExtensionSendersFor:into:`, swapping the
-  /// per-method scan to the FFI-site query and threading the module/function/
-  /// arity target.
-  class collectExtensionFfiSitesFor: module :: String function: function :: String arity: arity :: Object into: result :: List(Dictionary) -> List(Dictionary) =>
-    self
-      collectExtensionLinesInto: result
-      using: [:extSource |
-        self
-          ffiSitesIn: extSource
-          module: module
-          function: function
-          arity: arity
-      ]
-
   // ===== Source-Text Search (methodsMatching:) =====
 
   /// Return a collection of `{class, selector}` records for every method
@@ -1475,13 +1251,6 @@ sealed typed Object subclass: SystemNavigation
   /// for hot live-highlight paths. A maintained index is a follow-up
   /// optimisation (see ADR 0033 / BT-2201).
   ///
-  /// Extension methods (ADR 0066) are scanned when registered with source via
-  /// `beamtalk_extensions:register/5` (BT-2196). The `#class` for an
-  /// extension hit is the extended target class (or its metaclass object for
-  /// `Target class` extensions); an extension whose target class has been
-  /// removed is skipped (BT-4418). `register/4` registrations without source
-  /// remain invisible.
-  ///
   /// ## Examples
   /// ```beamtalk
   /// pat := (Regex from: "ifTrue:") unwrap
@@ -1495,7 +1264,7 @@ sealed typed Object subclass: SystemNavigation
     (aRegex isKindOf: Regex) ifFalse: [
       self error: "SystemNavigation methodsMatching: requires a Regex argument"
     ]
-    classScan := self
+    self
       liveClassesIn: self allClasses
       inject: List new
       into: [:acc :cls |
@@ -1512,8 +1281,6 @@ sealed typed Object subclass: SystemNavigation
           in: cls class
           into: withInstance
       ]
-    // BT-2196: walk source-bearing extensions registered via `register/5`.
-    self collectExtensionMethodsMatching: aRegex into: classScan
 
   /// Append `{class, selector}` records for methods of `aScope` whose source
   /// matches `aRegex` to `result`. Returns the (possibly extended) result.
@@ -1544,8 +1311,8 @@ sealed typed Object subclass: SystemNavigation
   /// `aPattern` (case-insensitive substring match).
   ///
   /// Powers omni-bar / Cmd-T "find any selector" surfaces in an IDE. Collects
-  /// instance-side selectors, class-side selectors, and extension-method
-  /// selectors (ADR 0066), then filters by lowercase substring match.
+  /// instance-side and class-side selectors, then filters by lowercase
+  /// substring match.
   ///
   /// Matching uses `selectorString lowercase includesSubstring: aPattern
   /// lowercase`, mirroring Pharo's `SystemNavigation >>
@@ -1566,11 +1333,6 @@ sealed typed Object subclass: SystemNavigation
   ///   falls back to the legacy `selectorsForClass:` gather for that class only,
   ///   and the runtime logs one `xref_miss` warning. The partition is computed
   ///   runtime-side by `beamtalk_xref:defined_selectors_bt/0`.
-  ///
-  /// Extension-method selectors (ADR 0066) are not yet in the index, so they
-  /// are still gathered unconditionally via `selectorsForClass:` over the full
-  /// scope; the final `unique sort` absorbs the overlap with the indexed and
-  /// fallback selectors.
   ///
   /// Raises an error if the argument is not a String, or if the pattern is
   /// empty (an empty pattern would match every selector and is almost
@@ -1604,156 +1366,28 @@ sealed typed Object subclass: SystemNavigation
     fallbackClasses := partition at: #fallback_classes
     indexedSels := self indexedSelectorsFrom: indexedRows into: List new
     // Miss-policy fallback: gather selectors only from the loaded-but-unindexed
-    // classes (instance, class-side, and their extensions). Keep the growing
+    // classes (instance and class-side). Keep the growing
     // accumulator on the RIGHT of `++` so each step copies only the small
     // per-class list and shares `acc` — `++` copies only its LEFT operand, so
     // `(perClass) ++ acc` keeps the walk O(total_selectors) rather than O(n²).
-    fallbackSels := self
+    allSels := self
       liveClassesIn: (self classesNamed: fallbackClasses)
       inject: indexedSels
       into: [:acc :cls | (self selectorsForClass: cls) ++ acc]
-    // Extension selectors are not in the index yet, so gather them across the
-    // full scope; `unique sort` below absorbs any overlap with the above.
-    allSels := self
-      liveClassesIn: self allClasses
-      inject: fallbackSels
-      into: [:acc :cls | (self extensionSelectorsForBothSides: cls) ++ acc]
     matches := allSels select: [:sel |
       sel asString lowercase includesSubstring: needle
     ]
     matches unique sort
 
-  /// Return every selector defined on the given class: instance-side,
-  /// class-side, and extension-method selectors (ADR 0066) registered on
-  /// either the instance tag or the metaclass tag.
+  /// Return every selector defined on the given class: instance-side and
+  /// class-side.
   ///
   /// Internal helper for `selectorsMatching:`. Splits the per-class gather
   /// out so the surrounding `inject:into:` body stays a single expression,
   /// mirroring the `collectSendersFor:in:into:` / `sendersOf:` pairing
   /// above.
-  ///
-  /// The `respondsTo: #name` guard (mirroring `collectSendersFor:in:into:`)
-  /// keeps a registry-shaped value that lacks a name from aborting the walk
-  /// — it is silently skipped for extension lookups instead. (Every real
-  /// `Behaviour` answers `name`; the guard is purely defensive.)
   class selectorsForClass: aClass :: Behaviour -> List(Symbol) =>
-    instance := aClass methods
-    classSide := aClass class methods
-    instance ++ classSide ++ (self extensionSelectorsForBothSides: aClass)
-
-  /// Return the extension-method selectors (ADR 0066) registered against the
-  /// class on either the instance tag or the metaclass tag.
-  ///
-  /// Split out of `selectorsForClass:` (BT-2302) so `selectorsMatching:` can
-  /// gather extension selectors over the full scope independently of the
-  /// indexed class-body selectors (extensions are not yet in the xref index).
-  ///
-  /// The `respondsTo: #name` guard keeps a registry-shaped value that lacks a
-  /// name from aborting the walk — it contributes no extension selectors
-  /// instead. (Every real `Behaviour` answers `name`; the guard is defensive.)
-  class extensionSelectorsForBothSides: aClass :: Behaviour -> List(Symbol) =>
-    (aClass respondsTo: #name) ifFalse: [^List new]
-    className := aClass name
-    instanceExtensions := self extensionSelectorsFor: className
-    // class_object_tag/1 is the runtime authority that encodes the metaclass
-    // display tag (`Foo` -> `Foo class`); resolveExtensionClass: decodes it via
-    // the same authority (BT-2223), so forward and reverse cannot drift.
-    metaTag := self classObjectTag: className
-    classSideExtensions := self extensionSelectorsFor: metaTag
-    instanceExtensions ++ classSideExtensions
-
-  /// Return the selectors of all extension methods (ADR 0066) registered
-  /// against the given class tag.
-  ///
-  /// Internal helper for `selectorsForClass:`. The extension registry
-  /// returns `{Selector, Owner}` 2-tuples; this strips the owner, keeping
-  /// only the selector atoms. Returns `[]` when the tag has no extensions.
-  ///
-  /// BT-2254: `Erlang beamtalk_extensions list:` is specced as a list of
-  /// `{atom(), atom()}` tuples, so the per-entry `entry at: 1` infers `Symbol`
-  /// directly — no `@expect type` suppression needed.
-  class extensionSelectorsFor: classTag :: Symbol -> List(Symbol) =>
-    rawEntries := self extensionEntriesFor: classTag
-    rawEntries collect: [:entry | entry at: 1]
-
-  // ===== Shared Extension-Body Scan Helpers =====
-
-  /// The one extension-body scan shared by the line-reporting
-  /// `collectExtension*For:into:` queries (senders, references, FFI sites).
-  /// For every live extension (ADR 0066 / BT-2196) `linesBlock` is given the
-  /// extension's source and answers the 1-based line numbers of its hits; one
-  /// `#{#class, #selector, #line}` record per line is appended to `result`,
-  /// shaped identically to the class-body scan. Returns the (possibly extended)
-  /// result. An extension whose target class has been removed is skipped
-  /// (BT-4418) by `liveExtensionsIn:`.
-  class internal collectExtensionLinesInto: result :: List(Dictionary) using: linesBlock :: Block(String, List(Integer)) -> List(Dictionary) =>
-    extEntries := self liveExtensionsIn: self allExtensionsWithSource
-    extEntries
-      inject: result
-      into: [:acc :ext |
-        extClass := ext at: #class
-        extSelector := ext at: #selector
-        lines := linesBlock value: (ext at: #source)
-        lines
-          inject: acc
-          into: [:innerAcc :line |
-            innerAcc add: #{
-              #class => extClass,
-              #selector => extSelector,
-              #line => line
-            }
-          ]
-      ]
-
-  /// Append senders of `aSelector` found in every extension method source
-  /// (ADR 0066 / BT-2196) to `result`. Returns the (possibly extended) result.
-  ///
-  /// Iterates the extension sources table — populated by
-  /// `beamtalk_extensions:register/5` — and runs the same per-method scan as
-  /// `collectSendersFor:in:into:` on each registered body. Extensions
-  /// registered via `register/4` (without source) are silently absent from
-  /// the source table and therefore from the scan; that is the documented
-  /// behaviour (see `sendersOf:` docstring).
-  ///
-  /// Each match emits a Dictionary `#{#class => Class, #selector => Selector,
-  /// #line => Line}` shaped identically to the class-side scan, so callers
-  /// cannot distinguish a hit on an extension from a hit on a class-body
-  /// method. The `#class` value is resolved from the extension's registry
-  /// tag via `liveExtensionsIn:` — the class object for an instance-side tag
-  /// (e.g. `#Integer`), the metaclass object for a class-side tag (e.g.
-  /// `#'String class'`). An extension whose target class has been removed is
-  /// skipped, never reported with a raw Symbol `#class` (BT-4418).
-  class collectExtensionSendersFor: aSelector :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
-    self collectExtensionLinesInto: result using: [:extSource |
-      self sendersIn: extSource selector: aSelector
-    ]
-
-  /// Append references to `targetName` found in every extension method
-  /// source (ADR 0066 / BT-2196) to `result`. Returns the (possibly extended)
-  /// result. Mirrors `collectExtensionSendersFor:into:`, swapping the
-  /// per-method scan to `findReferencesToIn:class:`.
-  class collectExtensionReferencesFor: targetName :: String into: result :: List(Dictionary) -> List(Dictionary) =>
-    self collectExtensionLinesInto: result using: [:extSource |
-      self referencesIn: extSource class: targetName
-    ]
-
-  /// Append `{class, selector}` records for every extension method (ADR 0066
-  /// / BT-2196) whose source matches `aRegex` to `result`. Returns the
-  /// (possibly extended) result. Mirrors `collectMethodsMatching:in:into:`
-  /// but iterates the extension sources table rather than a class's
-  /// instance method dictionary.
-  class collectExtensionMethodsMatching: aRegex :: Regex into: result :: List(Dictionary) -> List(Dictionary) =>
-    extEntries := self liveExtensionsIn: self allExtensionsWithSource
-    extEntries
-      inject: result
-      into: [:acc :ext |
-        extClass := ext at: #class
-        extSelector := ext at: #selector
-        extSource := ext at: #source
-        (extSource matchesRegex: aRegex) ifTrue: [
-          acc add: #{#class => extClass, #selector => extSelector}
-        ] ifFalse: [acc]
-      ]
+    aClass methods ++ aClass class methods
 
   // ===== Unimplemented Selectors (typo finder, ADR 0087 / BT-2303) =====
 
@@ -1764,8 +1398,7 @@ sealed typed Object subclass: SystemNavigation
   /// - `#selector` — the unimplemented selector (a Symbol)
   /// - `#sites` — a List of site Dictionaries, one per send. Each site has:
   ///   - `#class` — the class whose method contains the send (class object for
-  ///     an instance-side hit, metaclass object for a class-side hit, or the
-  ///     resolved extension target for an extension hit)
+  ///     an instance-side hit, metaclass object for a class-side hit)
   ///   - `#selector` — the selector of the method that contains the send
   ///   - `#line` — the 1-based line number within that method's source
   ///
@@ -1778,8 +1411,8 @@ sealed typed Object subclass: SystemNavigation
   /// Computes `allSentSelectors − allDefinedSelectors`, both sets read from the
   /// runtime-maintained xref index (`beamtalk_xref`) rather than re-parsed:
   /// - The defined set is the indexed `defined_selectors_bt` rows
-  ///   (instance- and class-side), unioned with the extension selectors (not
-  ///   yet indexed) and the documented `runtimeProvidedSelectors`.
+  ///   (instance- and class-side), unioned with the documented
+  ///   `runtimeProvidedSelectors`.
   /// - The sent sites come from `all_sends_bt` — one indexed row per send,
   ///   carrying the sent selector, the containing method's owner / side /
   ///   selector / line, and the receiver tag. Sends whose selector is in the
@@ -1797,8 +1430,6 @@ sealed typed Object subclass: SystemNavigation
   ///   runtime logs one `xref_miss` warning. The partitions are computed
   ///   runtime-side by `beamtalk_xref:defined_selectors_bt/0` and
   ///   `beamtalk_xref:all_sends_bt/0`.
-  /// - Extension selectors / sends (ADR 0066) are not yet in the index, so they
-  ///   are gathered unconditionally across the full scope.
   ///
   /// ## Exclusions (and their limits)
   ///
@@ -1829,14 +1460,13 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Performance
   ///
-  /// Two sub-millisecond ETS reads (`defined_selectors_bt` + `all_sends_bt`)
-  /// plus the unindexed extension scan, in place of the former per-call AST
-  /// walk over every method source (same migration as `sendersOf:`; see
-  /// `docs/development/benchmarks.md`).
+  /// Two sub-millisecond ETS reads (`defined_selectors_bt` + `all_sends_bt`),
+  /// in place of the former per-call AST walk over every method source (same
+  /// migration as `sendersOf:`; see `docs/development/benchmarks.md`).
   ///
   /// Returns `[]` when the registry is clean (modulo the documented
-  /// exclusions). Source-less methods and `register/4` extensions (no source)
-  /// contribute neither sends nor flags, exactly as in `sendersOf:`.
+  /// exclusions). Source-less methods contribute neither sends nor flags,
+  /// exactly as in `sendersOf:`.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -1857,8 +1487,8 @@ sealed typed Object subclass: SystemNavigation
     // miss set independently (one warning per query each).
     fallbackClasses := self unionFallbackClasses: (definedPartition at: #fallback_classes) with: (sendsPartition at: #fallback_classes)
     fallbackScope := self classesNamed: fallbackClasses
-    // Defined set = indexed defines + fallback-class defines + extension
-    // selectors (not yet indexed) + the documented runtime-provided selectors.
+    // Defined set = indexed defines + fallback-class defines + the documented
+    // runtime-provided selectors.
     indexedDefined := self definedSetFromIndex: definedRows into: Set new
     withFallbackDefined := self
       liveClassesIn: fallbackScope
@@ -1868,15 +1498,7 @@ sealed typed Object subclass: SystemNavigation
           innerAcc add: sel
         ]
       ]
-    withExtDefined := self
-      liveClassesIn: self allClasses
-      inject: withFallbackDefined
-      into: [:acc :cls |
-        (self extensionSelectorsForBothSides: cls) inject: acc into: [:innerAcc :sel |
-          innerAcc add: sel
-        ]
-      ]
-    excludedSet := self runtimeProvidedSelectors inject: withExtDefined into: [:acc :sel |
+    excludedSet := self runtimeProvidedSelectors inject: withFallbackDefined into: [:acc :sel |
       acc add: sel
     ]
     // The coarse DNU heuristic suppresses `self`/`super` sends in a class that
@@ -1909,11 +1531,11 @@ sealed typed Object subclass: SystemNavigation
           excluding: excludedSet
           into: withInstance
       ]
-    // Extensions are not in the index yet, so scan them unconditionally.
-    groupedWithExt := self collectExtensionAllSendsExcluding: excludedSet into: groupedWithFallback
-    groupedWithExt keys inject: List new into: [:acc :sel |
-      acc add: #{#selector => sel, #sites => (groupedWithExt at: sel)}
-    ]
+    groupedWithFallback keys
+      inject: List new
+      into: [:acc :sel |
+        acc add: #{#selector => sel, #sites => (groupedWithFallback at: sel)}
+      ]
 
   /// Union two fallback-class lists into a List of class-name Symbols, dropping
   /// duplicates. Internal helper for the composite queries: the defined-set and
@@ -2091,9 +1713,7 @@ sealed typed Object subclass: SystemNavigation
     sends
       inject: result
       into: [:acc :s |
-        sentSel := s at: 1
-        line := s at: 2
-        recv := s at: 3
+        {sentSel, line, recv} := s
         self
           recordSend: sentSel
           line: line
@@ -2129,94 +1749,6 @@ sealed typed Object subclass: SystemNavigation
         result at: sentSel put: (existing add: site)
       ]
 
-  /// Append unimplemented-send sites found in every extension method source
-  /// (ADR 0066 / BT-2196) to the grouping Dictionary `result`. Returns the
-  /// (possibly extended) Dictionary.
-  ///
-  /// Mirrors `collectExtensionSendersFor:into:` but threads a grouping
-  /// Dictionary and asks the compiler for EVERY send via `allSendsIn:`. The
-  /// `#class` for a site is resolved from the extension's registry tag via
-  /// `liveExtensionsIn:`, matching the class-body scan; an extension whose
-  /// target class has been removed is skipped (BT-4418).
-  ///
-  /// The `doesNotUnderstand:` exclusion does not apply to extension sources:
-  /// `handlesDnu` is `false` because an extension target's DNU handler (if any)
-  /// is a property of the *target* class, and probing it would send to a class
-  /// that may be removed mid-query (BT-4065). Erring toward reporting is
-  /// safe — extension bodies are rare and the user can add a documented
-  /// exclusion if a real false positive ever appears.
-  class collectExtensionAllSendsExcluding: excluded :: Set(Symbol) into: result :: Dictionary -> Dictionary =>
-    extEntries := self liveExtensionsIn: self allExtensionsWithSource
-    extEntries
-      inject: result
-      into: [:acc :ext |
-        extClass := ext at: #class
-        extSelector := ext at: #selector
-        extSource := ext at: #source
-        self
-          appendAllSendsIn: extSource
-          owner: extClass
-          methodSelector: extSelector
-          handlesDnu: false
-          excluding: excluded
-          into: acc
-      ]
-
-  /// Resolve an extension registry class tag (an atom) to the class object
-  /// the navigation queries should report in `#class`.
-  ///
-  /// Two tag shapes occur in the extension registry, both resolved by a single
-  /// `findClass:` send (BT-2223):
-  /// - Instance-side tags (`#Integer`) resolve to the class object.
-  /// - Class-side tags (`#'Integer class'`) resolve to the metaclass object —
-  ///   matching what BT-2195's class-side method walk reports for an ordinary
-  ///   class-method hit (a metaclass *object*, not a Symbol). This keeps
-  ///   `record at: #class` comparable across class-body and extension hits.
-  ///
-  /// The metaclass-tag decode lives runtime-side in `beamtalk_interface`'s
-  /// `handle_class_named/1`, alongside the `beamtalk_class_registry` authority
-  /// that encodes the tag (`class_object_tag/1`). The stdlib no longer
-  /// reverse-engineers the `" class"` convention with string surgery.
-  ///
-  /// Answers `nil` when the lookup misses — the target class was removed
-  /// after the extension table was read, or a stray registry entry has no
-  /// class behind it. Every caller drops such an entry (BT-4418), the same
-  /// way indexed rows drop a `nil` from `senderClassFor:classSide:`, so a
-  /// query never reports the raw tag Symbol in place of a class. Nothing is
-  /// sent to the resolved value here (BT-4065).
-  ///
-  /// Return type is intentionally untyped (Dynamic) — the result is a class
-  /// object, a metaclass object, or `nil`, which have no shared supertype in
-  /// the declared type system.
-  class resolveExtensionClass: classTag :: Symbol -> Object =>
-    self findClass: classTag
-
-  /// Resolve each `{classTag, selector, source}` entry of `extEntries` (as
-  /// answered by `allExtensionsWithSource`) to a `#{#class, #selector,
-  /// #source}` record, dropping entries whose target class no longer resolves
-  /// (BT-4418). Shared by the `collectExtension*` walks so the resolution and
-  /// the removed-class rule live in one place.
-  ///
-  /// The source-text invariant of `allExtensionsWithSource` is asserted once
-  /// here, as the `:: String` local, so the `SystemNavigationExtensionRecord` shape carries it
-  /// to every reader and no reader re-casts `#source`.
-  class internal liveExtensionsIn: extEntries :: List(Tuple) -> List(SystemNavigationExtensionRecord) =>
-    extEntries
-      inject: List new
-      into: [:acc :entry |
-        extClass := self resolveExtensionClass: (entry at: 1)
-        extSource :: String := entry at: 3
-        extClass isNil
-          ifTrue: [acc]
-          ifFalse: [
-            acc add: #{
-              #class => extClass,
-              #selector => (entry at: 2),
-              #source => extSource
-            }
-          ]
-      ]
-
   // ===== Unused Selectors (dead-method finder, ADR 0087 / BT-2303) =====
 
   /// Return a List of dead-method *candidates* — selectors that are DEFINED on
@@ -2245,8 +1777,8 @@ sealed typed Object subclass: SystemNavigation
   /// from the runtime-maintained xref index via
   /// `beamtalk_xref:all_sent_selectors_bt/0` (the distinct set of selectors sent
   /// somewhere, Erlang-FFI sends already excluded runtime-side) rather than
-  /// re-parsed, unioned with the unindexed extension-body sends and the
-  /// loaded-but-unindexed fallback classes' source-scanned sends. The defined
+  /// re-parsed, unioned with the loaded-but-unindexed fallback classes'
+  /// source-scanned sends. The defined
   /// candidates are built by walking `cls methods` (instance-side, owner `cls`)
   /// and `cls class methods` (class-side, owner `cls class`) over the live class
   /// registry — a reflective method-dictionary read, NOT a source re-parse — so
@@ -2294,16 +1826,10 @@ sealed typed Object subclass: SystemNavigation
   ///   a false positive. This is an inherent limit of a static scan; no special
   ///   casing is attempted.
   ///
-  /// Extension methods (ADR 0066) are out of scope on the *defined* side:
-  /// unused-detection covers instance-side and class-side definitions only,
-  /// extension methods are never flagged. Extension *bodies* ARE scanned for
-  /// sends, so they still count toward marking ordinary methods as used.
-  ///
   /// ## Performance
   ///
   /// One sub-millisecond ETS read (`all_sent_selectors_bt`) for the sent set
-  /// plus the reflective defined-candidate walk and the unindexed extension
-  /// scan, in place of the former per-call AST walk over every method source
+  /// plus the reflective defined-candidate walk, in place of the former per-call AST walk over every method source
   /// (same migration as `sendersOf:`; see `docs/development/benchmarks.md`).
   ///
   /// Returns `[]` when nothing qualifies. Note that a real stdlib has many
@@ -2326,15 +1852,13 @@ sealed typed Object subclass: SystemNavigation
     sentSet := self sentSetFromIndex: indexedSent into: Set new
     // Miss-policy fallback: source-scan sends only from the loaded-but-unindexed
     // classes, both sides, exactly as the legacy walk did.
-    withFallbackSent := self
+    fullSentSet := self
       liveClassesIn: (self classesNamed: fallbackClasses)
       inject: sentSet
       into: [:acc :cls |
         withInstance := self collectSentSelectorsIn: cls into: acc
         self collectSentSelectorsIn: cls class into: withInstance
       ]
-    // Extensions are not in the index yet, so scan their bodies unconditionally.
-    fullSentSet := self collectExtensionSentSelectorsInto: withFallbackSent
     excluded := self runtimeCalledSelectors inject: Set new into: [:acc :sel |
       acc add: sel
     ]
@@ -2444,29 +1968,8 @@ sealed typed Object subclass: SystemNavigation
     sends
       inject: result
       into: [:acc :s |
-        sentSel := s at: 1
-        recv := s at: 3
+        {sentSel, _, recv} := s
         recv == #erlang_ffi ifTrue: [acc] ifFalse: [acc add: sentSel]
-      ]
-
-  /// Add every non-FFI sent selector found in any extension method source
-  /// (ADR 0066 / BT-2196) to the Set `result`. Returns the (possibly extended)
-  /// Set.
-  ///
-  /// Internal helper for `unusedSelectors`. Mirrors
-  /// `collectExtensionSendersFor:into:` but accumulates into a Set and asks the
-  /// compiler for EVERY send. Extension bodies count toward marking ordinary
-  /// methods as used even though extension methods themselves are not candidates
-  /// for the unused report.
-  class collectExtensionSentSelectorsInto: result :: Set(Symbol) -> Set(Symbol) =>
-    extEntries := self allExtensionsWithSource
-    extEntries
-      inject: result
-      into: [:acc :entry |
-        extSource :: String := entry at: 3
-        // `extSource` is bound `:: String` above to re-assert the source-text
-        // invariant the `allExtensionsWithSource` seam erases (BT-2254).
-        self addSentSelectorsIn: extSource into: acc
       ]
 
   /// Append a `#{#class, #selector}` record for every locally-defined selector
@@ -2555,9 +2058,8 @@ sealed typed Object subclass: SystemNavigation
 
   // ===== Internal FFI seams (ADR 0101 Part 4) =====
   //
-  // SystemNavigation orchestrates four backing modules
-  // (`beamtalk_interface` / `beamtalk_xref` / `beamtalk_extensions` /
-  // `beamtalk_class_registry`), so it cannot be a single `native:` class.
+  // SystemNavigation orchestrates three backing modules
+  // (`beamtalk_interface` / `beamtalk_xref` / `beamtalk_class_registry`), so it cannot be a single `native:` class.
   // Instead, every Erlang call the query logic makes is funnelled through one
   // of the thin `internal` seams below. The public/helper methods above stay
   // pure Beamtalk; each Erlang call site is a one-line seam, deduplicated by
@@ -2634,32 +2136,6 @@ sealed typed Object subclass: SystemNavigation
       module: aModule
       function: aFunction
       arity: anArity
-
-  /// Package owners (atoms) of extension methods on class `aName`.
-  class internal extensionOwnersOf: aName :: Symbol -> List(Symbol) =>
-    (Erlang beamtalk_extensions) extenders_of: aName
-
-  /// `{extendedClass, selector}` pairs contributed by owner `anOwner`.
-  class internal extensionPairsBy: anOwner :: Symbol -> List(Tuple) =>
-    (Erlang beamtalk_extensions) extensions_by: anOwner
-
-  /// Every registered extension `{classTag, selector, source}` entry.
-  ///
-  /// INVARIANT: the third tuple element (`entry at: 3`, the extension source)
-  /// is always a String. The underlying FFI spec types it `binary()`
-  /// (String | Binary, BT-2254), but the runtime always delivers source text.
-  /// The `List(Tuple)` return type drops per-element precision, so `entry at: 3`
-  /// reads as `Dynamic`. To restore the static `String` check the inline FFI
-  /// gave (e.g. at the `ffiSitesIn:…` seam in `collectExtensionFfiSitesFor:`),
-  /// every consumer re-asserts the invariant by binding the source through a
-  /// typed local: `extSource :: String := entry at: 3`. If a non-String third
-  /// element ever appears, that typed binding fails loudly rather than silently.
-  class internal allExtensionsWithSource -> List(Tuple) =>
-    (Erlang beamtalk_extensions) listAllWithSource
-
-  /// `{selector, owner}` entries registered against class tag `aTag`.
-  class internal extensionEntriesFor: aTag :: Symbol -> List(Tuple) =>
-    (Erlang beamtalk_extensions) list: aTag
 
   /// The metaclass display tag (`Foo` -> `Foo class`) for `aName`.
   class internal classObjectTag: aName :: Symbol -> Symbol =>

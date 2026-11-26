@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Report — collects PASS / FAIL lines for a scenario run.
+Actor subclass: Report
+  state: lines = #()
+  state: failed = 0
+
+  check: name is: ok =>
+    ok
+      ifTrue: [self record: "PASS " ++ name]
+      ifFalse: [
+        self.failed := self.failed + 1
+        self record: "FAIL " ++ name
+      ]
+    ok
+
+  record: line =>
+    Console printLine: line
+    self.lines := self.lines add: line
+
+  info: text => self record: "INFO " ++ text
+
+  lines => self.lines
+
+  failed => self.failed

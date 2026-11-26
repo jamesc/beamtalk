@@ -39,11 +39,10 @@ fn expression_warning_carries_its_hint() {
 
 #[test]
 fn expression_warning_without_hint_has_no_hint_key() {
-    // An inline class with a standalone method targeting an unknown class:
-    // the port synthesises a hint-less warning for it.
-    let source = "Object subclass: Bt4449A\n  foo => 1\n\nBt4449Missing >> bar => 2\n";
+    // A selector with no near miss to suggest: the warning has no hint.
+    let source = "Object subclass: Bt4449A\n  foo => \"abc\" zzqxwv\n";
     let response = handle_compile_expression(&compile_expression_request(source));
-    let w = warning_containing(&response, "Standalone method targets unknown class");
+    let w = warning_containing(&response, "does not understand 'zzqxwv'");
     assert_eq!(w.hint, None);
 }
 
@@ -58,9 +57,9 @@ fn file_compile_warning_carries_its_hint() {
 
 #[test]
 fn file_compile_warning_without_hint_has_no_hint_key() {
-    let source = "Object subclass: Bt4449C\n  run => 1\n\nBt4449Missing >> bar => 2\n";
+    let source = "Object subclass: Bt4449C\n  run => \"abc\" zzqxwv\n";
     let response = handle_compile(&compile_request(source));
-    let w = warning_containing(&response, "Standalone method targets unknown class");
+    let w = warning_containing(&response, "does not understand 'zzqxwv'");
     assert_eq!(w.hint, None);
 }
 

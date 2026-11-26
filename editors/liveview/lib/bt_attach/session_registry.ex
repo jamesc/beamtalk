@@ -60,7 +60,14 @@ defmodule BtAttach.SessionRegistry do
   never be allowed to grant access to another user's session.
   """
 
-  use GenServer
+  # BT-5129/BT-5189: `terminate/2` closes every live session, bounded by
+  # `@close_all_timeout_ms`. The supervisor's shutdown bound for this child
+  # must be larger, or it kills the registry mid-close (the default 5000 ms
+  # used to equal the close bound, so slow closes were cut off).
+  @close_all_timeout_ms 4_000
+  @shutdown_ms @close_all_timeout_ms + 2_000
+
+  use GenServer, shutdown: @shutdown_ms
 
   require Logger
 
@@ -226,7 +233,29 @@ defmodule BtAttach.SessionRegistry do
   @impl true
   def init(opts) do
     reap_after = Keyword.get(opts, :reap_after_ms, configured_reap_after())
+    # BT-5129: trap exits so a graceful stop (supervisor shutdown) runs
+    # `terminate/2` and closes the live sessions before the VM exits.
+    Process.flag(:trap_exit, true)
     {:ok, %{entries: %{}, reap_after_ms: reap_after}}
+  end
+
+  @doc false
+  def close_all_timeout_ms, do: @close_all_timeout_ms
+
+  # BT-5129: a graceful front stop used to leave every session to the
+  # workspace's 4 h idle bound, because `release/1` only arms a grace timer the
+  # exiting VM never fires. Close them here, in parallel and bounded, so a hung
+  # workspace cannot hold up shutdown.
+  @impl true
+  def terminate(_reason, state) do
+    tasks =
+      for {_token, %Entry{session_pid: pid}} <- state.entries, is_pid(pid) do
+        Task.async(fn -> Workspace.close_session(pid) end)
+      end
+
+    _ = Task.yield_many(tasks, @close_all_timeout_ms)
+    Enum.each(tasks, &Task.shutdown(&1, :brutal_kill))
+    :ok
   end
 
   @impl true

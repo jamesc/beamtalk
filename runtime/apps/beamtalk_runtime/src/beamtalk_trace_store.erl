@@ -134,6 +134,13 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
 -export([sweep_pending/1]).
 -endif.
 
+%% A `{Name, Node}` dispatch target: a send to a node-qualified registered
+%% ref that addresses the name directly (BT-5271), with no pid to key by.
+-define(IS_REMOTE_NAME_DEST(D),
+    (is_tuple(D) andalso tuple_size(D) =:= 2 andalso is_atom(element(1, D)) andalso
+        is_atom(element(2, D)))
+).
+
 %% Atomics slot offsets (per aggregate key: {Class, Selector} or {Pid, Selector})
 -define(SLOT_CALLS, 1).
 -define(SLOT_OK, 2).
@@ -276,12 +283,19 @@ gen_server), for lock-free performance. Class comes from the dispatch
 metadata — the authoritative source.
 """.
 -spec record_dispatch(term(), term(), non_neg_integer(), atom(), atom(), term()) -> ok.
-record_dispatch(Pid, Selector, _Duration, _Outcome, _Mode, Class) when
-    not is_pid(Pid); not is_atom(Selector); not is_atom(Class)
+record_dispatch(_Pid, Selector, _Duration, _Outcome, _Mode, Class) when
+    not is_atom(Selector); not is_atom(Class)
 ->
     %% Malformed metadata (the function is exported and any code can emit the
-    %% event): per-actor rows are keyed by pid, and a non-atom class or
-    %% selector would poison the stats readers. Drop the sample.
+    %% event): a non-atom class or selector would poison the stats readers.
+    %% Drop the sample.
+    ok;
+record_dispatch(Target, _Selector, _Duration, _Outcome, _Mode, _Class) when
+    not is_pid(Target), not ?IS_REMOTE_NAME_DEST(Target)
+->
+    %% A target that is neither a pid nor a `{Name, Node}` send to a
+    %% node-qualified ref (BT-5271): per-actor rows are keyed by pid, so
+    %% nothing can be recorded for it. Drop the sample.
     ok;
 record_dispatch(Pid, Selector, Duration, Outcome, Mode, Class) ->
     %% A missing table (the gen_server mid-restart, or a hot upgrade whose new
@@ -303,7 +317,8 @@ do_record_dispatch(Pid, Selector, Duration, Outcome, _Mode, Class) ->
     %% remote actor's liveness is not observable without a node round-trip.
     %% Remote actors still count in the per-class aggregate above; their
     %% per-actor detail belongs to the node that hosts them.
-    case is_enabled() andalso node(Pid) =:= node() of
+    %% A `{Name, Node}` target (BT-5271) is always remote: aggregate only.
+    case is_enabled() andalso is_pid(Pid) andalso node(Pid) =:= node() of
         true ->
             maybe_add_sample(ensure_pid_slot(Pid, Selector, Class), Duration, Outcome);
         false ->
@@ -717,8 +732,6 @@ handle_call(disable, _From, State) ->
     {reply, ok, drop_sweep(State)};
 handle_call({dispatch_flag, Fun}, _From, State) ->
     %% A raise in `Fun` goes back to the caller, not into this process.
-    %% bt-catcher-audit: not-applicable-no-block - Fun is beamtalk_telemetry's
-    %% flag refresh, never a Beamtalk block
     Reply =
         try Fun() of
             Result -> {ok, Result}

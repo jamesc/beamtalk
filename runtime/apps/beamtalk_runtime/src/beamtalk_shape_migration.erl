@@ -28,9 +28,8 @@ populate those keys.
 
 **Migrations run in the calling process**, not the class's gen_server:
 `invoke_hook/3` resolves the class's registered class object and calls
-`beamtalk_object_class:local_call/3` (`performLocally:withArguments:`'s
-Erlang surface) — proven safe mid-reload by BT-3535's napkin spike. A raised
-exception, a `does_not_understand` (stale/mismatched migrations table), or a
+`beamtalk_object_class:local_call/3`, proven safe mid-reload by BT-3535's
+napkin spike. A raised exception, a `does_not_understand` (stale/mismatched migrations table), or a
 non-`Dictionary` hook result all become a `{error, {Step, Selector, Reason}}`
 from `beamtalk_shape_chain:migrate/4`, wrapped here as
 `#beamtalk_error{kind = shape_migration_failed}`.
@@ -463,8 +462,6 @@ safe_value_new_defaults(_Class, Module) ->
 
 -spec safe_actor_init_defaults(atom(), atom()) -> map().
 safe_actor_init_defaults(Class, Module) ->
-    %% bt-catcher-audit: not-applicable-other-process - actor init/1 field defaults, not a
-    %% class-method region
     try Module:init(#{?BT_SKIP_INITIALIZE_KEY => true}) of
         {ok, Map} when is_map(Map) ->
             Map;
@@ -762,8 +759,10 @@ operator-initiated rollback genuinely cannot use the new fields.
 
 Nested envelopes (from `pack/1`'s recursive `Value` packing) are unpacked
 first, depth-first, so migration hooks see ordinary instance maps, never raw
-envelope tuples. The result is tagged with `'$beamtalk_class'` and
-`'__shape_version__'` — a usable instance map, not a bare field dictionary.
+envelope tuples. The result is tagged with `'$beamtalk_class'` only — a usable instance map,
+not a bare field dictionary, and equal (`=:=`) to a freshly built Value with
+the same fields: `'__shape_version__'` is actor-state metadata and is never
+put on a `Value` (BT-5143).
 """.
 -spec unpack(envelope()) -> {ok, Instance :: map()} | {error, #beamtalk_error{}}.
 unpack(Envelope) ->
@@ -808,10 +807,15 @@ unpack({beamtalk_shape, Class, ShapeVersion, Fields}, Policy, Depth) when
             case unpack_nested_fields(Fields, Policy, Depth) of
                 {ok, UnpackedFields} ->
                     case migrate(Class, ShapeVersion, UnpackedFields) of
-                        {ok, NewFields, ToVersion} ->
-                            {ok, NewFields#{
-                                ?BT_CLASS_TAG_KEY => Class, '__shape_version__' => ToVersion
-                            }};
+                        {ok, NewFields, _ToVersion} ->
+                            %% No `'__shape_version__'` stamp: it is actor-state
+                            %% metadata and "never appears on a `Value` tagged
+                            %% map" (beamtalk_tagged_map:internal_fields/0). An
+                            %% extra key made an unpacked Value unequal (`=:=`,
+                            %% `hash`) to a freshly built equal one (BT-5143).
+                            %% pack/3 re-derives the version from the class's
+                            %% own metadata, so nothing reads it back.
+                            {ok, NewFields#{?BT_CLASS_TAG_KEY => Class}};
                         {error, _} = Err ->
                             Err
                     end;

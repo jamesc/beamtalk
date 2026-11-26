@@ -354,6 +354,21 @@ spawn_named_scoped(Scope, Link, Name, Module, Args) ->
                     {ok, Pid};
                 {error, {already_started, _Other}} ->
                     name_registered_error(Name);
+                {error, {register_timeout, Name}} ->
+                    %% BT-5192: `global` did not register the name in time
+                    %% (another node held its lock); the actor was stopped.
+                    {error,
+                        beamtalk_error:with_details(
+                            beamtalk_error:timeout(
+                                'Actor',
+                                spawnAs,
+                                <<
+                                    "The global name registry did not answer in time "
+                                    "(another node may hold its lock); the actor was not started"
+                                >>
+                            ),
+                            #{name => Name}
+                        )};
                 {error, Reason} ->
                     {error, Reason}
             catch
@@ -506,7 +521,12 @@ pid_class_candidates_remote_safe(Pid) when node(Pid) =:= node() ->
 pid_class_candidates_remote_safe(Pid) ->
     case
         beamtalk_call_failure:erpc(
-            node(Pid), ?BT_ACTOR_WIRE_MODULE, pid_class_candidates, [Pid], ?BT_REMOTE_CALL_TIMEOUT
+            node(Pid),
+            ?BT_ACTOR_WIRE_MODULE,
+            pid_class_candidates,
+            [Pid],
+            ?BT_REMOTE_CALL_TIMEOUT,
+            fun is_list/1
         )
     of
         {ok, Result} -> Result;
@@ -600,71 +620,74 @@ is_kernel_reserved(_) -> false.
 
 -doc """
 `global`'s resolve function for every Beamtalk `scope: #global` name (ADR
-0126 §4). Compares each candidate's start time (`actor_started_at/1`,
-reading the `'$beamtalk_actor_started_at'` process-dictionary marker
-`init/1` sets — possibly on the *other* node, via `erpc`) and keeps the
-older one, stopping the younger with `stop_global_conflict_loser/1`.
+0126 §4 and its BT-5193 amendment). Compares each candidate's start time
+(`actor_started_at/1`, reading the `'$beamtalk_actor_started_at'`
+process-dictionary marker `init/1` sets — possibly on the *other* node, via
+`erpc`) and keeps the older one, stopping the younger with
+`stop_global_conflict_loser/1`.
 
 When exactly one side reads `undefined` (no start time: an actor started by an
-older runtime during a rolling upgrade, ADR 0125, a `native:` actor, a raw
-non-Beamtalk process, or a process that has already exited) and the other has
-a time, the side with a time is kept (BT-4937). An `unreachable` read (the
-remote read failed) is not that case: it says nothing about age, so it takes
-the fallback below. Falls back to OTP's own `global:random_exit_name/3`
-tie-break when the start times cannot be compared (neither side has one, or
-either read was `unreachable`) — `global_name_server` calls this synchronously
-and expects a decision back, never an exception, so this must always return
-one. Note this fallback (only reachable when ages genuinely cannot be
-compared, per ADR 0126 §4 "falling back to random_exit_name's choice")
-inherits `random_exit_name/3`'s own force-kill of the pid it does not
-return — the `stop_global_conflict_loser/1` call after it is then a harmless
-no-op on an already-dead pid. The comparable-ages path above never does
-this: it always resolves via a graceful stop, never a kill.
+older runtime during a rolling upgrade, ADR 0125, a raw non-Beamtalk process,
+or a process that has already exited) and the other has a time, the side with
+a time is kept (BT-4937). Every case that cannot compare ages — an
+`unreachable` read (the remote read failed, which says nothing about age),
+neither side timed — and equal start times take one deterministic tie-break
+(`lower_node_pid/2`): keep the pid on the lower-named node (on one node, the
+lower pid). The loser is always stopped through
+`stop_global_conflict_loser/1`, which runs its `terminate/2` (BT-5231: this no
+longer falls back to `global:random_exit_name/3`, whose `exit(Pid, kill)`
+skips `terminate/2`).
+
+OTP runs this once per conflicting name, on one node, in `global`'s resolver
+process (not inside `global_name_server`); only the name exchange for that
+node pair waits on it. It must always return one of the two pids, never
+raise.
 """.
 -spec resolve_global_conflict(term(), pid(), pid()) -> pid().
-resolve_global_conflict(Name, Pid1, Pid2) ->
-    case {actor_started_at(Pid1), actor_started_at(Pid2)} of
-        {T1, T2} when is_integer(T1), is_integer(T2) ->
-            {Winner, Loser} =
-                case T1 =< T2 of
-                    true -> {Pid1, Pid2};
-                    false -> {Pid2, Pid1}
-                end,
-            stop_global_conflict_loser(Loser),
-            Winner;
-        {T1, undefined} when is_integer(T1) ->
-            %% BT-4937 mixed case: only Pid1 has a start time (Pid2 was started
-            %% by an older runtime that never wrote one, or is a `native:`
-            %% backing process). Keep the one that has a time (ADR 0126 §4).
-            stop_global_conflict_loser(Pid2),
-            Pid1;
-        {undefined, T2} when is_integer(T2) ->
-            stop_global_conflict_loser(Pid1),
-            Pid2;
-        _ ->
-            %% `global:random_exit_name/3` always returns one of its two
-            %% candidate pids (never `none`) per its own typespec.
-            case global:random_exit_name(Name, Pid1, Pid2) of
-                Pid1 ->
-                    stop_global_conflict_loser(Pid2),
-                    Pid1;
-                Pid2 ->
-                    stop_global_conflict_loser(Pid1),
-                    Pid2
-            end
-    end.
+resolve_global_conflict(_Name, Pid1, Pid2) ->
+    Winner =
+        case {actor_started_at(Pid1), actor_started_at(Pid2)} of
+            {T1, T2} when is_integer(T1), is_integer(T2), T1 < T2 -> Pid1;
+            {T1, T2} when is_integer(T1), is_integer(T2), T2 < T1 -> Pid2;
+            %% BT-4937 mixed case: only one side has a start time. Keep it.
+            {T1, undefined} when is_integer(T1) -> Pid1;
+            {undefined, T2} when is_integer(T2) -> Pid2;
+            %% Equal times, `unreachable`, or neither side timed (BT-5231).
+            _ -> lower_node_pid(Pid1, Pid2)
+        end,
+    Loser =
+        case Winner of
+            Pid1 -> Pid2;
+            Pid2 -> Pid1
+        end,
+    stop_global_conflict_loser(Loser),
+    Winner.
+
+%% The tie-break every node agrees on: the pid on the lower-named node, or on
+%% one node the lower pid (BT-5231, ADR 0126 BT-5193 amendment).
+-spec lower_node_pid(pid(), pid()) -> pid().
+lower_node_pid(Pid1, Pid2) when node(Pid1) =/= node(Pid2) ->
+    case node(Pid1) < node(Pid2) of
+        true -> Pid1;
+        false -> Pid2
+    end;
+lower_node_pid(Pid1, Pid2) ->
+    min(Pid1, Pid2).
 
 -doc """
 Stop the losing side of a resolved `global` name conflict with
 `{shutdown, global_name_conflict}` (ADR 0126 §4) — never `exit(Pid, kill)`,
 which OTP's own default resolver uses and which skips `terminate/2`
 entirely. Runs the (synchronous, blocking) `gen_server:stop/3` in a
-throwaway process rather than inline: `resolve_global_conflict/3` executes
-inside `global_name_server`'s own call, and blocking that process for the
-loser's full `terminate/2` would stall every other name operation
-cluster-wide until it returns. Best-effort: a `Loser` that is not a
-`gen_server` (or has already died) falls back to a plain `exit(Pid, kill)`,
-and any other failure is swallowed — the resolver's decision (which pid
+throwaway process rather than inline: `resolve_global_conflict/3` runs in
+`global`'s resolver process while the name exchange for that node pair waits
+on it, and blocking it for the loser's full `terminate/2` would hold up that
+exchange (`global:sync/0`) until it returns. Best-effort: only when that
+graceful stop fails (a `Loser` that is not a `gen_server`, has already died,
+or did not finish `terminate/2` within the timeout) does this throwaway
+process fall back to `exit(Pid, kill)`, so a loser never keeps running beside
+the winner; `resolve_global_conflict/3` itself never kills (BT-5231). Any
+other failure is swallowed — the resolver's decision (which pid
 wins the name) is already final by the time this runs; a failure to tidily
 stop the loser must never surface back into `global`.
 """.
@@ -699,7 +722,9 @@ started by a runtime older than BT-4937, a `native:` actor).
 Returns `unreachable` when the read itself failed (`erpc` timeout,
 `noconnection`, or a peer that lacks `started_at_from_dictionary/1`): that is
 a fact about the network, not the actor, so it says nothing about age and
-`resolve_global_conflict/3` falls back to OTP's tie-break.
+`resolve_global_conflict/3` takes its lower-node tie-break. The remote read
+is bounded by `?BT_GLOBAL_CONFLICT_READ_TIMEOUT` (~1 s), not the shared 5 s
+`?BT_REMOTE_CALL_TIMEOUT`: it holds up the heal's name exchange (BT-5231).
 """.
 -spec actor_started_at(pid()) -> integer() | undefined | unreachable.
 actor_started_at(Pid) when node(Pid) =:= node() ->
@@ -711,7 +736,8 @@ actor_started_at(Pid) ->
             ?BT_ACTOR_WIRE_MODULE,
             started_at_from_dictionary,
             [Pid],
-            ?BT_REMOTE_CALL_TIMEOUT
+            ?BT_GLOBAL_CONFLICT_READ_TIMEOUT,
+            fun(Answer) -> is_integer(Answer) orelse Answer =:= undefined end
         )
     of
         {ok, Result} -> Result;

@@ -103,9 +103,6 @@ out of the worker untouched.
 """.
 -spec fork_worker(fun(() -> term())) -> ok.
 fork_worker(Block) ->
-    %% bt-catcher-audit: not-applicable-other-process - the block runs in a
-    %% freshly spawned worker, not the caller's process (no home entry for
-    %% the caller's class there), and only an NLR is caught.
     try Block() of
         _Value -> ok
     catch

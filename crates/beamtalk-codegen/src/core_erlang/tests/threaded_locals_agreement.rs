@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! ADR 0131 §6 "One predicate, in `beamtalk-core`" (BT-3746): over the
-//! `class_var_program` corpus, every threaded set codegen's
+//! `arb_program` corpus, every threaded set codegen's
 //! `threaded_locals_of` computes in its own scope (`lookup_var`) is the set
 //! the `beamtalk-core` diagnostic pass's recognizer
 //! (`local_threading_construct` + `construct_outer_local_writes`) gives the
@@ -23,7 +23,8 @@ use beamtalk_core::semantic_analysis::block_facts::{
     construct_outer_local_writes, local_threading_construct,
 };
 use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
-use beamtalk_core::test_helpers::class_var_program::{Shapes, Spelling, gen_program};
+use beamtalk_core::test_helpers::test_support::draw_programs;
+use beamtalk_core::unparse::unparse_module;
 use std::collections::{HashMap, HashSet};
 
 /// The source-scope threaded set of every construct in a method body.
@@ -176,30 +177,84 @@ fn check_class(name: &str, source: &str) -> Result<Option<usize>, String> {
 }
 
 #[test]
-fn threaded_locals_of_agrees_with_the_core_recognizer_over_the_class_var_corpus() {
+fn threaded_locals_of_agrees_with_the_core_recognizer_over_the_program_corpus() {
     let mut agreed = 0;
     let mut compiled = 0;
-    for seed in 0..96u64 {
-        let size = 1 + u32::try_from(seed % 3).unwrap_or(0);
-        let program = gen_program(seed, size, Shapes::all());
-        for spelling in [Spelling::Open, Spelling::Sealed] {
-            for class in program.render(0, spelling) {
-                match check_class(&class.name, &class.source) {
-                    Ok(Some(n)) => {
-                        compiled += 1;
-                        agreed += n;
-                    }
-                    Ok(None) => {}
-                    Err(e) => panic!("seed {seed} size {size} {spelling:?}: {e}"),
+    for (i, module) in draw_programs("Prog", 400).iter().enumerate() {
+        let source = unparse_module(module);
+        // Instance-side and class-side: codegen scopes differ between the two.
+        for (side, source) in [("instance", source.clone()), ("class", class_side(&source))] {
+            match check_class("Prog", &source) {
+                Ok(Some(n)) => {
+                    compiled += 1;
+                    agreed += n;
                 }
+                Ok(None) => {}
+                Err(e) => panic!("program {i} ({side}): {e}"),
             }
         }
     }
-    // Not vacuous: the corpus (with `local_touch`) writes method locals
-    // inside loops, folds and protected blocks.
-    assert!(compiled > 50, "only {compiled} classes compiled");
+    assert!(compiled > 700, "only {compiled} classes compiled");
     assert!(
-        agreed > 20,
+        agreed >= 200,
+        "only {agreed} non-empty threaded sets compared"
+    );
+}
+
+/// The same class with its `run` method moved to the class side.
+fn class_side(source: &str) -> String {
+    let moved = source.replacen("\n  run", "\n  class run", 1);
+    assert_ne!(
+        moved, source,
+        "no `run` method header to move to the class side:\n{source}"
+    );
+    moved
+}
+
+/// Hand-written shapes for the constructs `arb_program` does not generate: the ones
+/// that bind block parameters (`do:`, `inject:into:`, `to:do:`, `timesRepeat:`) or open
+/// a protected region (`on:do:`, `ensure:`), where codegen's `lookup_var` scope and the
+/// source scope can diverge: parameter shadowing, fold accumulators, nested constructs
+/// writing an outer local, and locals first bound inside a block.
+const BLOCK_PARAM_SOURCES: &[&str] = &[
+    "Object subclass: Bp1\n  run =>\n    t := 0\n    #(1, 2, 3) do: [:x | t := t + x]\n    t\n",
+    "Object subclass: Bp2\n  run =>\n    t := 0\n    #(1, 2) do: [:t | t := t + 1]\n    t\n",
+    "Object subclass: Bp3\n  run =>\n    n := 0\n    s := #(1, 2, 3) inject: 0 into: [:acc :x | n := n + 1. acc + x]\n    s + n\n",
+    "Object subclass: Bp4\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + i]\n    sum\n",
+    "Object subclass: Bp5\n  run =>\n    c := 0\n    3 timesRepeat: [c := c + 1]\n    c\n",
+    "Object subclass: Bp6\n  run =>\n    r := 0\n    [r := 1. nil foo] on: Error do: [:e | r := r + 2]\n    r\n",
+    "Object subclass: Bp7\n  run =>\n    r := 0\n    [r := 1] ensure: [r := r + 1]\n    r\n",
+    "Object subclass: Bp8\n  run =>\n    t := 0\n    #(1, 2) do: [:x | #(3, 4) do: [:y | t := t + x + y]]\n    t\n",
+    "Object subclass: Bp9\n  run =>\n    t := 0\n    1 to: 3 do: [:i | [t := t + i] ensure: [u := i]]\n    t\n",
+    "Object subclass: Bp10\n  run =>\n    t := 0\n    #(1, 2) do: [:x | [t := t + x. nil bar] on: Error do: [:e | t := t + 10]]\n    t\n",
+    "Object subclass: Bp11\n  run =>\n    t := 0\n    #(1, 2) do: [:x | u := x. t := t + u]\n    t\n",
+];
+
+#[test]
+fn threaded_locals_of_agrees_with_the_core_recognizer_over_block_param_constructs() {
+    let mut agreed = 0;
+    let mut compiled = 0;
+    for source in BLOCK_PARAM_SOURCES {
+        let class_source = class_side(source);
+        for source in [*source, class_source.as_str()] {
+            let name = source
+                .strip_prefix("Object subclass: ")
+                .and_then(|rest| rest.split_whitespace().next())
+                .expect("source names its class");
+            match check_class(name, source) {
+                Ok(Some(n)) => {
+                    compiled += 1;
+                    agreed += n;
+                }
+                Ok(None) => {}
+                Err(e) => panic!("{name}: {e}"),
+            }
+        }
+    }
+    // Not vacuous: most shapes compile and each construct yields a non-empty set.
+    assert!(compiled >= 20, "only {compiled} classes compiled");
+    assert!(
+        agreed >= 50,
         "only {agreed} non-empty threaded sets compared"
     );
 }

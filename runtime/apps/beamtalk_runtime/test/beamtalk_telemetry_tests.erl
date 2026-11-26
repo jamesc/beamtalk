@@ -46,6 +46,7 @@ telemetry_test_() ->
         fun emit_returns_ok/0,
         fun dispatch_span_emits_span_with_outcome_when_enabled/0,
         fun dispatch_span_emits_nothing_by_default/0,
+        fun dispatch_span_to_a_remote_name_emits_no_events/0,
         fun dispatch_span_reraises_unchanged_when_disabled/0,
         fun dispatch_events_follow_erlang_api/0,
         fun dispatch_events_follow_app_env/0,
@@ -329,6 +330,21 @@ dispatch_span_emits_span_with_outcome_when_enabled() ->
         ?assertMatch(
             #{pid := Pid, class := 'Counter', outcome := ok, telemetry_span_context := _},
             StopMd
+        ),
+        ?assertEqual(ok, no_more()),
+        telemetry:detach(Id)
+    end).
+
+%% BT-5271: a send to a node-qualified registered ref has no pid. Even with
+%% events on it emits nothing, so handlers only ever see a pid under `pid`;
+%% it still answers its result (the trace store keeps the class aggregate).
+dispatch_span_to_a_remote_name_emits_no_events() ->
+    with_dispatch_events(fun() ->
+        Id = forward(?DISPATCH_EVENTS),
+        Dest = {bt5271_name, 'bt5271_peer@localhost'},
+        ?assertEqual(
+            result,
+            beamtalk_telemetry:dispatch_span(Dest, unknown, count, sync, fun() -> {result, ok} end)
         ),
         ?assertEqual(ok, no_more()),
         telemetry:detach(Id)

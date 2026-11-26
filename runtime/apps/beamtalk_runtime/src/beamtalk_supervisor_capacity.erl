@@ -114,8 +114,6 @@ slot on any failure. Runs in the supervisor process.
 -spec run_capped_start(ets:tid(), pid(), module(), atom(), [term()]) ->
     {ok, pid()} | {error, term()}.
 run_capped_start(Tid, MonPid, M, F, Args) ->
-    %% bt-catcher-audit: not-applicable-reraises - the catch clause frees the
-    %% ETS slot and re-raises, so the failure still propagates to OTP.
     try apply(M, F, Args) of
         {ok, Pid} when is_pid(Pid) ->
             track_capped_child(Tid, MonPid, Pid),

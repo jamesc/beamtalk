@@ -6,7 +6,7 @@
 /// cross-file context the lint surfaces must share to be reported at all.
 Object subclass: Caller
 
-  /// A selector no class or extension defines: does-not-understand.
+  /// A selector no class defines: does-not-understand.
   unknownSelector => Greeter new frobnicate
 
   /// `42` does not conform to the sibling file's `Greetable` protocol.

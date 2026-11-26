@@ -370,11 +370,6 @@ fn make_native_actor_with_class_methods() -> Module {
                 Span::new(0, 0),
             )
         }],
-        class_variables: vec![StateDeclaration {
-            default_value: Some(Expression::Literal(Literal::Integer(0), Span::new(0, 0))),
-            slot_kind: beamtalk_core::ast::SlotKind::default(),
-            ..StateDeclaration::test("current")
-        }],
         doc_comment: Some("A test native actor with class methods.".to_string()),
         backing_module: Some(Identifier::new("test_rich_backing", Span::new(0, 0))),
         ..ClassDefinition::test("TestNativeRich", Some("Actor"), ClassKind::Actor)
@@ -490,19 +485,6 @@ fn test_native_facade_cross_module_alias_reference_emits_user_type() {
         "module must declare the matching named -type for the cross-module alias",
         &code,
         &["'restart_strategy'"],
-    );
-}
-
-#[test]
-fn test_native_facade_class_variables_in_builder_state() {
-    // ADR 0056: classState: should appear in BuilderState
-    let module = make_native_actor_with_class_methods();
-    let result = generate_module(&module, CodegenOptions::new("bt@test_rich"));
-    let code = result.unwrap();
-    assert_has(
-        "BuilderState should include class variables",
-        &code,
-        &["'classState' => ~{'current' =>"],
     );
 }
 

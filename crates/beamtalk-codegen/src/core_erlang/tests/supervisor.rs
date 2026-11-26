@@ -294,7 +294,7 @@ fn test_supervisor_instance_methods_are_compiled_with_dispatch() {
     );
     assert!(
         code.contains("call 'bt@stdlib@supervisor':'dispatch'(Selector, Args, Self)")
-            && code.contains("call 'beamtalk_extensions':'lookup'('WebApp', Selector)"),
+            && !code.contains("beamtalk_extensions"),
         "dispatch/3 must delegate other selectors to the Supervisor base. Got:\n{code}"
     );
     let local = code
@@ -314,7 +314,6 @@ fn test_is_actor_class_returns_true_for_supervisor_subclass() {
     let module = make_static_supervisor_module();
     let (hierarchy, _) =
         beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module);
-    let hierarchy = hierarchy.unwrap();
     assert!(
         CoreErlangGenerator::is_actor_class(&module, &hierarchy),
         "Supervisor subclass must be routed through generate_actor_module. Got false."
@@ -326,7 +325,6 @@ fn test_is_actor_class_returns_true_for_dynamic_supervisor_subclass() {
     let module = make_dynamic_supervisor_module();
     let (hierarchy, _) =
         beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module);
-    let hierarchy = hierarchy.unwrap();
     assert!(
         CoreErlangGenerator::is_actor_class(&module, &hierarchy),
         "DynamicSupervisor subclass must be routed through generate_actor_module. Got false."

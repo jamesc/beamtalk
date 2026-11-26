@@ -18,21 +18,33 @@
     "why": "a quote inside a line comment must not be read as a string delimiter"
   },
   {
-    "kind": "block_comment",
+    "kind": "line_comment",
+    "source": "// note\r\nbeta := 2",
+    "expected_end": 7,
+    "why": "a line comment in a CRLF file ends before the \\r\\n line ending; the \\r is not part of the comment (BT-5182)"
+  },
+  {
+    "kind": "block_comment_opener",
     "source": "/* note */",
     "expected_end": 10,
-    "why": "a simple block comment closes at its own */"
+    "why": "a stray block-comment opener skips to the end of its line (BT-5229)"
   },
   {
-    "kind": "block_comment",
+    "kind": "block_comment_opener",
     "source": "/* a { b */ rest",
-    "expected_end": 11,
-    "why": "an unbalanced brace inside a block comment must not be read as real code; the comment ends at its own closing */, not at the end of the whole source"
+    "expected_end": 16,
+    "why": "the rest of the opener's line is skipped, including a closing */ and an unbalanced brace"
   },
   {
-    "kind": "block_comment",
-    "source": "/* { */",
+    "kind": "block_comment_opener",
+    "source": "/* abc\n  x\n\nObject subclass: Foo\n  y => 1",
+    "expected_end": 6,
+    "why": "only the opener's own line is skipped, so a later definition is never swallowed"
+  },
+  {
+    "kind": "block_comment_opener",
+    "source": "/* note\r\nbeta := 2",
     "expected_end": 7,
-    "why": "an opening brace immediately inside a block comment must not bump nesting depth"
+    "why": "a CRLF line ending stays out of the skipped span"
   }
 ]

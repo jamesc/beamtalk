@@ -7,15 +7,13 @@
 //!
 //! This module contains project-wide compilation passes that operate across
 //! multiple source files. Individual file analysis lives in `semantic_analysis`;
-//! these passes coordinate cross-file concerns like extension method indexing
-//! and conflict detection.
+//! these passes coordinate cross-file concerns like dependency ordering and the
+//! same-file extension fold.
 
 pub mod dep_graph;
 pub mod dep_order;
 pub mod dependency;
 pub mod diagnostics_policy;
-pub mod extension_conflicts;
-pub mod extension_index;
 pub mod ffi_stubs;
 pub mod same_file_fold;
 
@@ -26,11 +24,7 @@ pub use diagnostics_policy::{
     load_diagnostics_table_for_root, parse_diagnostics_table,
     parse_diagnostics_table_from_manifest_toml, parse_package_name_from_manifest_toml,
 };
-pub use extension_conflicts::{
-    ExtensionConflict, conflict_diagnostics, detect_extension_conflicts, shadowing_diagnostics,
+pub use same_file_fold::{
+    declared_class_names, fold_same_file_extensions, is_same_file_extension,
+    reject_cross_file_extensions,
 };
-pub use extension_index::{
-    ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
-    collect_extensions,
-};
-pub use same_file_fold::{declared_class_names, fold_same_file_extensions, is_same_file_extension};

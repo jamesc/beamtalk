@@ -107,24 +107,6 @@ TestCase subclass: ClassSideBehaviourProtocolTest
   testObjectClassMethodSelfPrintStringInClassProcess =>
     self assert: Bt4252ClassProtocolObjectChild selfPrintString equals: Bt4252ClassProtocolObjectChild printString
 
-  // BT-4262: the `doc:` setter still messages the class process, which
-  // cannot answer from inside one of its own class methods: a structured
-  // `dispatch_error` naming the send, and the doc is unchanged.
-  testActorClassMethodSelfSetDocInClassProcessRaisesDispatchError =>
-    self should: [
-      Bt4252ClassProtocolActorChild selfSetDoc
-    ] raise: #dispatch_error
-    selector := [
-      Bt4252ClassProtocolActorChild selfSetDoc
-    ] on: Exception do: [:e | e selector]
-    self assert: selector equals: #doc:
-    self assert: Bt4252ClassProtocolActorChild doc equals: "The actor child of the BT-4252 class-protocol fixtures."
-
-  testObjectClassMethodSelfSetDocInClassProcessRaisesDispatchError =>
-    self should: [
-      Bt4252ClassProtocolObjectChild selfSetDoc
-    ] raise: #dispatch_error
-
   // BT-4262: `doc` follows an external `doc:` (the published copy is written
   // by the setter).
   testSelfDocFollowsExternalSetter =>
@@ -141,35 +123,6 @@ TestCase subclass: ClassSideBehaviourProtocolTest
 
   testObjectByNameProtocolSendInClassProcess =>
     self assert: Bt4252ClassProtocolObjectChild byNamePrintString equals: Bt4252ClassProtocolObjectChild printString
-
-  testActorByNameDefinedSelectorInClassProcessRaisesDispatchError =>
-    self should: [
-      Bt4252ClassProtocolActorChild byNameDefinedSelector
-    ] raise: #dispatch_error
-
-  testObjectByNameDefinedSelectorInClassProcessRaisesDispatchError =>
-    self should: [
-      Bt4252ClassProtocolObjectChild byNameDefinedSelector
-    ] raise: #dispatch_error
-
-  // BT-4423: a class-variable reflection send answers in place from the
-  // class's own variables (`x` is not one; `pinned` is).
-  testActorByNameClassVarReflectionInClassProcessAnswersInPlace =>
-    self deny: Bt4252ClassProtocolActorChild byNameHasField
-
-  // BT-4262: a primitive that changes the class is refused before any side
-  // effect, and the class is still there.
-  testRemoveFromSystemInClassProcessIsRefused =>
-    // An instance of the class: removal stops the class's actors first, so a
-    // refusal that came after that would leave it dead.
-    instance := Bt4262RemoveGuard spawn
-    [
-      self should: [Bt4262RemoveGuard removeSelf] raise: #dispatch_error
-      self should: [Bt4262RemoveGuard removeByName] raise: #dispatch_error
-      self should: [Bt4262RemoveGuard renameSelf] raise: #dispatch_error
-      self assert: Bt4262RemoveGuard name equals: #Bt4262RemoveGuard
-      self assert: instance isAlive
-    ] ensure: [instance isAlive ifTrue: [instance stop]]
 
   testActorClassMethodSelfIncludesSelector =>
     self assert: Bt4252ClassProtocolActorChild selfIncludesFoo equals: (Bt4252ClassProtocolActorChild includesSelector: #foo)

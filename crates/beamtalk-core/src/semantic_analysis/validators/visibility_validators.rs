@@ -384,9 +384,6 @@ fn check_type_annotation_cross_package(
                 check_type_annotation_cross_package(p, current_pkg, hierarchy, diagnostics);
             }
         }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            check_type_annotation_cross_package(inner, current_pkg, hierarchy, diagnostics);
-        }
         TypeAnnotation::Difference { base, excluded, .. } => {
             check_type_annotation_cross_package(base, current_pkg, hierarchy, diagnostics);
             check_type_annotation_cross_package(excluded, current_pkg, hierarchy, diagnostics);
@@ -568,17 +565,6 @@ fn check_type_annotation_leaked(
                     diagnostics,
                 );
             }
-        }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            check_type_annotation_leaked(
-                inner,
-                class_name,
-                method_selector,
-                current_pkg,
-                hierarchy,
-                alias_registry,
-                diagnostics,
-            );
         }
         TypeAnnotation::Difference { base, excluded, .. } => {
             check_type_annotation_leaked(
@@ -843,16 +829,6 @@ fn check_type_annotation_alias_leak(
                 );
             }
         }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            check_type_annotation_alias_leak(
-                inner,
-                alias_name,
-                hierarchy,
-                alias_registry,
-                visited,
-                diagnostics,
-            );
-        }
         TypeAnnotation::Difference { base, excluded, .. } => {
             check_type_annotation_alias_leak(
                 base,
@@ -1056,10 +1032,18 @@ pub fn check_leaked_method_visibility(
         }
     }
 
+    if by_class.is_empty() {
+        return;
+    }
+    // Sorted by name so the errors come out in a stable order: the registry
+    // is a `HashMap` (BT-5184).
+    let mut protocols: Vec<_> = protocol_registry.protocols().collect();
+    protocols.sort_unstable_by(|a, b| a.0.cmp(b.0));
+
     for (class_name, internal_instance, internal_class) in &by_class {
         // Check each protocol the class might conform to
         // (Protocols don't have is_internal yet, so all protocols are treated as public)
-        for (_proto_name, proto_info) in protocol_registry.protocols() {
+        for (_proto_name, proto_info) in &protocols {
             // Use the protocol registry's conformance check so we stay consistent
             // with DNU-bypass, cross-file-parent, and inherited method handling.
             if protocol_registry
@@ -1276,9 +1260,7 @@ mod tests {
         internal_class: &str,
         internal_pkg: &str,
     ) -> ClassHierarchy {
-        let (Ok(mut h), _) = ClassHierarchy::build(module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(module);
         // Add an internal class from another package
         let info = ClassInfo {
             is_internal: true,
@@ -1320,9 +1302,7 @@ mod tests {
         let module = parse_bt(
             "internal Object subclass: ParserState\n  reset => nil\n\nParserState subclass: ExtendedState\n  parse => 42",
         );
-        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(&module);
         h.stamp_package("json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1349,9 +1329,7 @@ mod tests {
     #[test]
     fn e0401_public_class_cross_package_no_error() {
         let module = parse_bt("Object subclass: MyParser\n  parse => 42");
-        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(&module);
         // Add a public class from another package
         let info = ClassInfo {
             package: Some(EcoString::from("json")),
@@ -1519,9 +1497,7 @@ mod tests {
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              Object subclass: Parser\n  tokenize: input :: String -> TokenBuffer => nil",
         );
-        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(&module);
         h.stamp_package("json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1549,9 +1525,7 @@ mod tests {
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              Object subclass: Parser\n  process: buf :: TokenBuffer => nil",
         );
-        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(&module);
         h.stamp_package("json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1579,9 +1553,7 @@ mod tests {
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              Object subclass: Parser\n  state: buf :: TokenBuffer = nil",
         );
-        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(&module);
         h.stamp_package("json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1610,9 +1582,7 @@ mod tests {
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              internal Object subclass: InternalParser\n  tokenize: input :: String -> TokenBuffer => nil",
         );
-        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(&module);
         h.stamp_package("json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1644,9 +1614,7 @@ mod tests {
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              Object subclass: Parser\n  internal tokenize: input :: String -> TokenBuffer => nil",
         );
-        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(&module);
         h.stamp_package("json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1677,9 +1645,7 @@ mod tests {
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              Object subclass: Parser\n  tokenize: input :: String -> TokenBuffer => nil",
         );
-        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(&module);
         h.stamp_package("json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1704,9 +1670,7 @@ mod tests {
     /// counterpart of `build_hierarchy_with_internal_class` for tests that
     /// exercise a module-local `internal type` alongside a public class.
     fn build_hierarchy_and_aliases(module: &Module, pkg: &str) -> (ClassHierarchy, AliasRegistry) {
-        let (Ok(mut h), _) = ClassHierarchy::build(module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(module);
         h.stamp_package(pkg);
         let protocol_registry = ProtocolRegistry::new();
         let mut alias_registry = AliasRegistry::new();
@@ -1994,7 +1958,7 @@ mod tests {
     // Additional test imports
     use crate::ast::{
         ClassDefinition, ClassModifiers, CommentAttachment, ExpressionStatement, Identifier,
-        MessageSelector, MethodDefinition, MethodKind,
+        MessageSelector, MethodDefinition,
     };
     use crate::semantic_analysis::class_hierarchy::MethodInfo;
     use crate::source_analysis::Span as Sp;
@@ -2053,7 +2017,6 @@ mod tests {
             methods: vec![MethodInfo {
                 selector: "helper".into(),
                 arity: 0,
-                kind: MethodKind::Primary,
                 defined_in: "Parent".into(),
                 is_sealed: false,
                 is_internal: true,
@@ -2097,7 +2060,6 @@ mod tests {
             methods: vec![MethodInfo {
                 selector: "helper".into(),
                 arity: 0,
-                kind: MethodKind::Primary,
                 defined_in: "Parent".into(),
                 is_sealed: false,
                 is_internal: false,
@@ -2168,7 +2130,7 @@ mod tests {
             vec![make_method("asString", true)], // internal!
         )]);
         let (h, _) = ClassHierarchy::build(&module);
-        let hierarchy = h.unwrap();
+        let hierarchy = h;
 
         // Create a protocol registry with a Printable protocol requiring `asString`
         let mut registry = ProtocolRegistry::new();
@@ -2233,7 +2195,7 @@ mod tests {
             vec![make_method("asString", false)], // public
         )]);
         let (h, _) = ClassHierarchy::build(&module);
-        let hierarchy = h.unwrap();
+        let hierarchy = h;
 
         let mut registry = ProtocolRegistry::new();
         let proto_module = {
@@ -2282,5 +2244,57 @@ mod tests {
             e0402.is_empty(),
             "Public method should not trigger leaked visibility error, got: {e0402:?}"
         );
+    }
+
+    /// BT-5184: the protocol registry is a `HashMap`, so walking it unsorted
+    /// emitted one class's E0402 errors in a different order on each run.
+    /// Every fresh registry gets a fresh hash seed, so rebuilding it per run
+    /// is the "different seeds" check.
+    #[test]
+    fn e0402_errors_are_in_protocol_name_order_on_every_run() {
+        use std::fmt::Write as _;
+        let names = [
+            "Golf", "Alpha", "Echo", "Charlie", "Foxtrot", "Delta", "Bravo",
+        ];
+        let mut source = String::new();
+        for name in names {
+            let sel = name.to_lowercase();
+            let _ = write!(source, "Protocol define: {name}\n  {sel} -> Integer\n\n");
+        }
+        source.push_str("Object subclass: Leaky\n");
+        for name in names {
+            let _ = writeln!(source, "  internal {} -> Integer => 1", name.to_lowercase());
+        }
+        let run = || {
+            let (module, hierarchy) =
+                crate::semantic_analysis::test_helpers::parse_and_build(&source);
+            let mut registry = ProtocolRegistry::new();
+            let _ = registry.register_module(&module, &hierarchy);
+            let mut diagnostics = Vec::new();
+            check_leaked_method_visibility(
+                &module,
+                &hierarchy,
+                &registry,
+                Some("my_pkg"),
+                &mut diagnostics,
+            );
+            diagnostics
+                .iter()
+                .map(|d| d.message.to_string())
+                .collect::<Vec<_>>()
+        };
+        let first = run();
+        assert_eq!(first.len(), names.len(), "{first:?}");
+        let mut sorted_names = names;
+        sorted_names.sort_unstable();
+        for (message, name) in first.iter().zip(sorted_names) {
+            assert!(
+                message.contains(&format!("protocol '{name}'")),
+                "out of order: {first:?}"
+            );
+        }
+        for _ in 0..20 {
+            assert_eq!(run(), first);
+        }
     }
 }

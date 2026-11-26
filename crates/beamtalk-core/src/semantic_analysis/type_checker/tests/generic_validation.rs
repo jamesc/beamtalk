@@ -220,7 +220,7 @@ fn bt2022_method_return_type_cache_preserves_type_args() {
     let src = "Object subclass: Holder\n  items => #(\"a\" \"b\" \"c\")";
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _diags) = crate::source_analysis::parse(tokens);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
 
     let result = infer_method_return_types(&module, &hierarchy, None);
 
@@ -265,7 +265,6 @@ fn bt2022_generic_type_param_in_declared_args_not_warned() {
             ],
             span: span(),
         }),
-        kind: MethodKind::Primary,
         is_sealed: false,
         is_internal: false,
         is_class_method: false,

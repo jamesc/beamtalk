@@ -1,0 +1,275 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2819: JsonMapping / JsonMappable. Fixtures: fixtures/json_mapped_fixtures.bt
+
+TestCase subclass: JsonMappingTest
+
+  // testMappingIsBuiltOncePerClass counts rebuilds of the per-class cache,
+  // which any class load on the node flushes: run alone.
+  class serial -> Boolean => true
+
+  testEncodeRenamesAndOmitsUnmapped =>
+    e := JsonMappedRunningEntry
+      issueId: "a"
+      issueIdentifier: "BT-1"
+      state: "run"
+      turnCount: 3
+      tokens: nil
+      internalNote: "x"
+    d := JsonMappedRunningEntry jsonMapping encode: e
+    self assert: (d at: "issue_id") equals: "a"
+    self assert: (d at: "turn_count") equals: 3
+    self deny: (d includesKey: "internalNote")
+    self deny: (d includesKey: "internal_note")
+    self assert: d size equals: 5
+
+  testEncodeAnswersDictionary =>
+    self assert: (JsonMappedTokenUsage inputTokens: 1 outputTokens: 2) asJson equals: #{
+      "input_tokens" => 1,
+      "output_tokens" => 2
+    }
+
+  testTypedCallerGetsDictionaryWithoutOverride =>
+    self assert: (JsonMappedTypedCaller encode: (JsonMappedTokenUsage inputTokens: 1 outputTokens: 2)) equals: #{
+      "input_tokens" => 1,
+      "output_tokens" => 2
+    }
+
+  testRunningEntryMatchesHandWrittenJson =>
+    hand := JsonHandRunningEntry
+      issueId: "a"
+      issueIdentifier: "BT-1"
+      state: "run"
+      turnCount: 3
+      tokens: (JsonHandTokenUsage inputTokens: 10 outputTokens: 20)
+    mapped := JsonMappedRunningEntry
+      issueId: "a"
+      issueIdentifier: "BT-1"
+      state: "run"
+      turnCount: 3
+      tokens: (JsonMappedTokenUsage inputTokens: 10 outputTokens: 20)
+      internalNote: "ignored"
+    self assert: (Json generate: mapped) equals: (Json generate: hand)
+    self assert: (Json prettyPrint: mapped) equals: (Json prettyPrint: hand)
+
+  testConverterMatchesHandWrittenJson =>
+    self assert: (Json generate: (JsonMappedEvent eventType: #completed seq: 7)) equals: (Json generate: (JsonHandEvent eventType: #completed seq: 7))
+
+  testMappedObjectsInsideCollections =>
+    xs := #((JsonMappedEvent eventType: #a seq: 1), (JsonMappedEvent eventType: #b seq: 2))
+    self assert: (Json generate: xs) equals: (Json generate: #((JsonHandEvent eventType: #a seq: 1), (JsonHandEvent eventType: #b seq: 2)))
+
+  testHandWrittenAsJsonWins =>
+    self assert: (JsonOverridingMapped name: "n") asJson equals: #{
+      "custom" => "n"
+    }
+
+  testConformance =>
+    self assert: (JsonMappedEvent conformsTo: #JsonRepresentable)
+    self assert: (JsonMappedEvent protocols includes: #JsonMappable)
+
+  testMapFieldIsNonMutating =>
+    base := JsonMapping new
+    more := base mapField: #x
+    self assert: base entries size equals: 0
+    self assert: more entries size equals: 1
+
+  testJsonMappableIsProtocol =>
+    self assert: (Protocol isProtocol: #JsonMappable)
+
+  testDuplicateWireKeyRaises =>
+    self should: [
+      JsonMapping new |> mapField: #a to: "id" |> mapField: #b to: "id"
+    ] raise: #user_error
+
+  testSameFieldTwiceUnderDifferentKeysIsAllowed =>
+    m := JsonMapping new |> mapField: #seq to: "a" |> mapField: #seq to: "b"
+    self assert: (m encode: (JsonMappedEvent eventType: #x seq: 4)) equals: #{
+      "a" => 4,
+      "b" => 4
+    }
+
+  testMissingFieldRaises =>
+    self
+      should: [
+        (JsonMapping new mapField: #nope) encode: (JsonMappedEvent eventType: #x seq: 1)
+      ]
+      raise: #user_error
+
+  testActorUsingJsonMappable =>
+    a := JsonMappedActor spawn
+    self assert: (Json generate: a) equals: (Json generate: JsonStatusActor spawn)
+
+  // ── BT-5191 ─────────────────────────────────────────────────────────────
+  testNilIsNullByDefault =>
+    d := JsonMappedRunningEntry new asJson
+    self assert: (d includesKey: "tokens")
+    self assert: (d at: "tokens") equals: nil
+
+  testOmittingNilLeavesNilKeysOut =>
+    m := JsonMappedRunningEntry jsonMapping |> omittingNil
+    d := m encode: JsonMappedRunningEntry new
+    self deny: (d includesKey: "tokens")
+    self assert: (d at: "turn_count") equals: 0
+
+  testOmittingNilAppliesToConvertedValue =>
+    m := JsonMapping new
+      |> mapField: #seq
+         to: "seq"
+         using: [:v | nil]
+      |> omittingNil
+    self assert: (m encode: (JsonMappedEvent eventType: #x seq: 1)) equals: #{}
+
+  testMappingIsBuiltOncePerClass =>
+    ProcessDictionary at: #jsonMappedCountedBuilds put: 0
+    (1 to: 20) do: [:i | (JsonMappedCounted n: i) asJson]
+    self assert: (JsonMappedCounted n: 7) asJson equals: #{"n" => 7}
+    builds :: Dynamic := ProcessDictionary at: #jsonMappedCountedBuilds
+    self assert: builds <= 1
+
+  testForClassAnswersValidatedMapping =>
+    self assert: (JsonMapping forClass: JsonMappedEvent) equals: JsonMappedEvent jsonMapping
+
+  testSubclassAddingFieldsMustOverrideMapping =>
+    self
+      should: [
+        (JsonMappedEventChild new: #{
+          #eventType => #a,
+          #seq => 1,
+          #extra => "x"
+        }) asJson
+      ]
+      raise: #user_error
+    msg := [
+      (JsonMappedEventChild new: #{
+        #eventType => #a,
+        #seq => 1,
+        #extra => "x"
+      }) asJson
+    ] on: Error do: [:e | e message]
+    self assert: (msg includesSubstring: "JsonMappedEventChild")
+    self assert: (msg includesSubstring: "extra")
+
+  testSubclassExtendingParentMapping =>
+    self
+      assert: (JsonMappedEventExtended new: #{
+        #eventType => #a,
+        #seq => 1,
+        #extra => "x"
+      }) asJson
+      equals: #{"event_type" => "a", "seq" => 1, "extra" => "x"}
+
+  testSubclassWithoutNewFieldsInheritsMapping =>
+    self assert: (JsonMappedEventAlias new: #{
+      #eventType => #a,
+      #seq => 2
+    }) asJson equals: #{"event_type" => "a", "seq" => 2}
+
+  testSecretSlotIsRedacted =>
+    a := JsonMappedSecretActor spawn
+    self assert: a asJson equals: #{
+      "token" => "[redacted]",
+      "label" => "public"
+    }
+    self deny: ((Json generate: a) includesSubstring: "zqxv-json-secret-marker")
+    a stop
+
+  testInheritedSecretSlotIsRedacted =>
+    a := JsonMappedSecretChildActor spawn
+    self assert: a asJson equals: #{
+      "token" => "[redacted]",
+      "label" => "public",
+      "note" => "n"
+    }
+    a stop
+
+  testConverterOnSecretSlotSeesValue =>
+    a := JsonMappedSecretConvertedActor spawn
+    self assert: a asJson equals: #{"token_length" => 6}
+    a stop
+
+  testWithEntriesCannotBypassDuplicateCheck =>
+    m := JsonMapping new
+      withEntries: #(#{
+        #field => #seq,
+        #key => "id",
+        #using => nil
+      }, #{#field => #eventType, #key => "id", #using => nil})
+    self should: [
+      m encode: (JsonMappedEvent eventType: #x seq: 1)
+    ] raise: #user_error
+
+  testMalformedEntryRaises =>
+    m := JsonMapping new withEntries: #(#{
+      #field => "notASymbol",
+      #key => "k",
+      #using => nil
+    })
+    self should: [
+      m encode: (JsonMappedEvent eventType: #x seq: 1)
+    ] raise: #user_error
+
+  testConverterErrorNamesField =>
+    m := JsonMapping new
+      |> mapField: #seq
+         to: "n"
+         using: [:v | v / 0]
+    msg := [
+      m encode: (JsonMappedEvent eventType: #x seq: 1)
+    ] on: Error do: [:e | e message]
+    self assert: (msg includesSubstring: "#seq")
+    self assert: (msg includesSubstring: "converter")
+
+  testCycleRaises =>
+    a := JsonMappedLinkActor spawn
+    b := JsonMappedLinkActor spawn
+    a link: b
+    b link: a
+    self should: [Json generate: a] raise: #type_error
+    a stop
+    b stop
+
+  testConverterErrorKeepsItsKind =>
+    rawKind := [1 / 0] on: Error do: [:e | e kind]
+    m := JsonMapping new
+      |> mapField: #seq
+         to: "n"
+         using: [:v | v / 0]
+    kind := [
+      m encode: (JsonMappedEvent eventType: #x seq: 1)
+    ] on: Error do: [:e | e kind]
+    self assert: kind equals: rawKind
+
+  testSymbolWireKeyStillEncodes =>
+    m := JsonMapping new withEntries: #(#{
+      #field => #seq,
+      #key => #n,
+      #using => nil
+    })
+    self assert: (Json generate: (m encode: (JsonMappedEvent eventType: #x seq: 3))) equals: (Json generate: #{
+      "n" => 3
+    })
+
+  testEntriesConstructorStillWorks =>
+    m := JsonMapping entries: #(#{#field => #seq, #key => "n", #using => nil})
+    self assert: (m encode: (JsonMappedEvent eventType: #x seq: 3)) equals: #{
+      "n" => 3
+    }
+
+  testEntryWithoutUsingMeansNoConverter =>
+    m := JsonMapping new withEntries: #(#{#field => #seq, #key => "n"})
+    self assert: (m encode: (JsonMappedEvent eventType: #x seq: 5)) equals: #{
+      "n" => 5
+    }
+
+  testStringAndSymbolKeyWithSameNameAreDuplicates =>
+    m := JsonMapping new
+      withEntries: #(#{
+        #field => #seq,
+        #key => "id",
+        #using => nil
+      }, #{#field => #eventType, #key => #id, #using => nil})
+    self should: [
+      m encode: (JsonMappedEvent eventType: #x seq: 1)
+    ] raise: #user_error

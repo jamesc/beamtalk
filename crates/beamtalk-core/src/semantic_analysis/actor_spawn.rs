@@ -6,10 +6,8 @@
 //!
 //! **DDD Context:** Semantic Analysis
 //!
-//! Shared by the `class-state-abroad` validator
-//! (`validators::class_state_abroad`) and the standalone `beamtalk-lint`
-//! crate's `actor-state-abroad` lint, which both judge a block handed to an
-//! actor (BT-4186).
+//! Read by the standalone `beamtalk-lint` crate's `actor-state-abroad` lint,
+//! which judges a block handed to an actor (BT-4186).
 
 use crate::ast::{ConstructorSelectors, Expression, ExpressionStatement};
 use crate::ast_walker::walk_expression;
@@ -77,7 +75,6 @@ mod tests {
         let mut module = parse_bt(&src);
         crate::ast::normalize::peel_operand_parens(&mut module);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.expect("hierarchy builds");
         let driver = module
             .classes
             .iter()
@@ -144,7 +141,6 @@ mod tests {
     fn only_spawn_and_spawn_with_answer_an_actor() {
         let module = parse_bt("Actor subclass: Worker\n  run => 1\n\nWorker spawn\n");
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.expect("hierarchy builds");
         let Expression::MessageSend { receiver, .. } = &module.expressions[0].expression else {
             panic!("expected a send");
         };

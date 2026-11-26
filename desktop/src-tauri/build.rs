@@ -1,8 +1,21 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+// The app's own IPC command names (BT-5194), shared with `src/main.rs`'s
+// `generate_handler!` list through `src/app_commands.rs` — see that file.
+include!("src/app_commands.rs");
+
 fn main() {
-    tauri_build::build();
+    // Declaring the app's commands in an `AppManifest` makes Tauri check every
+    // app command against `capabilities/` (it skips that check for local
+    // origins when no manifest exists) and generates one `allow-<command>`
+    // permission per command, which `capabilities/default.json` grants to the
+    // picker window only.
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(APP_COMMANDS)),
+    )
+    .expect("failed to run tauri-build");
 
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
         && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")

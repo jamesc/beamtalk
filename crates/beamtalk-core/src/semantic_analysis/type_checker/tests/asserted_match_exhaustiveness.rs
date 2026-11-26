@@ -17,6 +17,7 @@ use super::common::*;
 
 use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::Severity;
+use crate::test_helpers::test_support::wildcard_arm;
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 
@@ -27,11 +28,6 @@ fn sym_arm(name: &str, body: Expression) -> MatchArm {
         body,
         span(),
     )
-}
-
-/// An unguarded `_ -> body` wildcard arm — full coverage.
-fn wildcard_arm(body: Expression) -> MatchArm {
-    MatchArm::new(Pattern::Wildcard(span()), body, span())
 }
 
 fn asserted_match_expr(value: Expression, arms: Vec<MatchArm>) -> Expression {
@@ -288,4 +284,114 @@ fn advisory_match_still_silent_on_dynamic_scrutinee() {
         warnings.is_empty(),
         "Dynamic scrutinee under plain match: must stay silent, got: {warnings:?}"
     );
+}
+
+// ── `Result` as a closed `ok:` / `error:` pair (BT-5278) ────────────────
+
+fn result_type() -> InferredType {
+    InferredType::known_with_args(
+        "Result",
+        vec![
+            InferredType::known("Integer"),
+            InferredType::known("String"),
+        ],
+    )
+}
+
+fn result_arm(selector: &str, binding: Pattern, body: Expression) -> MatchArm {
+    MatchArm::new(
+        Pattern::Constructor {
+            class: Identifier::new("Result", span()),
+            keywords: vec![(Identifier::new(selector, span()), binding)],
+            span: span(),
+        },
+        body,
+        span(),
+    )
+}
+
+#[test]
+fn result_scrutinee_with_ok_and_error_arms_is_accepted() {
+    let diags = asserted_diagnostics(
+        result_type(),
+        vec![
+            result_arm(
+                "ok:",
+                Pattern::Variable(Identifier::new("v", span())),
+                str_lit("a"),
+            ),
+            result_arm("error:", Pattern::Wildcard(span()), str_lit("b")),
+        ],
+    );
+    assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
+}
+
+#[test]
+fn result_scrutinee_with_redundant_wildcard_warns_unreachable() {
+    let diags = asserted_diagnostics(
+        result_type(),
+        vec![
+            result_arm(
+                "ok:",
+                Pattern::Variable(Identifier::new("v", span())),
+                str_lit("a"),
+            ),
+            result_arm("error:", Pattern::Wildcard(span()), str_lit("b")),
+            wildcard_arm(str_lit("c")),
+        ],
+    );
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+    assert_eq!(diags[0].severity, Severity::Warning);
+    assert!(diags[0].message.contains("unreachable"), "{diags:?}");
+}
+
+#[test]
+fn result_refutable_ok_arm_alone_errors() {
+    // `Result ok: {a, b}` cannot be proven total (BT-5278 review).
+    let tuple = Pattern::Tuple {
+        elements: vec![
+            Pattern::Variable(Identifier::new("a", span())),
+            Pattern::Variable(Identifier::new("b", span())),
+        ],
+        span: span(),
+    };
+    let diags = asserted_diagnostics(
+        result_type(),
+        vec![
+            result_arm("ok:", tuple, str_lit("a")),
+            result_arm("error:", Pattern::Wildcard(span()), str_lit("b")),
+        ],
+    );
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+    assert_eq!(diags[0].severity, Severity::Error);
+    assert!(diags[0].message.contains("ok:"), "{diags:?}");
+}
+
+#[test]
+fn result_leading_wildcard_marks_later_arms_unreachable() {
+    let diags = asserted_diagnostics(
+        result_type(),
+        vec![
+            wildcard_arm(str_lit("c")),
+            result_arm("ok:", Pattern::Wildcard(span()), str_lit("a")),
+        ],
+    );
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+    assert_eq!(diags[0].severity, Severity::Warning);
+}
+
+#[test]
+fn result_variable_catch_all_after_ok_is_accepted() {
+    let diags = asserted_diagnostics(
+        result_type(),
+        vec![
+            result_arm("ok:", Pattern::Wildcard(span()), str_lit("a")),
+            MatchArm::new(
+                Pattern::Variable(Identifier::new("other", span())),
+                str_lit("b"),
+                span(),
+            ),
+        ],
+    );
+    assert!(diags.is_empty(), "got: {diags:?}");
 }

@@ -333,9 +333,7 @@ fn lexical_edge_cases_are_decided_by_the_real_grammar() {
     // statement boundary.
     multiple("alpha := 1 // (see below\nbeta := 2");
     multiple("alpha := 1 // says \"hi\" here\nbeta := 2");
-    multiple("alpha := 1 /* { unbalanced */\nbeta := 2");
     single("alpha := 1 // says \"hi\" here", "alpha");
-    single("alpha := 1 /* note */", "alpha");
 
     // Continuation lines of one assignment are not new statements.
     single("result :=\n  42", "result");
@@ -361,7 +359,7 @@ fn lexical_edge_cases_are_decided_by_the_real_grammar() {
     multiple("x := ${ class. y := 2");
     single("x := $( class", "x");
     single("x := $\" class", "x");
-    single("x := $\\( class", "x");
+    single("x := $\\{ class", "x");
 
     // Not assignments at all.
     assert_eq!(assigned_var_with_known("a + 1"), None);
@@ -372,7 +370,7 @@ fn lexical_edge_cases_are_decided_by_the_real_grammar() {
 /// assignment (the `ClassBuilder` example in the language guide).
 #[test]
 fn nested_period_in_a_cascade_is_one_statement() {
-    let src = "account := Object classBuilder\n  name: #Account;\n  superclass: Object;\n  classVars: #{ #opened => 0 };\n  fields: #{ #balance => 0 };\n  methods: #{ #balance => [:inst | inst fieldAt: #balance] };\n  classMethods: #{ #open => [:self | self.opened := self.opened + 1. self.opened] };\n  register";
+    let src = "account := Object classBuilder\n  name: #Account;\n  superclass: Object;\n  fields: #{ #balance => 0 };\n  methods: #{ #balance => [:inst | inst fieldAt: #balance] };\n  classMethods: #{ #open => [:self | self new. self new] };\n  register";
     let response = handle_request(&Term::from(compile_expression_request(src)));
     if response_status(&response).as_deref() == Some("ok") {
         let Term::Map(map) = &response else {

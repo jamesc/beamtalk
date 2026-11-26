@@ -65,7 +65,7 @@ Two consequences:
 
 2. **Implement runtime support** (for primitive methods only)
    - Add dispatch clause in the appropriate runtime module (e.g., `runtime/apps/beamtalk_runtime/src/beamtalk_primitive.erl`)
-   - Runtime modules provide type checking, structured errors, and extension registry fallback
+   - Runtime modules provide type checking and structured errors
    - Add intrinsic name mapping in the compiler's intrinsic registry (one line)
    - For pure Beamtalk methods, skip this step — the compiler handles them directly
 

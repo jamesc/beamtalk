@@ -9,13 +9,12 @@
 //! `gen_server/dispatch.rs` (actor `has_method/1`) and `value_type_codegen.rs`
 //! (`generate_primitive_has_method`/`generate_minimal_has_method`) implement
 //! the same reflection surface — "does this class understand `Selector`,
-//! locally, via a foreign extension, or via an ancestor?" — and had drifted:
-//! the actor version only checked its own primary methods, silently omitting
-//! the extension-registry check, superclass delegation, and the
-//! catch-all-DNU short-circuit that the value-type version already had. That
-//! made `respondsTo:` answer differently for an actor than for a value type
-//! given the identical situation (an extension method, an inherited method,
-//! or a class whose `doesNotUnderstand:args:` accepts everything).
+//! locally or via an ancestor?" — and had drifted: the actor version only
+//! checked its own methods, silently omitting superclass delegation
+//! and the catch-all-DNU short-circuit that the value-type version already
+//! had. That made `respondsTo:` answer differently for an actor than for a
+//! value type given the identical situation (an inherited method, or a class
+//! whose `doesNotUnderstand:args:` accepts everything).
 //!
 //! [`DispatchSpec`] captures the *only* things that differ between the two
 //! call sites — which selectors are checked directly and which class/module
@@ -30,7 +29,7 @@ use beamtalk_cerl_doc::{Document, INDENT, join, leaf, line, nest};
 use beamtalk_core::ast::{ClassDefinition, Expression};
 
 /// How `has_method/1` delegates to its superclass when `Selector` isn't
-/// found locally or in the extension registry.
+/// found locally.
 ///
 /// The two kinds render different Core Erlang, not just a different name:
 /// - [`Static`](SuperclassDelegation::Static) calls the superclass's
@@ -55,7 +54,7 @@ use beamtalk_core::ast::{ClassDefinition, Expression};
 /// superclass, diverging from what `dispatch/4` (and a fresh `respondsTo:`
 /// walk) would actually resolve — exactly the actor/dispatch mismatch
 /// this module exists to eliminate, just reintroduced via hot reload
-/// instead of a missing extension/superclass check.
+/// instead of a missing superclass check.
 pub(in crate::core_erlang) enum SuperclassDelegation<'a> {
     /// A compiled module name (e.g. `bt@stdlib@actor`).
     Static(&'a str),
@@ -67,8 +66,8 @@ pub(in crate::core_erlang) enum SuperclassDelegation<'a> {
 /// The kind-specific inputs that drive `has_method/1` emission.
 ///
 /// The emitted shape is always the same (selector-membership check, then
-/// extension registry, then superclass delegation or catch-all-DNU
-/// short-circuit); only these values differ between an actor class and a
+/// superclass delegation or catch-all-DNU short-circuit); only these values
+/// differ between an actor class and a
 /// value-type class.
 pub(in crate::core_erlang) struct DispatchSpec<'a> {
     /// Selectors handled by hard-coded reflection dispatch arms (`class`,
@@ -78,10 +77,8 @@ pub(in crate::core_erlang) struct DispatchSpec<'a> {
     /// selectors are inherited from Object via superclass delegation rather
     /// than listed locally.
     pub(in crate::core_erlang) reflection: &'a [&'static str],
-    /// The class name for the `beamtalk_extensions:has/2` foreign-extension check.
-    pub(in crate::core_erlang) class_name: &'a str,
     /// How to delegate `has_method/1` to the superclass when `Selector`
-    /// isn't found locally or in the extension registry. `None` at the root
+    /// isn't found locally. `None` at the root
     /// of the hierarchy (no further delegation).
     pub(in crate::core_erlang) superclass: Option<SuperclassDelegation<'a>>,
     /// True when the class defines a catch-all `doesNotUnderstand:args:`
@@ -93,7 +90,7 @@ pub(in crate::core_erlang) struct DispatchSpec<'a> {
     /// actors and `ClassKind::Object` classes.
     pub(in crate::core_erlang) auto_slots: Option<&'a AutoSlotMethods>,
     /// Also emit a strictly-local `has_method_local/1` alongside
-    /// `has_method/1` — same own-methods-or-extension check, but the false
+    /// `has_method/1` — same own-methods check, but the false
     /// branch always answers `'false'`, regardless of `superclass`, instead
     /// of delegating.
     ///
@@ -146,8 +143,8 @@ pub(in crate::core_erlang) fn class_has_catch_all_dnu(class: &ClassDefinition) -
 /// selector. The arm list and the selector list handed to [`DispatchSpec`]
 /// both come from this one table, so they cannot drift apart.
 ///
-/// `perform:` re-dispatches through the class's own module so extension
-/// lookup and error attribution stay correct.
+/// `perform:` re-dispatches through the class's own module so error
+/// attribution stays correct.
 pub(in crate::core_erlang) fn value_core_reflection_arms(
     class_name: &str,
     mod_name: &str,
@@ -214,16 +211,16 @@ pub(in crate::core_erlang) fn value_core_reflection_selectors() -> Vec<&'static 
 /// layout, selector variable, verdict tag and slow route.
 pub(in crate::core_erlang) enum DefaultArmFlavour<'a> {
     /// An actor's `dispatch/4` (BT-4280): a `{'compiled', Owner, Module}`
-    /// verdict is invoked directly; any other verdict takes
-    /// `extension_route`. Every route binds `InheritedOutcome`, which
-    /// `outcome` (the reply / DNU / raise handling) then consumes.
+    /// verdict is invoked directly; any other verdict takes `slow_route`.
+    /// Every route binds `InheritedOutcome`, which `outcome` (the reply /
+    /// DNU / raise handling) then consumes.
     Actor {
-        extension_route: Document<'static>,
+        slow_route: Document<'static>,
         outcome: Document<'static>,
     },
     /// A value type's `dispatch/3` (BT-4260): a `{'value', Owner, Module}`
     /// verdict calls the owner's `dispatch/3` directly; any other verdict
-    /// takes this class's extensions, then the superclass's `dispatch/3`.
+    /// calls the superclass's `dispatch/3`.
     /// `one_hop` lists selectors the superclass defines itself: they skip the
     /// verdict, since the unchanged route is cheaper than the lookup.
     Value {
@@ -241,9 +238,9 @@ pub(in crate::core_erlang) fn inherited_default_arm(
 ) -> Document<'static> {
     match flavour {
         DefaultArmFlavour::Actor {
-            extension_route,
+            slow_route,
             outcome,
-        } => actor_default_arm(class_name, extension_route, outcome),
+        } => actor_default_arm(class_name, slow_route, outcome),
         DefaultArmFlavour::Value {
             one_hop,
             super_module,
@@ -253,7 +250,7 @@ pub(in crate::core_erlang) fn inherited_default_arm(
 
 fn actor_default_arm(
     class_name: &str,
-    extension_route: Document<'static>,
+    slow_route: Document<'static>,
     outcome: Document<'static>,
 ) -> Document<'static> {
     docvec![
@@ -286,7 +283,7 @@ fn actor_default_arm(
                                 ),
                                 line(),
                                 "<_InhSlow> when 'true' ->",
-                                nest(INDENT, docvec![line(), extension_route]),
+                                nest(INDENT, docvec![line(), slow_route]),
                             ]
                         ),
                         line(),
@@ -307,61 +304,47 @@ fn value_default_arm(
     one_hop: &[String],
     super_module: &str,
 ) -> Document<'static> {
-    // BT-5002: a `{'ext', Owner}` verdict (the owner of the selector has an
-    // extension, which replaces its compiled method) calls the extension. Every
-    // other verdict, `slow` and the one-hop selectors below included, keeps the
-    // unchanged route, so the common inherited send is byte for byte what it
-    // was.
-    let ask = docvec![
-        "call 'beamtalk_dispatch':'inherited_target'(",
-        leaf::atom(class_name.to_string()),
-        ", Selector)",
-    ];
-    let verdict: Document<'static> = if one_hop.is_empty() {
-        ask
-    } else {
-        let arms: Vec<Document<'static>> = one_hop
-            .iter()
-            .map(|sel| {
-                docvec![
-                    "                <",
-                    leaf::atom(sel.clone()),
-                    "> when 'true' -> 'slow'\n",
-                ]
-            })
-            .collect();
-        docvec![
-            "case Selector of\n",
-            Document::Vec(arms),
-            "                <_> when 'true' -> ",
-            ask,
-            "\n",
-            "            end",
-        ]
-    };
-    docvec![
-        "        <_Other> when 'true' ->\n",
-        "            %% BT-4260: a memoised verdict picks the direct inherited call.\n",
-        "            case ",
-        verdict,
-        " of\n",
-        "                <{'value', _InhOwner, InhModule}> when 'true' ->\n",
-        "                    call InhModule:'dispatch'(Selector, Args, Self)\n",
-        "                <{'ext', InhExtOwner}> when 'true' ->\n",
-        "                    call 'beamtalk_dispatch':'inherited_value_ext'(InhExtOwner, Selector, Args, Self, ",
-        leaf::atom(super_module.to_string()),
-        ")\n",
-        "                <_InhSlow> when 'true' ->\n",
-        "                    case call 'beamtalk_extensions':'lookup'(",
-        leaf::atom(class_name.to_string()),
-        ", Selector) of\n",
-        "                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->\n",
-        "                            apply ExtFun(Args, Self)\n",
-        "                        <'not_found'> when 'true' ->\n",
-        "                            call ",
+    // A `{'value', Owner, Module}` verdict calls the owner directly. Every
+    // other verdict calls the superclass's `dispatch/3`, as do the one-hop
+    // selectors, which skip the verdict lookup altogether.
+    let super_call = docvec![
+        "call ",
         leaf::atom(super_module.to_string()),
         ":'dispatch'(Selector, Args, Self)\n",
-        "                    end\n",
+    ];
+    let verdict = docvec![
+        "            %% BT-4260: a memoised verdict picks the direct inherited call.\n",
+        "            case call 'beamtalk_dispatch':'inherited_target'(",
+        leaf::atom(class_name.to_string()),
+        ", Selector) of\n",
+        "                <{'value', _InhOwner, InhModule}> when 'true' ->\n",
+        "                    call InhModule:'dispatch'(Selector, Args, Self)\n",
+        "                <_InhSlow> when 'true' ->\n",
+        "                    ",
+        super_call.clone(),
+        "            end\n",
+    ];
+    if one_hop.is_empty() {
+        return docvec!["        <_Other> when 'true' ->\n", verdict];
+    }
+    let one_hop_arms: Vec<Document<'static>> = one_hop
+        .iter()
+        .map(|sel| {
+            docvec![
+                "                <",
+                leaf::atom(sel.clone()),
+                "> when 'true' ->\n",
+                "                    ",
+                super_call.clone(),
+            ]
+        })
+        .collect();
+    docvec![
+        "        <_Other> when 'true' ->\n",
+        "            case Selector of\n",
+        Document::Vec(one_hop_arms),
+        "                <_> when 'true' ->\n",
+        verdict,
         "            end\n",
     ]
 }
@@ -375,16 +358,12 @@ fn value_default_arm(
 /// 'has_method'/1 = fun (Selector) ->
 ///     case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'increment']) of
 ///         <'true'> when 'true' -> 'true'
-///         <'false'> when 'true' ->
-///             case call 'beamtalk_extensions':'has'('Counter', Selector) of
-///                 <'true'> when 'true' -> 'true'
-///                 <'false'> when 'true' -> call 'bt@stdlib@actor':'has_method'(Selector)
-///             end
+///         <'false'> when 'true' -> call 'bt@stdlib@actor':'has_method'(Selector)
 ///     end
 /// ```
 ///
 /// A catch-all-DNU spec (`spec.dnu`) short-circuits to an unconditional
-/// `'true'`, skipping the selector list and extension/superclass checks
+/// `'true'`, skipping the selector list and superclass check
 /// entirely — such a class accepts every message.
 pub(in crate::core_erlang) fn generate_has_method_from_spec(
     own_methods: &[String],
@@ -438,7 +417,7 @@ pub(in crate::core_erlang) fn generate_has_method_from_spec(
         None => Document::Str("<'false'> when 'true' -> 'false'\n"),
     };
 
-    let has_method = render_has_method_fn("has_method", &selectors, spec.class_name, false_branch);
+    let has_method = render_has_method_fn("has_method", &selectors, false_branch);
 
     if !spec.emit_local_probe {
         return has_method;
@@ -448,23 +427,17 @@ pub(in crate::core_erlang) fn generate_has_method_from_spec(
     // check — it always answers `'false'`, so class_chain_step's own walk
     // (not this function's) is what advances to the superclass.
     let local_false_branch = Document::Str("<'false'> when 'true' -> 'false'\n");
-    let has_method_local = render_has_method_fn(
-        "has_method_local",
-        &selectors,
-        spec.class_name,
-        local_false_branch,
-    );
+    let has_method_local = render_has_method_fn("has_method_local", &selectors, local_false_branch);
 
     docvec![has_method, has_method_local]
 }
 
 /// Shared body renderer for `has_method/1` and `has_method_local/1`
-/// — both check `Selector` against `selectors` then the extension registry;
-/// they differ only in `fn_name` and what happens when neither matches.
+/// — both check `Selector` against `selectors`; they differ only in `fn_name`
+/// and what happens when it is not among them.
 fn render_has_method_fn(
     fn_name: &'static str,
     selectors: &[Document<'static>],
-    class_name: &str,
     false_branch: Document<'static>,
 ) -> Document<'static> {
     docvec![
@@ -474,14 +447,8 @@ fn render_has_method_fn(
         join(selectors.to_vec(), &Document::Str(", ")),
         "]) of\n",
         "        <'true'> when 'true' -> 'true'\n",
-        "        <'false'> when 'true' ->\n",
-        "            case call 'beamtalk_extensions':'has'(",
-        leaf::atom(class_name.to_string()),
-        ", Selector) of\n",
-        "                <'true'> when 'true' -> 'true'\n",
-        "                ",
+        "        ",
         false_branch,
-        "            end\n",
         "    end\n",
         "\n",
     ]

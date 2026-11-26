@@ -717,23 +717,16 @@ fn test_actor_raise_site_frames_show_in_the_failure_bt_4850() {
         .stderr(contains("bt@").not());
 }
 
-/// BT-4821: `--full-traces` still works as a hidden alias and says it is deprecated.
+/// BT-5196: the deprecated `--full-traces` alias is gone (BT-4821 renamed it
+/// `--raw-mfa`); the new flag is documented and the old one is rejected.
 #[test]
-fn test_full_traces_is_a_deprecated_alias_for_raw_mfa_bt_4821() {
-    let project = cli_common::fixture_project();
-    write_deep_failure(project.path());
-
+fn test_full_traces_alias_is_removed_bt_5196() {
     cli_common::beamtalk()
-        .current_dir(project.path())
         .args(["test", "--quiet", "--full-traces"])
         .assert()
         .failure()
-        .stderr(contains("`--full-traces` is deprecated; use `--raw-mfa`"))
-        .stderr(contains(
-            "[bt@cli_subprocess_fixture@test@deep_fail_test:testDeep/1]",
-        ));
+        .stderr(contains("unexpected argument '--full-traces'"));
 
-    // The alias is hidden from help; the new flag is documented.
     cli_common::beamtalk()
         .args(["test", "--help"])
         .assert()

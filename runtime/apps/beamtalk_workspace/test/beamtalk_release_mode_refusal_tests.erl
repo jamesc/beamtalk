@@ -91,7 +91,17 @@ compiler_ops_refused_without_compiler_test_() ->
             {<<"load-source">>, #{<<"source">> => <<"Object subclass: Foo">>}},
             {<<"load-project">>, #{}},
             {<<"show-codegen">>, #{<<"code">> => <<"3 + 4">>}},
-            {<<"diagnostics">>, #{<<"code">> => <<"3 +">>}}
+            {<<"diagnostics">>, #{<<"code">> => <<"3 +">>}},
+            %% BT-5203: the editing writes LiveView and MCP share.
+            {<<"save-method">>, #{
+                <<"class">> => <<"Counter">>,
+                <<"selector">> => <<"increment">>,
+                <<"source">> => <<"self.value := 1">>
+            }},
+            {<<"save-class">>, #{
+                <<"source">> => <<"Object subclass: Foo">>, <<"path">> => <<"src/Foo.bt">>
+            }},
+            {<<"reload-file">>, #{<<"path">> => <<"src/Foo.bt">>}}
         ]
     ].
 
@@ -106,8 +116,8 @@ test_file_form_refused_without_compiler_test() ->
     end).
 
 direct_compile_entry_points_refused_without_compiler_test() ->
-    %% Entry points reached outside the REPL op seam — the Inspector's
-    %% `evaluate:` and the LiveView reload-from-disk RPC — consult the gate too.
+    %% Entry points reached outside the REPL op seam (the Inspector's
+    %% `evaluate:`, and `reload-file`'s underlying call) consult the gate too.
     with_capabilities(?RELEASE, fun() ->
         ?assertEqual(
             release_mode_no_compiler,
@@ -149,7 +159,13 @@ workspace_ops_refused_in_both_release_variants_test_() ->
             release_mode_no_workspace,
             with_capabilities(Caps, fun() -> refusal_kind(dispatch(Op, #{})) end)
         )
-     || Op <- [<<"unload">>, <<"save-native-source">>, <<"save-section">>],
+     || Op <- [
+            <<"unload">>,
+            <<"save-native-source">>,
+            <<"save-section">>,
+            <<"revert-method">>,
+            <<"flush">>
+        ],
         Caps <- [?RELEASE, ?RELEASE_WITH_COMPILER]
     ].
 

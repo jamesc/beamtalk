@@ -86,15 +86,11 @@ pub(crate) fn handle_inline_class_definition(
     inject_verifier_violation: bool,
 ) -> Term {
     let mut module = module;
-    let mut warnings = warnings.to_vec();
-    // Same-file extensions were folded before analysis (BT-4721); any standalone
-    // method left targets a class this module does not declare.
-    for method_def in std::mem::take(&mut module.method_definitions) {
-        let target_class = method_def.class_name.name.as_str();
-        warnings.push(Warning::message_only(format!(
-            "Standalone method targets unknown class `{target_class}` in this module"
-        )));
-    }
+    let warnings = warnings.to_vec();
+    // Same-file extensions were folded before analysis (BT-4721) and a standalone
+    // method whose target is not defined here was rejected with the parse
+    // diagnostics (ADR 0152), so none remain.
+    debug_assert!(module.method_definitions.is_empty());
 
     // Use unified module name derivation so inline class definitions
     // in package mode produce the same module name as file-based compilation.

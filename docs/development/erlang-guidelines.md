@@ -140,39 +140,20 @@ init([]) ->
 
 ---
 
-## FFI Class Methods and Class Variables (ADR 0130)
+## FFI Class Methods (ADR 0153)
 
-Class variables live in the class process's dictionary for the duration of a class-method invocation, and **every** access goes through `beamtalk_class_vars`. A class method implemented directly in hand-written Erlang (rather than compiled from `.bt` source) takes `(ClassSelf, Args...)` and returns the **bare result**: it never takes, builds or returns a class-variable map.
+A class has no state of its own (ADR 0153): there are no class variables, and compiled code never reads or writes them. A class method implemented directly in hand-written Erlang (rather than compiled from `.bt` source) takes `(ClassSelf, Args...)` and returns the **bare result**. Keep state in an Actor, `AtomicCounter`, `Ets` or `PersistentTerm`, not in the class (the migration table is in the [CHANGELOG](../../CHANGELOG.md)).
 
-```erlang
-%% Hand-written class method `bump`: counts calls in the class variable `runs`.
-class_bump(ClassSelf) ->
-    Runs = beamtalk_class_vars:get(ClassSelf, runs),
-    beamtalk_class_vars:put(ClassSelf, runs, Runs + 1).
-```
 
 **Rules:**
-- **Use `beamtalk_class_vars` and nothing else.** Read with `get/2` (`get_late/2` for a `late` slot, `has/2` for `hasField:`) and write with `put/3`; never touch `{'$bt_class_vars', Tag}` or `'$bt_class_vars_home'` with `erlang:get/put/erase` yourself. `beamtalk_class_vars` owns the key shape; `install/2` and `uninstall/1` are called only by `invoke_class_method/7` and `invoke_class_extension/7`.
-- **Never return `{class_var_result, Result, NewClassVars}`** and never write the old `{'$bt_class_vars_shadow', _}` key. Both were deleted (ADR 0110 is superseded); a class-method result is the result, and a write is the `put`.
-- **Never pass `nil` as the receiver.** The access helpers need the real `ClassSelf` class object; `nil` is an internal error, not a reachable-state question.
-- **An Erlang `catch`/`try` that runs a Beamtalk block (a `fun()` the user supplied) must wrap the call in `beamtalk_class_vars:protect/1`.** A write made inside the protected block must be discarded when the error is caught (ADR 0130 §4, the same rule `on:do:` follows). `protect/1` snapshots the home entry, restores it before re-raising any exception other than a `$bt_nlr` throw, passes both `$bt_nlr` tuple shapes through untouched (a `^` is not an error), and is a pass-through when no invocation is live. `beamtalk_result:tryDo/1`, `TestCase should:raise:`, Inspector `evaluate:` (`beamtalk_repl_eval:run_self_eval_module/3`) and the `badarg` retry in `beamtalk_erlang_proxy` are converted. Every other `try ... catch` in `runtime/apps/*/src` whose body applies a fun or makes a dynamic call carries a `%% bt-catcher-audit: <disposition> - <reason>` marker saying why it needs no `protect/1`, and `just lint-class-var-catchers` (part of `just lint`) fails on an unmarked one, a stale marker, or a `converted` marker whose function no longer restores (BT-3769). The dispositions are in [`class-var-catcher-audit.md`](class-var-catcher-audit.md).
+- **A runtime catch boundary needs no class-variable handling.** An Erlang `catch`/`try` that runs a Beamtalk block (`Result tryDo:`, `TestCase should:raise:`, Inspector `evaluate:`, the FFI `badarg` retry) catches and classifies the error with nothing to save or restore.
+- **Never pass `nil` as the receiver.** The class-method helpers need the real `ClassSelf` class object.
 - **Recognise a `^` throw with `?IS_NLR(T)` from `beamtalk.hrl`, never a hand-rolled `{'$bt_nlr', ...}` pattern.** Pass it through with `throw:Nlr:Stack when ?IS_NLR(Nlr) -> erlang:raise(throw, Nlr, Stack)`, ordered before any catch-all clause. `just lint-nlr-tuple-matches` (part of `just lint`) fails on any code use of the `'$bt_nlr'` atom in `runtime/apps/*/{src,include}` outside the allowlist in `scripts/ci/lint-nlr-tuple-matches.sh` (BT-3758).
-- **Out-of-process code reads a snapshot.** Runtime code that deliberately runs a class method away from the class process (supervisor definition, the `initialize:` hook, `performLocally:withArguments:`) wraps the call in `beamtalk_class_vars:with_snapshot(ClassSelf, Fun)`: reads see the class variables as of the last completed invocation, and a write raises `class_state_read_only`.
 - **Callers of `beamtalk_class_dispatch:class_self_dispatch_local/4`** pass `(Name, Selector, Args, ReceiverTag)`. The arity is unchanged but the old third argument (`ClassVars`) is gone; a stale caller fails with `badarg` or `function_clause`. For a virtual class-side self-send call `class_self_send/3` (`(Name, Selector, Args)`, starting at the receiving class); for a class-side `super` call `class_super_dispatch/4` (`(DefiningClass, Selector, Args, ReceiverTag)`, starting at the defining class's superclass). The old `class_self_dispatch/4` is removed (BT-4254).
-- A hand-written Erlang class module with no `__beamtalk_meta/0` is outside the loader's `class_var_abi` check, so this rule is its only guard: a module built for the old convention is not refused, it just misbehaves.
 
 ### Actor state (ADR 0137)
 
-While an actor callback runs, the actor state map lives in one cell owned by `beamtalk_actor_state`: `install/1` and `uninstall/1` bracket a callback, `take/0` yields the new state on a normal exit, and `adapt/1` converts a `{reply, R, NewState}` result (native methods, ADR 0066 extension funs, `dispatch/4`) into the cell. Never touch `'$bt_actor_state'` with `erlang:get/put/erase` yourself: runtime and test code goes through the helpers, and so do the generated callbacks. The one exception is the compiler's cell bracket (`ThreadedStmt::SyncedCall`, `ACTOR_STATE_CELL` in `threaded_ir/emit.rs`), which inlines the `put`/`get` BIFs because a helper call would cost more than the bracket (ADR 0137 gate 2); `the_cell_key_matches_the_runtime_define` pins its key to the `-define(CELL, ...)` in `beamtalk_actor_state.erl`. A block writing a field away from its actor's process raises `actor_state_unreachable`.
-
-**Module map.** `beamtalk_class_vars` is the leaf that owns the key and every access; it calls neither `beamtalk_object_class` nor `beamtalk_behaviour_intrinsics`. Around it:
-
-| Module | Owns |
-|---|---|
-| `beamtalk_class_vars` | The process-dictionary key shape (from the generated `beamtalk_class_vars_keys.hrl`), `install/2`/`uninstall/1`, the access helpers, `snapshot/0`/`restore/1`/`protect/1`, `with_snapshot/2`. |
-| `beamtalk_class_var_errors` | The structured errors and hint text (`class_state_unreachable`, `class_state_read_only`, `undeclared_class_variable`, `uninitialized_state_error`), shared by the accesses and the class gen_server's `get_class_var`. |
-| `beamtalk_class_metadata:class_var_kinds/1` | Declared class-variable kinds (`eager`/`late`) of the class itself, own-only (class variables are not inherited, BT-3801), from its `__beamtalk_meta/0`; `inherited_class_var_kinds/1` is the diagnostic-only ancestor view. |
-| `beamtalk_class_var_abi` | The `class_var_abi` load gate: `abi/0`, `check_class_info_abi/2` (called by `beamtalk_object_class:start/2` and `update_class/2`) and `collect_abi_refusals/1` (the release preflight). |
+While an actor callback runs, the actor state map lives in one cell owned by `beamtalk_actor_state`: `install/1` and `uninstall/1` bracket a callback, `take/0` yields the new state on a normal exit, and `adapt/1` converts a `{reply, R, NewState}` result (native methods, `dispatch/4`) into the cell. Never touch `'$bt_actor_state'` with `erlang:get/put/erase` yourself: runtime and test code goes through the helpers, and so do the generated callbacks. The one exception is the compiler's cell bracket (`ThreadedStmt::SyncedCall`, `ACTOR_STATE_CELL` in `threaded_ir/emit.rs`), which inlines the `put`/`get` BIFs because a helper call would cost more than the bracket (ADR 0137 gate 2); `the_cell_key_matches_the_runtime_define` pins its key to the `-define(CELL, ...)` in `beamtalk_actor_state.erl`. A block writing a field away from its actor's process raises `actor_state_unreachable`.
 
 ---
 
@@ -822,7 +803,6 @@ The following functions are exposed by `beamtalk_runtime_api`:
 | `get_class_method_return_type/2` | `beamtalk_class_registry:get_class_method_return_type/2` |
 | `class_name/1` | `beamtalk_object_class:class_name/1` |
 | `module_name/1` | `beamtalk_object_class:module_name_safe/1` (preferred — resolves via ETS, no `gen_server:call`; avoids deadlocks in foreign-process blocks) |
-| `set_class_var/3` | `beamtalk_object_class:set_class_var/3` |
 | `class_methods/1` | `beamtalk_object_class:methods/1` |
 | `local_class_methods/1` | `beamtalk_object_class:local_class_methods/1` |
 | `local_instance_methods/1` | `beamtalk_object_class:local_instance_methods/1` |

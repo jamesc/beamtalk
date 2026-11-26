@@ -851,6 +851,10 @@ mod tests {
 
     #[test]
     fn test_find_workspace_by_project_path_returns_none() {
+        // BT-5272: reads the workspaces dir under `beamtalk_root_dir()`, so it
+        // must hold the shared hermetic home; unguarded, the dir another holder
+        // owns can be removed between `exists()` and `read_dir`.
+        let _home_guard = crate::commands::test_support::real_home_guard();
         let result = find_workspace_by_project_path(Path::new("/nonexistent/path/test")).unwrap();
         assert!(result.is_none());
     }
@@ -1709,6 +1713,23 @@ mod tests {
             !ws_dir.join("starting").exists(),
             "starting tombstone should be removed after successful startup"
         );
+    }
+
+    /// BT-5126: a real detached workspace node authenticates with its cookie
+    /// (the WebSocket health check inside `is_node_running` uses it) while the
+    /// cookie is absent from the node's `ps` / `/proc/<pid>/cmdline`.
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "integration test — requires Erlang/OTP runtime"]
+    #[serial(workspace_integration)]
+    fn test_detached_node_cookie_not_visible_in_ps_integration() {
+        let (tw, node_info, _guard) = start_test_node("integ_cookie_ps");
+        let cookie = read_workspace_cookie(&tw.id).unwrap();
+        assert!(
+            is_node_running(&node_info, Some(&tw.id)),
+            "the node must have adopted the cookie (authenticated health check)"
+        );
+        beamtalk_workspace::test_argv::assert_not_in_argv(node_info.pid, &cookie);
     }
 
     #[test]

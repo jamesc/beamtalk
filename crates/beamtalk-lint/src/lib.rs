@@ -35,6 +35,7 @@ mod dead_returned_assignment;
 mod effect_free_statement;
 mod inspect_in_string_position;
 mod redundant_sealed;
+mod scope;
 mod shadowed_block_param;
 mod sync_send_in_timer_block;
 mod trailing_caret;
@@ -99,8 +100,8 @@ pub(crate) trait LintPass {
 /// The module-local [`ClassHierarchy`]: this file's classes only, for
 /// [`run_lint_passes`] (a caller with no cross-file context) and pass tests.
 fn module_hierarchy(module: &Module) -> ClassHierarchy {
-    let (hierarchy_result, _hierarchy_diagnostics) = ClassHierarchy::build(module);
-    hierarchy_result.expect("ClassHierarchy::build is infallible")
+    let (hierarchy, _hierarchy_diagnostics) = ClassHierarchy::build(module);
+    hierarchy
 }
 
 /// The fix hint for a synchronous send to the actor that should be an async

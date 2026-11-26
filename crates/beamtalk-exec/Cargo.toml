@@ -31,10 +31,8 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 # why: process group management (setsid, kill) on Unix
 libc = { workspace = true }
-
-[target.'cfg(windows)'.dependencies]
-# why: Win32 Job Object APIs for process group isolation on Windows (BT-1133)
-windows-sys.workspace = true
+# why: BT-5195 — shared Job Object, kill escalation and exit-code helpers
+beamtalk-process = { workspace = true }
 
 [dev-dependencies]
 # why: BT-5028 — tests that spawn children are serialised against the one that

@@ -256,7 +256,6 @@ impl TypeChecker {
             DeclaredType::Generic { parameters, .. } => {
                 parameters.iter().any(Self::declared_type_contains_self)
             }
-            DeclaredType::FalseOr(inner) => Self::declared_type_contains_self(inner),
             DeclaredType::Shape { fields, .. } => fields
                 .iter()
                 .any(|f| Self::declared_type_contains_self(&f.value)),

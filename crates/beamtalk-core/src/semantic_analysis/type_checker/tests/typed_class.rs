@@ -27,7 +27,7 @@ fn test_typed_class_warns_on_missing_param_annotation() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let warnings: Vec<_> = checker
         .diagnostics()
@@ -62,7 +62,7 @@ fn test_typed_class_warns_on_missing_return_type() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let warnings: Vec<_> = checker
         .diagnostics()
@@ -96,7 +96,7 @@ fn test_typed_class_no_warning_when_fully_annotated() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let typed_warnings: Vec<_> = checker
         .diagnostics()
@@ -136,7 +136,7 @@ fn test_expect_type_suppresses_typed_method_warnings() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         diags.is_empty(),
@@ -168,7 +168,7 @@ fn test_expect_all_suppresses_typed_method_warnings() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         diags.is_empty(),
@@ -205,7 +205,7 @@ fn test_typed_no_default_state_no_warning() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let uninitialized: Vec<_> = checker
         .diagnostics()
@@ -235,7 +235,7 @@ fn test_non_typed_class_no_warnings() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let typed_warnings: Vec<_> = checker
         .diagnostics()
@@ -275,7 +275,7 @@ fn test_typed_class_skips_primitive_methods() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let typed_warnings: Vec<_> = checker
         .diagnostics()

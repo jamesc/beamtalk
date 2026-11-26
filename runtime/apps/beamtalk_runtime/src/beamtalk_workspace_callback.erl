@@ -40,12 +40,12 @@ the workspace's compile-and-install pipeline. This module is that seam:
     precheck_method/4,
     remove_method/4,
     emit_remove_change_entry/5,
-    emit_extension_remove_change_entry/7,
     rewrite_sites/2,
     validate_sites/2,
     emit_rewrite_change_entry/2,
     capture_class_removal_snapshot/1,
-    emit_remove_class_change_entry/4
+    emit_remove_class_change_entry/4,
+    report_late_hot_reload_failure/3
 ]).
 
 -define(KEY, {beamtalk_runtime, workspace_callback}).
@@ -71,21 +71,13 @@ the workspace's compile-and-install pipeline. This module is that seam:
 -callback emit_remove_change_entry(
     binary(), atom() | binary(), instance | class, binary(), human | agent
 ) -> emit_result().
--callback emit_extension_remove_change_entry(
-    binary(),
-    atom() | binary(),
-    instance | class,
-    atom() | undefined,
-    binary() | undefined,
-    binary(),
-    human | agent
-) -> emit_result().
 -callback rewrite_sites(map() | undefined, [map()]) -> {ok, map()} | {error, term()}.
 -callback validate_sites(map() | undefined, [map()]) -> ok | {error, term()}.
 -callback emit_rewrite_change_entry(map(), map()) -> emit_result().
 -callback capture_class_removal_snapshot(binary()) -> map().
 -callback emit_remove_class_change_entry(binary(), map(), binary(), human | agent) ->
     emit_result().
+-callback report_late_hot_reload_failure(atom(), pid(), {error, term()}) -> ok.
 
 %%% Registration
 
@@ -184,22 +176,6 @@ remove_method(ClassNameBin, Selector, Side, StdlibPolicy) ->
 emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
     invoke(emit_remove_change_entry, [ClassNameBin, Selector, Side, Author, AuthorKind]).
 
--spec emit_extension_remove_change_entry(
-    binary(),
-    atom() | binary(),
-    instance | class,
-    atom() | undefined,
-    binary() | undefined,
-    binary(),
-    human | agent
-) -> emit_result() | no_workspace().
-emit_extension_remove_change_entry(
-    ClassNameBin, Selector, Side, Owner, PrevSource, Author, AuthorKind
-) ->
-    invoke(emit_extension_remove_change_entry, [
-        ClassNameBin, Selector, Side, Owner, PrevSource, Author, AuthorKind
-    ]).
-
 -spec rewrite_sites(map() | undefined, [map()]) -> {ok, map()} | {error, term()} | no_workspace().
 rewrite_sites(DefinitionSite, ReferenceSites) ->
     invoke(rewrite_sites, [DefinitionSite, ReferenceSites]).
@@ -220,6 +196,10 @@ capture_class_removal_snapshot(ClassNameBin) ->
     emit_result() | no_workspace().
 emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
     invoke(emit_remove_class_change_entry, [ClassNameBin, Snapshot, Author, AuthorKind]).
+
+-spec report_late_hot_reload_failure(atom(), pid(), {error, term()}) -> ok | no_workspace().
+report_late_hot_reload_failure(Module, Pid, Failure) ->
+    invoke(report_late_hot_reload_failure, [Module, Pid, Failure]).
 
 %%% Internal
 

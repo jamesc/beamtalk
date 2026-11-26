@@ -317,6 +317,68 @@ examples() ->
                         'end' => 15
                     })
                 ]
+            }}},
+        %% BT-5203: the editing writes, each `{value, Map}` of scalars.
+        {<<"save-method">>, <<"save-method">>,
+            {value, #{<<"class">> => <<"Counter">>, <<"selector">> => <<"increment">>}}},
+        {<<"save-class">>, <<"save-class">>, {value, #{<<"path">> => <<"src/Greeter.bt">>}}},
+        {<<"revert-method">>, <<"revert-method">>,
+            {value, #{<<"class">> => <<"Counter">>, <<"selector">> => <<"increment">>}}},
+        {<<"reload-file">>, <<"reload-file">>,
+            {value, #{<<"classes">> => [<<"Counter">>, <<"Greeter">>]}}},
+        %% BT-5204: workspace state. Each `{value, Map}` is the wire projection
+        %% (`beamtalk_repl_ops_state`): binary keys, `null` for absent.
+        {<<"flush">>, <<"flush">>,
+            {value, #{
+                <<"flushed">> => 1,
+                <<"files">> => [<<"src/counter.bt">>],
+                <<"newClasses">> => 0,
+                <<"removedClasses">> => 0,
+                <<"skipped">> => [
+                    #{
+                        <<"seq">> => 2,
+                        <<"class">> => <<"Gone">>,
+                        <<"reason">> => <<"destructive">>
+                    }
+                ],
+                <<"conflicts">> => []
+            }}},
+        {<<"changes">>, <<"changes">>,
+            {value, #{
+                <<"entries">> => [
+                    #{
+                        <<"seq">> => 1,
+                        <<"className">> => <<"Counter">>,
+                        <<"selector">> => <<"increment">>,
+                        <<"kind">> => <<"instance">>,
+                        <<"side">> => <<"instance">>,
+                        <<"intent">> => <<"durable">>,
+                        <<"flushable">> => true,
+                        <<"authorKind">> => <<"human">>,
+                        <<"sourceFile">> => <<"src/counter.bt">>,
+                        <<"orphan">> => false,
+                        <<"priorEpoch">> => false,
+                        <<"flushed">> => false,
+                        <<"active">> => true,
+                        <<"shadowed">> => false,
+                        <<"clean">> => false,
+                        <<"diff">> => <<"-  increment => 1\n+  increment => 2\n">>,
+                        <<"oldClass">> => null,
+                        <<"oldSelector">> => null
+                    }
+                ]
+            }}},
+        {<<"info">>, <<"info">>,
+            {value, #{
+                <<"version">> => #{
+                    <<"runtime_version">> => <<"0.6.0">>,
+                    <<"protocol_version">> => <<"2.0">>,
+                    <<"otp_release">> => <<"27">>,
+                    <<"erts_version">> => <<"15.0">>
+                },
+                <<"node">> => <<"beamtalk_workspace_ab12@localhost">>,
+                <<"workspace_id">> => <<"ws-ab12">>,
+                <<"settings">> => #{<<"autoflush">> => false}
             }}}
     ].
 

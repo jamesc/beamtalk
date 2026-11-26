@@ -1315,7 +1315,7 @@ write in the body (loop bodies and blocks included) reuses `_CVKeyN`. A method w
 nothing. It is one lowering point shared by compiled class methods, `ClassBuilder` funs and class-side extension
 funs (`class_method_body_doc`), emitted through `class_var_keys::key_binding_doc` (`Document` + `leaf::*`).
 No state-threading scope is involved (class variables are written in place), so there is no `ThreadedIr` node to
-change; `just verify-threaded-ir` and `just test-class-var-corpus` pass.
+change; `just verify-threaded-ir` passes (the class-variable corpus has since been deleted, BT-5151).
 
 Method: `SsbMain run` through `beamtalk run`, two compilers built from the same checkout (before = `origin/main`
 `fbeac1c39`, after = this change), the bench package rebuilt from scratch with each, 7 interleaved rounds
@@ -1748,6 +1748,8 @@ compiles to and the functions it calls. Run it with `just bench-vs-elixir`.
 Method, results (main at `dc216bf52`), the analysis and the effect of BT-4065
 and BT-4071 are in [`benchmarks/vs-elixir/README.md`](../../benchmarks/vs-elixir/README.md).
 
+The rows that measured a static call site shadowed by a class-side extension (3i and 3j, BT-4431) were removed with cross-file extension methods (ADR 0152), along with their `vb_shadowed_math*.bt` fixtures. Rows 3f, 3g and 3h (class variables, `VbStatefulMath` / `VbLateStateMath`) and dispatch-overhead row c4 (`VdStatefulMath`) measured class variables only and were removed with `classState:` (ADR 0153, BT-5150); their baseline numbers are in the BT-5145 baseline. The old result files under `benchmarks/vs-elixir/results/` keep those rows as history.
+
 ## BT-4416: `equals:` on a primitive receiver
 
 `a equals: b` compiles to `beamtalk_message_dispatch:send/3`. For a primitive
@@ -1878,3 +1880,183 @@ ns per call):
 The compiled method has no `make_ref` (the frame stays gone). A two-branch
 guard or a tail conditional on a declared comparison is not covered by the
 helper and keeps its frame again.
+
+### BT-5210: the right operand of a numeric comparison is tested (ADR 0116 addendum)
+
+ADR 0116 § Addendum (BT-5176), Phase 2b: an inlined `<`, `<=`, `>`, `>=`
+whose left operand may be a number now tests its right operand with
+`is_number` unless the compiler proves it numeric (a number or character
+literal, `self` in `Integer`/`Float`/`Character`), and sends a non-number its
+reflected hook through `send_number_comparison/4`. A declared right operand is
+tested. Measured against the Phase 0 baseline rows with a like-for-like repo
+build of `main` and of the change, three interleaved runs per side; the full
+tables are in `benchmarks/vs-elixir/results/bench-bt5176-after.md`.
+
+| Row | base ns | after ns | red / words |
+|---|---|---|---|
+| 11d `a > 0` (proven right) | 7.7–8.7 | 8.0–8.8 | 0 / 0, same code |
+| 11e `a < 10` (proven right) | 7.5–8.4 | 7.7–8.0 | 0 / 0, same code |
+| 11f `[a > i] whileTrue:` | 246–267 | 254–273 | 19 / 7 both |
+| 11g `a max: 3` | 19.3–23.5 | 17.0 | 4 / 0 both |
+| 11h `5 < b` | 0.5–1.1 | 7.7–7.8 | 0 / 0 both |
+| 11i `a < b` untyped | 10.6–11.0 | 7.7–8.0 | 0 / 0 both |
+| 11j `a :: Integer < b` | 7.6–8.2 | 7.7–8.3 | 0 / 0 both |
+| 11k `5 + b` (reference) | 8.8–10.2 | 8.9–9.5 | 0 / 0 both |
+| 11l actor `[0 < self.count] whileTrue:` | 3692–4912 | 3583–3667 | 112–113 → 102 |
+
+The gate holds: rows with a proven right operand compile to the same code;
+the rows whose guard already had a dispatching arm (11f, 11g, 11i, 11j) keep
+their reductions and words with ns inside the spread. 11h (`5 < b`) is the
+expected cost of the change and has its own bound: it was a bare BIF at the
+noise floor and is now ~7.7 ns, because its new `case` has an arm that makes a
+call (the hook), which gives the site a stack frame even when `b` is a number
+and the hook never runs (§ The failing arm; owner decision 1 in § Decisions on the open questions of ADR 0116). It stays
+cheaper than `5 + b` (8.9–9.5 ns). 11l was already a `StateAcc` loop; its
+condition now brackets the comparison with a BT-4279 fast path
+(`is_number(Count)` skips the store) and it measured faster.
+
+### BT-5211: the primitive bodies test their argument too (ADR 0116 addendum)
+
+Phase 2c gives the `@primitive` `<` `<=` `>` `>=` bodies of `Integer`,
+`Float` and `Character` the same right-operand test as the inlined path, so
+it only changes dynamic sends (`perform:`, a send the compiler cannot
+inline). None of the Phase 0 rows reaches a primitive body, so the gate is
+"no change beyond noise". Measured like for like: `main` at `0be6f90`
+(Phase 2b, built in a separate worktree) against this change, both repo dev
+builds, `BEAMTALK=<compiler> just bench-vs-elixir bench 7 11d,...,11l`,
+three runs per side, alternating base / after, on a 4-vCPU cloud container
+(OTP 28).
+
+| Row | base ns (1 / 2 / 3) | after ns (1 / 2 / 3) | red / words, both sides |
+|---|---|---|---|
+| 11d `a > 0` | 6.49 / 6.41 / 6.74 | 6.52 / 6.48 / 6.92 | 0 / 0 |
+| 11e `a < 10` | 6.92 / 6.43 / 6.61 | 6.43 / 6.85 / 6.63 | 0 / 0 |
+| 11f `[a > i] whileTrue:` | 223 / 187 / 235 | 207 / 224 / 226 | 19 / 7 |
+| 11g `a max: 3` | 14.3 / 14.1 / 16.0 | 14.3 / 14.3 / 14.3 | 4 / 0 |
+| 11h `5 < b` | 6.54 / 6.20 / 6.51 | 6.19 / 6.59 / 7.02 | 0 / 0 |
+| 11i `a < b` untyped | 6.28 / 6.57 / 6.61 | 6.28 / 6.38 / 7.75 | 0 / 0 |
+| 11j `a :: Integer < b` | 6.39 / 6.63 / 6.70 | 8.65 / 6.53 / 6.64 | 0 / 0 |
+| 11k `5 + b` (reference) | 7.57 / 7.32 / 7.96 | 7.48 / 7.92 / 7.72 | 0 / 0 |
+| 11l actor loop | 3660 / 3140 / 3297 | 3303 / 3351 / 3115 | 103 / 191–195 |
+
+The gate holds: reductions and words are identical on both sides (11l's
+words vary run to run, as in the BT-5210 runs), and every ns figure is
+inside the other side's spread apart from single outliers in both
+directions (after 11j run 1, 11i run 3; base 11f run 2).
+
+### BT-5213: `String` and `Symbol` receivers test their argument (ADR 0116 addendum follow-up)
+
+A `String` or `Symbol` on the left of `<`, `<=`, `>`, `>=` now orders only
+against its own kind and raises a `type_error` for anything else. The test is
+the class's routing guard (`is_record(R, beamtalk_string, 2)` for a `String`,
+`is_atom(R)` and not `nil`/`true`/`false` for a `Symbol`), and the failing arm
+is a frame-free `erlang:error/1`. It runs inline for a proven `String`
+receiver (a literal, `self` in `String`) and in the `@primitive` bodies of
+`String` and `Symbol`, which every other receiver dispatches to. New rows
+11m (`"m" < b`), 11n (`a < b`, two untyped Strings, dispatch to `String>><`)
+and 11o (`#m < b`, dispatch to `Symbol>><`) were added and measured on both
+sides: `main` at `52539ed` against this change, repo dev builds, three runs
+per side. Full tables:
+`benchmarks/vs-elixir/results/bench-bt5213.md`.
+
+| Row | base ns (1 / 2 / 3) | after ns (1 / 2 / 3) | red / words, both sides |
+|---|---|---|---|
+| 11d `a > 0` | 7.95 / 8.50 / 8.02 | 7.96 / 8.00 / 7.93 | 0 / 0 |
+| 11e `a < 10` | 7.79 / 8.34 / 7.95 | 7.95 / 7.98 / 7.54 | 0 / 0 |
+| 11h `5 < b` | 7.89 / 7.55 / 7.99 | 7.69 / 7.99 / 7.85 | 0 / 0 |
+| 11i `a < b` untyped | 7.97 / 7.97 / 7.98 | 8.20 / 8.20 / 8.06 | 0 / 0 |
+| 11k `5 + b` (reference) | 9.49 / 9.53 / 8.90 | 9.09 / 9.20 / 9.11 | 0 / 0 |
+| 11m `"m" < b` | 16.4 / 15.2 / 15.1 | 15.2 / 15.3 / 15.0 | 0 / 0 |
+| 11n `a < b` Strings | 104 / 100 / 106 | 102 / 97.9 / 101 | 12 / 2 |
+| 11o `#m < b` | 98.7 / 98.3 / 99.5 | 108 / 96.6 / 102 | 9 / 2 |
+
+The gate holds: reductions and words are identical on every row, and every
+ns figure is inside the other side's spread apart from one outlier (after
+11o run 1). 11m, the row the inlined test lands on, is unchanged because the
+failing arm is `erlang:error/1`: a first version that raised through a
+runtime helper call measured 17.6 / 17.6 / 18.0 ns there, the cost of the
+stack frame a returning call gives the site (ADR 0116 § The failing arm).
+11n and 11o go through dispatch (~100 ns) either way; the extra guard in the
+primitive body is lost in it.
+
+### BT-5261: comparison guards test the `String` tag, not `is_binary`
+
+The inlined comparison guard took `is_binary` as its `String` test, but since
+BT-4170 a `String` is the tagged `{beamtalk_string, Bin}` term, so no
+`String` passed it. The unknown-receiver guard is now `is_number` alone: a
+raw `Binary` dispatches and raises `does_not_understand`. A declared
+`String` receiver is now tested with the `String` tag and runs inline, with
+the BT-5213 argument test. New row 11p (`a :: String < b :: String`)
+measures that path on both sides. The setup is the same as for BT-5213:
+`main` at `8088582` against this change, repo dev builds, three runs per
+side, alternating. Full tables:
+`benchmarks/vs-elixir/results/bench-bt5261.md`.
+
+| Row | base ns (1 / 2 / 3) | after ns (1 / 2 / 3) | red / words (base → after) |
+|---|---|---|---|
+| 11i `a < b` untyped | 9.28 / 7.78 / 7.18 | 8.04 / 7.96 / 7.51 | 0 / 0 → 0 / 0 |
+| 11n `a < b` Strings | 117 / 90.7 / 92.8 | 110 / 108 / 99.5 | 12 / 2 → 12 / 2 |
+| 11p `a :: String < b :: String` | 106 / 98.1 / 96.7 | 8.01 / 7.97 / 7.73 | 12 / 2 → 0 / 0 |
+
+The gate holds. 11i and 11n keep their reductions and words: 11i loses only
+the `is_binary` arm, which a number never reaches, and 11n's tagged Strings
+dispatched before and still do. Their ns stays within the spread both sides
+show (11n runs 90–117 ns either way). Rows 11d, 11e, 11h, 11k, 11m and 11o
+compile to the same code and measured the same. 11p is the gain: a declared
+`String` comparison went from a dispatch to `String>><` (~100 ns,
+12 reductions) to an inline test (~8 ns, 0 reductions).
+
+## ADR 0153 baseline: class variables, before removal (BT-5145)
+
+The "before" run for removing `classState:` (epic BT-5144). It records what the class-variable snapshot before every compiled `on:do:`, `protect/1` in `Result tryDo:` and the class-variable input to the per-send class guard cost, so the "after" run (BT-5164, and the ADR 0153 Phase 3 gate) has something to compare against.
+
+Full tables, the exact commands and the conditions are in [`benchmarks/vs-elixir/results/bench-bt5145-baseline.md`](../../benchmarks/vs-elixir/results/bench-bt5145-baseline.md). Measured at `main` `b464155` with the dev compiler on a 4-core cloud container (OTP 28, Elixir 1.20.1); reductions and words are exact, time is noisy.
+
+| Row | Operation | BT red | BT words | BT ns |
+|---|---|--:|--:|--:|
+| vs-elixir 3a-3c | class send, guarded direct call | 3.0 | 0 | 20-26 |
+| vs-elixir 3d | class in a variable | 24.1 | 42 | 608 |
+| vs-elixir 3f | class with `classState:` (control; removed by BT-5150) | 140 | 167 | 6518 |
+| vs-elixir 8a | `on: Error do:` without a raise | 5.0 | 0 | 67.7 |
+| vs-elixir 8b | `on: Error do:` with a raise | 99.1 | 167 | 2210 |
+| dispatch e1 | `on: Error do:` without a raise | 5.0 | n/a | 65.5 |
+| dispatch e2 | `ensure:` without a raise | 4.0 | n/a | 2.0 |
+| `beamtalk_result:tryDo/1`, block answers | direct timing, no benchmark row exists | n/a | n/a | 23.0 (bare `try`: 8.4) |
+
+The inventory that drives the removal is [`class-state-removal-inventory.md`](class-state-removal-inventory.md), a one-off file deleted by the last issue of the epic.
+
+## ADR 0153 after: class variables and cross-file extensions removed, and the guard read (BT-5164)
+
+The "after" run for the BT-5145 baseline above, measured with three runs interleaved against the baseline commit (`b464155e`) on the same host and build profile, versus `main` at `1e3755e`. Full tables and per-run numbers: [`benchmarks/vs-elixir/results/bench-bt5164-after.md`](../../benchmarks/vs-elixir/results/bench-bt5164-after.md). Reductions and words are exact; time on this 4-core cloud host is noisy (run to run ±10-30%), so read the time columns as ratios within one run; the time deltas on rows 3a-3c, 8a, 8b and e1 are inside that noise and only the reductions are firm.
+
+| Row | Operation | base red | main red | base ns | main ns |
+|---|---|--:|--:|--:|--:|
+| 3a-3c | class send, guarded direct call | 3.0 | 3.0 | 22 / 22 / 24 | 27 / 21 / 34 |
+| 3d | class in a variable | 24.1 | **31.0** | 660 | 746 |
+| 3e | inherited class method | 31.1 | 28.3 | 939 | **1516** |
+| 8a | `on: Error do:` without a raise | 5.0 | **3.0** | 65.3 | 64.6 |
+| 8b | `on: Error do:` with a raise | 99.2 | 95.2 | 2546 | 2462 |
+| e1 | dispatch `on: Error do:` | 5.0 | **3.0** | 67.9 | 74.6 |
+| `beamtalk_result:tryDo/1` over a bare `try` (noisy) | | n/a | n/a | 15.2 | 9.9 |
+
+- **What the removals saved.** The class-variable snapshot cost `on:do:` 2 reductions (5 → 3) and `Result tryDo:` at most a few ns on its success path (0.5-6 ns over three runs, not distinguishable from noise); `on:do:` time did not move beyond noise. The class-send rows 3a-3c have equal reductions (3.0) and their time is inconclusive (3c slower on main in all three runs of one harness, faster in the other); the guard is the same read.
+- **The guard read is still there and still dominant.** One `persistent_term:get` per class send (`'<Class> static calls'` or `'<Class> class'`), about 16-17 ns at the floor (BT-4987 said 15 ns, also a floor) of a 19-21 ns send: roughly 75-90%. Replacing it with `atomics:get` (21 ns) or `ets:lookup` (27 ns) would be slower. Removing it would leave a send of very roughly 3-5 ns (an estimate from two noisy figures), like Elixir's remote call. Conclusion (a): it can go in principle, but safely only with two owner decisions (a runtime fun shadowing a compiled selector; a `ClassSelf` that carries a pid), tracked in BT-5268 (spike, `needs-spec`). No guard code was changed.
+- **Regression found.** A class held in a variable (3d, 3e, c5) now reads the raw `runtime_fun` and ready flags per send instead of the derived flag: 3 reads instead of 2, 24 → 31 reductions on 3d, and 3e is +60% in time in all three runs (more than one extra read explains). Tracked in BT-5267, fixed below.
+- Rows 3f-3j and c4 no longer exist (they measured class variables and cross-file extensions); the old numbers stay in the baseline above and in the files under `benchmarks/vs-elixir/results/`.
+
+## Class-in-a-variable send back to two reads (BT-5267)
+
+The fix for the regression found in BT-5164. Three runs, interleaved: base `b464155e` (the BT-5145 baseline), `main` at `b66c683`, and the change. Full tables and per-run numbers: [`benchmarks/vs-elixir/results/bench-bt5267.md`](../../benchmarks/vs-elixir/results/bench-bt5267.md). Reductions, words and the read list are exact; time is noisy.
+
+| Row | Operation | base red | main red | change red | base words | main words | change words | base ns | main ns | change ns |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| 3d | class in a variable | 24.1 | 31.0 | **24.0** | 42 | 46 | **41** | 620 | 711 | 584 |
+| 3e | inherited class method | 31.1 | 28.3 | **21.1** | 36 | 40 | **35** | 851 | 1429 | 876 |
+| 3e untraced (`VS_BENCH_NO_TRACE=1`) | | | | | | | | 477 | 388 | 356 |
+| c5 | dispatch, class in a variable | 24.0 | 31.1 | **24.0** | n/a | n/a | n/a | 307 | 331 | 318 |
+| 3a-3c, c1-c3 | guarded direct calls (control) | 3.0 | 3.0 | 3.0 | 0 | 0 | 0 | 19-26 | 20-28 | 19-24 |
+
+- **Reads.** `bench-dispatch keys c5` shows two `persistent_term` reads again: the owner memo's generation and the defining class's derived flag (`beamtalk_class_shadow_flags:body_route/2`, which owns the "ready and no `runtime_fun`" rule; `direct_call_ok/2` wraps it). Main read the generation and the two raw flags. A test pins the list (`beamtalk_class_in_caller_tests`, `class_in_variable_test_`).
+- **3e's time.** The vs-elixir harness traces garbage collection while it times a row, and on these rows that tracing is most of the time. Untraced, main's 3e was already faster than base's (388 vs 477 ns); traced, it rose to 1429 ns. The cause was allocation: `is_shadowed/1` built a `{beamtalk_class_shadow, runtime_fun, Class}` key tuple on every send (+4 words). The fix drops it, and the owner memo's key loses its leading tag (`{ClassPid, Selector}`, 2 words less per send). Traced 3e is back to 876 ns.
+- **Unchanged semantics.** A runtime fun still runs in the caller (BT-5161). A shadowed defining class takes the fun-store route after the derived flag misses: generation, derived flag, readiness, `runtime_fun` flag, then the fun store (one more read than main on that path, which also does an ETS lookup). Runtime-fun shadowing on an ancestor, `removeSelector:` and a hot reload each take effect between two sends of a class held in a variable (tests in `class_in_variable_test_`).
+

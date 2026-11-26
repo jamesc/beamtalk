@@ -18,15 +18,13 @@
 //! in name but carried this shared logic.
 
 use super::gen_server::extract_package_from_module_name;
-use super::util::omit_late_defaultless_slot;
 use super::value_accessors::has_opaque_native_representation;
-use super::{CodeGenContext, CoreErlangGenerator, Result};
+use super::{CodeGenContext, CoreErlangGenerator};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{
-    ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, MethodKind, Module,
-    ParameterDefinition, ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
-    WellKnownSelector,
+    ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module,
+    ParameterDefinition, ProtocolMethodSignature, TypeAnnotation, WellKnownSelector,
 };
 use beamtalk_core::unparse::unparse_method_display_signature;
 
@@ -38,7 +36,6 @@ impl CoreErlangGenerator {
         class
             .methods
             .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
             .filter(|m| m.selector == MessageSelector::Unary("new".into()))
             .any(|m| Self::is_self_error_body(&m.body))
     }
@@ -61,7 +58,6 @@ impl CoreErlangGenerator {
             .methods
             .iter()
             .chain(class.class_methods.iter())
-            .filter(|m| m.kind == MethodKind::Primary)
             .any(|m| m.selector == MessageSelector::Unary("new".into()))
     }
 
@@ -112,7 +108,6 @@ impl CoreErlangGenerator {
     ///             'classMethodSource' => ~{...}~,
     ///             'methodSignatures' => ~{...}~,
     ///             'classMethodSignatures' => ~{}~,
-    ///             'classState' => ~{}~,
     ///             'classDoc' => 'none',
     ///             'methodDocs' => ~{}~,
     ///             'classMethodDocs' => ~{}~,
@@ -132,40 +127,29 @@ impl CoreErlangGenerator {
         &mut self,
         module: &Module,
         synthesize_supervision_spec: bool,
-    ) -> Result<Document<'static>> {
-        // Skip only if there are no class definitions AND no protocols
-        // AND no foreign extension methods. Protocol-only files still need
-        // register_class/0 for protocol registration; pure-extension
-        // files (only `Target >> sel` with no host class) need it to register
-        // their foreign extensions at load.
-        if module.classes.is_empty()
-            && module.protocols.is_empty()
-            && !Self::has_foreign_extensions(module)
-        {
-            return Ok(Document::Nil);
+    ) -> Document<'static> {
+        // Skip only if there are no class definitions AND no protocols.
+        // Protocol-only files still need register_class/0 for protocol
+        // registration.
+        if module.classes.is_empty() && module.protocols.is_empty() {
+            return Document::Nil;
         }
 
-        // Class-less module — generate register_class/0 with
-        // only protocol registration and/or foreign extension registration
-        // calls, no class builder chain.
+        // Class-less module — generate register_class/0 with only protocol
+        // registration calls, no class builder chain.
         if module.classes.is_empty() {
-            let ext_reg_doc = self.generate_foreign_extension_registrations(module)?;
             let protocol_reg_doc = self.generate_protocol_registrations(module);
-            return Ok(Self::register_class_fn_doc(
-                docvec![ext_reg_doc, protocol_reg_doc, line(), "'ok'"],
+            return Self::register_class_fn_doc(
+                docvec![protocol_reg_doc, line(), "'ok'"],
                 Document::Str("of _ProtoRegResult -> _ProtoRegResult"),
-            ));
+            );
         }
 
         let mut class_docs = Vec::new();
 
         for (i, class) in module.classes.iter().enumerate() {
             // Instance methods — used for methodSource, methodSignatures, and methodDocs
-            let instance_methods: Vec<_> = class
-                .methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-                .collect();
+            let instance_methods: Vec<_> = class.methods.iter().collect();
 
             // Method source
             let method_source_doc = Self::build_selector_map(&instance_methods, |m| {
@@ -180,12 +164,8 @@ impl CoreErlangGenerator {
             });
 
             // Class-side method display signatures for :help command
-            let class_methods_primary: Vec<_> = class
-                .class_methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-                .collect();
-            let class_method_sigs_doc = Self::build_selector_map(&class_methods_primary, |m| {
+            let class_method_refs: Vec<_> = class.class_methods.iter().collect();
+            let class_method_sigs_doc = Self::build_selector_map(&class_method_refs, |m| {
                 let sig_str = unparse_method_display_signature(m);
                 leaf::binary_lit(&sig_str)
             });
@@ -193,7 +173,7 @@ impl CoreErlangGenerator {
             // Class-side method source — mirrors method_source for the
             // instance side. Required by SystemNavigation `sendersOf:` /
             // `referencesTo:` / `methodsMatching:` to scan class-side bodies.
-            let class_method_source_doc = Self::build_selector_map(&class_methods_primary, |m| {
+            let class_method_source_doc = Self::build_selector_map(&class_method_refs, |m| {
                 let source_str = self.extract_method_source(class.name.name.as_str(), true, m);
                 leaf::binary_lit(&source_str)
             });
@@ -202,14 +182,11 @@ impl CoreErlangGenerator {
             // into register_class/0. Forwarded to beamtalk_xref synchronously at
             // class-load time by beamtalk_object_class:init/1.
             let method_xref_doc =
-                self.build_method_xref_list(class, &instance_methods, &class_methods_primary);
+                self.build_method_xref_list(class, &instance_methods, &class_method_refs);
 
             // Per-instance-variable declaration-line index, the
             // state-var analogue of `method_xref_doc` above.
             let state_var_xref_doc = self.build_state_var_xref_list(class);
-
-            // Class variable initial values
-            let class_vars_doc = self.build_class_var_map(&class.class_variables)?;
 
             // Class-level doc comment
             let class_doc_value: Document<'static> = if let Some(ref doc) = class.doc_comment {
@@ -225,7 +202,7 @@ impl CoreErlangGenerator {
 
             // Class method doc comments
             let class_method_docs_doc =
-                Self::build_selector_map_filtered(&class_methods_primary, |m| {
+                Self::build_selector_map_filtered(&class_method_refs, |m| {
                     m.doc_comment.as_ref().map(|doc| leaf::binary_lit(doc))
                 });
 
@@ -251,14 +228,12 @@ impl CoreErlangGenerator {
             );
             let class_method_sigs_doc = Self::extend_selector_map_doc(
                 class_method_sigs_doc,
-                class_methods_primary.is_empty(),
+                class_method_refs.is_empty(),
                 synth.class_sigs,
             );
             let class_method_docs_doc = Self::extend_selector_map_doc(
                 class_method_docs_doc,
-                !class_methods_primary
-                    .iter()
-                    .any(|m| m.doc_comment.is_some()),
+                !class_method_refs.iter().any(|m| m.doc_comment.is_some()),
                 synth.class_docs,
             );
 
@@ -303,7 +278,6 @@ impl CoreErlangGenerator {
                 class_method_sigs_doc,
                 method_xref_doc,
                 state_var_xref_doc,
-                class_vars_doc,
                 class_doc_value,
                 method_docs_doc,
                 class_method_docs_doc,
@@ -319,13 +293,7 @@ impl CoreErlangGenerator {
         // of which class position caused it.
         let class_chain = Self::build_short_circuit_chain(&class_docs);
 
-        // Register foreign cross-class extension methods at load.
-        // The `let _ExtN = ... in` fragments are prepended to the class
-        // registration chain so extensions register before the chain's trailing
-        // class-registration result is produced (extension registration always
-        // succeeds — it just inserts into ETS — so it does not short-circuit).
-        let ext_reg_doc = self.generate_foreign_extension_registrations(module)?;
-        let try_body = docvec![ext_reg_doc, class_chain];
+        let try_body = class_chain;
         // ADR 0068 Phase 2c: Generate protocol registration calls.
         // Protocol definitions in the module are registered with the runtime
         // protocol registry during on_load, after class registration succeeds.
@@ -347,7 +315,7 @@ impl CoreErlangGenerator {
             ]
         };
 
-        Ok(Self::register_class_fn_doc(try_body, of_clause))
+        Self::register_class_fn_doc(try_body, of_clause)
     }
 
     /// The `'register_class'/0` function shell shared by every shape of
@@ -448,45 +416,6 @@ impl CoreErlangGenerator {
         Document::Vec(parts)
     }
 
-    /// Builds a Core Erlang map document for class variable initial values.
-    ///
-    /// Each variable maps `'name' => expression`, defaulting to `'nil'` when
-    /// no default value is declared. Returns `Result` because evaluating
-    /// default-value expressions is fallible.
-    fn build_class_var_map(
-        &mut self,
-        class_variables: &[StateDeclaration],
-    ) -> Result<Document<'static>> {
-        // BT-4591: defaults that run code are bound in source order ahead of the
-        // map (`thread_default_values`), so the document is `[let ... in ] ~{..}~`.
-        let vars: Vec<&StateDeclaration> = class_variables
-            .iter()
-            // ADR 0124 §2/B2: a defaultless `late classState:` slot is
-            // omitted from the map entirely, not emitted as `'nil'` — see
-            // `omit_late_defaultless_slot`.
-            .filter(|cv| !omit_late_defaultless_slot(cv))
-            .collect();
-        self.class_var_map_doc(&vars)
-    }
-
-    /// The `[let FieldDefaultN = .. in ] ~{ 'name' => value, .. }~` document of
-    /// `classState:` initial values, shared by the class registry and the
-    /// native-actor facade.
-    pub(super) fn class_var_map_doc(
-        &mut self,
-        vars: &[&StateDeclaration],
-    ) -> Result<Document<'static>> {
-        let (prelude, values) = self.thread_default_values(vars)?;
-        let mut parts: Vec<Document<'static>> = Vec::new();
-        for (cv, val) in vars.iter().zip(values) {
-            if !parts.is_empty() {
-                parts.push(Document::Str(", "));
-            }
-            parts.push(docvec![leaf::atom(cv.name.name.to_string()), " => ", val,]);
-        }
-        Ok(docvec![prelude, "~{", Document::Vec(parts), "}~"])
-    }
-
     /// Builds the `_BuilderState` map and register call block for a single class
     /// at position `idx` in the module.
     ///
@@ -513,7 +442,6 @@ impl CoreErlangGenerator {
         class_method_sigs_doc: Document<'static>,
         method_xref_doc: Document<'static>,
         state_var_xref_doc: Document<'static>,
-        class_vars_doc: Document<'static>,
         class_doc_value: Document<'static>,
         method_docs_doc: Document<'static>,
         class_method_docs_doc: Document<'static>,
@@ -567,10 +495,6 @@ impl CoreErlangGenerator {
                     // maps (like methodXref), not a `~{ }~` map.
                     "'stateVarXref' => ",
                     state_var_xref_doc,
-                    ",",
-                    line(),
-                    "'classState' => ",
-                    class_vars_doc,
                     ",",
                     line(),
                     "'classDoc' => ",

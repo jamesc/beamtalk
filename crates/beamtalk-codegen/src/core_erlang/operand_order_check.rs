@@ -211,10 +211,9 @@ fn is_keyword(word: &str) -> bool {
 /// conversions.
 ///
 /// `READS`: a read of mutable process state a sibling that runs code can
-/// change — the class-variable lookup `erlang:get(Key)` and its miss fallback
-/// `beamtalk_class_vars:get/2`, `get_late/2`, and a block literal's
-/// creation-time `capture/2` (BT-4722), which reads the live cell or
-/// class-variable map.
+/// change — a process-dictionary lookup `erlang:get(Key)` and a block
+/// literal's creation-time `beamtalk_actor_state:capture/2` (BT-4722), which
+/// reads the live cell.
 fn call_effect(module: Option<&str>, function: Option<&str>, atomic: bool) -> Effect {
     if !atomic {
         return RUNS;
@@ -223,18 +222,16 @@ fn call_effect(module: Option<&str>, function: Option<&str>, atomic: bool) -> Ef
         (Some("erlang"), Some("element" | "hd" | "tl" | "tuple_size" | "map_size"))
         | (Some("maps"), Some("get" | "find"))
         | (Some("beamtalk_primitive"), Some("string_to_binary")) => QUIET,
-        // BT-4722: a block literal's creation-time capture reads the live cell /
-        // class-variable map, so a sibling operand that runs code and writes
-        // that state must be sequenced before it.
-        (Some("erlang"), Some("get"))
-        | (Some("beamtalk_class_vars"), Some("get" | "get_late" | "capture"))
-        | (Some("beamtalk_actor_state"), Some("capture")) => READS,
+        // BT-4722: a block literal's creation-time capture reads the live cell,
+        // so a sibling operand that runs code and writes that state must be
+        // sequenced before it.
+        (Some("erlang"), Some("get")) | (Some("beamtalk_actor_state"), Some("capture")) => READS,
         _ => RUNS,
     }
 }
 
 /// What evaluating an expression does: nothing observable, a read of mutable
-/// process state (the class-variable lookup `case erlang:get(Key) of ..`), or
+/// process state (a process-dictionary lookup `case erlang:get(Key) of ..`), or
 /// arbitrary code. Ordered, so a combination is the `max` of its parts.
 type Effect = u8;
 const QUIET: Effect = 0;
@@ -415,8 +412,8 @@ impl Scan<'_> {
                     // undefined -> raise class_not_found; Pid -> Pid`) runs no
                     // user code, and `is_trivial_subexpr` treats the operand as
                     // one that races with nothing. Every other `case` is the
-                    // `max` of its scrutinee and clauses; a class variable read
-                    // (`case erlang:get(Key) of .. -> beamtalk_class_vars:get(..)`)
+                    // `max` of its scrutinee and clauses; a process-dictionary
+                    // read (`case erlang:get(Key) of .. -> maps:find(..)`)
                     // is `READS` only because each call in it is a known read
                     // (`call_effect`), so a clause that runs code or `put`s
                     // makes it `RUNS`.
@@ -734,7 +731,7 @@ mod tests {
     fn a_process_state_write_races_a_read() {
         let read =
             "case call 'erlang':'get'(K) of <M> when 'true' -> call 'maps':'find'('n', M) end";
-        let write = "let V = 6 in case call 'erlang':'get'(K) of <M> when 'true' -> let _ = call 'erlang':'put'(K, V) in V <_> when 'true' -> call 'beamtalk_class_vars':'put'(K, V) end";
+        let write = "let V = 6 in case call 'erlang':'get'(K) of <M> when 'true' -> let _ = call 'erlang':'put'(K, V) in V <_> when 'true' -> call 'm':'put'(K, V) end";
         let code = module(&format!("[{read}, {write}]"));
         assert_eq!(found(&code), vec![(RacingConstruct::ListCell, 2)]);
     }

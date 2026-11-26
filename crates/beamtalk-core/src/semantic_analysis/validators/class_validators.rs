@@ -22,7 +22,7 @@ use crate::ast::{
     ClassKind, ConstructorSelectors, DeclaredKeyword, Expression, Identifier, MessageSelector,
     MethodDefinition, Module, migrate_from_v_version,
 };
-use crate::ast_walker::{later_cascade_sends, walk_expression, walk_module};
+use crate::ast_walker::{for_each_child, later_cascade_sends, walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, MethodSide, Span};
@@ -530,99 +530,6 @@ fn validate_map_field_names(
     }
 }
 
-/// Warn on access to undeclared class variables.
-pub(crate) fn check_class_variable_access(
-    module: &Module,
-    hierarchy: &ClassHierarchy,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    walk_module_with_hierarchy(module, hierarchy, diagnostics, visit_classvar_access);
-}
-
-/// The hint for the `Undefined class variable` warning on `Cls classState: #x`,
-/// or `None` when `Cls` is unknown or declares `x` itself.
-///
-/// Own-only, like compiled method bodies and the runtime declared-set check
-/// (BT-3762, BT-3801): class variables are per class and not inherited, so a
-/// variable only an ancestor declares is undefined here and the hint says to
-/// redeclare it.
-fn undefined_class_variable_hint(
-    hierarchy: &ClassHierarchy,
-    class_name: &str,
-    var_name: &str,
-) -> Option<String> {
-    if !hierarchy.has_class(class_name) {
-        return None;
-    }
-    let class_vars = hierarchy.own_class_variable_names(class_name);
-    if class_vars.iter().any(|cv| cv.as_str() == var_name) {
-        return None;
-    }
-    if let Some(owner) = hierarchy.inherited_class_variable_owner(class_name, var_name) {
-        return Some(format!(
-            "`{owner}` declares it, but class variables are not inherited; \
-             redeclare it with `classState: {var_name}` on `{class_name}`"
-        ));
-    }
-    Some(if class_vars.is_empty() {
-        format!("`{class_name}` has no declared class variables")
-    } else {
-        let names: Vec<&str> = class_vars.iter().map(EcoString::as_str).collect();
-        format!("Declared class variables: {}", names.join(", "))
-    })
-}
-
-fn visit_classvar_access(
-    expr: &Expression,
-    hierarchy: &ClassHierarchy,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    if let Expression::MessageSend {
-        receiver,
-        selector,
-        arguments,
-        span,
-        ..
-    } = expr
-        && let Some(class_name) = receiver_class_name(receiver)
-    {
-        let sel = selector.name();
-        if sel == "classState:"
-            && let Some(Expression::Literal(crate::ast::Literal::Symbol(var_name), _)) =
-                arguments.first()
-            && let Some(hint) = undefined_class_variable_hint(hierarchy, class_name, var_name)
-        {
-            diagnostics.push(
-                Diagnostic::warning(
-                    format!("Undefined class variable `{var_name}` on class `{class_name}`"),
-                    *span,
-                )
-                .with_hint(hint)
-                .with_category(DiagnosticCategory::Type),
-            );
-        }
-    }
-    for send in later_cascade_sends(expr) {
-        if let Some(class_name) = receiver_class_name(send.receiver) {
-            let sel = send.selector.name();
-            if sel == "classState:"
-                && let Some(Expression::Literal(crate::ast::Literal::Symbol(var_name), _)) =
-                    send.arguments.first()
-                && let Some(hint) = undefined_class_variable_hint(hierarchy, class_name, var_name)
-            {
-                diagnostics.push(
-                    Diagnostic::warning(
-                        format!("Undefined class variable `{var_name}` on class `{class_name}`"),
-                        send.span,
-                    )
-                    .with_hint(hint)
-                    .with_category(DiagnosticCategory::Type),
-                );
-            }
-        }
-    }
-}
-
 /// Warn when a user-defined class name matches a stdlib built-in class name.
 ///
 /// Stdlib class names are protected at runtime (via `update_class` in the runtime).
@@ -727,8 +634,8 @@ pub(crate) fn check_value_slot_assignment(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // Instance methods only (inline and standalone Tonel-style
-    // `Counter >> setX: v => ...`): `classState:` slots on class methods are
-    // separate and not subject to value-type immutability rules.
+    // `Counter >> setX: v => ...`): class methods hold no state (ADR 0153), so
+    // value-type immutability rules do not apply to them.
     for (class_name, side, method) in module.methods_with_owner() {
         // TestCase subclasses are permanently exempt from slot
         // assignment checks (see this function's own doc comment) — not a
@@ -1193,14 +1100,9 @@ pub(crate) fn check_value_slot_case_collision(
 ///   they have no generated `init/1`/`code_change/3` (ADR 0056).
 /// - A `migrateFromVN:` with `N >= shapeVersion` is an unreachable-migration
 ///   warning (gaps are fine; only an at-or-past-current step is dead).
-/// - `migrateFromVN:` may not read or write a class variable: it runs
-///   outside the class process via `local_call/3`, which passes `nil` for
-///   `self` and has no class process to write to — a read would silently
-///   see `nil` and a write would be silently dropped (ADR 0123 §2).
 /// - `migrateFromVN:`'s return type, when annotated, must be `Dictionary`.
 pub(crate) fn check_shape_version_and_migrations(
     module: &Module,
-    hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for class in &module.classes {
@@ -1215,11 +1117,6 @@ pub(crate) fn check_shape_version_and_migrations(
         }
 
         let declared_version = class.effective_shape_version();
-        // Own-only (BT-3762): `self.<name>` in a `migrateFromVN:` body is a
-        // class-variable access only for the class's own declarations; an
-        // ancestor's name does not compile as a class variable at all, so
-        // flagging it here as "class variables unavailable" would be misleading.
-        let class_var_names = hierarchy.own_class_variable_names(class.name.name.as_str());
 
         for method in &class.class_methods {
             let selector_text = method.selector.name();
@@ -1249,15 +1146,6 @@ pub(crate) fn check_shape_version_and_migrations(
                         "Remove `{selector_text}` or bump `shapeVersion:` above {n}"
                     ))
                     .with_category(DiagnosticCategory::Type),
-                );
-            }
-
-            if !class_var_names.is_empty() {
-                check_migration_body_class_var_access(
-                    method,
-                    &class_var_names,
-                    &selector_text,
-                    diagnostics,
                 );
             }
 
@@ -1296,48 +1184,64 @@ fn native_shape_clause_error(class_name: &str, clause: &str, span: Span) -> Diag
     .with_category(DiagnosticCategory::Type)
 }
 
-/// Walks a `migrateFromVN:` method's body for any `self.<classVar>` access
-/// (read or write — both reach `walk_expression` as a bare `FieldAccess`
-/// node, since a `self.field := …` write's target is itself one), pushing a
-/// compile error for each hit.
-fn check_migration_body_class_var_access(
-    method: &MethodDefinition,
-    class_var_names: &[EcoString],
-    selector_text: &str,
+/// ADR 0153: a class has no slots, so `self.x` (read or write) in a class
+/// method is a compile error — on every surface, from this one diagnostic.
+///
+/// Covers `class` methods in a class body and standalone `Foo class >> sel`
+/// definitions. Nested blocks are walked; a `self.x` written in an instance
+/// method is untouched.
+pub(crate) fn check_class_side_self_field_access(
+    module: &Module,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for stmt in &method.body {
-        walk_expression(&stmt.expression, &mut |expr| {
-            let Expression::FieldAccess {
-                receiver,
-                field,
-                span,
-            } = expr
-            else {
-                return;
-            };
-            if !receiver.is_self() {
-                return;
-            }
-            if class_var_names
+    let class_side = module
+        .classes
+        .iter()
+        .flat_map(|c| c.class_methods.iter())
+        .chain(
+            module
+                .method_definitions
                 .iter()
-                .any(|cv| cv.as_str() == field.name.as_str())
-            {
-                diagnostics.push(
-                    Diagnostic::error(
-                        format!(
-                            "`{selector_text}` may not access class variables (`self.{}`); \
-                             migration methods run outside the class process, where class \
-                             variables are not available",
-                            field.name
-                        ),
-                        *span,
-                    )
-                    .with_category(DiagnosticCategory::Type),
-                );
-            }
-        });
+                .filter(|m| m.is_class_method)
+                .map(|m| &m.method),
+        );
+    for method in class_side {
+        for stmt in &method.body {
+            report_class_side_self_fields(&stmt.expression, diagnostics);
+        }
     }
+}
+
+/// Reports each `self.x` under `expr`. A block that declares its own `self`
+/// parameter (`[:self | self.total := 1]`, as `ClassBuilder` method blocks do)
+/// rebinds `self`, so its body is the block's own instance side and is skipped.
+fn report_class_side_self_fields(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+    if let Expression::Block(block) = expr
+        && block.parameters.iter().any(|p| p.name == "self")
+    {
+        return;
+    }
+    if let Expression::FieldAccess {
+        receiver,
+        field,
+        span,
+    } = expr
+        && receiver.is_self()
+    {
+        diagnostics.push(class_side_self_field_error(&field.name, *span));
+    }
+    for_each_child(expr, &mut |child| {
+        report_class_side_self_fields(child, diagnostics);
+    });
+}
+
+fn class_side_self_field_error(field: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        format!("`self.{field}` in a class method: a class has no slots."),
+        span,
+    )
+    .with_hint("`self.x` reads an instance's state. Class methods have none.")
+    .with_category(DiagnosticCategory::Type)
 }
 
 #[cfg(test)]
@@ -1394,7 +1298,6 @@ mod tests {
         let src = "Value subclass: Point\n  state: x = 0\n  setX: v => self.x := v";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_slot_assignment(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1421,7 +1324,6 @@ mod tests {
         let src = "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_slot_assignment(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1438,7 +1340,6 @@ mod tests {
         let src = "Actor subclass: BankAccount\n  state: value = 0\n  withValue: v => v\n  setDirectly: v => self.value := v";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_slot_assignment(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1465,7 +1366,6 @@ mod tests {
             "Actor subclass: BankAccount\n  state: value = 0\n  withValue: v => self.value := v";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_slot_assignment(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1480,7 +1380,6 @@ mod tests {
         let src = "Object subclass: Plain\n  state: x = 0\n  setX: v => self.x := v";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_slot_assignment(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1496,7 +1395,6 @@ mod tests {
         let src = "Value subclass: Point\n  state: x = 0\n  setX: v => [self.x := v] value";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_slot_assignment(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1520,7 +1418,6 @@ mod tests {
             "Expected 1 standalone method definition"
         );
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_slot_assignment(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1539,7 +1436,6 @@ mod tests {
         let src = "Value subclass: Point\n  state: x = 0\n  doStuff => Point foo!";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_cast_on_value_type(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1562,7 +1458,6 @@ mod tests {
         let src = "Actor subclass: Worker\n  doStuff => Worker foo!";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_cast_on_value_type(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1576,7 +1471,6 @@ mod tests {
         let src = "Value subclass: MyVal\n  doSomething -> Nil => nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1598,7 +1492,6 @@ mod tests {
         let src = "Value subclass: MyVal\n  class create -> Nil => nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1613,7 +1506,6 @@ mod tests {
         let src = "Object subclass: MyObj\n  doSomething -> Nil => nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1628,7 +1520,6 @@ mod tests {
         let src = "Actor subclass: MyActor\n  doSomething -> Nil => nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1643,7 +1534,6 @@ mod tests {
         let src = "Value subclass: MyVal\n  each: block :: Block -> Nil => nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1658,7 +1548,6 @@ mod tests {
         let src = "Value subclass: MyVal\n  sideEffect -> Nil => nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1675,7 +1564,6 @@ mod tests {
         let src = "Value subclass: MyVal\n  doSomething -> Nil => self subclassResponsibility";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1690,7 +1578,6 @@ mod tests {
         let src = "Value subclass: MyVal\n  doSomething -> Nil => ^ self subclassResponsibility";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1705,7 +1592,6 @@ mod tests {
         let src = "Value subclass: MyVal\n  doSomething => nil\nMyVal >> doVoid -> Nil => nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1727,7 +1613,6 @@ mod tests {
         let src = "Value subclass: Point\n  state: x = 0\n  state: y = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1745,7 +1630,6 @@ mod tests {
         let src = "Actor subclass: Counter\n  field: count = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1763,7 +1647,6 @@ mod tests {
         let src = "Object subclass: BadObj\n  state: x = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1783,7 +1666,6 @@ mod tests {
         let src = "Object subclass: BadObj\n  late state: x :: Integer";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1800,7 +1682,6 @@ mod tests {
         let src = "Object subclass: BadObj\n  field: x = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1817,7 +1698,6 @@ mod tests {
         let src = "Value subclass: Point\n  field: x = 0\n  field: y = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1831,7 +1711,6 @@ mod tests {
         let src = "Actor subclass: Counter\n  state: count = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1847,7 +1726,6 @@ mod tests {
         let src = "Value subclass: Shape\n  field: color = \"red\"\n\nShape subclass: Circle\n  state: radius = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1866,7 +1744,6 @@ mod tests {
         let src = "Object subclass: Helper\n  class doStuff => 42";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1881,7 +1758,6 @@ mod tests {
         let src = "Value subclass: TestCase\n  field: name = \"\"\n\nTestCase subclass: MyTest\n  state: counter = nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1902,7 +1778,6 @@ mod tests {
         let src = "Value subclass: Weird\n  field: x = 0\n  field: X = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_slot_case_collision(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1927,7 +1802,6 @@ mod tests {
         let src = "Value subclass: Dup\n  field: x = 0\n  field: x = 1";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_slot_case_collision(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1948,7 +1822,6 @@ mod tests {
         let src = "Value subclass: Point\n  field: x = 0\n  field: y = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_slot_case_collision(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1966,7 +1839,6 @@ mod tests {
         let src = "Value subclass: Weird\n  field: x = 0\n  field: X = 0\n  withX: v => v";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_slot_case_collision(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1983,7 +1855,6 @@ mod tests {
         let src = "Actor subclass: Weird\n  state: x = 0\n  state: X = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_value_slot_case_collision(&module, &hierarchy, &mut diagnostics);
         assert!(

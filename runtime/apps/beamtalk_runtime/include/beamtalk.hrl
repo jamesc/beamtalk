@@ -181,6 +181,13 @@
 %% its own literal (AGENTS.md "No duplicate implementations").
 -define(BT_REMOTE_CALL_TIMEOUT, 5000).
 
+%% @doc BT-5231 (ADR 0126 BT-5193 amendment): timeout (ms) for
+%% `beamtalk_actor_registry:actor_started_at/1`'s remote start-time read.
+%% `global`'s resolver runs it while a heal's name exchange waits, so it is
+%% shorter than `?BT_REMOTE_CALL_TIMEOUT`; a read that times out is
+%% `unreachable` and takes the resolver's lower-node tie-break.
+-define(BT_GLOBAL_CONFLICT_READ_TIMEOUT, 1000).
+
 %% BT-4701: the module peers are addressed by in `erpc:call/5`s that reach a
 %% `beamtalk_actor` function on another node (remote spawn/lookup, class
 %% candidates, the `global` conflict resolver's start-time read). The code
@@ -221,6 +228,15 @@
 %% "inside a real supervisor" from "inside a class's own gen_server").
 -define(BT_SUPERVISOR_SPAWN_CONTEXT_KEY, '$bt_supervisor_spawn_context').
 
+%% BT-5213: the head of the raw error term a `String` or `Symbol` ordering
+%% comparison (`<`, `<=`, `>`, `>=`) raises for a right operand of another kind:
+%% `erlang:error({?BT_ORDERING_TYPE_ERROR_TAG, Left, Op, Right})`. Codegen
+%% raises it frame-free on both send paths (`operators::ORDERING_TYPE_ERROR_TAG`
+%% in beamtalk-codegen); `beamtalk_exception_handler:wrap_raw/2` turns it into
+%% the structured `type_error`. The beamtalk-codegen test
+%% `the_ordering_type_error_tag_matches_the_runtime_header` reads this line.
+-define(BT_ORDERING_TYPE_ERROR_TAG, beamtalk_ordering_type_error).
+
 %% @doc Is `T` an in-flight `^` non-local return signal?
 %%
 %% Codegen throws the state-carrying 4-tuple `{'$bt_nlr', Token, Value,
@@ -228,7 +244,7 @@
 %% by `beamtalk_result:tryDo/1`. Both are control-flow signals aimed at a
 %% method frame that may live in another process, so any dispatch layer that
 %% might intercept a `throw` (class-side self-sends, instance-side extension
-%% invocation, `tryDo:`, class-variable `protect/1`, JSON encoding) must
+%% invocation, `tryDo:`, JSON encoding) must
 %% relay rather than report them. Single source of truth for the shape check
 %% across the runtime and stdlib apps — per AGENTS.md's no-duplicate-
 %% implementation rule, a future NLR shape change only needs to land here.

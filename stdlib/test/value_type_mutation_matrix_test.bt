@@ -828,29 +828,12 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testNestedWhileTrueOuterOnlyStateReadWriteActor =>
     self assert: self actorCorpus nestedWhileTrueOuterOnlyStateReadWrite equals: 9
 
-  testNestedWhileTrueOuterOnlyClassVarReadWriteClassMethod =>
-    self assert: MutationCorpusClassMethod nestedWhileTrueOuterOnlyClassVarReadWrite equals: 9
-
   // ════════════════════════════════════════════════════════════════════════
   //  BT-3176 axis 2 — self-send as the mutation mechanism (not a direct
   //  `self.field :=`), inside a loop or conditional body. See BT-3150/BT-3159.
   // ════════════════════════════════════════════════════════════════════════
   testSelfSendWhileTrueNonLastReadWriteActor =>
     self assert: self actorCorpus selfSendWhileTrueNonLastReadWrite equals: 5
-
-  testSelfSendWhileTrueNonLastReadWriteClassMethod =>
-    self assert: MutationCorpusClassMethod selfSendWhileTrueNonLastReadWrite equals: 5
-
-  // BT-3611: `Foldl*` (`do:`/`collect:`) self-send plus a co-occurring
-  // outer-local read+write, followed by a POST-FOLD read of the class var —
-  // `do:` already threaded `ClassVars` correctly here; `collect:` crashed
-  // `erlc` with "unbound variable 'ClassVarsN'" before the fix (see
-  // `mutation_corpus_class_method.bt`'s own fragment comments for why).
-  testSelfSendDoNonLastReadWriteClassMethod =>
-    self assert: MutationCorpusClassMethod selfSendDoNonLastReadWrite equals: 5
-
-  testSelfSendCollectNonLastReadWriteClassMethod =>
-    self assert: MutationCorpusClassMethod selfSendCollectNonLastReadWrite equals: 5
 
   testSelfSendIfTrueNonLastReadWriteTrueActor =>
     self bt3178ActorSelfSendInConditionalPending
@@ -862,12 +845,6 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testSelfSendIfTrueNonLastReadWriteFalseActor =>
     self assert: (self actorCorpus selfSendIfTrueNonLastReadWrite: false) equals: 0
 
-  testSelfSendIfTrueNonLastReadWriteTrueClassMethod =>
-    self assert: (MutationCorpusClassMethod selfSendIfTrueNonLastReadWrite: true) equals: 1
-
-  testSelfSendIfTrueNonLastReadWriteFalseClassMethod =>
-    self assert: (MutationCorpusClassMethod selfSendIfTrueNonLastReadWrite: false) equals: 0
-
   // ════════════════════════════════════════════════════════════════════════
   //  BT-3176 axis 3 — on:do:/ensure: combined with a self-send or a nested
   //  conditional in the try body's LAST statement. See BT-3160/BT-3161.
@@ -877,9 +854,6 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // ════════════════════════════════════════════════════════════════════════
   testOnDoSelfSendLastReadWriteActor =>
     self assert: self actorCorpus onDoSelfSendLastReadWrite equals: 1
-
-  testOnDoSelfSendLastReadWriteClassMethod =>
-    self assert: MutationCorpusClassMethod onDoSelfSendLastReadWrite equals: 1
 
   testEnsureNestedConditionalLastReadWriteTrueActor =>
     self assert: (self actorCorpus ensureNestedConditionalLastReadWrite: true) equals: 11
@@ -914,28 +888,6 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testEnsureNestedConditionalLastReadWriteFalseActorClassMethod =>
     self assert: (MutationCorpusActorClassMethod ensureNestedConditionalLastReadWrite: false) equals: 1
 
-  // BT-3581: `is_actor_self_send` gap — a same-class self-send inside an
-  // Actor class method's loop body or `on:do:` try body (never `safe_dispatch`).
-  testSelfSendWhileTrueNonLastReadWriteActorClassMethod =>
-    self assert: MutationCorpusActorClassMethod selfSendWhileTrueNonLastReadWrite equals: 5
-
-  testOnDoSelfSendLastReadWriteActorClassMethod =>
-    self assert: MutationCorpusActorClassMethod onDoSelfSendLastReadWrite equals: 1
-
-  // BT-3584: `Foldl*` (`do:`/`collect:`) class-var threading, previously
-  // unconditionally excluded for `CodeGenContext::Actor` in `plan.rs`'s
-  // `threads_class_vars_answer` — silently dropped the mutation (`0`
-  // instead of `5`) rather than failing to compile. `collect:` also
-  // exercises BT-3611's fix (`generate_vt_foldl_list_op_open`'s previously
-  // missing post-fold `ClassVars` refresh), since lifting the Actor
-  // exclusion alone would otherwise route this cell into that same
-  // `unbound 'ClassVarsN'` `erlc` crash.
-  testSelfSendDoNonLastReadWriteActorClassMethod =>
-    self assert: MutationCorpusActorClassMethod selfSendDoNonLastReadWrite equals: 5
-
-  testSelfSendCollectNonLastReadWriteActorClassMethod =>
-    self assert: MutationCorpusActorClassMethod selfSendCollectNonLastReadWrite equals: 5
-
   // ════════════════════════════════════════════════════════════════════════
   //  BT-3176 axis 4 — class-var / state-field mutation, threaded the same
   //  way the rest of the corpus threads outer locals.
@@ -955,9 +907,6 @@ TestCase subclass: ValueTypeMutationMatrixTest
         ^self skip: "BT-3484: value-type self.field := inside to:do: silently drops the mutation"
       ]
     self assert: self fragStateFieldToDoNonLastReadWrite equals: 15
-
-  testClassVarToDoNonLastReadWriteClassMethod =>
-    self assert: MutationCorpusClassMethod classVarToDoNonLastReadWrite equals: 15
 
   // BT-3521: an Actor state-field write inside a bare (non-last) `collect:`
   // statement crashed erlc with an unbound `_Val` in `dispatch/4` — the
@@ -1043,26 +992,6 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testStateFieldIfTrueIfFalseNonLastReadWriteFalseTestCase =>
     self assert: (self fragStateFieldIfTrueIfFalseNonLastReadWrite: false) equals: 100
 
-  // BT-3487/BT-3488: no live fixtures for these — both shapes are now clean
-  // compile-time rejections (`FieldAssignmentInUnsupportedBlock`), which
-  // still can't be live fixtures in a file that must compile. BT-3487:
-  // self.field := inside a Foldl-shaped list-op (do:/collect:/select:/
-  // reject:/inject:into:/detect:ifNone:/count:, and a Range's own do:) —
-  // pinned at the Rust level in control_flow.rs's
-  // `test_value_type_field_write_in_foldl_body_is_compile_error` and
-  // `test_value_type_field_write_in_remaining_foldl_selectors_is_compile_error`.
-  // BT-3488: self.field := inside a conditional nested inside a loop (not
-  // itself a top-level loop statement) — inconsistent with the identical
-  // ClassVar shape, which gets a clean "Cannot assign to field... inside
-  // this block" compile-time rejection instead of crashing; BT-3488 closed
-  // that inconsistency by giving the value-type shape the same clean
-  // rejection rather than by adding full threading support.
-  testClassVarIfTrueNonLastReadWriteTrueClassMethod =>
-    self assert: (MutationCorpusClassMethod classVarIfTrueNonLastReadWrite: true) equals: 7
-
-  testClassVarIfTrueNonLastReadWriteFalseClassMethod =>
-    self assert: (MutationCorpusClassMethod classVarIfTrueNonLastReadWrite: false) equals: 0
-
   // ── axis 4 × on:do:/ensure: (BT-3486) ────────────────────────────────────
   // The third construct family, at the same density as the loop and
   // conditional cells above. Each TestCase (value-type) cell is paired with
@@ -1115,47 +1044,6 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   testStateFieldEnsureAssignRhsTestCase =>
     self assert: self fragStateFieldEnsureAssignRhs equals: 1
-
-  // ── axis 4 × on:do:/ensure:, `ClassVars` via self-send (BT-3506) ──────────
-  // The `ClassVars` twin of the `SelfVt` cells directly above: a same-class
-  // self-send (`self bump`), not a bare `self.runs := ...` — a direct write
-  // stays a clean compile-time rejection through this construct (BT-3506's
-  // decision; see `classVarEnsureTryNonLastReadWrite`'s own comment).
-  testClassVarEnsureTryNonLastReadWriteClassMethod =>
-    self assert: MutationCorpusClassMethod classVarEnsureTryNonLastReadWrite equals: 1
-
-  testClassVarEnsureCleanupNonLastReadWriteClassMethod =>
-    self assert: MutationCorpusClassMethod classVarEnsureCleanupNonLastReadWrite equals: 1
-
-  testClassVarEnsureBothNonLastReadWriteClassMethod =>
-    self assert: MutationCorpusClassMethod classVarEnsureBothNonLastReadWrite equals: 2
-
-  testClassVarOnDoTryNonLastReadWriteClassMethod =>
-    self assert: MutationCorpusClassMethod classVarOnDoTryNonLastReadWrite equals: 1
-
-  testClassVarOnDoHandlerNonLastReadWriteClassMethod =>
-    self assert: MutationCorpusClassMethod classVarOnDoHandlerNonLastReadWrite equals: 1
-
-  // BT-3506's own headline repro (shape (b) — self-send is the construct's
-  // ONLY mutation, no co-occurring captured local). No like-for-like
-  // Actor/TestCase cell — see the fragment's own comment.
-  testClassVarEnsureSelfSendOnlyNonLastClassMethod =>
-    self assert: MutationCorpusClassMethod classVarEnsureSelfSendOnlyNonLast equals: 1
-
-  // BT-3522: the same `ClassVars` mutation one level BELOW the arm's own top
-  // level — in a top-level statement's own sub-expression, the half the
-  // construct genuinely carries once the (now recursive) detector allocates
-  // it a trailing slot. Before BT-3522 these did not compile at all in a
-  // debug build (`ThreadedIr::verify` → `UnboundVersion`) and produced an
-  // `erlc` unbound-variable crash in release. The nested-BLOCK half is a
-  // compile-time rejection and therefore has no runtime cell — see
-  // `classVarEnsureSelfSendInSubExprNonLast`'s own comment for where it is
-  // pinned instead.
-  testClassVarEnsureSelfSendInSubExprNonLastClassMethod =>
-    self assert: MutationCorpusClassMethod classVarEnsureSelfSendInSubExprNonLast equals: 1
-
-  testClassVarOnDoSelfSendAsReceiverNonLastClassMethod =>
-    self assert: MutationCorpusClassMethod classVarOnDoSelfSendAsReceiverNonLast equals: 1
 
   // ════════════════════════════════════════════════════════════════════════
   //  BT-3414 (ADR 0118 phase 0) — self-send POSITION axis, Actor-only

@@ -289,7 +289,7 @@ fn elixir_added_keys(window: &str) -> BTreeSet<String> {
 }
 
 /// Requests built in `workspace.ex`: `dispatch_browse("op", …)` /
-/// `dispatch_simple("op", …)` calls, `%{"op" => "name", …}` request literals,
+/// `dispatch_simple("op", …)` / `request_op("op", …)` (BT-5201) calls, `%{"op" => "name", …}` request literals,
 /// and the `{op, params} = case … {"name", %{…}}` tuple form in `run_tests`.
 fn scan_liveview(text: &str) -> Vec<Sent> {
     let bytes = text.as_bytes();
@@ -302,7 +302,7 @@ fn scan_liveview(text: &str) -> Vec<Sent> {
         &text[start..at]
     };
 
-    for call in ["dispatch_browse(\"", "dispatch_simple(\""] {
+    for call in ["dispatch_browse(\"", "dispatch_simple(\"", "request_op(\""] {
         let mut from = 0;
         while let Some(rel) = text[from..].find(call) {
             let at = from + rel;
@@ -356,9 +356,9 @@ fn scan_liveview(text: &str) -> Vec<Sent> {
         let close = matching(bytes, open);
         let mut keys = elixir_map_keys(&text[open..=close]);
         keys.remove("op");
-        // `Map.put(request, "k", …)` additions before the decode call.
+        // `Map.put(request, "k", …)` additions before the `request_op(` call.
         let tail_end = text[close..]
-            .find("rpc(:beamtalk_repl_protocol")
+            .find("request_op(")
             .map_or(text.len(), |n| close + n);
         keys.extend(elixir_added_keys(&text[close..tail_end]));
         out.push(Sent {

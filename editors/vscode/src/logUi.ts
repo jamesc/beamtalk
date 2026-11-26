@@ -3,7 +3,7 @@
 
 import * as vscode from "vscode";
 import { state } from "./extensionState";
-import { registerLogLevelSync } from "./logLevelSync";
+import { LOG_LEVEL_OFF, registerLogLevelSync } from "./logLevelSync";
 
 const LOG_LEVELS = [
   "debug",
@@ -14,6 +14,7 @@ const LOG_LEVELS = [
   "critical",
   "alert",
   "emergency",
+  LOG_LEVEL_OFF,
 ] as const;
 
 type LogLevel = (typeof LOG_LEVELS)[number];

@@ -82,6 +82,12 @@ NOTE: This function only handles the two-element tagged tuple form.
 - Multi-value tuples like `{ok, V1, V2}` must be normalized before calling.
 - Functions that crash on failure (raising exceptions) should use `tryDo:`.
 
+A class object from another node as the ok payload (BT-5274) is resolved by
+name to this node's class, as `beamtalk_wire:decode/1` resolves one. When the
+class is not registered on this node, this raises `class_not_found`, the same
+error the FFI boundary raises for a bare class result, so an FFI answer fails
+the same way whether or not it is `{ok, _}`-wrapped.
+
 ## Examples (Erlang)
 ```erlang
 beamtalk_result:from_tagged_tuple({ok, 42})
@@ -93,14 +99,27 @@ beamtalk_result:from_tagged_tuple({error, enoent})
 ```
 """.
 -spec from_tagged_tuple({ok, term()} | {error, term()}) -> t().
+from_tagged_tuple({ok, #beamtalk_object{pid = Pid} = Value}) when
+    is_pid(Pid), node(Pid) =/= node()
+->
+    %% BT-5274: an `{ok, ClassObj}` from an FFI or `rpc`/`erpc` call skipped
+    %% the wire, so a class object in it can carry a peer's class pid. Both the
+    %% FFI proxy and codegen's inline Result build go through here.
+    %% An actor on another node is a legitimate remote ref and comes back
+    %% unchanged.
+    ok_result(beamtalk_wire:ensure_local_class_object(Value));
 from_tagged_tuple({ok, Value}) ->
-    #{?BT_CLASS_TAG_KEY => 'Result', 'isOk' => true, 'okValue' => Value, 'errReason' => nil};
+    ok_result(Value);
 from_tagged_tuple({error, Reason}) ->
     %% Promote error reasons to Beamtalk Exception objects so that
     %% errReason is always re-raiseable. ensure_wrapped/1 is idempotent:
     %% already-wrapped Exception maps pass through unchanged.
     ExObj = beamtalk_exception_handler:ensure_wrapped(Reason),
     #{?BT_CLASS_TAG_KEY => 'Result', 'isOk' => false, 'okValue' => nil, 'errReason' => ExObj}.
+
+-spec ok_result(term()) -> map().
+ok_result(Value) ->
+    #{?BT_CLASS_TAG_KEY => 'Result', 'isOk' => true, 'okValue' => Value, 'errReason' => nil}.
 
 -doc """
 Convert a `Result` tagged map to an Erlang `{ok, V} | {error, R}` tuple, the
@@ -221,11 +240,7 @@ Result tryDo: [1 / 0]                           // => Result error: <RuntimeErro
 """.
 -spec tryDo(function()) -> t() | no_return().
 tryDo(Block) when is_function(Block, 0) ->
-    %% ADR 0130 §4: a catch boundary around a Beamtalk block. `protect/1` restores
-    %% the class-variable map on an error before we wrap it (writes made before
-    %% entering the block are kept; `^` passes through untouched).
-    %% bt-catcher-audit: converted - the block runs under protect/1, which restores on error
-    try beamtalk_class_vars:protect(Block) of
+    try Block() of
         Value ->
             from_tagged_tuple({ok, Value})
     catch
@@ -262,16 +277,15 @@ block literal that writes outer locals. Codegen calls this instead of
 `tryDo/1` when the argument to `tryDo:` is such a literal, and treats the
 `{Result, StateAcc}` answer as a local-threading construct tuple.
 
-It is the same catch boundary as `tryDo/1` — `protect/1` restores the
-class-variable map on a raise, `^` passes through, the exception is wrapped by
-`ensure_wrapped/3` — so the Tier 1 and Tier 2 paths share one implementation of
+It is the same catch boundary as `tryDo/1` — `^` passes through, the exception
+is wrapped by `ensure_wrapped/3` — so the Tier 1 and Tier 2 paths share one implementation of
 it rather than a copy across the Rust/Erlang line.
 
 - On success the answer is `{Result ok: Value, StateAcc1}`: the block's local
   writes are kept.
 - On a raise the answer is `{Result error: Exception, StateAcc}` with the
-  **entry** `StateAcc`: the block's local writes are discarded, exactly as its
-  class-variable writes are (`protect/1`) and as `on:do:` does.
+  **entry** `StateAcc`: the block's local writes are discarded, as `on:do:`
+  does.
 
 ## Examples (Erlang)
 ```erlang
@@ -281,8 +295,7 @@ it rather than a copy across the Rust/Erlang line.
 """.
 -spec tryDo(fun((map()) -> {term(), map()}), map()) -> {t(), map()}.
 tryDo(Block, StateAcc) when is_function(Block, 1) ->
-    %% bt-catcher-audit: converted - the block runs under protect/1, which restores on error
-    try beamtalk_class_vars:protect(fun() -> Block(StateAcc) end) of
+    try Block(StateAcc) of
         {Value, StateAcc1} ->
             {from_tagged_tuple({ok, Value}), StateAcc1}
     catch

@@ -83,7 +83,6 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     is_class_method: false,
-                    kind: Primary,
                     expect: None,
                     comments: CommentAttachment {
                         leading: [
@@ -212,7 +211,6 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     is_class_method: false,
-                    kind: Primary,
                     expect: None,
                     comments: CommentAttachment {
                         leading: [
@@ -444,7 +442,6 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     is_class_method: false,
-                    kind: Primary,
                     expect: None,
                     comments: CommentAttachment {
                         leading: [
@@ -488,9 +485,303 @@ Module {
                         end: 1839,
                     },
                 },
+                MethodDefinition {
+                    selector: Unary(
+                        "bt2746DoubleBackslashTypo",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Literal(
+                                Symbol(
+                                    "bar",
+                                ),
+                                Span {
+                                    start: 2131,
+                                    end: 2135,
+                                },
+                            ),
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: Some(
+                        Difference {
+                            base: Simple(
+                                Identifier {
+                                    name: "Symbol",
+                                    span: Span {
+                                        start: 2113,
+                                        end: 2119,
+                                    },
+                                },
+                            ),
+                            excluded: Singleton {
+                                name: "foo",
+                                span: Span {
+                                    start: 2123,
+                                    end: 2127,
+                                },
+                            },
+                            span: Span {
+                                start: 2113,
+                                end: 2127,
+                            },
+                        },
+                    ),
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [
+                            Comment {
+                                content: "The lexer greedily merges `\\\\` into the modulo selector; in type position",
+                                span: Span {
+                                    start: 2084,
+                                    end: 2109,
+                                },
+                                kind: Line,
+                                preceding_blank_line: true,
+                            },
+                            Comment {
+                                content: "this is almost certainly a typo for the difference operator `\\`, so it gets",
+                                span: Span {
+                                    start: 2084,
+                                    end: 2109,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "a targeted \"did you mean `\\`\" diagnostic rather than a generic parse error.",
+                                span: Span {
+                                    start: 2084,
+                                    end: 2109,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        trailing: None,
+                        leading_blank_line: true,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    pipeline_sends: {},
+                    literal_comments: {},
+                    span: Span {
+                        start: 2084,
+                        end: 2135,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "bt2746MixedOperators",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                                leading_blank_line: false,
+                                blank_line_after_comments: false,
+                            },
+                            expression: Identifier(
+                                Identifier {
+                                    name: "self",
+                                    span: Span {
+                                        start: 3145,
+                                        end: 3149,
+                                    },
+                                },
+                            ),
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: Some(
+                        Intersection {
+                            left: Intersection {
+                                left: Simple(
+                                    Identifier {
+                                        name: "Printable",
+                                        span: Span {
+                                            start: 3112,
+                                            end: 3121,
+                                        },
+                                    },
+                                ),
+                                right: Simple(
+                                    Identifier {
+                                        name: "Comparable",
+                                        span: Span {
+                                            start: 3124,
+                                            end: 3134,
+                                        },
+                                    },
+                                ),
+                                span: Span {
+                                    start: 3112,
+                                    end: 3134,
+                                },
+                            },
+                            right: Singleton {
+                                name: "foo",
+                                span: Span {
+                                    start: 3137,
+                                    end: 3141,
+                                },
+                            },
+                            span: Span {
+                                start: 3112,
+                                end: 3141,
+                            },
+                        },
+                    ),
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [
+                            Comment {
+                                content: "Mixing `&` and `\\` in one type-annotation chain without explicit grouping",
+                                span: Span {
+                                    start: 3088,
+                                    end: 3108,
+                                },
+                                kind: Line,
+                                preceding_blank_line: true,
+                            },
+                            Comment {
+                                content: "is a deliberate parse error (ADR 0102 §3) — `(Printable & Comparable) \\",
+                                span: Span {
+                                    start: 3088,
+                                    end: 3108,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "#foo` and `Printable & (Comparable \\ #foo)` differ and neither reading is",
+                                span: Span {
+                                    start: 3088,
+                                    end: 3108,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "obviously dominant. Grouping parentheses do not exist in type-annotation",
+                                span: Span {
+                                    start: 3088,
+                                    end: 3108,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "position today, so there is currently no way to write either reading",
+                                span: Span {
+                                    start: 3088,
+                                    end: 3108,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "explicitly; this is a documented limitation, not an oversight in this test.",
+                                span: Span {
+                                    start: 3088,
+                                    end: 3108,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "",
+                                span: Span {
+                                    start: 3088,
+                                    end: 3108,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "Recovery keeps building using the first-committed operator (`&`), so the",
+                                span: Span {
+                                    start: 3088,
+                                    end: 3108,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "annotation still resolves — to `Intersection{Printable, Comparable} & #foo`,",
+                                span: Span {
+                                    start: 3088,
+                                    end: 3108,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "which normalises to `Never` (a protocol intersection has no member in",
+                                span: Span {
+                                    start: 3088,
+                                    end: 3108,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "common with an unrelated singleton). That produces a *second*, knock-on",
+                                span: Span {
+                                    start: 3088,
+                                    end: 3108,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "semantic warning (\"declares return type Never, but body returns Object\") —",
+                                span: Span {
+                                    start: 3088,
+                                    end: 3108,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                            Comment {
+                                content: "an honest consequence of parse-error recovery, not a second bug to fix.",
+                                span: Span {
+                                    start: 3088,
+                                    end: 3108,
+                                },
+                                kind: Line,
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        trailing: None,
+                        leading_blank_line: true,
+                        blank_line_after_comments: false,
+                    },
+                    doc_comment: None,
+                    pipeline_sends: {},
+                    literal_comments: {},
+                    span: Span {
+                        start: 3088,
+                        end: 3149,
+                    },
+                },
             ],
             class_methods: [],
-            class_variables: [],
             comments: CommentAttachment {
                 leading: [
                     Comment {
@@ -678,382 +969,18 @@ Module {
             uses: [],
             span: Span {
                 start: 1066,
-                end: 1839,
+                end: 3149,
             },
         },
     ],
-    method_definitions: [
-        StandaloneMethodDefinition {
-            class_name: Identifier {
-                name: "Object",
-                span: Span {
-                    start: 2347,
-                    end: 2353,
-                },
-            },
-            package: None,
-            is_class_method: false,
-            method: MethodDefinition {
-                selector: Unary(
-                    "bt2746DoubleBackslashTypo",
-                ),
-                parameters: [],
-                body: [
-                    ExpressionStatement {
-                        comments: CommentAttachment {
-                            leading: [],
-                            trailing: None,
-                            leading_blank_line: false,
-                            blank_line_after_comments: false,
-                        },
-                        expression: Literal(
-                            Symbol(
-                                "bar",
-                            ),
-                            Span {
-                                start: 2404,
-                                end: 2408,
-                            },
-                        ),
-                        preceding_blank_line: false,
-                    },
-                ],
-                return_type: Some(
-                    Difference {
-                        base: Simple(
-                            Identifier {
-                                name: "Symbol",
-                                span: Span {
-                                    start: 2386,
-                                    end: 2392,
-                                },
-                            },
-                        ),
-                        excluded: Singleton {
-                            name: "foo",
-                            span: Span {
-                                start: 2396,
-                                end: 2400,
-                            },
-                        },
-                        span: Span {
-                            start: 2386,
-                            end: 2400,
-                        },
-                    },
-                ),
-                is_sealed: false,
-                is_internal: false,
-                is_class_method: false,
-                kind: Primary,
-                expect: None,
-                comments: CommentAttachment {
-                    leading: [
-                        Comment {
-                            content: "The two error cases below are standalone (Tonel-style `Class >> method`)",
-                            span: Span {
-                                start: 2347,
-                                end: 2353,
-                            },
-                            kind: Line,
-                            preceding_blank_line: true,
-                        },
-                        Comment {
-                            content: "extension methods rather than new `subclass:` definitions, so they do not",
-                            span: Span {
-                                start: 2347,
-                                end: 2353,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                        Comment {
-                            content: "trip the unrelated one-class-per-file check (BT-1666) — only the class",
-                            span: Span {
-                                start: 2347,
-                                end: 2353,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                        Comment {
-                            content: "above counts toward `module.classes`.",
-                            span: Span {
-                                start: 2347,
-                                end: 2353,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                        Comment {
-                            content: "The lexer greedily merges `\\\\` into the modulo selector; in type position",
-                            span: Span {
-                                start: 2347,
-                                end: 2353,
-                            },
-                            kind: Line,
-                            preceding_blank_line: true,
-                        },
-                        Comment {
-                            content: "this is almost certainly a typo for the difference operator `\\`, so it gets",
-                            span: Span {
-                                start: 2347,
-                                end: 2353,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                        Comment {
-                            content: "a targeted \"did you mean `\\`\" diagnostic rather than a generic parse error.",
-                            span: Span {
-                                start: 2347,
-                                end: 2353,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                    ],
-                    trailing: None,
-                    leading_blank_line: true,
-                    blank_line_after_comments: false,
-                },
-                doc_comment: None,
-                pipeline_sends: {},
-                literal_comments: {},
-                span: Span {
-                    start: 2357,
-                    end: 2408,
-                },
-            },
-            span: Span {
-                start: 2347,
-                end: 2408,
-            },
-        },
-        StandaloneMethodDefinition {
-            class_name: Identifier {
-                name: "Object",
-                span: Span {
-                    start: 3333,
-                    end: 3339,
-                },
-            },
-            package: None,
-            is_class_method: false,
-            method: MethodDefinition {
-                selector: Unary(
-                    "bt2746MixedOperators",
-                ),
-                parameters: [],
-                body: [
-                    ExpressionStatement {
-                        comments: CommentAttachment {
-                            leading: [],
-                            trailing: None,
-                            leading_blank_line: false,
-                            blank_line_after_comments: false,
-                        },
-                        expression: Identifier(
-                            Identifier {
-                                name: "self",
-                                span: Span {
-                                    start: 3400,
-                                    end: 3404,
-                                },
-                            },
-                        ),
-                        preceding_blank_line: false,
-                    },
-                ],
-                return_type: Some(
-                    Intersection {
-                        left: Intersection {
-                            left: Simple(
-                                Identifier {
-                                    name: "Printable",
-                                    span: Span {
-                                        start: 3367,
-                                        end: 3376,
-                                    },
-                                },
-                            ),
-                            right: Simple(
-                                Identifier {
-                                    name: "Comparable",
-                                    span: Span {
-                                        start: 3379,
-                                        end: 3389,
-                                    },
-                                },
-                            ),
-                            span: Span {
-                                start: 3367,
-                                end: 3389,
-                            },
-                        },
-                        right: Singleton {
-                            name: "foo",
-                            span: Span {
-                                start: 3392,
-                                end: 3396,
-                            },
-                        },
-                        span: Span {
-                            start: 3367,
-                            end: 3396,
-                        },
-                    },
-                ),
-                is_sealed: false,
-                is_internal: false,
-                is_class_method: false,
-                kind: Primary,
-                expect: None,
-                comments: CommentAttachment {
-                    leading: [
-                        Comment {
-                            content: "Mixing `&` and `\\` in one type-annotation chain without explicit grouping",
-                            span: Span {
-                                start: 3333,
-                                end: 3339,
-                            },
-                            kind: Line,
-                            preceding_blank_line: true,
-                        },
-                        Comment {
-                            content: "is a deliberate parse error (ADR 0102 §3) — `(Printable & Comparable) \\",
-                            span: Span {
-                                start: 3333,
-                                end: 3339,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                        Comment {
-                            content: "#foo` and `Printable & (Comparable \\ #foo)` differ and neither reading is",
-                            span: Span {
-                                start: 3333,
-                                end: 3339,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                        Comment {
-                            content: "obviously dominant. Grouping parentheses do not exist in type-annotation",
-                            span: Span {
-                                start: 3333,
-                                end: 3339,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                        Comment {
-                            content: "position today, so there is currently no way to write either reading",
-                            span: Span {
-                                start: 3333,
-                                end: 3339,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                        Comment {
-                            content: "explicitly; this is a documented limitation, not an oversight in this test.",
-                            span: Span {
-                                start: 3333,
-                                end: 3339,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                        Comment {
-                            content: "",
-                            span: Span {
-                                start: 3333,
-                                end: 3339,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                        Comment {
-                            content: "Recovery keeps building using the first-committed operator (`&`), so the",
-                            span: Span {
-                                start: 3333,
-                                end: 3339,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                        Comment {
-                            content: "annotation still resolves — to `Intersection{Printable, Comparable} & #foo`,",
-                            span: Span {
-                                start: 3333,
-                                end: 3339,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                        Comment {
-                            content: "which normalises to `Never` (a protocol intersection has no member in",
-                            span: Span {
-                                start: 3333,
-                                end: 3339,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                        Comment {
-                            content: "common with an unrelated singleton). That produces a *second*, knock-on",
-                            span: Span {
-                                start: 3333,
-                                end: 3339,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                        Comment {
-                            content: "semantic warning (\"declares return type Never, but body returns Object\") —",
-                            span: Span {
-                                start: 3333,
-                                end: 3339,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                        Comment {
-                            content: "an honest consequence of parse-error recovery, not a second bug to fix.",
-                            span: Span {
-                                start: 3333,
-                                end: 3339,
-                            },
-                            kind: Line,
-                            preceding_blank_line: false,
-                        },
-                    ],
-                    trailing: None,
-                    leading_blank_line: true,
-                    blank_line_after_comments: false,
-                },
-                doc_comment: None,
-                pipeline_sends: {},
-                literal_comments: {},
-                span: Span {
-                    start: 3343,
-                    end: 3404,
-                },
-            },
-            span: Span {
-                start: 3333,
-                end: 3404,
-            },
-        },
-    ],
+    method_definitions: [],
     protocols: [],
     type_aliases: [],
     native_declarations: [],
     expressions: [],
     span: Span {
         start: 1066,
-        end: 3404,
+        end: 3149,
     },
     file_leading_comments: [],
     file_trailing_comments: [],
@@ -1062,5 +989,5 @@ Module {
 }
 
 Diagnostics:
-Diagnostic { severity: Error, message: "Unexpected `\\\\` in type annotation; did you mean `\\` (type difference)?", span: Span { start: 2393, end: 2395 }, hint: None, category: None, notes: [], provision: None }
-Diagnostic { severity: Error, message: "Cannot mix `&` and `\\` in a type annotation without parentheses; parenthesise to disambiguate", span: Span { start: 3390, end: 3391 }, hint: None, category: None, notes: [], provision: None }
+Diagnostic { severity: Error, message: "Unexpected `\\\\` in type annotation; did you mean `\\` (type difference)?", span: Span { start: 2120, end: 2122 }, hint: None, category: None, notes: [], provision: None }
+Diagnostic { severity: Error, message: "Cannot mix `&` and `\\` in a type annotation without parentheses; parenthesise to disambiguate", span: Span { start: 3135, end: 3136 }, hint: None, category: None, notes: [], provision: None }

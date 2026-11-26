@@ -714,7 +714,8 @@ keyword_in_string_or_comment_is_none_test() ->
     %% comment that must not fall back to a one-keyword lookup.
     ?assertEqual(none, kw(<<"x := \"Fetcher fetch:">>, <<" u\"">>)),
     ?assertEqual(none, kw(<<"// Foo bar:">>, <<" x">>)),
-    ?assertEqual(none, kw(<<"/* Foo bar:">>, <<" x */">>)).
+    %% BT-5229: `/*` is no comment, but a stray opener skips to the end of its line.
+    ?assertEqual(none, kw(<<"/* Foo bar:">>, <<" x">>)).
 
 hover_docs_keyword_send_unclassifiable_receiver_is_empty_test() ->
     ?assertEqual(
@@ -1323,7 +1324,7 @@ dev_runtime_test_() ->
             {"context completion: negative integer literal receiver",
                 fun context_completion_negative_integer_literal/0},
             {"context completion: negative/radix floats stay unclassified",
-                fun context_completion_negative_and_radix_floats_unclassified/0},
+                fun context_completion_floats_unclassified_negative_radix_integer/0},
             {"context completion: string literal receiver",
                 fun context_completion_string_literal/0},
             {"context completion: binding receiver", fun context_completion_binding_receiver/0},
@@ -1755,13 +1756,19 @@ context_completion_negative_integer_literal() ->
         )
     ).
 
-context_completion_negative_and_radix_floats_unclassified() ->
+context_completion_floats_unclassified_negative_radix_integer() ->
     %% Floats are not classified (see completion_receiver_literal_corpus.json).
     lists:foreach(
         fun(Line) ->
             ?assertEqual([], beamtalk_repl_ops_dev_complete:get_context_completions(Line))
         end,
-        [<<"-1.5 ab">>, <<"1e-3 ab">>, <<"-16rFF ab">>]
+        [<<"-1.5 ab">>, <<"1e-3 ab">>]
+    ),
+    %% A negative radix literal is one Integer token (BT-5182).
+    ?assert(
+        lists:member(
+            <<"abs">>, beamtalk_repl_ops_dev_complete:get_context_completions(<<"-16rFF ab">>)
+        )
     ).
 
 context_completion_string_literal() ->

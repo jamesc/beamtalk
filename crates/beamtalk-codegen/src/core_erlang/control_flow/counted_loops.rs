@@ -20,7 +20,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::{Block, Expression};
+use beamtalk_core::ast::{Block, Expression, Literal};
 
 // ─── CountedLoopFrame ─────────────────────────────────────────────────────────
 
@@ -123,6 +123,13 @@ impl CoreErlangGenerator {
         // gensym the loop counter so a user local named `i` (→ Core `I`)
         // cannot collide with the loop fun parameter.
         let counter = self.fresh_temp_var("loopidx");
+        // BT-5190: the receiver is the count, and only `Integer` defines
+        // `timesRepeat:`. A nil, Float or user-class receiver raises what the
+        // pure send raises (`does_not_understand`, or `stateful_block_dispatch`
+        // for a class with its own `timesRepeat:`) instead of being
+        // term-ordered by `=<` (BT-5167 only raised a `type_error` for nil and
+        // let a Float count run).
+        let receiver_guard = Self::start_guard_doc(receiver, &n_var, "timesRepeat:");
 
         let frame = CountedLoopFrame {
             preamble: docvec![
@@ -130,7 +137,8 @@ impl CoreErlangGenerator {
                 leaf::var(n_var.clone()),
                 " = ",
                 receiver_code,
-                " in"
+                " in ",
+                receiver_guard,
             ],
             fn_name: threaded_ir::REPEAT_LOOP_FN.to_string(),
             condition_prelude: Document::Nil,
@@ -168,6 +176,13 @@ impl CoreErlangGenerator {
 
         // Bind the block parameter name (e.g. "i" in [:i | ...])
         let body_param = body.parameters.first().map(|p| p.name.to_string());
+        // BT-5215: a non-Integer start raises what the pure send raises.
+        let start_guard = Self::start_guard_doc(receiver, &start_var, "to:do:");
+        // BT-5167: a nil/non-number limit would be term-ordered by `=<` and a
+        // writing block would loop forever; raise the same `type_error` as
+        // the stdlib `Integer>>to:by:do:`.
+        let number_guard =
+            self.number_guard_doc(&start_var, &[(&end_var, "Interval limit must be a number")]);
 
         let frame = CountedLoopFrame {
             preamble: docvec![
@@ -179,7 +194,9 @@ impl CoreErlangGenerator {
                 leaf::var(end_var.clone()),
                 " = ",
                 limit_code,
-                " in",
+                " in ",
+                start_guard,
+                number_guard,
             ],
             fn_name: threaded_ir::COUNTED_LOOP_FN.to_string(),
             condition_prelude: Document::Nil,
@@ -199,7 +216,69 @@ impl CoreErlangGenerator {
         self.generate_counted_stateful_loop(&frame, body, &plan)
     }
 
-    /// BT-5098: `do case Step =:= 0 of 'true' -> raise 'false' -> 'ok' end`.
+    /// BT-5136: `do case is_number(Step) and is_number(Limit) of 'false' ->
+    /// raise type_error`. A nil or other non-number would otherwise be
+    /// term-ordered by `erlang:>`/`<` and the loop would silently do nothing.
+    fn number_guard_doc(&mut self, recv_var: &str, checks: &[(&str, &str)]) -> Document<'static> {
+        let mut guards = Vec::new();
+        for &(var, text) in checks {
+            let msg_var = self.fresh_temp_var("NumMsg");
+            let raise = form::let_in(
+                leaf::var(msg_var.clone()),
+                leaf::binary_lit(text),
+                self.type_error_raise_doc(recv_var, &msg_var),
+                Layout::Flat,
+            );
+            let is_number = form::call("erlang", "is_number", [leaf::var(var.to_string())]);
+            guards.push(form::do_prefix(form::case_of(
+                is_number,
+                [
+                    form::clause([leaf::atom("true")], None, leaf::atom("ok"), Layout::Flat),
+                    form::clause([leaf::atom("false")], None, raise, Layout::Flat),
+                ],
+                Layout::Flat,
+            )));
+        }
+        Document::Vec(guards)
+    }
+
+    /// BT-5215: `do case is_integer(Start) of 'false' -> <receiver guard>`.
+    /// The start is the receiver of the `to:do:` / `to:by:do:` the loop stands
+    /// in for, and only `Integer` defines those; any other start would be
+    /// term-ordered by `=<` (a `nil` start silently ran zero iterations). The
+    /// pure path sends the selector to the start, so the non-Integer branch
+    /// runs the receiver guard every inlined writing fold already uses,
+    /// `beamtalk_collection:guard_writing_fold/2`: `does_not_understand` when the
+    /// start's class does not respond to `selector` (a `Float` start included),
+    /// `stateful_block_dispatch` when it answers it with its own method, which
+    /// the inlined loop would bypass, and `ok` only when a stdlib method answers
+    /// it, which the loop stands in for. Checked before the limit and step, as
+    /// the pure send fails on its receiver first.
+    ///
+    /// Elided only for an Integer literal start (the common `1 to: n do:`
+    /// compiles exactly as before). A declared `:: Integer` is not proof:
+    /// annotations are not enforced, and `=<` would order a `nil` silently.
+    fn start_guard_doc(start: &Expression, start_var: &str, selector: &str) -> Document<'static> {
+        if matches!(start, Expression::Literal(Literal::Integer(_), _)) {
+            return Document::Nil;
+        }
+        let refuse = form::call(
+            "beamtalk_collection",
+            "guard_writing_fold",
+            [leaf::var(start_var.to_string()), leaf::atom(selector)],
+        );
+        let is_integer = form::call("erlang", "is_integer", [leaf::var(start_var.to_string())]);
+        form::do_prefix(form::case_of(
+            is_integer,
+            [
+                form::clause([leaf::atom("true")], None, leaf::atom("ok"), Layout::Flat),
+                form::clause([leaf::atom("false")], None, refuse, Layout::Flat),
+            ],
+            Layout::Flat,
+        ))
+    }
+
+    /// BT-5098: `do case Step == 0 of 'true' -> raise 'false' -> 'ok' end`.
     /// The raise is the one `Object>>error:` lowering (`object_error_raise_doc`)
     /// that the stdlib `Integer>>to:by:do:` reaches through `self error:`, so
     /// both paths raise the same `user_error` (class from the receiver). Emitted
@@ -214,7 +293,7 @@ impl CoreErlangGenerator {
         );
         let is_zero = form::call(
             "erlang",
-            "=:=",
+            "==",
             [leaf::var(step_var.to_string()), leaf::int_lit(0)],
         );
         form::do_prefix(form::case_of(
@@ -243,8 +322,17 @@ impl CoreErlangGenerator {
         let limit_code = self.expression_doc(limit)?;
         let step_var = self.fresh_temp_var("temp");
         let step_code = self.expression_doc(step)?;
+        // BT-5215: a non-Integer start raises what the pure send raises.
+        let start_guard = Self::start_guard_doc(receiver, &start_var, "to:by:do:");
         // BT-5098: a step of 0 raises, as `Integer>>to:by:do:` does. Checked
         // once here in the preamble (not per iteration).
+        let number_guard = self.number_guard_doc(
+            &start_var,
+            &[
+                (&step_var, "Interval step must be a number"),
+                (&end_var, "Interval limit must be a number"),
+            ],
+        );
         let zero_step_guard = self.zero_step_guard_doc(&start_var, &step_var);
         // gensym the loop counter (the block param is aliased to it).
         let counter = self.fresh_temp_var("loopidx");
@@ -266,6 +354,8 @@ impl CoreErlangGenerator {
                 " = ",
                 step_code,
                 " in ",
+                start_guard,
+                number_guard,
                 zero_step_guard,
             ],
             fn_name: threaded_ir::COUNTED_LOOP_FN.to_string(),
@@ -815,14 +905,76 @@ mod tests {
         );
         assert_eq!(
             code.matches("'with_message'").count(),
-            1,
-            "exactly one guard. Got:\n{code}"
+            3,
+            "step-number, limit-number and zero-step guards. Got:\n{code}"
         );
         assert!(code.contains("'user_error'"), "Got:\n{code}");
+        assert!(code.contains("'type_error'"), "Got:\n{code}");
         assert!(
             code.contains("'beamtalk_primitive':'class_of'"),
             "class comes from the receiver, as `self error:`. Got:\n{code}"
         );
+    }
+
+    /// BT-5215: an Integer literal start (positive or negative) is proven, so
+    /// the common `1 to: n do:` shape emits no start check.
+    #[test]
+    fn test_to_do_literal_start_emits_no_start_guard() {
+        for loop_src in [
+            "1 to: n do: [:i | sum := sum + i]",
+            "1 to: n by: 2 do: [:i | sum := sum + i]",
+            "-3 to: n do: [:i | sum := sum + i]",
+        ] {
+            let src = format!(
+                "Actor subclass: Ctr\n  state: n = 0\n\n  run: n =>\n    sum := 0\n    {loop_src}\n    self.n := sum\n"
+            );
+            let code = codegen(&src);
+            assert!(
+                code.contains("letrec"),
+                "inlined loop expected. Got:\n{code}"
+            );
+            assert!(
+                !code.contains("'guard_writing_fold'"),
+                "a literal start must not be checked. Got:\n{code}"
+            );
+        }
+    }
+
+    /// BT-5215: a non-literal start is checked once, before the limit/step
+    /// checks and the letrec, and the non-number branch raises through the
+    /// writing-fold receiver guard for the selector the loop stands in for.
+    #[test]
+    fn test_to_do_non_literal_start_guard_is_in_preamble() {
+        for (loop_src, selector) in [
+            ("s to: 10 do: [:i | sum := sum + i]", "'to:do:'"),
+            ("s to: 10 by: 2 do: [:i | sum := sum + i]", "'to:by:do:'"),
+            // A Float is not an Integer: the pure send raises DNU.
+            ("1.5 to: 10 do: [:i | sum := sum + i]", "'to:do:'"),
+        ] {
+            let src = format!(
+                "Actor subclass: Ctr\n  state: n = 0\n\n  run: s =>\n    sum := 0\n    {loop_src}\n    self.n := sum\n"
+            );
+            let code = codegen(&src);
+            let guard = code
+                .find("'beamtalk_collection':'guard_writing_fold'")
+                .expect("start guard expected");
+            assert_eq!(
+                code.matches("'guard_writing_fold'").count(),
+                1,
+                "the start is checked once. Got:\n{code}"
+            );
+            let call = &code[guard..];
+            assert!(
+                call[..call.find(')').expect("call close")].contains(selector),
+                "the guard names {selector}. Got:\n{code}"
+            );
+            // After the start guard: the limit guard, then the letrec.
+            let loop_fn = call.find("letrec").expect("letrec after the start guard");
+            assert!(
+                call[..loop_fn].contains("'type_error'"),
+                "start guard must precede the limit guard and the letrec. Got:\n{code}"
+            );
+        }
     }
 
     #[test]

@@ -34,7 +34,8 @@ defmodule BtAttachWeb.SessionLifecycleTest do
   defp authed_conn(conn, age_secs) do
     Plug.Test.init_test_session(conn, %{
       "bt_user" => %{"sub" => "alice", "groups" => ["beamtalk-owners"]},
-      "bt_logged_in_at" => System.system_time(:second) - age_secs
+      "bt_logged_in_at" => System.system_time(:second) - age_secs,
+      "live_socket_id" => "bt_session:#{System.unique_integer([:positive])}"
     })
   end
 
@@ -273,7 +274,8 @@ defmodule BtAttachWeb.SessionLifecycleTest do
     defp init_csrf(conn) do
       Plug.Test.init_test_session(conn, %{
         "bt_user" => %{"sub" => "alice", "groups" => ["beamtalk-owners"]},
-        "bt_logged_in_at" => System.system_time(:second)
+        "bt_logged_in_at" => System.system_time(:second),
+        "live_socket_id" => "bt_session:#{System.unique_integer([:positive])}"
       })
       |> put_req_header("x-csrf-token", Plug.CSRFProtection.get_csrf_token())
     end

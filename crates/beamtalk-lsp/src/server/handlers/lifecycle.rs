@@ -11,8 +11,12 @@ use super::super::config::{
     configured_stdlib_source_dirs, preload_covers, workspace_roots,
 };
 use super::super::convert::uri_to_path;
+use super::super::core::PreloadGuard;
+use super::super::guard::panic_message;
 use crate::server::lock::LockRecover;
+use futures_util::FutureExt;
 use std::fs;
+use std::panic::AssertUnwindSafe;
 
 use beamtalk_language_service::LanguageService;
 use tower_lsp::jsonrpc::Result;
@@ -27,6 +31,22 @@ use tower_lsp::lsp_types::{
     WorkDoneProgressOptions,
 };
 use tracing::debug;
+
+/// What other open files were last re-checked against for one open file
+/// (BT-5188; see `Backend::interface_baselines`).
+#[derive(Debug, Default)]
+pub(in crate::server) struct InterfaceBaseline {
+    /// The file's interface (`None`: it exported nothing).
+    interface: Option<beamtalk_language_service::FileInterface>,
+    /// While the file had a parse error, error recovery made the indexed
+    /// interface differ from `interface`. Other files may have been checked
+    /// against that recovered interface since, so clearing the error
+    /// re-checks them once even when the interface is back to `interface`.
+    diverged_while_broken: bool,
+}
+
+/// Startup preload panics after which the server stops retrying (BT-5188).
+const MAX_STARTUP_PRELOAD_FAILURES: u32 = 3;
 
 const DIAGNOSTIC_DEBOUNCE_DURATION: std::time::Duration = std::time::Duration::from_millis(150);
 
@@ -163,56 +183,11 @@ impl Backend {
             let mut preload_config = self.preload_config.lock_recover();
             preload_config.take()
         };
-        if let Some(ref config) = preload_config {
-            // Held for the whole startup sequence so a package root that
-            // `did_open` registers meanwhile (BT-4158) loads strictly after
-            // it, rather than racing its whole-session setter calls.
-            let root_load_guard = self.root_load_lock.lock().await;
-            // The per-root loaders replace whole-session state, so feed them
-            // every known root — not just `config.roots` — in case a
-            // `did_open` registered one before this lock was taken.
-            let all_roots = self.workspace_roots_snapshot();
-            // mark preload in-flight so a didOpen/didChange racing
-            // this sequence defers its own `publish_diagnostics` to the
-            // self-healing republish below instead of racing it to be the
-            // last notification sent — see `is_preload_in_progress`'s doc.
-            {
-                let mut svc = self.service.lock_recover();
-                svc.set_preload_in_progress(true);
-            }
-            // load each workspace root's real beamtalk.toml
-            // [package] name before preload indexes files under that root,
-            // so first-time stamping is already correct. This
-            // ordering is best-effort, not a guarantee — a didOpen/didChange
-            // racing this sequence still stamps eagerly with the fallback
-            // marker, and set_root_packages/mark_stdlib_file re-stamp those
-            // files when they run. (The [diagnostics] table below needs no
-            // such care: it is applied per-request at diagnostic-computation
-            // time.)
-            self.load_root_packages(&all_roots).await;
-            self.preload_workspace_source_files(config.clone()).await;
-            // ADR 0075: Load type cache from _build/type_cache/ for typed completions.
-            self.load_type_cache(&all_roots).await;
-            // ADR 0100 Rule 3: load beamtalk.toml's [diagnostics]
-            // severity-override table so the LSP agrees with `beamtalk build`.
-            self.load_diagnostics_table(&all_roots).await;
-            // the project index is now fully populated (and won't
-            // change again from this startup sequence) — clear the flag
-            // *before* republishing below, so republish's own
-            // `publish_diagnostics` calls actually send.
-            {
-                let mut svc = self.service.lock_recover();
-                svc.set_preload_in_progress(false);
-            }
-            drop(root_load_guard);
-
-            // Re-publish diagnostics for every open file after preload
-            // completes. If a file was opened via `did_open` before preload
-            // finished (or against an incomplete project index), its initial
-            // diagnostics may contain stale `unresolved_class` warnings against
-            // classes that have since been indexed. Republishing self-heals
-            // those without requiring the user to touch the file.
-            self.republish_open_diagnostics().await;
+        if let Some(config) = preload_config {
+            // BT-5188: a panic is contained here, so the rest of this
+            // function (OTP lib dir, capability and watcher registration)
+            // still runs.
+            self.run_startup_preload_contained(config).await;
         }
 
         // Resolve OTP lib dir for FFI goto-definition.
@@ -237,6 +212,123 @@ impl Backend {
                 "Beamtalk language server ready",
             )
             .await;
+    }
+
+    /// Runs the startup preload, containing a panic (BT-5188).
+    ///
+    /// Whatever happens, the preload flag is cleared and every open file is
+    /// republished: the publishes skipped while the load ran would otherwise
+    /// be lost. After a panic the config is put back so the next `did_open`
+    /// retries the load ([`Self::retry_startup_preload_if_pending`]), up to
+    /// [`MAX_STARTUP_PRELOAD_FAILURES`] times.
+    pub(in crate::server) async fn run_startup_preload_contained(&self, config: PreloadConfig) {
+        let outcome = AssertUnwindSafe(self.run_startup_preload(config.clone()))
+            .catch_unwind()
+            .await;
+        if let Err(payload) = outcome {
+            let failures = self
+                .startup_preload_failures
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                + 1;
+            let msg = panic_message(payload.as_ref());
+            if failures < MAX_STARTUP_PRELOAD_FAILURES {
+                tracing::error!(
+                    panic = %msg,
+                    failures,
+                    "startup preload panicked; retrying on the next opened file"
+                );
+                *self.preload_config.lock_recover() = Some(config);
+            } else {
+                tracing::error!(
+                    panic = %msg,
+                    failures,
+                    "startup preload panicked again; giving up for this session"
+                );
+            }
+        }
+        // Re-publish diagnostics for every open file after preload ends. If a
+        // file was opened via `did_open` before preload finished (or against
+        // an incomplete project index), its initial diagnostics may contain
+        // stale `unresolved_class` warnings against classes that have since
+        // been indexed, or were never sent at all (`publish_diagnostics`
+        // skips while the flag is set). Republishing self-heals those
+        // without requiring the user to touch the file.
+        self.republish_open_diagnostics().await;
+    }
+
+    /// Retries a startup preload that panicked (BT-5188). A no-op unless an
+    /// earlier attempt failed and left its config to retry.
+    async fn retry_startup_preload_if_pending(&self) {
+        if self
+            .startup_preload_failures
+            .load(std::sync::atomic::Ordering::SeqCst)
+            == 0
+        {
+            return;
+        }
+        let config = self.preload_config.lock_recover().take();
+        if let Some(config) = config {
+            self.run_startup_preload_contained(config).await;
+        }
+    }
+
+    /// The startup preload sequence. Clears the preload flag on every exit,
+    /// a panic included; the caller republishes.
+    async fn run_startup_preload(&self, config: PreloadConfig) {
+        // Held for the whole startup sequence so a package root that
+        // `did_open` registers meanwhile (BT-4158) loads strictly after
+        // it, rather than racing its whole-session setter calls.
+        let root_load_guard = self.root_load_lock.lock().await;
+        // The per-root loaders replace whole-session state, so feed them
+        // every known root — not just `config.roots` — in case a
+        // `did_open` registered one before this lock was taken.
+        let all_roots = self.workspace_roots_snapshot();
+        // mark preload in-flight so a didOpen/didChange racing
+        // this sequence defers its own `publish_diagnostics` to the
+        // self-healing republish after it instead of racing it to be the
+        // last notification sent — see `is_preload_in_progress`'s doc.
+        let mut preload_guard = PreloadGuard::begin(&self.service);
+        // load each workspace root's real beamtalk.toml
+        // [package] name before preload indexes files under that root,
+        // so first-time stamping is already correct. This
+        // ordering is best-effort, not a guarantee — a didOpen/didChange
+        // racing this sequence still stamps eagerly with the fallback
+        // marker, and set_root_packages/mark_stdlib_file re-stamp those
+        // files when they run. (The [diagnostics] table below needs no
+        // such care: it is applied per-request at diagnostic-computation
+        // time.)
+        self.load_root_packages(&all_roots).await;
+        self.inject_preload_panic();
+        self.preload_workspace_source_files(config).await;
+        // ADR 0075: Load type cache from _build/type_cache/ for typed completions.
+        self.load_type_cache(&all_roots).await;
+        // ADR 0100 Rule 3: load beamtalk.toml's [diagnostics]
+        // severity-override table so the LSP agrees with `beamtalk build`.
+        self.load_diagnostics_table(&all_roots).await;
+        // the project index is now fully populated (and won't
+        // change again from this startup sequence) — clear the flag
+        // *before* the caller republishes, so republish's own
+        // `publish_diagnostics` calls actually send.
+        preload_guard.finish();
+        drop(root_load_guard);
+    }
+
+    /// [`Self::ensure_package_root_loaded`], containing a panic (BT-5188):
+    /// the root's guards clear the preload flag and unregister the root (so
+    /// the next `did_open` under it retries), and the open files are
+    /// republished, since publishes skipped during the load are lost.
+    async fn ensure_package_root_loaded_contained(&self, path: &camino::Utf8PathBuf) {
+        let outcome = AssertUnwindSafe(self.ensure_package_root_loaded(path))
+            .catch_unwind()
+            .await;
+        if let Err(payload) = outcome {
+            tracing::error!(
+                panic = %panic_message(payload.as_ref()),
+                path = %path,
+                "package root preload panicked; retrying on the next file opened under it"
+            );
+            self.republish_open_diagnostics().await;
+        }
     }
 
     /// Handles a graceful shutdown request from the client.
@@ -269,6 +361,7 @@ impl Backend {
                 let mut versions = self.versions.lock_recover();
                 versions.insert(path.clone(), params.text_document.version);
             }
+            let mut interface_changed = false;
             if uri.scheme() != "beamtalk-stdlib" {
                 // BT-4967: the file's FFI registry goes in *before* its text,
                 // so no diagnostics pass can see the file without it.
@@ -284,16 +377,78 @@ impl Backend {
                         == Some(params.text_document.version);
                     if still_current {
                         let mut svc = self.service.lock_recover();
+                        // BT-5131: an open whose buffer differs from the
+                        // preloaded (disk) text can change what other open
+                        // files resolve, like a `did_change` would. The one
+                        // clone per open is the baseline later edits compare
+                        // against by reference (BT-5188).
+                        let before = svc.project_index().file_interface(&path);
                         svc.update_file(path.clone(), params.text_document.text);
+                        self.interface_baselines.lock_recover().insert(
+                            path.clone(),
+                            InterfaceBaseline {
+                                interface: before,
+                                diverged_while_broken: false,
+                            },
+                        );
+                        interface_changed = self.interface_changed_since_baseline(&svc, &path);
                     }
                 }
                 // BT-4158: resolve this file's own package root (nearest
                 // `beamtalk.toml`) — the workspace folder may be a parent
                 // of it, leaving its dependencies unloaded.
-                self.ensure_package_root_loaded(&path).await;
+                self.ensure_package_root_loaded_contained(&path).await;
             }
             self.publish_diagnostics(&uri).await;
+            // After this file's own publish, so a retried whole-workspace
+            // walk never holds up the file being opened (BT-5188).
+            self.retry_startup_preload_if_pending().await;
+            if interface_changed {
+                self.request_cross_file_republish();
+            }
         }
+    }
+
+    /// Whether other open files must be re-checked for `path`'s indexed
+    /// interface, recording it as the new baseline if so (BT-5188). Call with
+    /// the service locked, right after indexing the file's new text.
+    ///
+    /// While the file has a parse error the answer is "no": error recovery
+    /// can drop declarations, so a pause mid-typing must not re-analyse every
+    /// other open file. The baseline is kept, and if recovery made the
+    /// interface differ from it, clearing the error re-checks the other files
+    /// once (they may have been checked against the recovered interface in
+    /// the meantime). The comparison is by reference; only an actual change
+    /// clones the new interface. A file with no baseline (an edit that raced
+    /// its open) gets the current interface as its baseline, and no change.
+    fn interface_changed_since_baseline(
+        &self,
+        svc: &beamtalk_language_service::SimpleLanguageService,
+        path: &camino::Utf8PathBuf,
+    ) -> bool {
+        let index = svc.project_index();
+        let mut baselines = self.interface_baselines.lock_recover();
+        let Some(base) = baselines.get_mut(path) else {
+            baselines.insert(
+                path.clone(),
+                InterfaceBaseline {
+                    interface: index.file_interface(path),
+                    diverged_while_broken: false,
+                },
+            );
+            return false;
+        };
+        let unchanged = index.file_interface_matches(path, base.interface.as_ref());
+        if svc.has_parse_errors(path) {
+            base.diverged_while_broken |= !unchanged;
+            return false;
+        }
+        if !unchanged {
+            base.interface = index.file_interface(path);
+        }
+        let recheck = !unchanged || base.diverged_while_broken;
+        base.diverged_while_broken = false;
+        recheck
     }
 
     /// Re-indexes a document after edits and republishes diagnostics.
@@ -310,19 +465,11 @@ impl Backend {
                 let _sync = self.text_sync.lock_recover();
                 {
                     let mut svc = self.service.lock_recover();
-                    // BT-5078/BT-5109: a changed interface (the set of classes
-                    // defined in this file, or any class's methods, signatures
-                    // or state) changes what other open files resolve, so
-                    // they must be re-checked too. Method-body edits leave
-                    // the interface equal, so ordinary typing is unaffected.
-                    let before = svc.project_index().file_interface(&path);
+                    // BT-5078/BT-5109/BT-5188: whether the interface changed
+                    // is decided once the edits settle (below), against the
+                    // baseline, so ordinary typing compares and clones
+                    // nothing here.
                     svc.update_file(path.clone(), change.text);
-                    let after = svc.project_index().file_interface(&path);
-                    if before != after {
-                        self.pending_interface_change
-                            .lock_recover()
-                            .insert(path.clone());
-                    }
                 }
                 let mut versions = self.versions.lock_recover();
                 versions.insert(path.clone(), params.text_document.version);
@@ -347,15 +494,18 @@ impl Backend {
 
             if is_latest {
                 self.publish_diagnostics(&uri).await;
-                // Take (and clear) the pending flag here, not per edit: an
+                // Compared here, against the baseline, not per edit: an
                 // earlier edit in this debounce window may have renamed the
                 // class and been superseded by this one.
-                let interface_changed = self.pending_interface_change.lock_recover().remove(&path);
+                let interface_changed = {
+                    let svc = self.service.lock_recover();
+                    self.interface_changed_since_baseline(&svc, &path)
+                };
                 if interface_changed {
                     // Already debounced (this is the latest edit) and gated
-                    // on the file's class set changing, so ordinary typing
+                    // on the file's interface changing, so ordinary typing
                     // never re-analyses the other open files.
-                    self.republish_other_open_diagnostics(&uri).await;
+                    self.request_cross_file_republish();
                 }
             }
         }
@@ -436,6 +586,7 @@ impl Backend {
             // `did_open`'s insert simply blocks until we release it (after
             // our own write below completes), so its own `update_file` call
             // is guaranteed to run after — and therefore win over — ours.
+            let mut interface_changed = false;
             let reopened = {
                 let mut open_generation = self.open_generation.lock_recover();
                 let reopened = open_generation.get(&path).copied() != generation_before;
@@ -445,10 +596,30 @@ impl Backend {
                         versions.remove(&path);
                     } else {
                         let mut svc = self.service.lock_recover();
+                        // BT-5131: reverting an edited buffer to disk (or
+                        // dropping the file) can change what other open
+                        // files resolve. Compared against what other files
+                        // were last re-checked with (BT-5188); with no
+                        // baseline (an open that lost a race), against the
+                        // buffer's own interface.
+                        let baseline = self
+                            .interface_baselines
+                            .lock_recover()
+                            .remove(&path)
+                            .unwrap_or_else(|| InterfaceBaseline {
+                                interface: svc.project_index().file_interface(&path),
+                                diverged_while_broken: false,
+                            });
                         match disk_content {
                             Some(content) => svc.update_file(path.clone(), content),
                             None => svc.remove_file(&path),
                         }
+                        // Parse errors on disk still count: nothing would
+                        // re-check the other files later.
+                        interface_changed = baseline.diverged_while_broken
+                            || !svc
+                                .project_index()
+                                .file_interface_matches(&path, baseline.interface.as_ref());
                         let mut versions = self.versions.lock_recover();
                         versions.remove(&path);
                     }
@@ -462,7 +633,6 @@ impl Backend {
                 return;
             }
             self.clear_dirty(&path);
-            self.pending_interface_change.lock_recover().remove(&path);
             {
                 let mut generations = self.diagnostic_generation.lock_recover();
                 generations.remove(&uri);
@@ -472,7 +642,12 @@ impl Backend {
                 // later one sees the document closed), so nothing re-adds
                 // diagnostics after this clear.
                 let _publishing = self.publish_lock.lock().await;
-                self.client.publish_diagnostics(uri, Vec::new(), None).await;
+                self.client
+                    .publish_diagnostics(uri.clone(), Vec::new(), None)
+                    .await;
+            }
+            if interface_changed {
+                self.request_cross_file_republish();
             }
         }
     }
@@ -489,5 +664,8 @@ impl Backend {
             self.clear_dirty(&path);
         }
         self.publish_diagnostics(&uri).await;
+        // A startup preload that panicked is retried on the next open or
+        // save, so editing only already-open files still recovers (BT-5188).
+        self.retry_startup_preload_if_pending().await;
     }
 }

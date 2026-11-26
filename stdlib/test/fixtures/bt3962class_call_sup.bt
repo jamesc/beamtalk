@@ -7,9 +7,8 @@
 // tree is starting.
 
 Supervisor subclass: Bt3962ClassCallSup
-  classState: workers = 1
 
-  class childCount => self.workers
+  class childCount => 1
 
   childSpecs =>
     ((1 to: Bt3962ClassCallSup childCount) collect: [:i |

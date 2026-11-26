@@ -31,7 +31,12 @@ of this ADR. Consequences for this document:
   The comparison *argument* stays unchecked by decision (BT-3928, 2026-10-19):
   `5 < nil` still answers `true`, with the static warning and the documented
   term-order fallback. Part 1 never proposed otherwise; this note makes it
-  explicit.
+  explicit. **Superseded for a number receiver** by the ADR 0116
+  comparison addendum (BT-5176, 2026-11-25): a number on the left now sends
+  a non-number argument its reflected hook (`lessThanFromNumber:` …) and
+  raises `does_not_understand` when it has none, so `5 < nil` raises. A
+  `String` or `Symbol` receiver's argument is still unchecked (BT-5213). See
+  [ADR 0116 § Addendum](0116-number-on-the-left-arithmetic-coercion.md).
 - BT-4823 was benchmarked, and adds rows 11e–11g to `just bench-vs-elixir`
   (this ADR called the typed comparison row 11e). The ~1 ns figures below are
   the estimates made before that measurement; the PR's numbers are in

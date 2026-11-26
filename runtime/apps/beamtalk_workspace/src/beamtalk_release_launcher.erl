@@ -27,17 +27,60 @@ WebSocket `run-entry` op and these launcher verbs — never a second one.
   resolves the target via `net_adm:ping/1`/`rpc:call/5` and reports through
   its own exit code, never touching the target node's supervision tree except
   through `init:stop/0` (`stop`) or one `run-entry` (`rpc`).
+* `tls_preflight_main/0` runs before any distributed node when the operator
+  opts in to cross-host clustering with `RELEASE_DISTRIBUTION=tls` (ADR 0126
+  amendment D2, BT-5233): it refuses to go on unless the TLS option file makes
+  both sides verify their peer, and prints the distribution flags the launcher
+  then passes to every node it starts.
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
+
+%% How long the `rpc` client waits for the target node's run-entry. Keep it
+%% below the outer wall-clock limit in examples/cluster/scripts/e2e.sh
+%% (CLUSTER_E2E_TIMEOUT, default 150 s) so the `{badrpc, timeout}` failure
+%% is reported before the outer limit kills the client.
+-define(RPC_CALL_TIMEOUT_MS, 120000).
+
+%% The flags erlexec handles itself, and so never hands to `init` (the `+`
+%% emulator flags are matched by their lead character). Words after one join
+%% the flag before it in `init:get_argument/1`, a rule the vm.args reader
+%% cannot place exactly, so it refuses (BT-5260). From erlexec's own flag table;
+%% flags it passes through (`-sname`, `-name`, `-noshell`, `-epmd` ...) end the
+%% words as any other.
+-define(ERLEXEC_CONSUMED_FLAGS, [
+    "-env",
+    "-emu_type",
+    "-emu_flavor",
+    "-emu_args",
+    "-emu_args_exit",
+    "-emu_name_exit",
+    "-emu_qouted_cmd_exit",
+    "-keep_window",
+    "-detached",
+    "-start_epmd",
+    "-no_epmd",
+    "-bindir",
+    "-root",
+    "-configfd",
+    "-smpdisable",
+    "-make",
+    "-compile",
+    "-version",
+    "-man"
+]).
 
 -export([
     eval_main/0,
     rpc_entry/3,
     rpc_client_main/0,
     ping_client_main/0,
-    stop_client_main/0
+    stop_client_main/0,
+    tls_preflight_main/0,
+    tls_preflight/2,
+    vm_args_dist_flags/1,
+    epmd_address/1
 ]).
 
 %%% ============================================================================
@@ -216,7 +259,11 @@ rpc_client_main() ->
             ClassBin = unicode:characters_to_binary(ClassStr),
             SelectorBin = unicode:characters_to_binary(SelectorStr),
             Argv = [unicode:characters_to_binary(A) || A <- RestArgs],
-            case rpc:call(Node, ?MODULE, rpc_entry, [ClassBin, SelectorBin, Argv], 60000) of
+            case
+                rpc:call(
+                    Node, ?MODULE, rpc_entry, [ClassBin, SelectorBin, Argv], ?RPC_CALL_TIMEOUT_MS
+                )
+            of
                 {ok, Value} ->
                     io:format("~tp~n", [Value]),
                     erlang:halt(0);
@@ -298,4 +345,518 @@ stop_client_main() ->
             end;
         _ ->
             erlang:halt(2)
+    end.
+
+%%% ============================================================================
+%%% RELEASE_DISTRIBUTION=tls — check the opt-in before any node starts
+%%% ============================================================================
+
+-doc """
+The `RELEASE_DISTRIBUTION=tls` check `bin/<name>` runs (in a VM with no
+distribution, given the release's `vm.args` path as `-beamtalk_vm_args` and
+reading only its distribution flags with `vm_args_dist_flags/1`, plus the
+`ERL_*FLAGS` variables, so it sees every `-ssl_dist_opt` flag the node will)
+before it starts any distributed node (ADR 0126 amendment D2, BT-5233). On success it prints one
+`tls-<key>=<value>` line per value the launcher needs and halts with 0;
+otherwise it prints each problem with its fix to stderr and halts with 2, so
+the launcher refuses to start. See `tls_preflight/2` for what it checks.
+""".
+-spec tls_preflight_main() -> no_return().
+tls_preflight_main() ->
+    case vm_args_flags() of
+        {ok, VmArgs} ->
+            tls_preflight_main(VmArgs);
+        {error, Problem} ->
+            io:format(
+                standard_error,
+                "error: RELEASE_DISTRIBUTION=tls is set, but this node cannot start with it:~n"
+                "  - ~ts~n",
+                [Problem]
+            ),
+            erlang:halt(2)
+    end.
+
+-spec tls_preflight_main(#{atom() => [string()]}) -> no_return().
+tls_preflight_main(VmArgs) ->
+    Words = fun(Flag) -> init_words(Flag) ++ maps:get(Flag, VmArgs) end,
+    Args = #{
+        dist_opt_words => Words(ssl_dist_opt),
+        extra_optfiles => Words(ssl_dist_optfile),
+        extra_proto_dists => Words(proto_dist),
+        epmd_listening => fun epmd_listening/2
+    },
+    case tls_preflight(fun os:getenv/1, Args) of
+        {ok, #{proto := Proto, interface := Ip, host := Host, optfile := OptFile} = Result} ->
+            %% Notes are for the operator starting the node; a health check's
+            %% `ping` every few seconds should not repeat them. The launcher
+            %% names its verb with `-beamtalk_launcher_verb`.
+            [
+                io:format(standard_error, "note: ~ts~n", [Note])
+             || init_words(beamtalk_launcher_verb) =:= ["foreground"],
+                Note <- maps:get(notes, Result)
+            ],
+            io:format(
+                "tls-proto=~ts~ntls-interface=~w~ntls-epmd=~ts~ntls-host=~ts~ntls-optfile=~ts~n",
+                [Proto, Ip, epmd_address(Ip), Host, OptFile]
+            ),
+            erlang:halt(0);
+        {error, Problems} ->
+            io:format(
+                standard_error,
+                "error: RELEASE_DISTRIBUTION=tls is set, but this node cannot start with it:~n",
+                []
+            ),
+            [io:format(standard_error, "  - ~ts~n", [P]) || P <- Problems],
+            erlang:halt(2)
+    end.
+
+-doc """
+The distribution flags in a `vm.args` file's text, and nothing else: the words
+after each `-ssl_dist_opt`, `-ssl_dist_optfile` and `-proto_dist` (up to the
+next word that starts with `-`, as `init:get_argument/1` would give them), in
+file order. Every other flag, including `-name`, `-sname`, `-detached`, `-s`,
+`-run` and `-eval`, is ignored: the check VM never loads the file, so none of
+them can run, start distribution or silence its output there. Reads erl's
+arg-file syntax: whitespace-separated words, `#` comments to the end of the
+line, `\\` escapes the next character, and single or double quoted words; `-extra` ends the flags. A `+`
+emulator flag ends the words of the flag before it.
+
+What the reader cannot place exactly is reported in `problems` and refused by
+the check, never guessed: a nested `-args_file` (the node loads it, the check
+cannot), a quote with no closing quote, and a plain word after a `+` flag that
+sits inside a distribution flag's words (erlexec removes `+K true` from the
+argument list, so such a word would join the distribution flag). A test
+compares the words with a real `erl -args_file` VM's.
+""".
+-spec vm_args_dist_flags(string() | binary()) ->
+    #{
+        ssl_dist_opt := [string()],
+        ssl_dist_optfile := [string()],
+        proto_dist := [string()],
+        problems := [string()]
+    }.
+vm_args_dist_flags(Text) ->
+    Chars =
+        case unicode:characters_to_list(Text) of
+            List when is_list(List) -> List;
+            %% Not UTF-8 (a Latin-1 comment): erl reads the file bytewise.
+            _ -> binary_to_list(iolist_to_binary(Text))
+        end,
+    Empty = #{ssl_dist_opt => [], ssl_dist_optfile => [], proto_dist => [], problems => []},
+    try vm_args_words(Chars, [], []) of
+        Words -> vm_args_collect(Words, none, Empty)
+    catch
+        throw:unbalanced_quote ->
+            Empty#{
+                problems := [
+                    "has a ' or \" quote with no closing quote; the check cannot tell which "
+                    "words the node reads after it, so close the quote"
+                ]
+            }
+    end.
+
+vm_args_collect([], _Current, Acc) ->
+    Acc;
+vm_args_collect(["-extra" | _], _Current, Acc) ->
+    Acc;
+vm_args_collect(["-ssl_dist_opt" | T], _, Acc) ->
+    vm_args_collect(T, ssl_dist_opt, Acc);
+vm_args_collect(["-ssl_dist_optfile" | T], _, Acc) ->
+    vm_args_collect(T, ssl_dist_optfile, Acc);
+vm_args_collect(["-args_file", File | _], _, Acc) ->
+    %% The node would load it; this check cannot see inside.
+    problem(
+        io_lib:format(
+            "sets -args_file ~ts: the check cannot read the distribution flags in a "
+            "nested argument file; put -ssl_dist_opt, -ssl_dist_optfile and -proto_dist "
+            "in the [release] vm-args file itself",
+            [File]
+        ),
+        Acc
+    );
+vm_args_collect(["-proto_dist" | T], _, Acc) ->
+    vm_args_collect(T, proto_dist, Acc);
+vm_args_collect([Word = [Lead | _] | T], Flag, Acc) when Lead =:= $+; Lead =:= $- ->
+    case Lead =:= $+ orelse lists:member(Word, ?ERLEXEC_CONSUMED_FLAGS) of
+        true when Flag =:= none ->
+            vm_args_collect(T, Flag, Acc);
+        true when is_tuple(Flag) ->
+            vm_args_collect(T, Flag, Acc);
+        true ->
+            %% erlexec takes this flag (and its operands, as in `+K true` or
+            %% `-env VAR VALUE`) out of the argument list before `init` reads it, so a
+            %% plain word after it joins the distribution flag before it.
+            vm_args_collect(T, {after_plus, Flag}, Acc);
+        false ->
+            vm_args_collect(T, none, Acc)
+    end;
+vm_args_collect([_ | T], none, Acc) ->
+    vm_args_collect(T, none, Acc);
+vm_args_collect([_ | _], {after_plus, Flag}, Acc) ->
+    problem(
+        io_lib:format(
+            "has a flag that erlexec handles itself (a + flag, -env, -detached ...) in the "
+            "middle of the words of -~ts: the check cannot tell which of the words after it "
+            "the node reads as options; move it before the -~ts flag, or after a flag that "
+            "is not -ssl_dist_opt, -ssl_dist_optfile or -proto_dist",
+            [Flag, Flag]
+        ),
+        Acc
+    );
+vm_args_collect([Word | T], Flag, Acc) ->
+    vm_args_collect(T, Flag, Acc#{Flag := maps:get(Flag, Acc) ++ [Word]}).
+
+problem(Message, #{problems := Problems} = Acc) ->
+    Acc#{problems := Problems ++ [lists:flatten(Message)]}.
+
+%% Split into words as erl's arg-file reader does (checked against `erl`):
+%% whitespace separates, `#` starts a comment to the end of the line, `\\`
+%% escapes the next character, and a quoted word may hold whitespace.
+vm_args_words([], [], Acc) ->
+    lists:reverse(Acc);
+vm_args_words([], Cur, Acc) ->
+    lists:reverse([lists:reverse(Cur) | Acc]);
+vm_args_words([C | T], Cur, Acc) when C =:= $\s; C =:= $\t; C =:= $\n; C =:= $\r ->
+    vm_args_words(T, [], vm_args_flush(Cur, Acc));
+vm_args_words([$# | T], Cur, Acc) ->
+    vm_args_words(lists:dropwhile(fun(C) -> C =/= $\n end, T), [], vm_args_flush(Cur, Acc));
+vm_args_words([$\\, C | T], Cur, Acc) ->
+    vm_args_words(T, [C | Cur], Acc);
+vm_args_words([Q | T], Cur, Acc) when Q =:= $"; Q =:= $' ->
+    case lists:splitwith(fun(C) -> C =/= Q end, T) of
+        {_, []} -> throw(unbalanced_quote);
+        {Quoted, [_Closing | Rest]} -> vm_args_words(Rest, lists:reverse(Quoted) ++ Cur, Acc)
+    end;
+vm_args_words([C | T], Cur, Acc) ->
+    vm_args_words(T, [C | Cur], Acc).
+
+vm_args_flush([], Acc) -> Acc;
+vm_args_flush(Cur, Acc) -> [lists:reverse(Cur) | Acc].
+
+%% The file `-beamtalk_vm_args` names (the launcher passes the release's
+%% `vm.args`), or no flags when it is not given.
+vm_args_flags() ->
+    case init:get_argument(beamtalk_vm_args) of
+        {ok, [[Path | _] | _]} ->
+            case file:read_file(Path) of
+                {ok, Text} ->
+                    case vm_args_dist_flags(Text) of
+                        #{problems := [Problem | _]} ->
+                            {error, io_lib:format("'~ts' ~ts", [Path, Problem])};
+                        Flags ->
+                            {ok, Flags}
+                    end;
+                {error, Reason} ->
+                    {error,
+                        io_lib:format("cannot read '~ts': ~ts", [Path, file:format_error(Reason)])}
+            end;
+        _ ->
+            {ok, vm_args_dist_flags("")}
+    end.
+
+-doc """
+Check a `RELEASE_DISTRIBUTION=tls` opt-in, reading the environment with
+`GetEnv` (`os:getenv/1`'s contract):
+
+* `RELEASE_HOST` names this host as the other nodes reach it (fully qualified,
+  with at least one '.', and a name its certificate names, or an IP address); it becomes the host part of `-name`.
+* `RELEASE_DIST_INTERFACE` is one IP address of this host to listen on, parsed
+  by the shared rule (`beamtalk_dist_address:parse/1`; a `%zone` is refused,
+  since the listener cannot carry one). There is no default, so the node
+  listens on every interface (`0.0.0.0`) only if the operator names it. An
+  IPv6 address selects `inet6_tls`. If an epmd already runs on this host (on
+  loopback) but does not listen on the interface, other hosts could never
+  find the node: epmd keeps the address of whatever started it first.
+* `RELEASE_SSL_DIST_OPTFILE` is the `-ssl_dist_optfile` file. With the
+  `-ssl_dist_opt` words the node will also get (`dist_opt_words`), it must
+  pass `beamtalk_dist_tls:check_optfile/2`. A second option file from
+  `vm.args` (`extra_optfiles`) is refused, and so is a `-proto_dist` there
+  (`extra_proto_dists`): the launcher passes its own first, so OTP would
+  ignore it, with only a warning.
+* A `RELEASE_HOST` that is an IP address must be the same family (IPv4 or
+  IPv6) as the interface, or other nodes could not connect to it.
+
+`Args` carries what the VM supplies: `dist_opt_words`, `extra_optfiles`,
+`extra_proto_dists` (optional, default none) and
+`epmd_listening(Address, Port) -> boolean()`. Returns every problem at once,
+each with its fix.
+""".
+-spec tls_preflight(fun((string()) -> string() | false), #{
+    dist_opt_words := [string()],
+    extra_optfiles := [string()],
+    extra_proto_dists => [string()],
+    epmd_listening := fun((inet:ip_address(), inet:port_number()) -> boolean())
+}) ->
+    {ok, #{
+        proto := string(),
+        interface := inet:ip_address(),
+        host := string(),
+        optfile := string(),
+        notes := [string()]
+    }}
+    | {error, [unicode:chardata(), ...]}.
+tls_preflight(
+    GetEnv, #{dist_opt_words := Words, extra_optfiles := Extra, epmd_listening := Epmd} = Args
+) ->
+    Host = tls_host(read_env("RELEASE_HOST", GetEnv)),
+    Interface = tls_interface(read_env("RELEASE_DIST_INTERFACE", GetEnv)),
+    OptFile = tls_optfile(read_env("RELEASE_SSL_DIST_OPTFILE", GetEnv), Words, Extra),
+    EpmdCheck =
+        case Interface of
+            {ok, {Ip0, _}} -> tls_epmd(Ip0, epmd_port(GetEnv), Epmd);
+            {error, _} -> ok
+        end,
+    ProtoCheck =
+        case maps:get(extra_proto_dists, Args, []) of
+            [] ->
+                ok;
+            Protos ->
+                {error,
+                    io_lib:format(
+                        "vm.args (or ERL_FLAGS) also sets -proto_dist ~ts; remove it: "
+                        "RELEASE_DISTRIBUTION=tls sets the protocol",
+                        [lists:join(" ", Protos)]
+                    )}
+        end,
+    FamilyCheck =
+        case {Host, Interface} of
+            {{ok, H0}, {ok, {Ip1, _}}} -> tls_family(H0, Ip1);
+            _ -> ok
+        end,
+    Checks = [Host, Interface, OptFile, EpmdCheck, ProtoCheck, FamilyCheck],
+    case [Problem || {error, Problem} <- Checks] of
+        [] ->
+            {ok, H} = Host,
+            {ok, {Ip, Notes0}} = Interface,
+            Notes = Notes0 ++ [Note || {note, Note} <- [EpmdCheck]],
+            {ok, F} = OptFile,
+            Proto =
+                case tuple_size(Ip) of
+                    4 -> "inet_tls";
+                    8 -> "inet6_tls"
+                end,
+            {ok, #{proto => Proto, interface => Ip, host => H, optfile => F, notes => Notes}};
+        Problems ->
+            {error, Problems}
+    end.
+
+%% An IP-literal RELEASE_HOST names the address other nodes dial; it has to be
+%% reachable over the protocol family the interface selects.
+tls_family(Host, Ip) ->
+    case beamtalk_dist_address:parse(Host) of
+        {ok, HostIp} when tuple_size(HostIp) =/= tuple_size(Ip) ->
+            {error,
+                io_lib:format(
+                    "RELEASE_HOST ~ts and RELEASE_DIST_INTERFACE ~ts are different IP families; "
+                    "the node's distribution runs over one family (inet_tls or inet6_tls), "
+                    "so use addresses of the same family",
+                    [Host, inet:ntoa(Ip)]
+                )};
+        _ ->
+            ok
+    end.
+
+-doc """
+The `ERL_EPMD_ADDRESS` for the interface, or `all` for `0.0.0.0` / `::`: the
+launchers then leave `ERL_EPMD_ADDRESS` unset, epmd's own default of every
+interface. Naming `0.0.0.0` makes a freshly started epmd exit, since it binds
+the wildcard and then loopback on the same port.
+""".
+-spec epmd_address(inet:ip_address()) -> string().
+epmd_address(Ip) ->
+    case is_wildcard(Ip) of
+        true -> "all";
+        false -> inet:ntoa(Ip)
+    end.
+
+%% The every-interface address (`0.0.0.0` or `::`), the one rule the epmd
+%% address and the epmd check share.
+is_wildcard(Ip) -> Ip =:= {0, 0, 0, 0} orelse Ip =:= {0, 0, 0, 0, 0, 0, 0, 0}.
+
+init_words(Flag) ->
+    case init:get_argument(Flag) of
+        {ok, Values} -> lists:append(Values);
+        error -> []
+    end.
+
+%% Whether something accepts TCP connections at `Address:Port` (epmd's).
+epmd_listening(Address, Port) ->
+    case gen_tcp:connect(Address, Port, [], 1000) of
+        {ok, Socket} ->
+            gen_tcp:close(Socket),
+            true;
+        {error, _} ->
+            false
+    end.
+
+epmd_port(GetEnv) ->
+    case string:to_integer(read_env("ERL_EPMD_PORT", GetEnv)) of
+        {Port, ""} when Port > 0, Port < 65536 -> Port;
+        _ -> 4369
+    end.
+
+%% An epmd already running on loopback but not on the interface keeps its
+%% address (it is shared, and binds whatever the first starter gave it), so
+%% this node would register where no other host can look it up. Nothing to
+%% check for a loopback listener. For every interface (`0.0.0.0`, `::`) a
+%% probe cannot tell the cases apart (it always reaches loopback), so a
+%% running epmd only earns a note.
+tls_epmd(Ip, Port, Epmd) ->
+    Wildcard = is_wildcard(Ip),
+    case
+        beamtalk_dist_address:is_loopback(Ip) orelse not Epmd({127, 0, 0, 1}, Port) orelse
+            (not Wildcard andalso Epmd(Ip, Port))
+    of
+        true ->
+            ok;
+        false when Wildcard ->
+            {note,
+                io_lib:format(
+                    "an epmd is already running on this host (port ~b) and keeps the address "
+                    "it was started with; if a loopback release or a beamtalk REPL started it, "
+                    "other hosts cannot find this node (check with `epmd -names` from another "
+                    "host, or run `epmd -kill` and start this node first)",
+                    [Port]
+                )};
+        false ->
+            {error,
+                io_lib:format(
+                    "an epmd is already running on this host but does not listen on ~ts "
+                    "(port ~b), so other hosts could not find this node; it keeps the address "
+                    "of whatever started it first (a loopback release or a beamtalk REPL). "
+                    "Stop the nodes using it and run `epmd -kill`, then start this node first",
+                    [inet:ntoa(Ip), Port]
+                )}
+    end.
+
+read_env(Name, GetEnv) ->
+    case GetEnv(Name) of
+        false -> "";
+        Value -> string:trim(Value)
+    end.
+
+tls_host("") ->
+    {error,
+        "RELEASE_HOST is not set: set it to this host's name as the other nodes reach it "
+        "(the DNS name its certificate names), e.g. RELEASE_HOST=node1.example.com"};
+tls_host(Host) ->
+    %% `parse/1` drops a `%zone`, which would then end up in `-name`.
+    case not lists:member($%, Host) andalso beamtalk_dist_address:parse(Host) of
+        {ok, _} ->
+            {ok, Host};
+        _ ->
+            case valid_host_name(Host) of
+                true ->
+                    {ok, Host};
+                false ->
+                    {error,
+                        io_lib:format(
+                            "RELEASE_HOST '~ts' is not a fully qualified host name "
+                            "(with at least one '.') or an IP address "
+                            "(letters, digits, '-' and '.' only in a name)",
+                            [Host]
+                        )}
+            end
+    end.
+
+%% A legacy IPv4 shorthand (`10.1`, octal `010.0.0.1`, hex `0x7f.1`) is not
+%% an IP literal by the shared rule, but the resolver still reads it as one,
+%% so it is refused rather than passed to `-name` as a host name.
+valid_host_name(Host) ->
+    Labels = string:split(Host, ".", all),
+    %% `-name` needs a fully qualified host: OTP refuses to connect to a node
+    %% whose host has no dot ("Hostname node1 is illegal").
+    length(Labels) >= 2 andalso
+        element(1, inet:parse_ipv4_address(Host)) =:= error andalso
+        length(Host) =< 253 andalso
+        lists:all(
+            fun(Label) ->
+                Label =/= "" andalso length(Label) =< 63 andalso
+                    hd(Label) =/= $- andalso lists:last(Label) =/= $- andalso
+                    lists:all(fun host_char/1, Label)
+            end,
+            Labels
+        ).
+
+host_char(C) ->
+    (C >= $a andalso C =< $z) orelse (C >= $A andalso C =< $Z) orelse
+        (C >= $0 andalso C =< $9) orelse C =:= $-.
+
+tls_interface("") ->
+    {error,
+        "RELEASE_DIST_INTERFACE is not set: set it to the IP address of this host "
+        "the other nodes connect to, e.g. RELEASE_DIST_INTERFACE=10.0.0.5 "
+        "(name 0.0.0.0 to listen on every interface)"};
+tls_interface(Value) ->
+    case lists:member($%, Value) of
+        true ->
+            {error,
+                io_lib:format(
+                    "RELEASE_DIST_INTERFACE '~ts' has a %zone, which the distribution listener "
+                    "cannot use; name a global or unique-local address instead",
+                    [Value]
+                )};
+        false ->
+            tls_interface_address(Value)
+    end.
+
+tls_interface_address(Value) ->
+    case beamtalk_dist_address:parse(Value) of
+        {ok, Ip} ->
+            Notes =
+                case beamtalk_dist_address:loopback_dist(Value) of
+                    true ->
+                        [
+                            io_lib:format(
+                                "RELEASE_DIST_INTERFACE ~ts is a loopback address: "
+                                "other hosts cannot reach this node",
+                                [Value]
+                            )
+                        ];
+                    false ->
+                        []
+                end,
+            {ok, {Ip, Notes}};
+        error ->
+            {error,
+                io_lib:format(
+                    "RELEASE_DIST_INTERFACE '~ts' is not one IP address "
+                    "(a host name or a list is not accepted), e.g. 10.0.0.5 or fd00::5",
+                    [Value]
+                )}
+    end.
+
+tls_optfile("", _Words, _Extra) ->
+    {error,
+        "RELEASE_SSL_DIST_OPTFILE is not set: set it to the TLS distribution option file "
+        "that names this node's certificate, key and CA, and makes both sides verify their "
+        "peer (see docs/development/deploying.md, \"Clustering across hosts\")"};
+tls_optfile(_Path, _Words, [_ | _] = Extra) ->
+    {error,
+        io_lib:format(
+            "vm.args (or ERL_FLAGS) also sets -ssl_dist_optfile ~ts; remove it and set "
+            "RELEASE_SSL_DIST_OPTFILE instead",
+            [lists:join(" ", Extra)]
+        )};
+tls_optfile(Path0, Words, []) ->
+    Path = filename:absname(Path0),
+    %% The launchers splice the path into `erl`'s command line; `launcher.cmd`
+    %% runs under delayed expansion, where `!`, `^` and `%` are not literal.
+    %% Non-ASCII is refused too: the check prints the path from a `-noshell`
+    %% VM, whose output encoding may be Latin-1.
+    case [C || C <- Path, lists:member(C, "\"!^%") orelse C < 32 orelse C > 126] of
+        [_ | _] ->
+            {error,
+                io_lib:format(
+                    "RELEASE_SSL_DIST_OPTFILE '~ts' must not contain '\"', '!', '^', '%', "
+                    "control or non-ASCII characters",
+                    [Path]
+                )};
+        [] ->
+            case beamtalk_dist_tls:check_optfile(Path, Words) of
+                ok ->
+                    {ok, Path};
+                {error, Reason} ->
+                    {error, beamtalk_dist_tls:format_error(Reason)}
+            end
     end.

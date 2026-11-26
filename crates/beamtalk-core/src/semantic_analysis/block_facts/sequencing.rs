@@ -529,9 +529,9 @@ pub fn ends_with_self_field_write(body: &[ExpressionStatement]) -> bool {
     )
 }
 
-/// Whether `target` is `self.<field>`, the target of a field or class-variable
-/// write: the one shape the field-write rules share (here, and codegen's
-/// `field_assignment_name` and `class_var_assignment_shape`).
+/// Whether `target` is `self.<field>`, the target of a field write: the one
+/// shape the field-write rules share (here, and codegen's
+/// `field_assignment_name`).
 #[must_use]
 pub fn is_self_field_target(target: &Expression) -> bool {
     matches!(

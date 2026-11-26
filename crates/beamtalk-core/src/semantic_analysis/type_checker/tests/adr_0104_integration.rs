@@ -58,7 +58,7 @@ c increment
 c getValue
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         diags
@@ -86,7 +86,7 @@ Object subclass: Client
   useCounter: c :: Counter -> Integer => c increment
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         return_type_diags(&diags).is_empty(),
@@ -108,7 +108,7 @@ Object subclass: Client
   useCounter: c :: Counter -> String => c increment
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let mismatches = return_type_diags(&diags);
     assert_eq!(
@@ -144,7 +144,7 @@ Object subclass: Client
   notify: c :: Counter -> Nil => c increment!
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         return_type_diags(&diags).is_empty(),
@@ -167,7 +167,7 @@ Object subclass: Client
   notify: c :: Counter -> Integer => c increment!
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let mismatches = return_type_diags(&diags);
     assert_eq!(
@@ -200,7 +200,7 @@ Actor subclass: Counter
 Counter spawnWith: #{#cuont => 0}
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let key_diags: Vec<_> = diags
         .iter()
@@ -236,7 +236,7 @@ Actor subclass: Counter
 Counter spawnWith: #{#count => 0}
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         diags.iter().all(|d| !d.message.contains("state key")),
@@ -260,7 +260,7 @@ Actor subclass: Counter
     self spawnWith: #{#cuont => 0}
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let key_diags: Vec<_> = diags
         .iter()
@@ -291,7 +291,7 @@ Actor subclass: Counter
     self spawnWith: #{#count => 0}
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         diags.iter().all(|d| !d.message.contains("state key")),
@@ -316,7 +316,7 @@ Object subclass: Client
   run: db :: SlowDb -> List => (db withTimeout: 30000) query: \"SELECT\"
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         return_type_diags(&diags).is_empty(),
@@ -345,7 +345,7 @@ Object subclass: Client
   run: db :: SlowDb -> String => (db withTimeout: 30000) query: \"SELECT\"
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let mismatches = return_type_diags(&diags);
     assert_eq!(
@@ -384,7 +384,7 @@ Object subclass: Client
     (b withTimeout: 5000) echo: n
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         return_type_diags(&diags).is_empty(),
@@ -414,7 +414,7 @@ Object subclass: Client
     (b withTimeout: 5000) echo: n
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let mismatches = return_type_diags(&diags);
     assert_eq!(
@@ -444,7 +444,7 @@ Object subclass: Client
   useLogger: logger :: Logger => logger logg: \"hi\"
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let dnu = diags
         .iter()
@@ -486,7 +486,7 @@ Pool spawn
 (Pool named: #pool) unwrap
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         diags

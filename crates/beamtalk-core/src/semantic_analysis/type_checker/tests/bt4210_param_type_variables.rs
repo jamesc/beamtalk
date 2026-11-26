@@ -160,7 +160,7 @@ typed Object subclass: H
   pass: x :: E -> E => [:y :: E | y] value: x
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
 
     assert!(
@@ -184,7 +184,7 @@ typed Object subclass: H
     #(1, 2) collect: [:y :: E | y]
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
 
     assert!(

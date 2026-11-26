@@ -232,7 +232,7 @@ fn test_init_actor_with_declared_shape_version_writes_real_value() {
 // Target: gen_server/callbacks.rs — the shared
 // `beamtalk_core::semantic_analysis::requires_definite_assignment`'s Union
 // nilability (ADR 0124 §7 A1), type_annotation_display
-// Singleton/Generic/FalseOr/SelfType/SelfClass/ClassOf variants,
+// Singleton/Generic/SelfType/SelfClass/ClassOf variants,
 // user_defined_initialize_chain fallback when class_hierarchy is None,
 // and inherited_typed_no_default_fields fallback.
 // (Function names rather than line numbers so these references don't drift as
@@ -379,16 +379,22 @@ fn test_actor_typed_generic_field_triggers_validation() {
 }
 
 #[test]
-fn test_actor_typed_false_or_field_triggers_validation() {
-    // type_annotation_display FalseOr branch.
+fn test_actor_typed_integer_or_false_field_triggers_validation() {
+    // type_annotation_display Union branch (`Integer | False`).
     let s = Span::new(0, 0);
-    let false_or = TypeAnnotation::false_or(TypeAnnotation::simple("Integer", s), s);
+    let false_or = TypeAnnotation::union(
+        vec![
+            TypeAnnotation::simple("Integer", s),
+            TypeAnnotation::simple("False", s),
+        ],
+        s,
+    );
     let module = make_actor_typed_no_default("result", false_or);
     let result = generate_module(&module, CodegenOptions::new("bt@test_actor"));
     assert!(result.is_ok(), "Codegen should succeed: {result:?}");
     let code = result.unwrap();
     assert_has(
-        "FalseOr-typed field should trigger typed-no-default validation",
+        "`Integer | False` field should trigger typed-no-default validation",
         &code,
         &["'uninitialized_state_error'"],
     );
@@ -592,23 +598,29 @@ fn test_inherited_typed_no_default_fallback_class_of_type_display() {
 }
 
 #[test]
-fn test_inherited_typed_no_default_fallback_false_or_type_display() {
-    // type_annotation_display FalseOr branch: directly assert the fallback
+fn test_inherited_typed_no_default_fallback_integer_or_false_type_display() {
+    // type_annotation_display Union branch: directly assert the fallback
     // display string (the generate_module test only checks it indirectly via
     // emitted Core Erlang).
     let s = Span::new(0, 0);
-    let false_or = TypeAnnotation::false_or(TypeAnnotation::simple("Integer", s), s);
+    let false_or = TypeAnnotation::union(
+        vec![
+            TypeAnnotation::simple("Integer", s),
+            TypeAnnotation::simple("False", s),
+        ],
+        s,
+    );
     let module = make_actor_typed_no_default("result", false_or);
     let generator = crate::core_erlang::CoreErlangGenerator::new("bt@test_actor");
     let fields = generator.inherited_typed_no_default_fields(&module, "TestActor");
     assert_eq!(
         fields.len(),
         1,
-        "FalseOr field should appear in typed-no-default"
+        "`Integer | False` field should appear in typed-no-default"
     );
     assert_eq!(
         fields[0].type_name, "Integer | False",
-        "FalseOr display should be 'Integer | False'"
+        "`Integer | False` display should be 'Integer | False'"
     );
 }
 

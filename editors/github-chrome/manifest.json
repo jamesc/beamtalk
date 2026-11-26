@@ -7,7 +7,7 @@
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
-      "matches": ["https://github.com/*", "https://gist.github.com/*"],
+      "matches": ["https://github.com/*"],
       "js": ["content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"

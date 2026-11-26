@@ -10,7 +10,8 @@
 
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 use beamtalk_etf::{
-    map_get, term_to_atom, term_to_bool, term_to_string, term_to_string_list, term_to_usize,
+    map_get, term_to_atom, term_to_bool, term_to_string_list, term_to_string_map_checked,
+    term_to_usize,
 };
 use eetf::{Map, Term};
 
@@ -18,37 +19,6 @@ use crate::respond::error_response;
 
 // ────────────────────────────────────────────────────────────────
 // Domain-specific ETF helpers (not shared via beamtalk-etf)
-//
-// The compiler port's `term_to_string_map` needs richer error reporting
-// than the generic `Option`-based version in beamtalk-etf, so it remains
-// local.
-
-/// Extract a string->string map from a Term with descriptive errors.
-///
-/// Returns `Err` if the term is present but contains non-string keys or values,
-/// so callers can surface the problem rather than silently falling back.
-pub(crate) fn term_to_string_map_checked(
-    term: &Term,
-    field_name: &str,
-) -> Result<std::collections::HashMap<String, String>, String> {
-    match term {
-        Term::Map(m) => {
-            let mut result = std::collections::HashMap::new();
-            for (k, v) in &m.map {
-                let key = term_to_string(k)
-                    .ok_or_else(|| format!("{field_name} key is not a string: {k:?}"))?;
-                let val = term_to_string(v).ok_or_else(|| {
-                    format!("{field_name} value for '{key}' is not a string: {v:?}")
-                })?;
-                result.insert(key, val);
-            }
-            Ok(result)
-        }
-        _ => Err(format!(
-            "{field_name} must be a map of string->string, got: {term:?}"
-        )),
-    }
-}
 
 /// Extract a list of atom strings from a Term.
 pub(crate) fn term_to_atom_list(term: &Term) -> Vec<ecow::EcoString> {
@@ -221,14 +191,14 @@ pub(crate) fn term_to_atom_bool_map(
     }
 }
 
-/// Deserialize an atom→`SlotKind` map (for `field_kinds`/`class_field_kinds`,
-/// ADR 0124 §1/B5a — `meta_field_kinds_map`, beamtalk-codegen).
+/// Deserialize an atom→`SlotKind` map (for `field_kinds`, ADR 0124 §1 —
+/// `meta_field_kinds_map`, beamtalk-codegen).
 ///
 /// An unrecognised value (anything but the atom `'late'`) degrades to
-/// [`SlotKind::Eager`] — the pre-ADR-0124 default every slot had, and the
-/// same "missing metadata means eager" convention `state_field_kind`/
-/// `class_variable_kind` (beamtalk-core) fall back to when the map itself is
-/// absent (an older BEAM artifact predating this key).
+/// [`SlotKind::Eager`] — the pre-ADR-0124 default every slot had, and the same
+/// "missing metadata means eager" convention `state_field_kind` (beamtalk-core)
+/// falls back to when the map itself is absent (an older BEAM artifact
+/// predating this key).
 pub(crate) fn term_to_slot_kind_map(
     term: &Term,
 ) -> std::collections::HashMap<ecow::EcoString, beamtalk_core::ast::SlotKind> {
@@ -290,7 +260,6 @@ pub(crate) fn parse_method_infos_from_map(
     key: &str,
     class_name: &str,
 ) -> Vec<beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo> {
-    use beamtalk_core::ast::MethodKind;
     use beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo;
 
     let Some(Term::Map(method_map)) = map_get(m, key) else {
@@ -323,7 +292,6 @@ pub(crate) fn parse_method_infos_from_map(
             Some(MethodInfo {
                 selector: ecow::EcoString::from(selector.as_str()),
                 arity,
-                kind: MethodKind::Primary,
                 defined_in: ecow::EcoString::from(class_name),
                 is_sealed: map_get(info_map, "is_sealed")
                     .and_then(term_to_bool)
@@ -443,34 +411,6 @@ pub(crate) fn parse_class_info_from_meta_term(
             .unwrap_or_default()
             .into_iter()
             .collect();
-    // Class variables: name list from `class_fields` (the key codegen
-    // actually emits — `meta_atom_list(&class.class_variables...)` in
-    // `class_meta.rs`), paired with per-name slot kind from
-    // `class_field_kinds`. There is no wire representation yet for a class
-    // variable's declared type or default-value presence (only instance
-    // `field_types`/`field_has_default` exist), so those degrade to
-    // `None`/`false` for a cross-file class — the same "AST-less metadata is
-    // best-effort" contract `state_types`/`state_has_default` already have
-    // for fields absent from their maps.
-    let class_field_kinds = map_get(m, "class_field_kinds")
-        .map(term_to_slot_kind_map)
-        .unwrap_or_default();
-    let class_variables = map_get(m, "class_fields")
-        .map(term_to_atom_list)
-        .unwrap_or_default()
-        .into_iter()
-        .map(
-            |name| beamtalk_core::semantic_analysis::class_hierarchy::ClassVarInfo {
-                kind: class_field_kinds
-                    .get(&name)
-                    .copied()
-                    .unwrap_or(beamtalk_core::ast::SlotKind::Eager),
-                name,
-                ty: None,
-                has_default: false,
-            },
-        )
-        .collect();
 
     let methods = parse_method_infos_from_map(m, "method_info", class_name);
     let class_methods = parse_method_infos_from_map(m, "class_method_info", class_name);
@@ -523,7 +463,6 @@ pub(crate) fn parse_class_info_from_meta_term(
         has_dynamic_field_writer: false,
         methods,
         class_methods,
-        class_variables,
         type_params: Vec::new(),
         type_param_bounds: Vec::new(),
         superclass_type_args: Vec::new(),
@@ -669,7 +608,7 @@ pub(crate) fn extract_protocol_registry(
 }
 
 /// Merge a method into a method list, replacing any existing method with the
-/// same selector and kind, else appending it.
+/// same selector, else appending it.
 ///
 /// This is the REPL's *explicit redefinition* (`compile_method`: the user
 /// re-typed a method on a live class), where replace is the point. It is not
@@ -679,20 +618,15 @@ pub(crate) fn extract_protocol_registry(
 ///
 /// The instance/class **side** is encoded entirely by *which* list the caller
 /// passes (`class.methods` vs `class.class_methods`) — `handle_compile_method`
-/// selects it from the `is_class_method` flag. `MethodKind` does *not* encode the
-/// side (it only distinguishes `Primary` from future AOP advice kinds), so a
-/// standalone-parsed body lands in the right side purely by list choice, and the
-/// `kind` match is a within-list replace-or-add discriminator — not a side check.
-/// There is therefore no class-side "kind trap" / duplicate-push.
+/// selects it from the `is_class_method` flag, so a standalone-parsed body
+/// lands in the right side purely by list choice. There is therefore no
+/// class-side duplicate-push.
 pub(crate) fn merge_method(
     methods: &mut Vec<beamtalk_core::ast::MethodDefinition>,
     method: beamtalk_core::ast::MethodDefinition,
 ) {
     let selector = method.selector.name();
-    if let Some(existing) = methods
-        .iter_mut()
-        .find(|m| m.selector.name() == selector && m.kind == method.kind)
-    {
+    if let Some(existing) = methods.iter_mut().find(|m| m.selector.name() == selector) {
         *existing = method;
     } else {
         methods.push(method);

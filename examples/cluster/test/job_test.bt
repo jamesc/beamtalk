@@ -1,0 +1,47 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the cluster example that need only one node.
+// The multi-node scenario is `Demo run`, driven by scripts/e2e.sh.
+
+TestCase subclass: JobTest
+
+  testJobSquares => self assert: (Job id: 1 n: 7) square equals: 49
+
+  testJobResultKeepsFields =>
+    r := JobResult
+      jobId: 3
+      value: 9
+      node: #'w@localhost'
+    self assert: r jobId equals: 3
+    self assert: r value equals: 9
+    self assert: r node equals: #'w@localhost'
+
+  testWorkerProcessesLocally =>
+    w := Worker spawn
+    r := w process: (Job id: 2 n: 5)
+    self assert: r value equals: 25
+    self assert: r node equals: Node current name
+    self assert: w done equals: 1
+
+  testWorkerNotesArriveInOrder =>
+    w := Worker spawn
+    w note: "a"!
+    w note: "b"!
+    self assert: w notes equals: #("a", "b")
+
+  testLedgerCollects =>
+    l := Ledger spawn
+    l
+      add: (JobResult
+        jobId: 1
+        value: 1
+        node: #n)
+    self assert: l size equals: 1
+
+  testFarmRetriesNothingWhenAllWorkersAreLocalAndHealthy =>
+    farm := Farm spawn
+    farm useWorkers: #(Worker spawn)
+    results := farm runAll: #((Job id: 1 n: 3)) killAt: 0
+    self assert: results size equals: 1
+    self assert: farm lostKinds equals: #()

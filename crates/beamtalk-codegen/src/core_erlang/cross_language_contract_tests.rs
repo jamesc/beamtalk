@@ -184,8 +184,8 @@ fn every_liveview_rpc_target_is_exported() {
     // cannot turn the check into a name-only one.
     for (module, function, arity) in [
         ("beamtalk_process_navigation", "child_handles", 1),
-        ("beamtalk_repl_eval", "compile_method", 6),
-        ("beamtalk_repl_ops", "dispatch", 4),
+        ("beamtalk_repl_ops", "start_session", 2),
+        ("beamtalk_repl_ops", "request", 3),
         ("beamtalk_git", "git_stage", 1),
     ] {
         assert!(
@@ -434,7 +434,9 @@ fn every_selector_the_mcp_cli_and_lsp_send_is_declared_in_the_stdlib() {
     // The selectors the issue names; each must be found by the scan, so a
     // changed template style cannot silently empty the check.
     for needle in [
-        "compile:source:",
+        // MCP's `try_method` template; `save_method` sends the `save-method` op
+        // now (BT-5203), so nothing builds a `compile:source:` send any more.
+        "tryCompile:source:",
         "flush:",
         "flush:confirmDestructive:",
         "recheckImage",

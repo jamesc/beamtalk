@@ -11,16 +11,11 @@ Single teardown path for class removal.
 `beamtalk_behaviour_intrinsics:classRemoveFromSystemByName/1` stops live
 actors, stops the class gen_server (whose `terminate/2` removes the
 `beamtalk_class_metadata` row, the ETS hierarchy entry, and the pg group),
-and purges the BEAM module — but that leaves five *derived* registries
+and purges the BEAM module — but that leaves four *derived* registries
 holding stale rows for the removed class:
 
 - `beamtalk_xref` — per-method cross-reference rows (only `update_class` →
   `refresh_xref` purged these; class removal never did).
-- `beamtalk_extensions` — extension methods registered *on* the class,
-  across all three of its tables (main registry, sources, conflict
-  history). Left live, these stay dispatchable, and resurrect if a class of
-  the same name is later re-created (extensions are keyed by class *name*
-  atom, not by the class's pid/module).
 - `beamtalk_protocol_registry` — a protocol whose defining module is purged
   had no unregister path at all until this existed.
 - `beamtalk_compiler_server` — the ambient class-metadata cache
@@ -35,8 +30,8 @@ invokes once its safety checks pass and the class process has been stopped;
 each purge below targets a disjoint table/process, so there is no ordering
 requirement between them.
 
-`purge_class_registries/1` factors out the four *name-keyed* purges (xref,
-extensions, compiler cache, workspace class source) as their own exported
+`purge_class_registries/1` factors out the *name-keyed* purges (xref,
+compiler cache, workspace class source, users index) as their own exported
 step, reused by `classRenameTo` (ADR 0114) to retire a class's OLD
 identity after a rename installs the new one. Rename deliberately does NOT
 call `class_removed/2` itself for this: `purge_protocol/1` is keyed by
@@ -61,8 +56,8 @@ never raises for an unregistered name — it degrades to a silent no-op — so
 these two casts need no `noproc` guard, matching `publish_class_removed/2`'s
 existing call.
 
-The three registries that live in `beamtalk_runtime` itself (xref,
-extensions, protocol registry) are purged via ordinary direct calls — no
+The registries that live in `beamtalk_runtime` itself (xref, protocol registry)
+are purged via ordinary direct calls — no
 dependency-direction concern, since they live in this app.
 """.
 
@@ -88,8 +83,8 @@ class_removed(ClassName, Module) ->
     ok.
 
 -doc """
-Purge the four *name-keyed* derived registries for `ClassName` — xref,
-extensions, compiler cache, and workspace class source — WITHOUT touching
+Purge the *name-keyed* derived registries for `ClassName` — xref, compiler
+cache, workspace class source and the protocol users index — WITHOUT touching
 `beamtalk_protocol_registry` (keyed by `Module`, not by class name; see this
 module's doc for why `classRenameTo` must not call `class_removed/2` itself).
 
@@ -100,7 +95,6 @@ a class's OLD name after installing it under a new one.
 -spec purge_class_registries(atom()) -> ok.
 purge_class_registries(ClassName) ->
     purge_xref(ClassName),
-    purge_extensions(ClassName),
     purge_compiler_cache(ClassName),
     purge_workspace_class_source(ClassName),
     purge_uses_index(ClassName),
@@ -109,27 +103,12 @@ purge_class_registries(ClassName) ->
 -doc """
 Purge `ClassName`'s rows from `beamtalk_xref` — both instance- and
 class-side method entries, and its sends/references. Run best-effort via
-`beamtalk_extensions:safe_xref/1` (the existing helper) so a dead or
-restarting `beamtalk_xref` cannot raise out of this stage and skip the
-other four purges below it.
+`beamtalk_xref:safe_xref/1` so a dead or restarting `beamtalk_xref` cannot
+raise out of this stage and skip the purges below it.
 """.
 -spec purge_xref(atom()) -> ok.
 purge_xref(ClassName) ->
-    beamtalk_extensions:safe_xref(fun() -> beamtalk_xref:purge_class(ClassName) end).
-
--doc """
-Purge every extension registered on `ClassName` — instance-side (keyed by
-the class name atom) and class-side (keyed by the metaclass tag, e.g.
-`'Counter class'`), which the extension registry stores as two distinct ETS
-keys (mirrors `beamtalk_class_dispatch:class_understands_class_selector/2`'s
-lookup convention for the same split).
-""".
--spec purge_extensions(atom()) -> ok.
-purge_extensions(ClassName) ->
-    beamtalk_extensions:purge_class(ClassName),
-    ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    beamtalk_extensions:purge_class(ClassTag),
-    ok.
+    beamtalk_xref:safe_xref(fun() -> beamtalk_xref:purge_class(ClassName) end).
 
 -doc """
 Unregister every protocol defined by `Module` (the removed class's BEAM
@@ -163,8 +142,7 @@ purge_protocol(Module) ->
 -doc """
 Remove `ClassName` from the ADR 0127 §12 users index (`beamtalk_protocol_
 registry`'s `?USES_TABLE`/`?USERS_TABLE`) — its own `uses:` row and every
-reverse-index row naming it. Keyed by class name (like `purge_xref/1` and
-`purge_extensions/1` above), unlike `purge_protocol/1`'s module-keyed purge of
+reverse-index row naming it. Keyed by class name (like `purge_xref/1` above), unlike `purge_protocol/1`'s module-keyed purge of
 protocols the class itself *defined*; a class is a *user* of protocols
 (recorded by name), not their definer.
 """.

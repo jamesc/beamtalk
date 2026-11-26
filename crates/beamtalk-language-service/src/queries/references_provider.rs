@@ -32,8 +32,8 @@
 
 use crate::Location;
 use beamtalk_core::ast::{
-    ClassDefinition, Expression, MethodDefinition, Module, ParameterDefinition, Pattern,
-    ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAliasDefinition,
+    ClassDefinition, Expression, Identifier, MethodDefinition, Module, ParameterDefinition,
+    Pattern, ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAliasDefinition,
     TypeAnnotation, TypeParamDecl,
 };
 use beamtalk_core::ast_walker::{
@@ -72,6 +72,13 @@ pub fn find_class_references<'a>(
         // Protocol definitions: name, `extending:` target, and type-parameter bounds.
         for protocol in &module.protocols {
             collect_protocol_definition_refs(protocol, class_name, file_path, &mut results);
+        }
+
+        // `declare native:` signatures mention class names in type annotations.
+        for native in &module.native_declarations {
+            for sig in &native.method_signatures {
+                collect_protocol_method_signature_refs(sig, class_name, file_path, &mut results);
+            }
         }
 
         // Type alias definitions: declaration name and any reference to
@@ -127,8 +134,20 @@ fn collect_class_definition_refs(
     collect_type_param_bound_refs(&class.type_params, name, file_path, results);
 
     // State and class-variable type annotations — e.g. `state: x :: Printable = nil`.
-    for state in class.state.iter().chain(class.class_variables.iter()) {
+    for state in &class.state {
         collect_state_type_annotation_refs(state, name, file_path, results);
+    }
+
+    // `uses: Protocol(TypeArgs)` lines (BT-5132): the protocol name and any
+    // type arguments. `excluding:`/`overriding:` entries are selectors, not
+    // class names, so they are not visited.
+    for used in &class.uses {
+        if used.protocol.name == name {
+            results.push(Location::new(file_path.clone(), used.protocol.span));
+        }
+        for arg in &used.type_args {
+            collect_type_annotation_refs(arg, name, file_path, results);
+        }
     }
 
     // Method signature type annotations (parameters and return type). The
@@ -291,9 +310,6 @@ fn collect_type_annotation_refs(
                 collect_type_annotation_refs(ty, name, file_path, results);
             }
         }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            collect_type_annotation_refs(inner, name, file_path, results);
-        }
         TypeAnnotation::Difference { base, excluded, .. } => {
             collect_type_annotation_refs(base, name, file_path, results);
             collect_type_annotation_refs(excluded, name, file_path, results);
@@ -374,26 +390,12 @@ pub fn find_selector_send_sites<'a>(
     let mut results = Vec::new();
 
     for (file_path, module) in files {
-        // Top-level expressions
-        for stmt in &module.expressions {
-            collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
-        }
-
-        // Class method bodies (instance + class side)
-        for class in &module.classes {
-            for method in class.methods.iter().chain(class.class_methods.iter()) {
-                for stmt in &method.body {
-                    collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
-                }
-            }
-        }
-
-        // Standalone method bodies
-        for smd in &module.method_definitions {
-            for stmt in &smd.method.body {
-                collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
-            }
-        }
+        // Every expression root, the same iterator rename and class
+        // references use: statements, method bodies, state and
+        // class-variable defaults, protocol provided-method bodies (BT-5132).
+        for_each_root_expr(module, |expr| {
+            collect_selector_refs(expr, selector_name, file_path, &mut results);
+        });
     }
 
     results
@@ -412,42 +414,87 @@ pub fn find_selector_references<'a>(
     let mut results = Vec::new();
 
     for (file_path, module) in files {
-        // Method definitions in classes
+        // Method definitions in classes, and the selectors their `uses:`
+        // lines name in `excluding:` / `overriding:` (BT-5188).
         for class in &module.classes {
             collect_method_def_refs(&class.methods, selector_name, file_path, &mut results);
             collect_method_def_refs(&class.class_methods, selector_name, file_path, &mut results);
-        }
-
-        // Standalone method definitions
-        for smd in &module.method_definitions {
-            if smd.method.selector.name() == selector_name {
-                results.push(Location::new(file_path.clone(), smd.method.span));
-            }
-        }
-
-        // Message sends and cascades in expressions
-        for stmt in &module.expressions {
-            collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
-        }
-
-        // Message sends and cascades in class method bodies
-        for class in &module.classes {
-            for method in class.methods.iter().chain(class.class_methods.iter()) {
-                for stmt in &method.body {
-                    collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
+            for (_, entry) in uses_clause_selectors(class) {
+                if entry.name == selector_name {
+                    results.push(Location::new(
+                        file_path.clone(),
+                        selector_symbol_span(entry),
+                    ));
                 }
             }
         }
 
-        // Message sends and cascades in standalone method bodies
-        for smd in &module.method_definitions {
-            for stmt in &smd.method.body {
-                collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
-            }
-        }
+        // A standalone `Foo >> sel` left in `method_definitions` is a rejected
+        // cross-file extension (ADR 0152), not a declaration of `sel`
+        // (BT-5184).
+
+        // Message sends and cascades in every expression root.
+        for_each_root_expr(module, |expr| {
+            collect_selector_refs(expr, selector_name, file_path, &mut results);
+        });
     }
 
     results
+}
+
+/// Which `uses:` clause a selector entry was written in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UsesClause {
+    /// `excluding: #(#sel, …)`.
+    Excluding,
+    /// `overriding: #(#sel, …)`.
+    Overriding,
+}
+
+impl UsesClause {
+    /// The clause's keyword, as written.
+    pub(crate) const fn keyword(self) -> &'static str {
+        match self {
+            Self::Excluding => "excluding:",
+            Self::Overriding => "overriding:",
+        }
+    }
+}
+
+/// The selectors a class's `uses:` lines name in `excluding:` and
+/// `overriding:` clauses, with the line they are on and which clause, in
+/// source order (BT-5188).
+pub(crate) fn uses_clause_entries(
+    class: &ClassDefinition,
+) -> impl Iterator<Item = (&beamtalk_core::ast::ProtocolUse, UsesClause, &Identifier)> {
+    class.uses.iter().flat_map(|used| {
+        used.excluding
+            .iter()
+            .map(move |e| (used, UsesClause::Excluding, e))
+            .chain(
+                used.overriding
+                    .iter()
+                    .map(move |e| (used, UsesClause::Overriding, e)),
+            )
+    })
+}
+
+/// [`uses_clause_entries`] without the `uses:` line.
+fn uses_clause_selectors(
+    class: &ClassDefinition,
+) -> impl Iterator<Item = (UsesClause, &Identifier)> {
+    uses_clause_entries(class).map(|(_, clause, entry)| (clause, entry))
+}
+
+/// The selector text of a `#sel` entry: its span without the `#`, like every
+/// other selector reference. A quoted symbol keeps its whole span.
+fn selector_symbol_span(entry: &Identifier) -> Span {
+    let name_len = u32::try_from(entry.name.len()).unwrap_or(u32::MAX);
+    if entry.span.end() - entry.span.start() == name_len + 1 {
+        Span::new(entry.span.start() + 1, entry.span.end())
+    } else {
+        entry.span
+    }
 }
 
 /// Collect method definition references with matching selector.
@@ -486,11 +533,7 @@ pub fn find_selector_declarations<'a>(
             collect_method_def_refs(&class.methods, selector_name, file_path, &mut results);
             collect_method_def_refs(&class.class_methods, selector_name, file_path, &mut results);
         }
-        for smd in &module.method_definitions {
-            if smd.method.selector.name() == selector_name {
-                results.push(Location::new(file_path.clone(), smd.method.span));
-            }
-        }
+        // Not `module.method_definitions`: see `find_selector_references`.
     }
     results
 }
@@ -560,15 +603,12 @@ fn collect_selector_refs(
     results[first..].sort_by_key(|location| location.span.start());
 }
 
-/// Get the span covering a selector's keywords (for keyword messages)
-/// or None for unary/binary selectors (whose span is part of the message send).
+/// The span of a keyword selector's first keyword part (BT-5132: not the
+/// first-to-last merge, which also covered the arguments between the parts),
+/// or `None` for unary/binary selectors, whose reference is the whole send.
 fn selector_reference_span(selector: &beamtalk_core::ast::MessageSelector) -> Option<Span> {
     match selector {
-        beamtalk_core::ast::MessageSelector::Keyword(parts) if !parts.is_empty() => {
-            let first = parts.first().unwrap().span;
-            let last = parts.last().unwrap().span;
-            Some(first.merge(last))
-        }
+        beamtalk_core::ast::MessageSelector::Keyword(parts) => parts.first().map(|p| p.span),
         _ => None,
     }
 }
@@ -1034,15 +1074,22 @@ mod tests {
     }
 
     #[test]
-    fn find_selector_declarations_includes_class_side_and_standalone() {
+    fn find_selector_declarations_includes_class_side_and_folded_extension() {
         let file = Utf8PathBuf::from("test.bt");
-        // Instance-side def + class-side def + standalone def of the same
-        // selector. All three must be in the declaration set.
-        let module =
-            parse_source("Object subclass: Foo\n  bar => 1\n  class bar => 2\n\nFoo >> bar => 3");
+        // Instance-side def + class-side def + same-file `>>` def of the same
+        // selector (folded into Foo, as the index does). All three are
+        // declarations; the cross-file `Integer >> bar` (an ADR 0152 error,
+        // left in `method_definitions`) is not (BT-5184).
+        let mut module = parse_source(
+            "Object subclass: Foo\n  bar => 1\n  class bar => 2\n\nFoo >> bar => 3\nInteger >> bar => 4",
+        );
+        let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
+        assert_eq!(module.method_definitions.len(), 1);
 
         let decls = find_selector_declarations("bar", [(&file, &module)]);
         assert_eq!(decls.len(), 3, "expected 3 declarations, got {decls:?}");
+        let refs = find_selector_references("bar", [(&file, &module)]);
+        assert_eq!(refs.len(), 3, "expected 3 references, got {refs:?}");
     }
 
     #[test]
@@ -1176,5 +1223,27 @@ mod tests {
         let decls = find_class_declarations("RestartStrategy", [(&file, &module)]);
         assert_eq!(decls.len(), 1, "expected 1 alias declaration");
         assert_eq!(decls[0].span, module.type_aliases[0].name.span);
+    }
+}
+
+#[cfg(test)]
+mod uses_clause_tests {
+    use super::*;
+    use crate::queries::parse_source;
+
+    /// BT-5188: `excluding:` / `overriding:` entries are references to the
+    /// selector they name.
+    #[test]
+    fn selector_references_include_uses_clause_entries() {
+        let source =
+            "Object subclass: Foo\n  uses: Greets excluding: #(#greet) overriding: #(#greet)\n";
+        let module = parse_source(source);
+        let path = Utf8PathBuf::from("/p/Foo.bt");
+        let refs = find_selector_references("greet", [(&path, &module)]);
+        let texts: Vec<&str> = refs
+            .iter()
+            .map(|l| &source[l.span.start() as usize..l.span.end() as usize])
+            .collect();
+        assert_eq!(texts, ["greet", "greet"], "the selector text, without `#`");
     }
 }

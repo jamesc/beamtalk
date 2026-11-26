@@ -429,7 +429,7 @@ fn cache_key(url: &str) -> String {
 
 /// Acquire the exclusive advisory lock covering `cache_root`'s clone,
 /// refresh, and swap. Hold it for no longer than that sequence.
-fn lock_registry_cache(cache_root: &Utf8Path) -> Result<std::fs::File> {
+fn lock_registry_cache(cache_root: &Utf8Path) -> Result<crate::commands::dir_lock::DirLock> {
     crate::commands::dir_lock::lock_dir(cache_root, "registry cache")
 }
 
@@ -476,7 +476,7 @@ fn ensure_git_index(url: &str, project_root: &Utf8Path, refresh: bool) -> Result
             return Ok(index_dir);
         }
 
-        info!(url, "Refreshing registry index");
+        info!(url = %super::git::redact_url_credentials(url), "Refreshing registry index");
         if fast_forward_index(&index_dir) {
             return Ok(index_dir);
         }
@@ -580,6 +580,12 @@ fn clone_index(url: &str, target: &Utf8Path) -> Result<()> {
     // with the same rules as a dependency URL so `ext::` and option-lookalikes
     // can't reach `git clone`.
     super::git::validate_git_url("<registry>", url)?;
+    // Same plaintext rule as dependency URLs (BT-5135).
+    super::git::check_git_transport(
+        "The registry index",
+        url,
+        super::git::insecure_git_allowed(),
+    )?;
 
     if target.exists() {
         std::fs::remove_dir_all(target)

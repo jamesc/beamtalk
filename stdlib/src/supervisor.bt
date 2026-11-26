@@ -361,6 +361,11 @@ abstract Object subclass: Supervisor
   /// that is running or restarting gives `#child_running`; a failing start
   /// `#child_start_failed`.
   ///
+  /// A `scope: #global` child whose name is held on another node (it lost a
+  /// netsplit-heal conflict) does not start: `restartChild:` answers
+  /// `Result ok: nil`. Nothing watches the name: the child stays down until
+  /// a later `restartChild:` finds it free (ADR 0126 BT-5193 amendment).
+  ///
   /// ## Examples
   /// ```beamtalk
   /// (server terminateChild: #acceptorPool) unwrap
@@ -426,8 +431,8 @@ abstract Object subclass: Supervisor
 
   /// Is this supervisor running?
   ///
-  /// A supervisor on another node answers `true` (as an actor does); the
-  /// next call to it reports `#stale_handle` or `#node_down`. Sealed, like
+  /// A supervisor on another node is asked through its node (as an actor
+  /// is), and raises `#node_down` when that node cannot answer. Sealed, like
   /// `stop` (BT-3984): the runtime answers both without a method lookup.
   ///
   /// WARNING: check-then-act is racy; the supervisor can stop right after.

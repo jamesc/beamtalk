@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5229: a stray block-comment opener skips only its own line.
+Object subclass: A
+  /* never closed
+  greet => 1
+
+Object subclass: B
+  size => 2
+)
+Protocol define: P
+  ping

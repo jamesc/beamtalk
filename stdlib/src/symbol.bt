@@ -76,6 +76,10 @@ sealed typed Object subclass: Symbol
   /// Test if the receiver sorts before another symbol (alphabetically by
   /// name, codepoint by codepoint).
   ///
+  /// `<`, `>`, `<=` and `>=` order a Symbol only against a Symbol: any other
+  /// argument (a String, a number, `nil`, ...) raises a `type_error`
+  /// (BT-5213).
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #apple < #banana         // => true

@@ -55,6 +55,12 @@ pub const TYPE_AUTH_OK: &str = "auth_ok";
 /// The `type` value on a failed auth response.
 pub const TYPE_AUTH_ERROR: &str = "auth_error";
 
+/// The `type` value on a client's pre-auth identity challenge (BT-5188).
+pub const TYPE_IDENTIFY: &str = "identify";
+
+/// The `type` value on the workspace's reply to [`TYPE_IDENTIFY`].
+pub const TYPE_IDENTITY: &str = "identity";
+
 /// The `op` value on the post-auth session frame.
 pub const OP_SESSION_STARTED: &str = "session-started";
 
@@ -135,6 +141,43 @@ pub fn auth_request(
     }
     msg
 }
+
+/// Build the client's pre-auth `identify` frame carrying `challenge`
+/// (BT-5188). A client that knows the workspace's port-file nonce sends this
+/// before `auth`, so a process that merely reuses a dead workspace's port
+/// never receives the cookie.
+#[must_use]
+pub fn identify_request(challenge: &str) -> Value {
+    serde_json::json!({"type": TYPE_IDENTIFY, "challenge": challenge})
+}
+
+/// The proof a workspace returns for `challenge`: lowercase hex SHA-256 of
+/// `beamtalk-workspace-identity`, the port-file `nonce` and `challenge`,
+/// newline-separated. Only a process that knows the nonce (the workspace
+/// that wrote the port file) can produce it, and a fresh challenge per
+/// connection means an observed proof cannot be replayed. The Erlang side
+/// (`beamtalk_ws_handler:identity_proof/2`) is pinned to the same vector in
+/// the shared wire corpus.
+#[must_use]
+pub fn identity_proof(nonce: &str, challenge: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(format!("beamtalk-workspace-identity\n{nonce}\n{challenge}"));
+    beamtalk_workspace::hex_encode(&digest)
+}
+
+/// True when `frame` is an `identity` reply proving knowledge of `nonce` for
+/// `challenge` (see [`identity_proof`]).
+#[must_use]
+pub fn verify_identity(frame: &Value, nonce: &str, challenge: &str) -> bool {
+    frame.get("type").and_then(Value::as_str) == Some(TYPE_IDENTITY)
+        && frame.get("proof").and_then(Value::as_str)
+            == Some(identity_proof(nonce, challenge).as_str())
+}
+
+/// The error when a workspace fails the identity check: the cookie was not
+/// sent.
+pub const IDENTITY_MISMATCH: &str = "the process on this port did not prove it is the workspace \
+     the port file names (a dead workspace's port may have been reused); the cookie was not sent";
 
 /// Verify a workspace node's `describe` versions against this client's.
 ///
@@ -308,7 +351,7 @@ pub fn session_id(frame: &Value) -> Option<String> {
 }
 
 /// What the caller does after feeding a frame to an [`AuthHandshake`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum AuthStep {
     /// Write this text frame to the server, then read the next frame.
     Send(String),
@@ -318,9 +361,21 @@ pub enum AuthStep {
     Done(Option<String>),
 }
 
+/// `Send` holds the auth JSON (the cookie), so `Debug` never prints it.
+impl std::fmt::Debug for AuthStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Send(_) => f.write_str("Send(<redacted>)"),
+            Self::Continue => f.write_str("Continue"),
+            Self::Done(id) => f.debug_tuple("Done").field(id).finish(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum AuthPhase {
     AuthRequired,
+    Identity,
     AuthAck,
     SessionStarted,
 }
@@ -335,6 +390,9 @@ pub struct AuthHandshake {
     cookie: String,
     client: String,
     resume: Option<String>,
+    /// `(nonce, challenge)` when the workspace must prove its identity
+    /// before the cookie is sent (BT-5188).
+    identity: Option<(String, String)>,
 }
 
 /// Hand-written so the cookie never reaches a log line or panic message
@@ -346,6 +404,7 @@ impl std::fmt::Debug for AuthHandshake {
             .field("cookie", &"<redacted>")
             .field("client", &self.client)
             .field("resume", &self.resume.as_ref().map(|_| "<redacted>"))
+            .field("identity_check", &self.identity.is_some())
             .finish()
     }
 }
@@ -361,7 +420,33 @@ impl AuthHandshake {
             cookie: cookie.to_string(),
             client: client.to_string(),
             resume: resume.map(String::from),
+            identity: None,
         }
+    }
+
+    /// Require the workspace to prove it knows `nonce` (its port-file nonce)
+    /// for a fresh `challenge` before the cookie is sent (BT-5188).
+    #[must_use]
+    pub fn with_identity_check(mut self, nonce: &str, challenge: &str) -> Self {
+        self.identity = Some((nonce.to_string(), challenge.to_string()));
+        self
+    }
+
+    /// The `auth` frame, moving to [`AuthPhase::AuthAck`].
+    fn send_auth(&mut self) -> Result<AuthStep, String> {
+        // The version fields let the node reject a mismatched
+        // toolchain (BT-4327) before any session exists.
+        let auth = auth_request(
+            &self.cookie,
+            &self.client,
+            self.resume.as_deref(),
+            beamtalk_version(),
+            PROTOCOL_VERSION,
+        );
+        let text =
+            serde_json::to_string(&auth).map_err(|e| format!("failed to serialise auth: {e}"))?;
+        self.phase = AuthPhase::AuthAck;
+        Ok(AuthStep::Send(text))
     }
 
     /// Feed the next text frame from the server.
@@ -371,6 +456,7 @@ impl AuthHandshake {
     pub fn on_frame(&mut self, text: &str) -> Result<AuthStep, String> {
         let what = match self.phase {
             AuthPhase::AuthRequired => "auth-required",
+            AuthPhase::Identity => "identity",
             AuthPhase::AuthAck => "auth response",
             AuthPhase::SessionStarted => "session-started",
         };
@@ -389,19 +475,36 @@ impl AuthHandshake {
                 if !is_auth_required(frame) {
                     return Err(format!("unexpected pre-auth message: {frame}"));
                 }
-                // The version fields let the node reject a mismatched
-                // toolchain (BT-4327) before any session exists.
-                let auth = auth_request(
-                    &self.cookie,
-                    &self.client,
-                    self.resume.as_deref(),
-                    beamtalk_version(),
-                    PROTOCOL_VERSION,
-                );
-                let text = serde_json::to_string(&auth)
-                    .map_err(|e| format!("failed to serialise auth: {e}"))?;
-                self.phase = AuthPhase::AuthAck;
-                Ok(AuthStep::Send(text))
+                if let Some((_, challenge)) = &self.identity {
+                    let identify = serde_json::to_string(&identify_request(challenge))
+                        .map_err(|e| format!("failed to serialise identify: {e}"))?;
+                    self.phase = AuthPhase::Identity;
+                    return Ok(AuthStep::Send(identify));
+                }
+                self.send_auth()
+            }
+            AuthPhase::Identity => {
+                let verified = self
+                    .identity
+                    .as_ref()
+                    .is_some_and(|(nonce, challenge)| verify_identity(frame, nonce, challenge));
+                if !verified {
+                    // A node that does not know `identify` (an older
+                    // toolchain) rejects it as a bad auth message: say so,
+                    // rather than suggest a reused port.
+                    if let Some(AuthAck::Error { message }) = parse_auth_ack(frame) {
+                        return Err(format!(
+                            "workspace identity check failed: the workspace rejected it ({}); \
+                             it may be running a different beamtalk version — restart it with \
+                             `beamtalk workspace stop <id>`. The cookie was not sent.",
+                            message.as_deref().unwrap_or("no reason given")
+                        ));
+                    }
+                    return Err(format!(
+                        "workspace identity check failed: {IDENTITY_MISMATCH}"
+                    ));
+                }
+                self.send_auth()
             }
             AuthPhase::AuthAck => match parse_auth_ack(frame) {
                 Some(AuthAck::Ok) => {
@@ -435,10 +538,44 @@ pub async fn perform_auth_sequence<T>(
     cookie: &str,
     client: &str,
     resume: Option<&str>,
+    send: impl AsyncFnMut(&mut T, String) -> Result<(), String>,
+    recv: impl AsyncFnMut(&mut T) -> Result<String, String>,
+) -> Result<Option<String>, String> {
+    drive_auth(io, AuthHandshake::new(cookie, client, resume), send, recv).await
+}
+
+/// [`perform_auth_sequence`] that first has the workspace prove it knows
+/// `nonce` (its port-file nonce) for `challenge`, and only then sends the
+/// cookie (BT-5188). `challenge` must be fresh and unpredictable per
+/// connection.
+///
+/// # Errors
+/// As [`perform_auth_sequence`], plus an identity-check failure (the cookie
+/// is not sent).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the closure-style driver's shape"
+)]
+pub async fn perform_verified_auth_sequence<T>(
+    io: &mut T,
+    cookie: &str,
+    client: &str,
+    resume: Option<&str>,
+    (nonce, challenge): (&str, &str),
+    send: impl AsyncFnMut(&mut T, String) -> Result<(), String>,
+    recv: impl AsyncFnMut(&mut T) -> Result<String, String>,
+) -> Result<Option<String>, String> {
+    let handshake =
+        AuthHandshake::new(cookie, client, resume).with_identity_check(nonce, challenge);
+    drive_auth(io, handshake, send, recv).await
+}
+
+async fn drive_auth<T>(
+    io: &mut T,
+    mut handshake: AuthHandshake,
     mut send: impl AsyncFnMut(&mut T, String) -> Result<(), String>,
     mut recv: impl AsyncFnMut(&mut T) -> Result<String, String>,
 ) -> Result<Option<String>, String> {
-    let mut handshake = AuthHandshake::new(cookie, client, resume);
     loop {
         let frame = recv(io).await?;
         match handshake.on_frame(&frame)? {
@@ -453,6 +590,15 @@ pub async fn perform_auth_sequence<T>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn auth_step_debug_redacts_the_auth_frame() {
+        let dbg = format!(
+            "{:?}",
+            super::AuthStep::Send("{\"cookie\":\"hunter2\"}".into())
+        );
+        assert!(!dbg.contains("hunter2"), "{dbg}");
+    }
+
     #[test]
     fn auth_handshake_debug_redacts_cookie_and_resume_token() {
         let hs = super::AuthHandshake::new("s3cret-cookie-value", "repl", Some("resume-tok-123"));
@@ -713,6 +859,8 @@ mod tests {
         id: String,
         frame: Value,
         dynamic_fields: Vec<String>,
+        /// Known inputs for a computed frame (`identity_reply`, BT-5188).
+        vector: Value,
     }
 
     fn load_corpus() -> Vec<Case> {
@@ -732,6 +880,7 @@ mod tests {
                     .expect("case.id is a string")
                     .to_string(),
                 frame: case["frame"].clone(),
+                vector: case["vector"].clone(),
                 dynamic_fields: case["dynamic_fields"]
                     .as_array()
                     .expect("case.dynamic_fields is an array")
@@ -841,6 +990,91 @@ mod tests {
                 .dynamic_fields
                 .contains(&"session".to_string())
         );
+    }
+
+    /// BT-5188: the identify frame and the identity proof agree with the
+    /// shared corpus, including the proof vector the Erlang side checks.
+    #[test]
+    fn identity_frames_match_shared_wire_corpus() {
+        let corpus = load_corpus();
+        let identify = find(&corpus, "identify_request");
+        let challenge = identify.frame["challenge"].as_str().expect("challenge");
+        assert_eq!(identify_request(challenge), identify.frame);
+        assert!(identify.dynamic_fields.contains(&"challenge".to_string()));
+        let reply = find(&corpus, "identity_reply");
+        let nonce = reply.vector["nonce"].as_str().expect("vector.nonce");
+        let vector_challenge = reply.vector["challenge"]
+            .as_str()
+            .expect("vector.challenge");
+        assert_eq!(
+            Some(identity_proof(nonce, vector_challenge).as_str()),
+            reply.frame["proof"].as_str()
+        );
+        assert!(verify_identity(&reply.frame, nonce, vector_challenge));
+        assert!(!verify_identity(
+            &reply.frame,
+            "other-nonce",
+            vector_challenge
+        ));
+        assert!(!verify_identity(
+            &reply.frame,
+            nonce,
+            "other-challenge-0000"
+        ));
+    }
+
+    /// BT-5188: with an identity check, the cookie goes out only after a
+    /// valid proof.
+    #[test]
+    fn identity_check_sends_the_cookie_only_after_a_valid_proof() {
+        let mut hs = AuthHandshake::new("cookie-1", "mcp", None)
+            .with_identity_check("nonce-1", "challenge-0123456789");
+        let Ok(AuthStep::Send(first)) = hs.on_value(&serde_json::json!({"op": OP_AUTH_REQUIRED}))
+        else {
+            panic!("identify expected");
+        };
+        assert!(
+            !first.contains("cookie-1"),
+            "the first frame carries no cookie"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&first).unwrap(),
+            identify_request("challenge-0123456789")
+        );
+        let proof = serde_json::json!({
+            "type": TYPE_IDENTITY,
+            "proof": identity_proof("nonce-1", "challenge-0123456789"),
+        });
+        let Ok(AuthStep::Send(auth)) = hs.on_value(&proof) else {
+            panic!("auth expected after a valid proof");
+        };
+        assert!(auth.contains("cookie-1"));
+    }
+
+    /// BT-5188: a wrong proof (another process on a reused port) fails the
+    /// handshake without sending the cookie.
+    #[test]
+    fn identity_check_refuses_a_wrong_proof() {
+        let refuse = |reply: Value| {
+            let mut hs = AuthHandshake::new("cookie-1", "mcp", None)
+                .with_identity_check("nonce-1", "challenge-0123456789");
+            let _ = hs.on_value(&serde_json::json!({"op": OP_AUTH_REQUIRED}));
+            hs.on_value(&reply).expect_err("must refuse")
+        };
+        let err = refuse(serde_json::json!({
+            "type": TYPE_IDENTITY,
+            "proof": identity_proof("other", "challenge-0123456789"),
+        }));
+        assert!(err.contains("cookie was not sent"), "{err}");
+        assert!(
+            err.contains("reused"),
+            "a wrong proof suggests a reused port: {err}"
+        );
+        // An older node rejects `identify` itself: a version hint instead.
+        let err =
+            refuse(serde_json::json!({"type": TYPE_AUTH_ERROR, "message": "Invalid auth message"}));
+        assert!(err.contains("cookie was not sent"), "{err}");
+        assert!(err.contains("different beamtalk version"), "{err}");
     }
 
     /// Drive an [`AuthHandshake`] with `frames`, returning what it asked to send.

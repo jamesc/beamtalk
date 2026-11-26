@@ -11,46 +11,6 @@
 
 TestCase subclass: Adr0131CondMatrixTest
 
-  testClassArmCvarDo =>
-    self assert: (Adr0131CondMatrixClass armCvarDo: true) equals: 3
-    self assert: (Adr0131CondMatrixClass armCvarDo: false) equals: 0
-
-  testClassArmCvarIfTrue =>
-    self assert: (Adr0131CondMatrixClass armCvarIfTrue: true) equals: 1
-    self assert: (Adr0131CondMatrixClass armCvarIfTrue: false) equals: 0
-
-  testClassArmCvarInject =>
-    self assert: (Adr0131CondMatrixClass armCvarInject: true) equals: 3
-    self assert: (Adr0131CondMatrixClass armCvarInject: false) equals: 0
-
-  testClassArmCvarToDo =>
-    self assert: (Adr0131CondMatrixClass armCvarToDo: true) equals: 3
-    self assert: (Adr0131CondMatrixClass armCvarToDo: false) equals: 0
-
-  testClassArmCvarWhile =>
-    self assert: (Adr0131CondMatrixClass armCvarWhile: true) equals: 2
-    self assert: (Adr0131CondMatrixClass armCvarWhile: false) equals: 0
-
-  testClassArmCvarOuterDo =>
-    self assert: (Adr0131CondMatrixClass armCvarOuterDo: true) equals: 3
-    self assert: (Adr0131CondMatrixClass armCvarOuterDo: false) equals: 0
-
-  testClassArmCvarOuterIfTrue =>
-    self assert: (Adr0131CondMatrixClass armCvarOuterIfTrue: true) equals: 1
-    self assert: (Adr0131CondMatrixClass armCvarOuterIfTrue: false) equals: 0
-
-  testClassArmCvarOuterInject =>
-    self assert: (Adr0131CondMatrixClass armCvarOuterInject: true) equals: 3
-    self assert: (Adr0131CondMatrixClass armCvarOuterInject: false) equals: 0
-
-  testClassArmCvarOuterToDo =>
-    self assert: (Adr0131CondMatrixClass armCvarOuterToDo: true) equals: 3
-    self assert: (Adr0131CondMatrixClass armCvarOuterToDo: false) equals: 0
-
-  testClassArmCvarOuterWhile =>
-    self assert: (Adr0131CondMatrixClass armCvarOuterWhile: true) equals: 2
-    self assert: (Adr0131CondMatrixClass armCvarOuterWhile: false) equals: 0
-
   testClassArmDirectAnd =>
     self assert: (Adr0131CondMatrixClass armDirectAnd: true) equals: 1
     self assert: (Adr0131CondMatrixClass armDirectAnd: false) equals: 0

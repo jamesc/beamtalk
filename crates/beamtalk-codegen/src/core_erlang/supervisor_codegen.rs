@@ -165,7 +165,7 @@ impl CoreErlangGenerator {
         docs.push(self.generate_superclass_function(module));
         docs.push(Document::Str("\n"));
         docs.push(self.generate_meta_function(module, false));
-        docs.push(self.generate_register_class(module, false)?);
+        docs.push(self.generate_register_class(module, false));
 
         Ok(super::module_shell::core_module(
             module_name.to_string(),
@@ -214,7 +214,6 @@ impl CoreErlangGenerator {
         &mut self,
         class: &ClassDefinition,
     ) -> Result<Document<'static>> {
-        let class_name = self.class_name().clone();
         let mod_name = self.module_name.clone();
         let super_mod = self
             .superclass_module_name(class.superclass_name())
@@ -233,19 +232,11 @@ impl CoreErlangGenerator {
             "'dispatch'/3 = fun (Selector, Args, Self) ->\n",
             "    case Selector of\n",
             Document::Vec(method_branches),
-            // Default: an extension on this class (which has_method_local/1
-            // also answers for), then the superclass.
+            // Default: the superclass.
             "        <_Other> when 'true' ->\n",
-            "            case call 'beamtalk_extensions':'lookup'(",
-            atom(class_name.clone()),
-            ", Selector) of\n",
-            "                <{'ok', ExtFun, _ExtOwner}> when 'true' ->\n",
-            "                    apply ExtFun(Args, Self)\n",
-            "                <'not_found'> when 'true' ->\n",
-            "                    call ",
+            "            call ",
             atom(super_mod.clone()),
             ":'dispatch'(Selector, Args, Self)\n",
-            "            end\n",
             "    end\n",
             "\n",
         ]);
@@ -264,7 +255,6 @@ impl CoreErlangGenerator {
             &own_methods,
             &DispatchSpec {
                 reflection: &[],
-                class_name: &class_name,
                 superclass: Some(SuperclassDelegation::Static(&super_mod)),
                 dnu: false,
                 auto_slots: None,

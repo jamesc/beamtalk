@@ -94,21 +94,13 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
 'has_method'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['doWork', 'compute:', 'ping:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('NativeWorker', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
-            end
+        <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
     end
 
 'has_method_local'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['doWork', 'compute:', 'ping:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('NativeWorker', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> 'false'
-            end
+        <'false'> when 'true' -> 'false'
     end
 
 
@@ -130,7 +122,6 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
       'package' => 'none',
       'kind' => 'actor',
       'fields' => [],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'false',
@@ -142,11 +133,10 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'doWork' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Nil', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'compute:' => ~{'arity' => 1, 'param_types' => ['Integer'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'ping:' => ~{'arity' => 1, 'param_types' => ['String'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
       'defines_user_class_new0' => 'false',
@@ -165,7 +155,6 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
             'methodSignatures' => ~{'doWork' => #{#<100>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<87>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<78>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']])}#, 'compute:' => #{#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']])}#, 'ping:' => #{#<112>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<83>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<83>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']])}#}~,
             'classMethodSignatures' => ~{}~,
             'methodXref' => [~{'class_side' => 'false', 'selector' => 'doWork', 'line' => 1, 'sends' => [~{'selector' => 'delegate', 'line' => 1, 'recv_kind' => 'self_recv', 'recv_type' => 'NativeWorker'}~], 'references' => [~{'class' => 'Nil', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'compute:', 'line' => 1, 'sends' => [~{'selector' => 'delegate', 'line' => 1, 'recv_kind' => 'self_recv', 'recv_type' => 'NativeWorker'}~], 'references' => [~{'class' => 'Integer', 'line' => 1}~, ~{'class' => 'Integer', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'ping:', 'line' => 1, 'sends' => [~{'selector' => 'delegate', 'line' => 1, 'recv_kind' => 'self_recv', 'recv_type' => 'NativeWorker'}~], 'references' => [~{'class' => 'String', 'line' => 1}~, ~{'class' => 'String', 'line' => 1}~], 'source_status' => 'indexed'}~],
-            'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
             'meta' => ~{'class' => 'NativeWorker',
@@ -173,7 +162,6 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
       'package' => 'none',
       'kind' => 'actor',
       'fields' => [],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'false',
@@ -185,11 +173,10 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
       'field_types' => ~{}~,
       'field_has_default' => ~{}~,
       'field_kinds' => ~{}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'doWork' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Nil', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'compute:' => ~{'arity' => 1, 'param_types' => ['Integer'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'ping:' => ~{'arity' => 1, 'param_types' => ['String'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
       'defines_user_class_new0' => 'false',

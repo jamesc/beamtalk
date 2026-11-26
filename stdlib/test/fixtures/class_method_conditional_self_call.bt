@@ -6,19 +6,12 @@
 // combined a conditional self-call with subsequent expressions or ^ early return.
 
 Object subclass: ClassMethodConditionalSelfCall
-  classState: counter = 0
 
   class helper => nil
 
-  class increment => self.counter := self.counter + 1
-
-  class counterValue => self.counter
-
-  class resetCounter => self.counter := 0
-
   // Minimal repro: conditional self-call + subsequent expression.
-  // The self-call inside ifTrue: increments class_var_version inside the block,
-  // which leaked to the outer scope causing unbound ClassVars{N}.
+  // The self-call inside ifTrue: increments a version counter inside the block,
+  // which leaked to the outer scope causing an unbound threaded variable.
   class trigger: x =>
     x > 0 ifTrue: [self helper]
     x
@@ -27,11 +20,6 @@ Object subclass: ClassMethodConditionalSelfCall
   class triggerWithReturn: x default: default =>
     x > 0 ifTrue: [self helper]
     default isNil not ifTrue: [^default]
-    x
-
-  // Variant: conditional self-call that mutates class state + subsequent expression.
-  class triggerWithMutation: x =>
-    x > 0 ifTrue: [self increment]
     x
 
   // Full pattern from the original bug report: ifAbsent: + conditional self + ^.

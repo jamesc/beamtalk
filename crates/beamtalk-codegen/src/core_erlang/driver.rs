@@ -103,7 +103,7 @@ pub fn generate_module_with_warnings(
         mut driver_method_return_types,
         protocol_registry,
         mut self_flattened,
-    } = derive_analysis_basis(module, options.analysis.take(), &mut generator)?;
+    } = derive_analysis_basis(module, options.analysis.take(), &mut generator);
 
     // BT-4151: before the pre-loaded entries are folded into `hierarchy`
     // (which keeps one entry per name), record which class names more than
@@ -260,6 +260,13 @@ pub fn generate_module_with_warnings(
 /// fold same-file extensions before analysis; this keeps ad-hoc callers
 /// (unit tests, tools that parse and generate directly) on the same single
 /// fold rather than a second representation.
+///
+/// ADR 0152: after the fold, any standalone `X >> m` left in
+/// `method_definitions` targets a class this module does not declare, and
+/// codegen has no lowering for it (cross-file extension methods were
+/// removed). That is an error here, not a silent drop: the front ends reject
+/// it with a diagnostic first, so a module that reaches codegen with one has
+/// skipped them.
 fn canonical_module(module: &Module) -> Result<(Cow<'_, Module>, normalize::PeeledParens)> {
     let mut canonical: Cow<'_, Module> = Cow::Borrowed(module);
     if module
@@ -272,6 +279,7 @@ fn canonical_module(module: &Module) -> Result<(Cow<'_, Module>, normalize::Peel
         let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut owned);
         canonical = Cow::Owned(owned);
     }
+    check_no_foreign_standalone_methods(&canonical)?;
     check_no_duplicate_methods(&canonical)?;
     let mut peeled_parens = normalize::PeeledParens::default();
     if normalize::needs_normalising(&canonical) {
@@ -352,7 +360,7 @@ fn derive_analysis_basis(
     module: &Module,
     analysis: Option<beamtalk_core::semantic_analysis::AnalysisResult>,
     generator: &mut CoreErlangGenerator,
-) -> Result<AnalysisBasis> {
+) -> AnalysisBasis {
     // Consume the driver's already-computed analysis when supplied
     // (`CodegenOptions::with_analysis`) instead of re-deriving semantic facts,
     // the class hierarchy, and inferred method return types from scratch —
@@ -416,12 +424,10 @@ fn derive_analysis_basis(
                 beamtalk_core::semantic_analysis::compute_semantic_facts(flattened_module);
 
             // Build hierarchy once for the entire generation (ADR 0006)
-            let (hierarchy_result, _) =
+            let (mut hierarchy, _) =
                 beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(
                     flattened_module,
                 );
-            let mut hierarchy = hierarchy_result
-                .map_err(|e| CodeGenError::Internal(format!("hierarchy: {e:?}")))?;
             // Stamp `MethodInfo::origin` for flattened provisions, exactly as
             // `analyse_full` does for the driver-handoff path (BT-3626).
             beamtalk_core::semantic_analysis::trait_expansion::apply_origins(
@@ -430,13 +436,13 @@ fn derive_analysis_basis(
             );
             (hierarchy, false, None)
         };
-    Ok(AnalysisBasis {
+    AnalysisBasis {
         hierarchy,
         analysis_handed_off,
         driver_method_return_types,
         protocol_registry,
         self_flattened,
-    })
+    }
 }
 
 /// The module generation reads: as the driver prepared it when its hand-off
@@ -949,6 +955,31 @@ impl CoreErlangGenerator {
             .first()
             .is_none_or(|class| hierarchy.compiles_as_actor(class))
     }
+}
+
+/// ADR 0152 backstop: reject a standalone `X >> m` that survived the same-file
+/// fold. `canonical_module` has folded every method whose target class this
+/// module declares (the one rule,
+/// [`beamtalk_core::compilation::is_same_file_extension`], that analysis and
+/// the fold share), so anything left in `method_definitions` extends a class
+/// from outside its source, which codegen does not lower. Fails closed instead
+/// of dropping the method. Front ends report it first, as a diagnostic from
+/// [`beamtalk_core::compilation::reject_cross_file_extensions`]; a caller that
+/// skips its diagnostics gets this.
+fn check_no_foreign_standalone_methods(module: &Module) -> Result<()> {
+    if let Some(def) = module.method_definitions.first() {
+        let side = if def.is_class_method { " class" } else { "" };
+        return Err(CodeGenError::UnsupportedFeature {
+            feature: format!(
+                "cross-file extension method `{}{side} >> {}`: cross-file extension methods were \
+                 removed (ADR 0152)",
+                def.class_name.name,
+                def.method.selector.name()
+            ),
+            span: Some(def.method.head_span()),
+        });
+    }
+    Ok(())
 }
 
 /// BT-4811 backstop: reject a class that defines one selector twice (after the

@@ -27,10 +27,8 @@ Object subclass: DirectParamsValue
     sum
 
 Actor subclass: DirectParamsClassCtr
-  classState: spawnCount = 0
 
-  // ClassMethod context: local-only timesRepeat: loop. Does NOT touch the
-  // class var, so it never routes through ClassVars threading — purely
+  // ClassMethod context: local-only timesRepeat: loop. Purely
   // exercises DirectParams selection with `context == Actor` and
   // `in_class_method() == true` simultaneously (BT-3055: class methods start
   // pack/unpack from a fresh map regardless of the enclosing class's Actor

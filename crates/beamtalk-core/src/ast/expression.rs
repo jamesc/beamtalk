@@ -31,8 +31,6 @@ pub enum ExpectCategory {
     /// comments). Intended for test fixtures that deliberately pin a
     /// codegen shape the style lint would otherwise rewrite away.
     Lint,
-    /// Suppress deprecation warnings — wrong keyword/class-kind.
-    Deprecation,
     /// Suppress actor-new errors — using `new`/`new:` on an Actor subclass.
     ActorNew,
     /// Suppress visibility errors/warnings — cross-package internal method access (ADR 0071).
@@ -43,8 +41,6 @@ pub enum ExpectCategory {
     UnresolvedFfi,
     /// Suppress arity mismatch warnings.
     ArityMismatch,
-    /// Suppress workspace-binding-shadows-class warnings.
-    ShadowedClass,
     /// Suppress missing type annotation warnings in typed classes.
     TypeAnnotation,
     /// Suppress inheritance constraint errors — sealed subclass/method.
@@ -55,21 +51,14 @@ pub enum ExpectCategory {
     /// Suppress match-arm-block warnings — a `match:` arm whose body is a
     /// bare block literal answers the Block without running it (BT-4028).
     MatchArmBlock,
-    /// Suppress class-state-abroad warnings — a block literal that touches
-    /// its home class's variables used where it runs outside an invocation of
-    /// that class (ADR 0130 §5).
-    ClassStateAbroad,
-    /// Suppress class-process-ffi warnings — a class-side method that runs in
-    /// its class's process and directly calls a process-sensitive Erlang
-    /// function (BT-4031).
-    ClassProcessFfi,
     /// Suppress class-method-process-resource warnings — a class-side method
     /// that is direct-called in the caller's process directly creates a
     /// resource tied to, or acts on, the calling process (BT-4302).
     ClassMethodProcessResource,
-    /// Suppress class-var-reflection-shadowing warnings — a class-side method
-    /// named `fieldAt:`, `fieldAt:put:`, `hasField:` or `clearField:`, which
-    /// the class process answers itself for a Symbol argument (BT-4422).
+    /// Deprecated, parse-only (ADR 0153, BT-5155): the
+    /// `class-var-reflection-shadowing` lint was removed, because a class
+    /// method named `fieldAt:` etc. now answers on every route; reported as
+    /// a stale expectation.
     ClassVarReflectionShadowing,
     /// Suppress actor-state-abroad warnings — a block literal that touches
     /// its actor's state used where it runs outside the actor's process
@@ -96,6 +85,20 @@ pub enum ExpectCategory {
     /// then falls through the ordinary unused-`@expect` path and is reported
     /// as a stale-expectation warning. New code must not use it.
     StoredClosure,
+    /// Deprecated, parse-only (ADR 0153): the `class-state-abroad` lint was
+    /// removed with class variables. Like [`Self::StoredClosure`], an
+    /// existing `@expect class_state_abroad` keeps compiling and is reported
+    /// as a stale expectation.
+    ClassStateAbroad,
+    /// Deprecated, parse-only (ADR 0153): the `class-process-ffi` lint was
+    /// removed with class variables; reported as a stale expectation.
+    ClassProcessFfi,
+    /// Deprecated, parse-only (BT-5196): the `deprecation` diagnostic was
+    /// never emitted; reported as a stale expectation.
+    Deprecation,
+    /// Deprecated, parse-only (BT-5196): the shadowed-class diagnostic was
+    /// never emitted; reported as a stale expectation.
+    ShadowedClass,
     /// Suppress any diagnostic on the following expression.
     All,
 }
@@ -110,19 +113,15 @@ impl ExpectCategory {
             "unused" => Some(Self::Unused),
             "dead_assignment" => Some(Self::DeadAssignment),
             "lint" => Some(Self::Lint),
-            "deprecation" => Some(Self::Deprecation),
             "actor_new" => Some(Self::ActorNew),
             "visibility" => Some(Self::Visibility),
             "unresolved_class" => Some(Self::UnresolvedClass),
             "unresolved_ffi" => Some(Self::UnresolvedFfi),
             "arity_mismatch" => Some(Self::ArityMismatch),
-            "shadowed_class" => Some(Self::ShadowedClass),
             "type_annotation" => Some(Self::TypeAnnotation),
             "inheritance" => Some(Self::Inheritance),
             "sendability" => Some(Self::Sendability),
             "match_arm_block" => Some(Self::MatchArmBlock),
-            "class_state_abroad" => Some(Self::ClassStateAbroad),
-            "class_process_ffi" => Some(Self::ClassProcessFfi),
             "class_method_process_resource" => Some(Self::ClassMethodProcessResource),
             "class_var_reflection_shadowing" => Some(Self::ClassVarReflectionShadowing),
             "actor_state_abroad" => Some(Self::ActorStateAbroad),
@@ -131,6 +130,10 @@ impl ExpectCategory {
             "cascade_drops_update" => Some(Self::CascadeDropsUpdate),
             "discarded_update" => Some(Self::DiscardedUpdate),
             "stored_closure" => Some(Self::StoredClosure),
+            "class_state_abroad" => Some(Self::ClassStateAbroad),
+            "class_process_ffi" => Some(Self::ClassProcessFfi),
+            "deprecation" => Some(Self::Deprecation),
+            "shadowed_class" => Some(Self::ShadowedClass),
             "all" => Some(Self::All),
             _ => None,
         }
@@ -145,19 +148,15 @@ impl ExpectCategory {
             Self::Unused => "unused",
             Self::DeadAssignment => "dead_assignment",
             Self::Lint => "lint",
-            Self::Deprecation => "deprecation",
             Self::ActorNew => "actor_new",
             Self::Visibility => "visibility",
             Self::UnresolvedClass => "unresolved_class",
             Self::UnresolvedFfi => "unresolved_ffi",
             Self::ArityMismatch => "arity_mismatch",
-            Self::ShadowedClass => "shadowed_class",
             Self::TypeAnnotation => "type_annotation",
             Self::Inheritance => "inheritance",
             Self::Sendability => "sendability",
             Self::MatchArmBlock => "match_arm_block",
-            Self::ClassStateAbroad => "class_state_abroad",
-            Self::ClassProcessFfi => "class_process_ffi",
             Self::ClassMethodProcessResource => "class_method_process_resource",
             Self::ClassVarReflectionShadowing => "class_var_reflection_shadowing",
             Self::ActorStateAbroad => "actor_state_abroad",
@@ -166,12 +165,19 @@ impl ExpectCategory {
             Self::CascadeDropsUpdate => "cascade_drops_update",
             Self::DiscardedUpdate => "discarded_update",
             Self::StoredClosure => "stored_closure",
+            Self::ClassStateAbroad => "class_state_abroad",
+            Self::ClassProcessFfi => "class_process_ffi",
+            Self::Deprecation => "deprecation",
+            Self::ShadowedClass => "shadowed_class",
             Self::All => "all",
         }
     }
 
     /// Returns the list of valid category name strings, for use in error messages.
-    /// Omits the deprecated parse-only `stored_closure` so it is not advertised.
+    /// Omits the deprecated parse-only names (`stored_closure`,
+    /// `class_state_abroad`, `class_process_ffi`, `deprecation`,
+    /// `shadowed_class`, `class_var_reflection_shadowing`) so they are not
+    /// advertised.
     #[must_use]
     pub const fn valid_names() -> &'static [&'static str] {
         &[
@@ -180,21 +186,16 @@ impl ExpectCategory {
             "unused",
             "dead_assignment",
             "lint",
-            "deprecation",
             "actor_new",
             "visibility",
             "unresolved_class",
             "unresolved_ffi",
             "arity_mismatch",
-            "shadowed_class",
             "type_annotation",
             "inheritance",
             "sendability",
             "match_arm_block",
-            "class_state_abroad",
-            "class_process_ffi",
             "class_method_process_resource",
-            "class_var_reflection_shadowing",
             "actor_state_abroad",
             "ffi_nested_string",
             "binary_string_compare",
@@ -639,6 +640,13 @@ pub enum Literal {
     /// Examples: `42`, `16rFF`, `2r1010`
     Integer(i64),
 
+    /// An integer literal too large for `i64` (BT-5182). Holds the value's
+    /// canonical decimal digits, with a leading `-` when negative; the BEAM
+    /// represents it as a bignum.
+    ///
+    /// Example: `100000000000000000000`, `16rFFFFFFFFFFFFFFFFFF`
+    BigInteger(EcoString),
+
     /// A floating-point literal.
     ///
     /// Examples: `3.14`, `1.5e10`, `2.0e-5`
@@ -664,6 +672,54 @@ pub enum Literal {
     ///
     /// Example: `$a`, `$\n`
     Character(char),
+}
+
+impl Literal {
+    /// The integer literal whose value is `decimal`: canonical decimal digits
+    /// (no leading zeros) with an optional leading `-`. A value that fits
+    /// `i64` is [`Literal::Integer`], any other [`Literal::BigInteger`], so
+    /// each integer has exactly one representation (BT-5182).
+    #[must_use]
+    pub fn integer_from_decimal(decimal: &str) -> Self {
+        decimal.parse::<i64>().map_or_else(
+            |_| Self::BigInteger(EcoString::from(decimal)),
+            Self::Integer,
+        )
+    }
+
+    /// The `f64` that equals an integer literal's decimal `digits` exactly,
+    /// or `None` when there is none (more than 53 significant bits, or a
+    /// bignum of about 309 digits or more). Only an exact value is folded
+    /// into a `float` binary segment: the BEAM's `float/1` on a bignum may
+    /// round differently from Rust's parse for an inexact one (BT-5239), so
+    /// that is left to the runtime. The one rule the parser's warning and
+    /// codegen share.
+    #[must_use]
+    pub fn bignum_as_f64(digits: &str) -> Option<f64> {
+        let f = digits.parse::<f64>().ok().filter(|f| f.is_finite())?;
+        // `{:.0}` prints the float's exact integer value.
+        (format!("{f:.0}") == digits).then_some(f)
+    }
+
+    /// The literal with its sign flipped, for a `-` written before a numeric
+    /// literal (negative patterns). An integer that overflows `i64` on
+    /// negation (`- -9223372036854775808`) becomes a [`Literal::BigInteger`];
+    /// a non-numeric literal is returned unchanged.
+    #[must_use]
+    pub fn negated(self) -> Self {
+        match self {
+            Self::Integer(n) => n.checked_neg().map_or_else(
+                || Self::integer_from_decimal(&n.unsigned_abs().to_string()),
+                Self::Integer,
+            ),
+            Self::BigInteger(digits) => match digits.strip_prefix('-') {
+                Some(magnitude) => Self::integer_from_decimal(magnitude),
+                None => Self::integer_from_decimal(&format!("-{digits}")),
+            },
+            Self::Float(f) => Self::Float(-f),
+            other => other,
+        }
+    }
 }
 
 /// A segment of an interpolated string (ADR 0023).
@@ -1110,15 +1166,6 @@ pub enum TypeAnnotation {
         /// Source location of the entire generic type.
         span: Span,
     },
-    /// A false-or type (Option/Maybe pattern).
-    ///
-    /// Example: `Integer | False`
-    FalseOr {
-        /// The inner type.
-        inner: Box<TypeAnnotation>,
-        /// Source location of the entire false-or type.
-        span: Span,
-    },
     /// A difference/negation type (e.g., `Symbol \ #foo`) — ADR 0102 §1.
     ///
     /// Denotes the values of `base` that are *not* values of `excluded`.
@@ -1268,7 +1315,6 @@ impl TypeAnnotation {
             Self::Union { span, .. }
             | Self::Singleton { span, .. }
             | Self::Generic { span, .. }
-            | Self::FalseOr { span, .. }
             | Self::Difference { span, .. }
             | Self::Intersection { span, .. }
             | Self::SelfType { span }
@@ -1293,7 +1339,6 @@ impl TypeAnnotation {
             Self::Union { span: s, .. }
             | Self::Singleton { span: s, .. }
             | Self::Generic { span: s, .. }
-            | Self::FalseOr { span: s, .. }
             | Self::Difference { span: s, .. }
             | Self::Intersection { span: s, .. }
             | Self::SelfType { span: s }
@@ -1331,15 +1376,6 @@ impl TypeAnnotation {
         Self::Generic {
             base,
             parameters,
-            span,
-        }
-    }
-
-    /// Creates a false-or type annotation.
-    #[must_use]
-    pub fn false_or(inner: TypeAnnotation, span: Span) -> Self {
-        Self::FalseOr {
-            inner: Box::new(inner),
             span,
         }
     }
@@ -1402,15 +1438,6 @@ impl TypeAnnotation {
                 }
                 result.push(')');
                 result
-            }
-            Self::FalseOr { inner, .. } => {
-                let inner_name = match inner.as_ref() {
-                    Self::Union { .. } | Self::FalseOr { .. } => {
-                        eco_format!("({})", inner.type_name())
-                    }
-                    _ => inner.type_name(),
-                };
-                eco_format!("{inner_name} | False")
             }
             Self::Difference { base, excluded, .. } => {
                 // `\` binds tighter than `|` and shares a tier with `&`, so a
@@ -1479,7 +1506,7 @@ impl TypeAnnotation {
     /// this, not by duplicating the match.
     pub(crate) fn needs_parens_in_difference(&self, is_excluded: bool) -> bool {
         match self {
-            Self::Union { .. } | Self::FalseOr { .. } | Self::Intersection { .. } => true,
+            Self::Union { .. } | Self::Intersection { .. } => true,
             Self::Difference { .. } => is_excluded,
             _ => false,
         }
@@ -1494,7 +1521,7 @@ impl TypeAnnotation {
     /// intersection (`A & (B & C)`).
     pub(crate) fn needs_parens_in_intersection(&self, is_right: bool) -> bool {
         match self {
-            Self::Union { .. } | Self::FalseOr { .. } | Self::Difference { .. } => true,
+            Self::Union { .. } | Self::Difference { .. } => true,
             Self::Intersection { .. } => is_right,
             _ => false,
         }
@@ -1507,9 +1534,9 @@ impl TypeAnnotation {
     /// Block parameter annotations are read with
     /// `parse_single_type_annotation`, which stops at a top-level `|` (the
     /// block's own parameter separator) and does not consume the `&`/`\`
-    /// tier — so a top-level [`Self::Union`], [`Self::FalseOr`],
-    /// [`Self::Difference`], or [`Self::Intersection`] (only reachable via
-    /// explicit grouping parens in the source) keeps its parens:
+    /// tier — so a top-level [`Self::Union`], [`Self::Difference`] or
+    /// [`Self::Intersection`] (only reachable via explicit grouping parens
+    /// in the source) keeps its parens:
     /// `:x :: (Integer | String)`. Grouping parens re-parse transparently,
     /// so the round-tripped AST is identical.
     ///
@@ -1518,10 +1545,7 @@ impl TypeAnnotation {
     pub(crate) fn needs_parens_in_block_param(&self) -> bool {
         matches!(
             self,
-            Self::Union { .. }
-                | Self::FalseOr { .. }
-                | Self::Difference { .. }
-                | Self::Intersection { .. }
+            Self::Union { .. } | Self::Difference { .. } | Self::Intersection { .. }
         )
     }
 }

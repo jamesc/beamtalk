@@ -10,8 +10,7 @@
 // "more coverage"):
 //   - read/raise (absent, injected `nil`), assign then read, the
 //     `whileTrue:`-loop guard shapes: `late_field_read_test.bt` (BT-3549)
-//   - `hasField:`/`clearField:`/re-assign, on an instance, a `late
-//     classState:` (via class methods and from outside), a `Value`, and a
+//   - `hasField:`/`clearField:`/re-assign, on an instance, a `Value`, and a
 //     primitive: `has_clear_field_test.bt` (BT-3551)
 //   - `fieldKinds`/`allFieldKinds`, including the inherited-vs-local split:
 //     `field_kinds_test.bt` (BT-3550)

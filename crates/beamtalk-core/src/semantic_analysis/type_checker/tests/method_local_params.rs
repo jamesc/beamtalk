@@ -22,7 +22,6 @@ fn add_processor_class(hierarchy: &mut ClassHierarchy) {
             MethodInfo {
                 selector: eco_string("processResult:"),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("Processor"),
                 is_sealed: false,
                 is_internal: false,
@@ -39,7 +38,6 @@ fn add_processor_class(hierarchy: &mut ClassHierarchy) {
             MethodInfo {
                 selector: eco_string("processArray:"),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("Processor"),
                 is_sealed: false,
                 is_internal: false,
@@ -268,7 +266,7 @@ fn singleton_return_type_mismatch_warns() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
@@ -301,7 +299,7 @@ fn singleton_return_type_match_no_warning() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()

@@ -95,7 +95,7 @@ tcp_integration_test_() ->
             {"reload module not loaded", fun() -> tcp_reload_module_not_loaded_test(Port) end},
             {"docs unknown class", fun() -> tcp_docs_unknown_class_test(Port) end},
             {"modules op", fun() -> tcp_modules_test(Port) end},
-            {"clone op", fun() -> tcp_clone_test(Port) end},
+            {"clone op removed", fun() -> tcp_clone_removed_test(Port) end},
             {"inspect dead actor", fun() -> tcp_inspect_dead_actor_test(Port) end},
             {"malformed json", fun() -> tcp_malformed_json_test(Port) end},
             {"raw expression", fun() -> tcp_raw_expression_test(Port) end},
@@ -122,14 +122,15 @@ tcp_integration_test_() ->
             {"gen_server info unknown", fun() -> tcp_info_unknown_check2() end},
             {"health op", fun() -> tcp_health_op_test(Port) end},
             {"start_link integer port", fun() -> tcp_start_link_integer_test() end},
-            %% session ID uniqueness test
-            {"clone uniqueness", fun() -> tcp_clone_uniqueness_test(Port) end},
             %% interrupt operation tests
             {"interrupt no eval", fun() -> tcp_interrupt_no_eval_test(Port) end},
             {"interrupt unknown session", fun() -> tcp_interrupt_unknown_session_test(Port) end},
             %% The /ws route is the shared REPL transport; the Phase-1 browser
             %% static routes (`/`, `/static/[...]`) have been removed.
             {"GET /ws without upgrade returns error", fun() -> http_ws_no_upgrade_test(Port) end},
+            {"WebSocket cap refuses cap+1 live sockets (BT-5127)", fun() ->
+                ws_connection_cap_test(Port)
+            end},
             %% bind:as: / unbind: session refresh
             {"bind:as: appears in bindings immediately", fun() ->
                 tcp_bind_as_updates_bindings_test(Port)
@@ -656,13 +657,15 @@ tcp_modules_test(Port) ->
     ErrorMsg = maps:get(<<"error">>, Resp),
     ?assert(binary:match(ErrorMsg, <<"Unknown operation">>) =/= nomatch).
 
-%% Test: clone op creates a new session
-tcp_clone_test(Port) ->
+%% BT-5199: `clone` had no sender in any client and was removed; sending it
+%% returns an unknown_op error like any other removed op.
+tcp_clone_removed_test(Port) ->
     Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"clone">>, <<"id">> => <<"t18">>})),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t18">>}, Resp),
-    %% Clone should return a session ID as value, or error if sup not ready
-    ?assert(maps:is_key(<<"value">>, Resp) orelse maps:is_key(<<"error">>, Resp)).
+    ?assertNot(maps:is_key(<<"value">>, Resp)),
+    ErrorMsg = maps:get(<<"error">>, Resp),
+    ?assert(binary:match(ErrorMsg, <<"Unknown operation">>) =/= nomatch).
 
 %% Test: inspect a dead actor by valid PID format
 tcp_inspect_dead_actor_test(Port) ->
@@ -1166,29 +1169,6 @@ start_link_integer_port_test() ->
     %% Basic verification that the export exists
     Exports = beamtalk_repl_server:module_info(exports),
     ?assert(lists:member({start_link, 1}, Exports)).
-
-%%% generate_session_id format and uniqueness tests (via clone op)
-
-%% Clone creates new sessions, each with a unique generated ID.
-%% This tests generate_session_id indirectly via the clone TCP op.
-%% The test is in tcp_integration_test_ as tcp_clone_uniqueness_test.
-
-%% Test: two clone ops produce different session IDs
-tcp_clone_uniqueness_test(Port) ->
-    Msg1 = iolist_to_binary(json:encode(#{<<"op">> => <<"clone">>, <<"id">> => <<"cu1">>})),
-    Msg2 = iolist_to_binary(json:encode(#{<<"op">> => <<"clone">>, <<"id">> => <<"cu2">>})),
-    Resp1 = tcp_send_op(Port, Msg1),
-    Resp2 = tcp_send_op(Port, Msg2),
-    %% Both clones must succeed — if the session sup isn't ready, fail loudly
-    ?assertMatch(#{<<"value">> := _}, Resp1),
-    ?assertMatch(#{<<"value">> := _}, Resp2),
-    V1 = maps:get(<<"value">>, Resp1),
-    V2 = maps:get(<<"value">>, Resp2),
-    ?assertNotEqual(V1, V2),
-    %% Verify session ID format: "session_<timestamp>_<random>"
-    %% BT-4167: session IDs are Strings, so they display quoted.
-    ?assert(binary:match(V1, <<"\"session_">>) =:= {0, 9}),
-    ?assert(binary:match(V2, <<"\"session_">>) =:= {0, 9}).
 
 %%% ===========================================================================
 %%% Coverage tests for internal helper functions
@@ -2310,6 +2290,51 @@ http_ws_no_upgrade_test(Port) ->
     Response = http_get(Port, <<"/ws">>),
     %% Without Upgrade: websocket header, cowboy should not return 101
     ?assert(binary:match(Response, <<"HTTP/1.1 101">>) =:= nomatch).
+
+%% BT-5127 / BT-5185: ranch drops a socket from its count once it upgrades,
+%% so the handler counts WebSockets itself. Unauthenticated sockets have their
+%% own budget: with 3 slots, a 4th unauthenticated socket is accepted and the
+%% oldest is closed with 1013, so idle sockets cannot lock a client out.
+ws_connection_cap_test(Port) ->
+    Prev = application:get_env(beamtalk_workspace, ws_max_preauth_connections),
+    application:set_env(beamtalk_workspace, ws_max_preauth_connections, 3),
+    try
+        [Oldest | Rest] = [ws_connect_unauthenticated(Port) || _ <- [1, 2, 3]],
+        ?assertEqual(3, beamtalk_ws_conn_cap:count(pre_auth)),
+        %% The 4th gets the `auth-required` text frame (0x81)...
+        ?assertMatch(<<16#81, _/binary>>, ws_first_frame(Port)),
+        %% ...and the oldest is sent a close frame (0x88) with code 1013.
+        ?assertMatch({ok, <<16#88, _, 1013:16, _/binary>>}, gen_tcp:recv(Oldest, 0, 5000)),
+        ok = beamtalk_test_wait:until(fun() -> beamtalk_ws_conn_cap:count(pre_auth) =< 3 end),
+        [gen_tcp:close(S) || S <- [Oldest | Rest]]
+    after
+        case Prev of
+            {ok, V} -> application:set_env(beamtalk_workspace, ws_max_preauth_connections, V);
+            undefined -> application:unset_env(beamtalk_workspace, ws_max_preauth_connections)
+        end
+    end.
+
+ws_first_frame(Port) ->
+    {ok, Sock} = gen_tcp:connect({127, 0, 0, 1}, Port, [binary, {active, false}], 5000),
+    Key = base64:encode(crypto:strong_rand_bytes(16)),
+    ok = gen_tcp:send(Sock, [
+        <<"GET /ws HTTP/1.1\r\nHost: 127.0.0.1:">>,
+        integer_to_binary(Port),
+        <<"\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ">>,
+        Key,
+        <<"\r\nSec-WebSocket-Version: 13\r\n\r\n">>
+    ]),
+    {ok, Rest} = ws_consume_http_response(Sock),
+    Frame =
+        case Rest of
+            <<>> ->
+                {ok, F} = gen_tcp:recv(Sock, 0, 5000),
+                F;
+            _ ->
+                Rest
+        end,
+    gen_tcp:close(Sock),
+    Frame.
 
 %%====================================================================
 %% write_port_file/3 — direct unit tests (no TCP listener)

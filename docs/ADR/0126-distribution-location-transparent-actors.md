@@ -1,7 +1,7 @@
 # ADR 0126: Distribution and Location-Transparent Actors
 
 ## Status
-Implemented (2026-09-24) — accepted 2026-09-22; Phases 0–7 shipped under Epic BT-3577 (all done); the BT-3633 `Node` introspection amendment landed 2026-09-29.
+Implemented (2026-09-24) — accepted 2026-09-22; Phases 0–7 shipped under Epic BT-3577 (all done); the BT-3633 `Node` introspection amendment landed 2026-09-29; the BT-5193 amendment (heal conflicts, version skew, cross-host releases) was accepted 2026-11-25.
 
 The Phase 0.5 wire-check spike (BT-3579; see
 Implementation and the Amendment section) confirmed four of this ADR's five
@@ -307,6 +307,21 @@ rather than silently re-resolving against the receiver's registry. The
 `pid` field type widens to
 `pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()}`.
 
+A sync send to a `{registered, Name, Node}` ref on another node is one
+network round trip, a `gen_server:call({Name, Node}, …)` with the wire
+envelope, and a cast is a single one-way message to `{Name, Node}`
+(BT-5271). The call's own exit gives the §7.1 errors: `noproc` is
+`no_such_process` and a lost connection is `node_down`. A node that has gone
+silent without dropping the connection is a `timeout` once the call's
+timeout runs out, as for a remote pid. `isRegistered` and `registeredName`
+are answered by the ref alone. `isAlive` and the selectors answered from the
+pid in the caller (`kill`, `pid`, `monitor`, `onExit:`, `stop`, `stopWith:`,
+`isRemote`, …) still resolve the name on `Node` first, as does a sync send
+made inside a call chain that already holds a pid on `Node`, so the
+call-stack deadlock check still sees its target, and any send while actor
+dispatch events are on (ADR 0069; `Tracing enable` turns them on), so it is
+observed with the actor's pid like any other send.
+
 ### 4. Cluster-unique names (opt-in `global`)
 
 Node-local names are the default and stay the default. A cluster-unique name
@@ -341,6 +356,19 @@ future pluggable-registry scope.
 `global_group`, `net_kernel`, `rex`). Refs carry `{global, Name}` and resolve
 via `global:whereis_name/1` per send, like registered refs.
 
+**Registration is bounded (BT-5192).** `global:register_name/3` waits for
+`global`'s cluster-wide lock for as long as another holder keeps it (another
+registration, a `global:trans/2`, a partition-heal name sync). The start
+waits at most 5000 ms for it (application env `global_register_timeout_ms`).
+On timeout the just-started actor is stopped (gracefully for up to 5000 ms,
+then killed) and `spawnAs:scope: #global` answers
+`#beamtalk_error{kind = timeout}` with the name in `details`; a registration
+`global` completes after that is dropped, since its process has exited, and a
+new start of the same name that meets that dead holder waits for `global` to
+drop it and retries once. A supervised `withName:scope: #global` child whose
+registration times out is `ignore`d with a logged warning, like one whose name
+is held on another node, so it does not spend restart intensity.
+
 **Partition heal.** When a netsplit heals with the same global name on both
 sides, `global` calls the registration's resolve function. OTP's default
 (`random_exit_name/3`) kills the loser with `exit(Pid, kill)` — `terminate/2`
@@ -350,7 +378,8 @@ registrant (the older, by start time, falling back to `random_exit_name`'s
 choice) and **stops** the other with `gen_server:stop(Loser,
 {shutdown, global_name_conflict}, Timeout)`, so the losing actor's
 `ActorStopped` announcement carries `reason: #globalNameConflict` and its
-`terminate` runs. User-supplied resolvers are future work.
+`terminate` runs. User-supplied resolvers are future work. The fallback and
+the supervised loser are amended by the Amendment (BT-5193) section.
 
 **The start time (BT-4937).** The age is the `'$beamtalk_actor_started_at'`
 process-dictionary key (`erlang:system_time(microsecond)`), read with
@@ -416,6 +445,18 @@ by the network; the language docs say so.
 
 `pg` process groups are **not** in v1 — they are a pub/sub/membership feature,
 not a lookup feature, and belong with a future "cluster announcements" ADR.
+
+The runtime's own internal groups (`beamtalk_classes` for class enumeration,
+`beamtalk_repl_shells` for class-removed notices, the spawn-family supervisor
+instances) are **node-local** (BT-5192). They use `pg`'s default scope, which
+`pg` synchronises with every connected node, so every read takes
+`pg:get_local_members/1`: class enumeration (`all_classes`, `live_class_entries`,
+`user_classes` and what is built on them — browse, the shape manifest,
+`project_class_names`) lists only this node's classes and makes no remote call,
+and a class removed on one node is not announced to another node's REPL shells,
+where that class is still loaded. A class object that crosses a node is
+resolved by name on the receiving node (§5), never through a peer's class
+process.
 
 ### 5. The wire: what crosses a node boundary, and how
 
@@ -536,7 +577,8 @@ Negotiation **informs; it does not refuse the connection**. Refusing would
 make every rolling upgrade (ADR 0125: "one shape-version bump per deploy,
 upgrade the receiving side first") impossible. The per-envelope strict check
 in §5.2 is the safety net; the handshake makes the skew visible before the
-first failure.
+first failure. Wire and Beamtalk version skew is announced the same way
+(`NodeVersionSkew`); see the Amendment (BT-5193) section.
 
 #### 5.4 Sendability across nodes — per tier
 
@@ -699,6 +741,8 @@ c remember: cache
 |------------------|-------|----------|
 | `exit:{{nodedown, N}, _}` / `noconnection` during call | catch-all → `actor_dead` (wrong) | **`node_down`**, `details = #{node => N}` |
 | `exit:{noproc, _}` on remote pid | `actor_dead` | `actor_dead` (unchanged — the node answered, the actor is gone) |
+| remote `kill`/`stop`/`isAlive` on an unreachable node (BT-5192) | `ok` / `actor_dead` / `true` | **`node_down`** (§7.3) |
+| an `erpc` target answering outside its contract, or killed mid-call (`exit:{signal, _}`) (BT-5192) | `case_clause` / raw exit | the call site's generic remote error (`runtime_error`), naming the answer |
 | `exit:{timeout, _}` | `timeout` | `timeout` (unchanged) |
 | `exit:{noproc, _}` on a `{registered, N, Node}` / `{global, N}` ref | — | `no_such_process` (the ref-shaped branch is checked before the pid branch, matching the local `whereis` path) |
 | `badfun`/`undef` for a block's module | `erlang_error` | **`remote_code_mismatch`** |
@@ -750,6 +794,27 @@ local pids use `is_process_alive/1`; remote pids return `true`
 optimistically and let the send fail with its real reason. `lookup_class/1`
 for a remote pid uses the `class` already in the `#beamtalk_object{}` record
 instead of the local ETS registry.
+
+That optimistic answer is for the runtime's internal guards only (BT-5192).
+The user-facing lifecycle selectors on a remote pid classify failures as a
+send does (`beamtalk_call_failure:classify/2`, §7.1), so "the node cannot be
+reached" is never reported as "dead" or "alive":
+
+- `isAlive` asks the pid's node (`beamtalk_pid:ask_alive/3`, `erpc`, bounded
+  by the 5000 ms remote-call timeout) and answers its `true`/`false`; an
+  unreachable node raises `node_down` and no answer in time raises `timeout`.
+  Sent async, the node is asked from a separate process, so the send still
+  hands back its future at once. On a remote supervisor handle both failures
+  raise the `node_down` every other handle call raises (`details` `reason`
+  `#noconnection` or `#timeout`). On a node-qualified `{registered, Name,
+  Node}` ref whose node cannot be reached, `isAlive` raises `node_down`
+  instead of answering `false`.
+- `kill` answers `ok` only once a `'DOWN'` says the actor is gone; a
+  `noconnection` `'DOWN'` (the kill signal was lost) raises `node_down`.
+- `stop`, `stopWith:` and `stopWith:timeout:` raise (or, sent async, reject
+  with) `node_down` when the node is unreachable and `timeout` when the actor
+  has not finished stopping in time; any other failed stop stays
+  `actor_dead`. An already-dead actor still counts as stopped.
 
 #### 7.4 Monitors and links
 
@@ -812,10 +877,20 @@ code execution, and the distribution boundary is single-user.
 2. **Off-host requires TLS.** `Node connect` to a host that does not resolve to
    loopback succeeds only if this node runs TLS distribution (`-proto_dist
    inet_tls`); otherwise it returns
-   `#beamtalk_error{kind = insecure_distribution, hint = "configure TLS distribution (ADR 0091) or use a tunnel"}`.
+   `#beamtalk_error{kind = insecure_distribution, hint = "configure TLS distribution (ADR 0126 §9) or use a tunnel"}`.
+   The configuration is ADR 0020 Layer 3 Option B; ADR 0091 is the remote-attach
+   rule, not a TLS recipe. Releases reach off-host only through the TLS opt-in of
+   the Amendment (BT-5193) section, which also updates the runtime's hint string.
    This is a guard on the Beamtalk API, not a firewall — FFI and raw
    `net_kernel` remain available to operators who configure distribution
    themselves.
+   The host lookup behind the guard is bounded per address family
+   (BT-5192): 2000 ms each by default (application env
+   `node_resolve_timeout_ms`), whichever resolver is configured. A family that
+   has not answered by then contributes no addresses, and a host left with
+   none cannot be proven local, so it is treated like one that does not
+   resolve: refused without TLS. The connection attempt itself is bounded by
+   OTP's `net_setuptime`.
 3. **No cookie API.** `Node` exposes no cookie getter or setter. Cookies come
    from `RELEASE_COOKIE`/`vm.args` (releases) or the workspace cookie file
    (workspaces), never from Beamtalk code. Per-peer cookies remain an FFI
@@ -1400,6 +1475,122 @@ scenario (d). A new `beamtalk_dist_wire_tests` case sends a remote
 If remote async sends are wanted later, that is a new decision: the receiver
 must be generated code (`handle_cast/2` decoding the envelope and resolving the
 future), which changes the Core Erlang of every actor.
+
+## Amendment (BT-5193): heal conflicts, version skew, cross-host releases
+
+**Status:** Accepted (2026-11-25). Owner decisions D1–D3 on BT-5193 (epic
+BT-5180), with the instruction to keep it simple. Implementation: BT-5193's
+child issues.
+
+### D1. A supervised `#global` child that loses a heal conflict stays down (§4)
+
+A losing child is stopped with `{shutdown, global_name_conflict}`. A
+`permanent` child then restart-looped, because `global:register_name/3`
+answers `no` while the winner lives. The supervisor reached its maximum
+restart intensity and died with its siblings, and the same failure spread up
+the tree. A `transient` child stayed down; the loser's `ActorStopped` was the
+only signal.
+
+**Decision.** A **supervised** `{global, Name}` child start
+(`beamtalk_supervisor:start_actor_child/3`, compiled and `native:` paths alike)
+that finds `Name` held by a pid **on another node** answers `ignore`, not
+`{error, already_started}`. An unsupervised `spawnAs:scope: #global` keeps its
+`name_registered` error. If the holder is gone by the time the start looks
+(`whereis_name` answers `undefined`), the start tries `register_name` once more
+and otherwise keeps the error. The rule also applies to a supervisor's
+*initial* start: the supervisor comes up without that child, with the warning
+below. Under `one_for_one` the supervisor keeps the child spec with no pid and
+siblings are unaffected; under `one_for_all` or `rest_for_one` the loser's exit
+still restarts its siblings as that strategy says, and a `simple_one_for_one`
+child that answers `ignore` is dropped. The start logs a warning naming the
+child and the holder's node. The announcement
+is the loser's existing `ActorStopped` with `reason: #globalNameConflict`; no
+new announcement class is added. A later `restartChild:` retries; while the
+name is still held it answers `Ok(nil)` (the child ignored the start), not an
+error. A holder on
+the **same** node stays an error, because that is a programming mistake.
+
+**Resolver fallback (a correction, not a new decision).** OTP runs the resolve
+function once per name, on one node, in a resolver process, so it does not
+block `global_name_server`; only the name exchange for that node pair waits.
+Every case that cannot compare start times (an `unreachable` read, or neither
+side timed) no longer calls `random_exit_name/3`, which kills with
+`exit(Pid, kill)`. It keeps the pid on the lower-named node (on one node, the
+lower pid) and stops the other with `stop_global_conflict_loser/1`. Equal start
+times use the same rule, so every tie-break agrees. The start-time read times
+out after about 1 s through a new constant, not the shared 5 s
+`?BT_REMOTE_CALL_TIMEOUT`. That bounds the sync delay per conflicting name;
+several conflicting names still add up. The §4 paragraphs above that name
+`random_exit_name/3` as the fallback describe the behaviour before this
+amendment.
+
+*Rejected:* a standby that takes the name over when the holder dies. That is a
+cluster-singleton feature and needs its own ADR.
+
+### D2. Cross-host releases: an explicit, TLS-only opt-in (§9)
+
+Release nodes are pinned to one host three times: `-sname X@localhost`,
+`ERL_EPMD_ADDRESS=127.0.0.1` and `inet_dist_use_interface {127,0,0,1}`. There
+was no opt-out, and `tls_distribution/0` checked only the `-proto_dist`
+suffix, not peer verification.
+
+**Decision.** The loopback pins stay the default. An operator can opt in with
+`RELEASE_DISTRIBUTION=tls`, `RELEASE_DIST_INTERFACE=<ip>` and
+`RELEASE_HOST=<fqdn>`. The launcher then starts `-name X@<fqdn>` with
+`-proto_dist inet_tls` and `-ssl_dist_optfile`. It refuses to start unless the
+optfile sets `verify_peer` on both the server and client sides. It never binds
+`0.0.0.0` unless the operator names it. The optfile must also set
+`{fail_if_no_peer_cert, true}` on the server side; without it a server with
+`verify_peer` still accepts a client that sends no certificate.
+`tls_distribution/0` checks the same two settings. The whole launcher follows
+the mode: `ERL_EPMD_ADDRESS` follows `RELEASE_DIST_INTERFACE`, the client verbs
+(`stop`, `ping`, `remote_console`, `rpc`) use `-name` and the same TLS optfile,
+and `launcher.cmd` matches `launcher.sh`. Plain TCP off-host is not offered.
+The launcher sets `-sname` and `ERL_EPMD_ADDRESS` itself, so hand-editing
+`vm.args` does not lift the pins; operators who want another setup start
+`erl` themselves (§9.2). The opt-in waits for BT-5185: the
+placeholder cookie is live during boot, which is local-only today but remote
+once distribution leaves loopback. It reuses BT-5185's shared loopback parser.
+
+*Rejected:* declaring releases same-host only and removing the
+`insecure_distribution` route. It is cheaper, but leaves `tls_distribution/0`
+as dead code and no supported multi-host path.
+
+### D3. Version skew at connect is announced, never refused (§5.3)
+
+Only class-shape skew was reported at connect. A wire-format or Beamtalk
+version mismatch was silent until the first envelope failed.
+
+**Decision.** At connect, `beamtalk_node_monitor` reads the peer's
+`{wireVersion, beamtalkVersion}` alongside the shape manifest. On a mismatch it
+announces one `NodeVersionSkew`. A peer too old to answer the read is announced
+too, with `nil` remote fields, because that is the rolling-upgrade case this is
+for. A read that **times out** is different (amended by BT-5240): it is logged
+as a warning and not announced. A slow peer is not evidence of skew, so only a
+real version mismatch, or a peer that answers with an error, is announced. The
+same holds for a peer that drops during the read. The check is tagged with the
+connection it was started for, so a read that outlives a reconnect does not
+announce a second event for the same peer:
+
+```beamtalk
+sealed typed Announcement subclass: NodeVersionSkew
+  field: node :: Node
+  field: localWireVersion :: Integer
+  field: remoteWireVersion :: Integer | Nil = nil
+  field: localBeamtalkVersion :: String
+  field: remoteBeamtalkVersion :: String | Nil = nil
+```
+
+The connection is not refused, which keeps rolling upgrades (ADR 0125)
+possible. The per-envelope `wire_version_unsupported` check (§5.2) stays the
+safety net. Method-body skew (same shape, different code) and classes present
+on one side only are out of scope.
+
+*Rejected:* refusing the connection on a version mismatch. A Beamtalk version
+bump is the normal state of a rolling upgrade, so refusing would forbid
+rolling upgrades. (A wire-format bump cannot roll out today either way: the
+envelope check accepts exactly one `?BT_WIRE_VERSION`. Accepting N-1 is a
+separate decision.)
 
 ## Migration Path
 

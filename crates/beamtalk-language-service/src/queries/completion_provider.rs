@@ -118,7 +118,7 @@ fn is_cross_package_internal_method(
 /// let source = "x := 42";
 /// let tokens = lex_with_eof(source);
 /// let (module, _) = parse(tokens);
-/// let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+/// let hierarchy = ClassHierarchy::build(&module).0;
 ///
 /// let completions = compute_completions(&module, source, Position::new(0, 0), &hierarchy, None, None);
 /// assert!(!completions.is_empty());
@@ -1575,7 +1575,7 @@ mod tests {
     ) -> Vec<Completion> {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         compute_completions(&module, source, position, &hierarchy, current_package, None)
     }
     #[test]
@@ -1697,7 +1697,7 @@ mod tests {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         let completions =
             compute_completions(&module, source, Position::new(0, 0), &hierarchy, None, None);
         // Should include inherited Actor methods (spawn)
@@ -1722,7 +1722,7 @@ mod tests {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         // Position at the method body (after "=> ")
         let completions = compute_completions(
             &module,
@@ -1749,7 +1749,7 @@ mod tests {
         // class it extends, like a method declared inside the class body.
         let source = "Actor subclass: Counter\n  state: count = 0\n  increment => 1\n\nActor subclass: Other\n  otherOnly => 1\n\nCounter >> twice => 2\nCounter class >> make => 3";
         let (module, _) = parse(lex_with_eof(source));
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         let labels_at = |marker: &str| -> Vec<String> {
             let offset = u32::try_from(source.find(marker).unwrap()).unwrap() + 3;
             let position =
@@ -1776,7 +1776,7 @@ mod tests {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.c";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         let completions = compute_completions(
             &module,
             source,
@@ -1803,7 +1803,7 @@ mod tests {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         // Position at col 17 — after `self.count := s` (not after self.)
         let completions = compute_completions(
             &module,
@@ -1826,7 +1826,7 @@ mod tests {
         let source = "Object subclass: Foo\n  test =>\n    first := \"foo\"\n    first ++ \"bar\"\n    b := fi";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         // Position at end of last line (after "fi")
         let completions = compute_completions(
             &module,
@@ -1851,7 +1851,7 @@ mod tests {
             "Object subclass: Foo\n  greet: name =>\n    msg := \"Hello \" ++ name\n    ms";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         // Position at end of last line (after "ms")
         let completions =
             compute_completions(&module, source, Position::new(3, 6), &hierarchy, None, None);
@@ -1877,7 +1877,7 @@ mod tests {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         let completions =
             compute_completions(&module, source, Position::new(0, 0), &hierarchy, None, None);
         // Should include user-defined class
@@ -1900,7 +1900,7 @@ mod tests {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  class withInitial: n => self new: #{count => n}\n\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         // Position inside the class method body (line 3, after "=> ")
         let completions = compute_completions(
             &module,
@@ -1922,7 +1922,7 @@ mod tests {
         let source = "Actor subclass: Counter\n  state: count = 0\n\n  class withInitial: n => self new: #{count => n}\n\n  increment => self.count := self.count + 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         // Position at top level (line 0 is part of class definition,
         // but completions at any position include all module methods)
         // Use Position(0, 0) which is before class keyword
@@ -2361,7 +2361,7 @@ mod tests {
         let source = "Erlang lists ";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         let mut registry = NativeTypeRegistry::new();
         registry.register_module(
             "lists",
@@ -2849,7 +2849,7 @@ mod tests {
         let source = "Object subclass: Actor\n  delegate => 1\nActor subclass: Counter\n  increment => self ";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         let completions = compute_completions(
             &module,
             source,
@@ -2870,7 +2870,7 @@ mod tests {
         let source = "Object subclass: Actor\n  delegate => 1\nActor subclass: Proc native: beamtalk_proc\n  run => self del";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         // Position inside the method body (on "del" partial text)
         let completions = compute_completions(
             &module,
@@ -2891,7 +2891,7 @@ mod tests {
         let source = "x := 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut hierarchy = ClassHierarchy::build(&module).0;
         // Inject an internal class from package "other_pkg"
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
@@ -2919,7 +2919,7 @@ mod tests {
         let source = "x := 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut hierarchy = ClassHierarchy::build(&module).0;
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
                 is_internal: true,
@@ -2946,7 +2946,7 @@ mod tests {
         let source = "x := 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut hierarchy = ClassHierarchy::build(&module).0;
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
                 is_internal: true,
@@ -2964,7 +2964,6 @@ mod tests {
     }
     #[test]
     fn cross_package_internal_method_helper() {
-        use beamtalk_core::ast::MethodKind;
         let mut hierarchy = ClassHierarchy::with_builtins();
         // Inject a class with both public and internal methods from "other_pkg"
         hierarchy.add_from_beam_meta(vec![
@@ -2974,7 +2973,6 @@ mod tests {
                     MethodInfo {
                         selector: EcoString::from("publicMethod"),
                         arity: 0,
-                        kind: MethodKind::Primary,
                         defined_in: EcoString::from("RemoteService"),
                         is_sealed: false,
                         is_internal: false,
@@ -2991,7 +2989,6 @@ mod tests {
                     MethodInfo {
                         selector: EcoString::from("internalHelper"),
                         arity: 0,
-                        kind: MethodKind::Primary,
                         defined_in: EcoString::from("RemoteService"),
                         is_sealed: false,
                         is_internal: true,
@@ -3072,12 +3069,11 @@ mod tests {
     }
     #[test]
     fn internal_method_excluded_from_typed_receiver_completions() {
-        use beamtalk_core::ast::MethodKind;
         // Use source that references RemoteService with a typed variable
         let source = "Object subclass: Client\n  doWork: svc :: RemoteService =>\n    svc pub";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut hierarchy = ClassHierarchy::build(&module).0;
         // Inject RemoteService with both public and internal methods
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
@@ -3086,7 +3082,6 @@ mod tests {
                     MethodInfo {
                         selector: EcoString::from("publicMethod"),
                         arity: 0,
-                        kind: MethodKind::Primary,
                         defined_in: EcoString::from("RemoteService"),
                         is_sealed: false,
                         is_internal: false,
@@ -3103,7 +3098,6 @@ mod tests {
                     MethodInfo {
                         selector: EcoString::from("internalHelper"),
                         arity: 0,
-                        kind: MethodKind::Primary,
                         defined_in: EcoString::from("RemoteService"),
                         is_sealed: false,
                         is_internal: true,
@@ -3197,7 +3191,7 @@ mod tests {
         let source = "Protocol define: Printable\n  asString -> String\n";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut hierarchy = ClassHierarchy::build(&module).0;
         hierarchy.register_protocol_classes(&module);
         // Directly test add_receiver_type_completions with a Class receiver
         let context = ClassContext::TopLevel;
@@ -3231,7 +3225,7 @@ mod tests {
         let source = "Protocol define: Printable\n  asString -> String\n";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut hierarchy = ClassHierarchy::build(&module).0;
         hierarchy.register_protocol_classes(&module);
         assert!(
             hierarchy.has_class("Printable"),
@@ -3249,7 +3243,7 @@ mod tests {
         let source = "Object subclass: Foo\n  bar => 1\n\nProtocol define: Foo\n  baz\n";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut hierarchy = ClassHierarchy::build(&module).0;
         hierarchy.register_protocol_classes(&module);
         let class = hierarchy.get_class("Foo").unwrap();
         assert_eq!(
@@ -3305,7 +3299,7 @@ mod tests {
                        Object subclass: Supervisor\n  restart: policy :: \n";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         let alias_registry = alias_registry_for(&module, &hierarchy);
 
         let completions = compute_completions_with_registries(
@@ -3356,13 +3350,13 @@ mod tests {
         let other_source = "type JsonKey = #a | #b\n";
         let other_tokens = lex_with_eof(other_source);
         let (other_module, _) = parse(other_tokens);
-        let other_hierarchy = ClassHierarchy::build(&other_module).0.unwrap();
+        let other_hierarchy = ClassHierarchy::build(&other_module).0;
         let alias_registry = alias_registry_for(&other_module, &other_hierarchy);
 
         let source = "Object subclass: Supervisor\n  restart: policy :: \n";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let completions = compute_completions_with_registries(
             &module,
@@ -3420,7 +3414,7 @@ mod tests {
         let source = "Object subclass: Supervisor\n  restart: policy :: \n";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let completions = compute_completions_with_registries(
             &module,

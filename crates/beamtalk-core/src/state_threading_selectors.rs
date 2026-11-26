@@ -772,49 +772,33 @@ pub fn structural_binary(op: &str) -> Option<StructuralBinary> {
 mod tests {
     use super::*;
 
-    /// BT-3951: the runtime's list of overridable collection selectors
-    /// (`beamtalk_collection_selectors.erl`, read when a runtime extension is
-    /// checked) is the compiler's one list, in the same order. Edit the Erlang
-    /// module when this fails.
+    /// BT-3951: the runtime's list of species-dependent collection selectors
+    /// (`beamtalk_collection_selectors.erl`, read by
+    /// `speciesConstructionOverriddenFromName/2`) is the compiler's one list, in
+    /// the same order. Edit the Erlang module when this fails.
     #[test]
-    fn runtime_overridable_selector_list_matches_the_compiler_list() {
+    fn runtime_species_dependent_list_matches_the_compiler_list() {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../runtime/apps/beamtalk_runtime/src/beamtalk_collection_selectors.erl"
         );
         let src = std::fs::read_to_string(path).expect("read beamtalk_collection_selectors.erl");
-        let atoms = |name: &str| -> Vec<String> {
-            let body = src
-                .split(&format!("%% BEGIN {name}"))
-                .nth(1)
-                .and_then(|rest| rest.split(&format!("%% END {name}")).next())
-                .unwrap_or_else(|| panic!("markers for {name}"));
-            body.lines()
-                .filter_map(|line| {
-                    let line = line.trim().trim_end_matches([',', ']']);
-                    Some(line.strip_prefix('\'')?.strip_suffix('\'')?.to_string())
-                })
-                .collect()
-        };
-        let strs = |it: &mut dyn Iterator<Item = &'static str>| -> Vec<String> {
-            it.map(str::to_string).collect()
-        };
-        assert_eq!(
-            atoms("SELECTORS"),
-            strs(&mut overridable_collection_selectors())
-        );
-        assert_eq!(
-            atoms("SPECIES DEPENDENT"),
-            strs(&mut species_dependent_collection_selectors())
-        );
-        assert_eq!(
-            atoms("SPECIES INSTANCE"),
-            strs(&mut species_construction_selectors())
-        );
-        assert_eq!(
-            atoms("SPECIES CLASS"),
-            strs(&mut species_construction_class_selectors())
-        );
+        let body = src
+            .split("%% BEGIN SPECIES DEPENDENT")
+            .nth(1)
+            .and_then(|rest| rest.split("%% END SPECIES DEPENDENT").next())
+            .expect("markers for SPECIES DEPENDENT");
+        let runtime: Vec<String> = body
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim().trim_end_matches([',', ']']);
+                Some(line.strip_prefix('\'')?.strip_suffix('\'')?.to_string())
+            })
+            .collect();
+        let compiler: Vec<String> = species_dependent_collection_selectors()
+            .map(str::to_string)
+            .collect();
+        assert_eq!(runtime, compiler);
         // Every species-dependent selector is also an overridable one.
         for sel in species_dependent_collection_selectors() {
             assert!(
@@ -1199,7 +1183,6 @@ mod tests {
                 | WellKnownSelector::ClearField
                 | WellKnownSelector::Perform
                 | WellKnownSelector::PerformWithArgs
-                | WellKnownSelector::PerformLocallyWithArgs
                 // Neither carries a block-literal argument —
                 // `withTimeout:`'s argument is a duration, `at:`'s an index/key.
                 | WellKnownSelector::WithTimeout
@@ -1248,7 +1231,6 @@ mod tests {
             WellKnownSelector::ClearField,
             WellKnownSelector::Perform,
             WellKnownSelector::PerformWithArgs,
-            WellKnownSelector::PerformLocallyWithArgs,
             WellKnownSelector::WithTimeout,
             WellKnownSelector::At,
         ];

@@ -61,6 +61,7 @@
 
 use std::collections::HashSet;
 
+use crate::scope::LintScope;
 use crate::{LintContext, LintPass};
 use beamtalk_core::ast::{
     BinarySegment, Block, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module,
@@ -126,46 +127,6 @@ struct Out<'a> {
     /// nested unthreaded blocks is seen once per enclosing block.
     reported: HashSet<(String, Span)>,
     diagnostics: &'a mut Vec<Diagnostic>,
-}
-
-// ── Scope tracking ────────────────────────────────────────────────────────────
-
-/// Lightweight scope stack tracking which variables are bound at each depth.
-struct LintScope {
-    levels: Vec<HashSet<String>>,
-}
-
-impl LintScope {
-    fn new() -> Self {
-        Self {
-            levels: vec![HashSet::new()],
-        }
-    }
-
-    fn push(&mut self) {
-        self.levels.push(HashSet::new());
-    }
-
-    fn pop(&mut self) {
-        debug_assert!(
-            self.levels.len() > 1,
-            "LintScope::pop called with only root scope"
-        );
-        if self.levels.len() > 1 {
-            self.levels.pop();
-        }
-    }
-
-    /// Define `name` in the current (innermost) scope level.
-    fn define(&mut self, name: &str) {
-        if let Some(top) = self.levels.last_mut() {
-            top.insert(name.to_string());
-        }
-    }
-
-    fn is_bound(&self, name: &str) -> bool {
-        self.levels.iter().any(|level| level.contains(name))
-    }
 }
 
 // ── Traversal ─────────────────────────────────────────────────────────────────

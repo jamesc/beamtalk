@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-3407: a value held by a named actor and set before `supervise` must be
+// visible to the supervisor's configuration (instance-side `childSpecs` since
+// ADR 0135, which runs inside the supervisor's own `init`). See
+// stdlib/test/fixtures/named_config_sup_app.bt.
+//
+// BT-3962: `supervise` starts the tree in the caller, so `childSpecs` can
+// message the named actor while `NamedConfigSupApp supervise` runs.
+
+TestCase subclass: NamedConfigSupervisorTest
+  field: sup = nil
+  field: config = nil
+
+  setUp =>
+    self.config := (NamedConfigSupConfig spawnAs: #bt3407_sup_cfg) unwrap
+    self
+
+  tearDown =>
+    self.sup isNil ifFalse: [self.sup stop]
+    self.config stop
+
+  testConfigSetBeforeSuperviseIsVisibleInChildren =>
+    self.config configure: #{#label => "hello"}
+    self.sup := NamedConfigSupApp supervise unwrap
+    w :: NamedConfigSupWorker := (self.sup which: NamedConfigSupWorker) unwrap
+    self assert: w label equals: "hello"

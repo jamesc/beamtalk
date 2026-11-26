@@ -5,6 +5,13 @@
 // Highlight API. Highlights are painted from Range objects, so GitHub's
 // React-managed DOM is never modified (mutating it breaks React's
 // reconciliation). Tokenizing happens in the service worker.
+//
+// github.com only (BT-5194): the selectors below follow github.com's React
+// file and diff views; gist.github.com renders different markup, so the
+// manifest no longer matches it. The functions are exported for the tests
+// (`test/content.test.js`); the bundled content script ignores the exports.
+
+import { boundBlocks, MESSAGE_TYPE } from "./protocol.js";
 
 const BEAMTALK_PATH = /\.(bt|btscript)$/;
 const CATEGORIES = ["comment", "string", "constant", "keyword", "type", "entity", "heading"];
@@ -36,14 +43,14 @@ function lineElementsBlock(els, continuous) {
 }
 
 /** File view: `/<owner>/<repo>/blob/<ref>/<path>.bt`. */
-function blobBlocks() {
+export function blobBlocks() {
   if (!/\/blob\//.test(location.pathname) || !BEAMTALK_PATH.test(location.pathname)) return [];
   const lines = [...document.querySelectorAll(".react-file-line")];
   return lines.length ? [lineElementsBlock(lines, true)] : [];
 }
 
 /** Markdown fences: ```beamtalk renders as <pre lang="beamtalk">. */
-function fenceBlocks() {
+export function fenceBlocks() {
   return [...document.querySelectorAll(FENCE_SELECTOR)].map((pre) => {
     const lines = (pre.textContent ?? "").split("\n");
     let base = 0;
@@ -57,7 +64,7 @@ function fenceBlocks() {
 }
 
 /** Commit and pull-request diffs; each line is tokenized on its own. */
-function diffBlocks() {
+export function diffBlocks() {
   const blocks = [];
   for (const region of document.querySelectorAll('[role="region"]')) {
     const path = region.querySelector("h3 code")?.textContent?.replace(/[‎‏]/g, "").trim();
@@ -79,29 +86,41 @@ function cacheKey(block) {
   return `${block.continuous ? 1 : 0}\u0000${block.lines.join("\n")}`;
 }
 
-/** @param {Block[]} blocks */
-async function tokenize(blocks) {
+/**
+ * Tokens for each block, from the cache or the service worker.
+ * @param {Block[]} blocks already within the request limits (`boundBlocks`)
+ */
+export async function tokenize(blocks) {
   const missing = blocks.filter((b) => !tokenCache.has(cacheKey(b)));
+  /** @type {Map<Block, Array<Array<[number, number, string]>>>} */
+  let fresh = new Map();
   if (missing.length) {
     const response = await chrome.runtime.sendMessage({
-      type: "beamtalk-tokenize",
+      type: MESSAGE_TYPE,
       blocks: missing.map((b) => ({ lines: b.lines, continuous: b.continuous })),
     });
     if (!response || response.error) {
       throw new Error(`beamtalk tokenizer: ${response?.error ?? "no response"}`);
     }
-    missing.forEach((b, i) => tokenCache.set(cacheKey(b), response.blocks[i]));
+    // Blocks the worker's time budget cut short are used this once but not
+    // cached, so the next scan asks for them again.
+    const incomplete = new Set(response.incomplete ?? []);
+    fresh = new Map();
+    missing.forEach((b, i) => {
+      if (incomplete.has(i)) fresh.set(b, response.blocks[i]);
+      else tokenCache.set(cacheKey(b), response.blocks[i]);
+    });
     while (tokenCache.size > TOKEN_CACHE_LIMIT) {
       tokenCache.delete(tokenCache.keys().next().value);
     }
   }
-  return blocks.map((b) => tokenCache.get(cacheKey(b)));
+  return blocks.map((b) => fresh.get(b) ?? tokenCache.get(cacheKey(b)));
 }
 
 // --- ranges -----------------------------------------------------------------
 
 /** Text nodes of a root with their starting offsets in the root's text. */
-function textIndex(root) {
+export function textIndex(root) {
   const nodes = [];
   const starts = [];
   let offset = 0;
@@ -115,7 +134,7 @@ function textIndex(root) {
 }
 
 /** Maps a text offset to a (node, offset) boundary point. */
-function locate(index, offset, preferNext) {
+export function locate(index, offset, preferNext) {
   const { nodes, starts } = index;
   let lo = 0;
   let hi = nodes.length - 1;
@@ -141,7 +160,7 @@ function cachedRanges(root) {
 }
 
 /** @param {Block} block @param {Array<Array<[number, number, string]>>} tokens */
-function blockRanges(block, tokens) {
+export function blockRanges(block, tokens) {
   /** @type {Map<Element, Array<[Range, string]>>} */
   const byRoot = new Map();
   const indexes = new Map();
@@ -174,14 +193,16 @@ function blockRanges(block, tokens) {
 let scanning = false;
 let rescan = false;
 
-async function scan() {
+export async function scan() {
   if (scanning) {
     rescan = true;
     return;
   }
   scanning = true;
   try {
-    const blocks = [...blobBlocks(), ...fenceBlocks(), ...diffBlocks()];
+    // Bounded (BT-5194): the worker refuses an over-limit request outright,
+    // so a huge page still gets its first blocks coloured.
+    const blocks = boundBlocks([...blobBlocks(), ...fenceBlocks(), ...diffBlocks()]);
     const tokens = blocks.length ? await tokenize(blocks) : [];
     const highlights = Object.fromEntries(CATEGORIES.map((c) => [c, new Highlight()]));
     blocks.forEach((block, i) => {

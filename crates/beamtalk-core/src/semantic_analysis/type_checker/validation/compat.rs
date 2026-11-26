@@ -174,22 +174,13 @@ impl TypeChecker {
         {
             return true;
         }
-        let false_ty = || DeclaredType::simple("False");
         match (actual, expected) {
             (DeclaredType::Union(members), _) => members
                 .iter()
                 .all(|m| Self::is_return_type_refinement(m, expected, hierarchy)),
-            (DeclaredType::FalseOr(inner), _) => {
-                Self::is_return_type_refinement(inner, expected, hierarchy)
-                    && Self::is_return_type_refinement(&false_ty(), expected, hierarchy)
-            }
             (_, DeclaredType::Union(members)) => members
                 .iter()
                 .any(|m| Self::is_return_type_refinement(actual, m, hierarchy)),
-            (_, DeclaredType::FalseOr(inner)) => {
-                Self::is_return_type_refinement(actual, inner, hierarchy)
-                    || Self::is_return_type_refinement(actual, &false_ty(), hierarchy)
-            }
             _ => {
                 // ADR 0147: the string helper knows no `#{...}` class (and
                 // would call it compatible), so a shape on either side is
@@ -236,7 +227,6 @@ impl TypeChecker {
             DeclaredType::Union(members) => members
                 .iter()
                 .any(|m| Self::declared_type_is_opaque(m, hierarchy)),
-            DeclaredType::FalseOr(inner) => Self::declared_type_is_opaque(inner, hierarchy),
             DeclaredType::Shape { fields, .. } => fields
                 .iter()
                 .any(|f| Self::declared_type_is_opaque(&f.value, hierarchy)),

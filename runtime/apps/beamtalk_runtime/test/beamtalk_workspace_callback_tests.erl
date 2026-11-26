@@ -30,12 +30,12 @@ wrapper fails the test.
     precheck_method/4,
     remove_method/4,
     emit_remove_change_entry/5,
-    emit_extension_remove_change_entry/7,
     rewrite_sites/2,
     validate_sites/2,
     emit_rewrite_change_entry/2,
     capture_class_removal_snapshot/1,
-    emit_remove_class_change_entry/4
+    emit_remove_class_change_entry/4,
+    report_late_hot_reload_failure/3
 ]).
 
 reload_class_file(P, C) -> {echo, reload_class_file, [P, C]}.
@@ -44,14 +44,14 @@ compile_method(A, B, C, D, E, F) -> {echo, compile_method, [A, B, C, D, E, F]}.
 precheck_method(A, B, C, D) -> {echo, precheck_method, [A, B, C, D]}.
 remove_method(A, B, C, D) -> {echo, remove_method, [A, B, C, D]}.
 emit_remove_change_entry(A, B, C, D, E) -> {echo, emit_remove_change_entry, [A, B, C, D, E]}.
-emit_extension_remove_change_entry(A, B, C, D, E, F, G) ->
-    {echo, emit_extension_remove_change_entry, [A, B, C, D, E, F, G]}.
 rewrite_sites(A, B) -> {echo, rewrite_sites, [A, B]}.
 validate_sites(A, B) -> {echo, validate_sites, [A, B]}.
 emit_rewrite_change_entry(A, B) -> {echo, emit_rewrite_change_entry, [A, B]}.
 capture_class_removal_snapshot(A) -> {echo, capture_class_removal_snapshot, [A]}.
 emit_remove_class_change_entry(A, B, C, D) ->
     {echo, emit_remove_class_change_entry, [A, B, C, D]}.
+
+report_late_hot_reload_failure(A, B, C) -> {echo, report_late_hot_reload_failure, [A, B, C]}.
 
 %% One entry per wrapper: {Name, Args}.
 calls() ->
@@ -62,14 +62,12 @@ calls() ->
         {precheck_method, [<<"Foo">>, bar, <<"src">>, instance]},
         {remove_method, [<<"Foo">>, bar, class, allow_stdlib]},
         {emit_remove_change_entry, [<<"Foo">>, bar, instance, <<"a">>, agent]},
-        {emit_extension_remove_change_entry, [
-            <<"Foo">>, bar, instance, 'Owner', <<"prev">>, <<"a">>, human
-        ]},
         {rewrite_sites, [undefined, [#{}]]},
         {validate_sites, [undefined, [#{}]]},
         {emit_rewrite_change_entry, [#{k => v}, #{r => s}]},
         {capture_class_removal_snapshot, [<<"Foo">>]},
-        {emit_remove_class_change_entry, [<<"Foo">>, #{}, <<"a">>, human]}
+        {emit_remove_class_change_entry, [<<"Foo">>, #{}, <<"a">>, human]},
+        {report_late_hot_reload_failure, [foo, self(), {error, {left_suspended, x}}]}
     ].
 
 with_registration(Fun) ->

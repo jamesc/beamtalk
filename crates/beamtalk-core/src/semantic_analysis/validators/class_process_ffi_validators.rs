@@ -1,46 +1,23 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Class-method FFI lints: `class-process-ffi` (BT-4031) and its ADR 0142
-//! inversion `class-method-process-resource` (BT-4302).
+//! Class-method FFI lint: `class-method-process-resource` (ADR 0142,
+//! BT-4302).
 //!
 //! **DDD Context:** Semantic Analysis
 //!
-//! A class method runs either in its class's `gen_server` process or, when
-//! it runs in the caller, in the caller's process. The two lints split on the
-//! one rule that decides it, [`ClassHierarchy::runs_class_method_in_caller`]
-//! (shared with codegen's direct-call table and the `class-state-abroad`
-//! lint), so a call gets at most one of them:
+//! A class method runs in the caller's process unless its selector is
+//! process-bound ([`ClassHierarchy::runs_class_method_in_caller`], the one
+//! rule, shared with codegen's direct-call table). The lint fires when such a
+//! method creates a resource tied to the calling process (`ets:new`,
+//! `open_port`, `spawn_link`, `link`, `monitor`, `register`,
+//! `erlang:send_after`/`start_timer`, the `timer` interval timers and
+//! `timer:send_after`) or acts on the calling process itself (`self()`, the
+//! process dictionary, `process_flag`, `unlink`, `demonitor`). The fix is an
+//! Actor that owns the resource. Suppress with
+//! `@expect class_method_process_resource`.
 //!
-//! - **`class-process-ffi`** — the class or an ancestor declares class
-//!   variables, so the method runs in the class process, and it calls a function that depends on the
-//!   *calling* process: `gen_tcp:accept/1` blocks the one shared class
-//!   process, `gen_tcp:controlling_process/2` and `file:sendfile/5` fail with
-//!   `not_owner` (the caller owns the socket), and `erlang:self/0`, the
-//!   process dictionary, `link` and `monitor` all see the class process.
-//!   A table from the `Ets` constructors (`new:type:`, `newOrExisting:type:`,
-//!   `private:`, `protected:`) is owned by the class process, so callers get
-//!   `access_denied` on every access to a private one and on writes to a
-//!   protected one (BT-4587). Only an unqualified `Ets`
-//!   reference is matched, not a package-qualified one.
-//!   Suppress deliberate serialisation with `@expect class_process_ffi`.
-//! - **`class-method-process-resource`** — no class in the chain declares
-//!   class variables, so the method runs in the caller, and it creates a resource tied to the calling
-//!   process (`ets:new`, `open_port`, `spawn_link`, `link`, `monitor`,
-//!   `register`, `erlang:send_after`/`start_timer`, the `timer` interval
-//!   timers and `timer:send_after`) or acts on the calling process itself
-//!   (`self()`, the process dictionary, `process_flag`, `unlink`,
-//!   `demonitor`). The fix is an Actor that owns the resource, or
-//!   `classState:` to keep the class process. Suppress with
-//!   `@expect class_method_process_resource`.
-//!
-//! **The rule moves, the lints follow.** ADR 0129 direct-called a method only
-//! when it was `class sealed` in a `sealed` class without class variables.
-//! ADR 0142 drops the sealing requirement, so every class method of a class
-//! without class variables in its chain runs in the caller; BT-4301 moved the
-//! shared rule to ADR 0142's, and these lints follow it.
-//!
-//! **Fire condition** (both lints):
+//! **Fire condition**:
 //!
 //! 1. the method is class-side: in `class.class_methods`, or a standalone
 //!    `Sub class >> m` definition (`ClassBuilder classMethods:` blocks are not
@@ -48,9 +25,8 @@
 //! 2. the class is known to the hierarchy and the selector is not
 //!    process-bound ([`ClassInfo::is_process_bound_class_selector`]: those
 //!    keep their routing whatever the class declares, so no hint can help);
-//! 3. the body contains a direct `(Erlang mod) fn ...` call, or a class-side
-//!    send such as `Ets private:`, listed in [`CLASS_METHOD_FFI`] with an
-//!    effect for the process the method runs in.
+//! 3. the body contains a direct `(Erlang mod) fn ...` call listed in
+//!    [`CLASS_METHOD_FFI`] with an effect in the caller.
 //!    Transitive calls (a helper does the FFI) are not followed in v1.
 //!
 //! **Deliberately excluded from the table** (flagging them would fire on the
@@ -63,7 +39,7 @@
 //! ...); and dataflow-sensitive cases such as `process_info(self())` (needs
 //! argument tracking).
 
-use crate::ast::{Expression, MessageSelector, MethodDefinition, MethodKind, Module};
+use crate::ast::{Expression, MessageSelector, MethodDefinition, Module};
 use crate::ast_walker::walk_expression;
 use crate::ffi_receiver::erlang_module_of_receiver;
 use crate::semantic_analysis::ClassHierarchy;
@@ -73,28 +49,7 @@ use crate::semantic_analysis::validators::structural_validators::{
 };
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
-/// Why a call is wrong in the **class process** (`class-process-ffi`);
-/// selects the message wording.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Sensitivity {
-    /// The call blocks the calling process, so a shared class process
-    /// serialises every caller behind it.
-    Blocking,
-    /// The call depends on the identity or ownership of the calling process
-    /// (socket owner, mailbox, process dictionary, links, monitors).
-    Ownership,
-    /// The call creates a named ETS table owned by the calling process, so the
-    /// class process owns it and it lives as long as the class process, not
-    /// the caller.
-    OwnedTable,
-    /// The call creates an access-restricted (`private`/`protected`) ETS
-    /// table owned by the calling process, so the class process owns it and
-    /// callers get `access_denied` (every access for `private:`, writes for
-    /// `protected:`).
-    OwnedRestrictedTable,
-}
-
-/// Why a call is surprising in the **caller**
+/// Why a call is surprising in the caller
 /// (`class-method-process-resource`); selects the message wording.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CallerEffect {
@@ -106,42 +61,14 @@ enum CallerEffect {
     Identity,
 }
 
-/// What a [`ClassMethodFfi`] row matches.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Callee {
-    /// `(Erlang <module>) <function>...`: matched on the module and the
-    /// Erlang function name (the selector's first keyword).
-    Erlang {
-        module: &'static str,
-        function: &'static str,
-    },
-    /// `<class> <selector>`: a class-side send to the unqualified class
-    /// reference, matched on the full selector. For stdlib constructors that
-    /// wrap a process-sensitive FFI call (`Ets private:` wraps `ets:new/2`),
-    /// which the `Erlang` rows cannot see through (BT-4587).
-    Class {
-        class: &'static str,
-        selector: &'static str,
-    },
-}
-
-impl Callee {
-    /// The call as the diagnostic names it: `` `mod:fn/arity` `` or
-    /// `` `Class selector` ``.
-    fn render(self, arity: usize) -> String {
-        match self {
-            Self::Erlang { module, function } => format!("`{module}:{function}/{arity}`"),
-            Self::Class { class, selector } => format!("`{class} {selector}`"),
-        }
-    }
-}
-
-/// One curated row: the callee and its effect in each process a class method
-/// can run in. `None` means that process's lint does not fire.
+/// One curated row: an Erlang function whose effect depends on which process
+/// runs it, and its effect in the caller. `None` means the lint does not
+/// fire, but the call still counts as process-sensitive
+/// ([`ffi_call_is_process_sensitive`]).
+#[derive(Debug)]
 struct ClassMethodFfi {
-    callee: Callee,
-    /// Effect when the method runs in the class process (`class-process-ffi`).
-    in_class_process: Option<Sensitivity>,
+    module: &'static str,
+    function: &'static str,
     /// Effect when the method runs in the caller
     /// (`class-method-process-resource`).
     in_caller: Option<CallerEffect>,
@@ -152,127 +79,82 @@ struct ClassMethodFfi {
 const fn row(
     module: &'static str,
     function: &'static str,
-    in_class_process: Option<Sensitivity>,
     in_caller: Option<CallerEffect>,
 ) -> ClassMethodFfi {
     ClassMethodFfi {
-        callee: Callee::Erlang { module, function },
-        in_class_process,
+        module,
+        function,
         in_caller,
     }
 }
 
-/// Builds a [`Callee::Class`] row.
-const fn class_row(
-    class: &'static str,
-    selector: &'static str,
-    in_class_process: Option<Sensitivity>,
-    in_caller: Option<CallerEffect>,
-) -> ClassMethodFfi {
-    ClassMethodFfi {
-        callee: Callee::Class { class, selector },
-        in_class_process,
-        in_caller,
-    }
-}
-
-const BLOCKING: Option<Sensitivity> = Some(Sensitivity::Blocking);
-const OWNERSHIP: Option<Sensitivity> = Some(Sensitivity::Ownership);
-const OWNED_TABLE: Option<Sensitivity> = Some(Sensitivity::OwnedTable);
-const OWNED_RESTRICTED_TABLE: Option<Sensitivity> = Some(Sensitivity::OwnedRestrictedTable);
 const RESOURCE: Option<CallerEffect> = Some(CallerEffect::Resource);
 const IDENTITY: Option<CallerEffect> = Some(CallerEffect::Identity);
 
-/// The single curated v1 table of process-sensitive calls, read by both
-/// lints: a function both lints care about (`self`, the process
-/// dictionary, `process_flag`, links, monitors) has one row with both
-/// effects. Modelled on the curated `ffi_exports` table: a spec-derived
-/// attribute is a possible follow-up. See the module docs for what is
-/// deliberately left out.
-///
-/// The `Ets` constructor rows fire only in the class process: in the caller
-/// they make a table the caller owns, which is what they are for, whereas
-/// a direct `ets:new` there is flagged as an FFI resource escape hatch.
-/// `ets:new` itself stays caller-only: the `class-method-process-resource`
-/// hint offers `classState:` as a fix, so flagging it in the class process
-/// too would leave no lint-clean home for the call.
+/// The single curated v1 table of process-sensitive calls: those the
+/// `class-method-process-resource` lint reports (an effect in the caller),
+/// and those that only make an explicit class-side `new` keep the class
+/// process ([`ffi_call_is_process_sensitive`], BT-4464). Modelled on the
+/// curated `ffi_exports` table: a spec-derived attribute is a possible
+/// follow-up. See the module docs for what is deliberately left out.
 const CLASS_METHOD_FFI: &[ClassMethodFfi] = &[
-    row("erlang", "self", OWNERSHIP, IDENTITY),
-    row("erlang", "send", OWNERSHIP, None),
-    row("erlang", "get", OWNERSHIP, IDENTITY),
-    row("erlang", "put", OWNERSHIP, IDENTITY),
-    row("erlang", "erase", OWNERSHIP, IDENTITY),
-    row("erlang", "process_flag", OWNERSHIP, IDENTITY),
-    row("erlang", "link", OWNERSHIP, RESOURCE),
-    row("erlang", "unlink", OWNERSHIP, IDENTITY),
-    row("erlang", "monitor", OWNERSHIP, RESOURCE),
-    row("erlang", "demonitor", OWNERSHIP, IDENTITY),
-    row("erlang", "spawn_link", None, RESOURCE),
-    row("erlang", "open_port", None, RESOURCE),
-    row("erlang", "register", None, RESOURCE),
-    row("erlang", "send_after", None, RESOURCE),
-    row("erlang", "start_timer", None, RESOURCE),
-    row("ets", "new", None, RESOURCE),
-    class_row("Ets", "new:type:", OWNED_TABLE, None),
-    class_row("Ets", "newOrExisting:type:", OWNED_TABLE, None),
-    class_row("Ets", "private:", OWNED_RESTRICTED_TABLE, None),
-    class_row("Ets", "protected:", OWNED_RESTRICTED_TABLE, None),
-    row("timer", "apply_interval", None, RESOURCE),
-    row("timer", "apply_repeatedly", None, RESOURCE),
-    row("timer", "send_after", None, RESOURCE),
-    row("timer", "send_interval", None, RESOURCE),
-    row("gen_tcp", "accept", BLOCKING, None),
-    row("gen_tcp", "connect", BLOCKING, None),
-    row("gen_tcp", "listen", OWNERSHIP, None),
-    row("gen_tcp", "recv", BLOCKING, None),
-    row("gen_tcp", "send", OWNERSHIP, None),
-    row("gen_tcp", "close", OWNERSHIP, None),
-    row("gen_tcp", "shutdown", OWNERSHIP, None),
-    row("gen_tcp", "controlling_process", OWNERSHIP, None),
-    row("gen_udp", "open", OWNERSHIP, None),
-    row("gen_udp", "recv", BLOCKING, None),
-    row("gen_udp", "send", OWNERSHIP, None),
-    row("gen_udp", "close", OWNERSHIP, None),
-    row("gen_udp", "controlling_process", OWNERSHIP, None),
-    row("ssl", "connect", BLOCKING, None),
-    row("ssl", "handshake", BLOCKING, None),
-    row("ssl", "recv", BLOCKING, None),
-    row("ssl", "send", OWNERSHIP, None),
-    row("ssl", "close", OWNERSHIP, None),
-    row("ssl", "shutdown", OWNERSHIP, None),
-    row("ssl", "controlling_process", OWNERSHIP, None),
-    row("file", "sendfile", OWNERSHIP, None),
+    row("erlang", "self", IDENTITY),
+    row("erlang", "send", None),
+    row("erlang", "get", IDENTITY),
+    row("erlang", "put", IDENTITY),
+    row("erlang", "erase", IDENTITY),
+    row("erlang", "process_flag", IDENTITY),
+    row("erlang", "link", RESOURCE),
+    row("erlang", "unlink", IDENTITY),
+    row("erlang", "monitor", RESOURCE),
+    row("erlang", "demonitor", IDENTITY),
+    row("erlang", "spawn_link", RESOURCE),
+    row("erlang", "open_port", RESOURCE),
+    row("erlang", "register", RESOURCE),
+    row("erlang", "send_after", RESOURCE),
+    row("erlang", "start_timer", RESOURCE),
+    row("ets", "new", RESOURCE),
+    row("timer", "apply_interval", RESOURCE),
+    row("timer", "apply_repeatedly", RESOURCE),
+    row("timer", "send_after", RESOURCE),
+    row("timer", "send_interval", RESOURCE),
+    row("gen_tcp", "accept", None),
+    row("gen_tcp", "connect", None),
+    row("gen_tcp", "listen", None),
+    row("gen_tcp", "recv", None),
+    row("gen_tcp", "send", None),
+    row("gen_tcp", "close", None),
+    row("gen_tcp", "shutdown", None),
+    row("gen_tcp", "controlling_process", None),
+    row("gen_udp", "open", None),
+    row("gen_udp", "recv", None),
+    row("gen_udp", "send", None),
+    row("gen_udp", "close", None),
+    row("gen_udp", "controlling_process", None),
+    row("ssl", "connect", None),
+    row("ssl", "handshake", None),
+    row("ssl", "recv", None),
+    row("ssl", "send", None),
+    row("ssl", "close", None),
+    row("ssl", "shutdown", None),
+    row("ssl", "controlling_process", None),
+    row("file", "sendfile", None),
 ];
 
 fn table_row(module: &str, function: &str) -> Option<&'static ClassMethodFfi> {
-    CLASS_METHOD_FFI.iter().find(|r| {
-        matches!(r.callee, Callee::Erlang { module: m, function: f } if m == module && f == function)
-    })
+    CLASS_METHOD_FFI
+        .iter()
+        .find(|r| r.module == module && r.function == function)
 }
 
-/// The row matching the send `receiver selector`, if any: an `Erlang` row
-/// for an FFI call, a `Class` row for a class-side send to an unqualified
-/// class reference.
+/// The row matching the FFI call `(Erlang <module>) <selector>`, if any.
 fn row_for_send(
     receiver: &Expression,
     selector: &MessageSelector,
 ) -> Option<&'static ClassMethodFfi> {
-    if let Some(module) = erlang_module_of_receiver(receiver) {
-        let function = erlang_function_name(selector)?;
-        return table_row(module, &function);
-    }
-    let Expression::ClassReference {
-        name,
-        package: None,
-        ..
-    } = receiver
-    else {
-        return None;
-    };
-    let sent = selector.name();
-    CLASS_METHOD_FFI.iter().find(|r| {
-        matches!(r.callee, Callee::Class { class, selector } if class == name.name.as_str() && selector == sent.as_str())
-    })
+    let module = erlang_module_of_receiver(receiver)?;
+    let function = erlang_function_name(selector)?;
+    table_row(module, &function)
 }
 
 /// Whether `(Erlang <module>) <selector>` is any row of the curated
@@ -281,14 +163,15 @@ fn row_for_send(
 /// either direction. BT-4464: an explicit class-side `new` making such a call
 /// keeps the class process (`ClassHierarchy::explicit_class_new_builds_in_caller`
 /// fails closed on every row), since `new` used to be guaranteed to run there,
-/// neither lint inspects process-bound selectors, and moving it would hand
+/// the lint does not inspect process-bound selectors, and moving it would hand
 /// what it creates to whichever caller ran first. Calls outside the table
-/// (`file open:`, a user `start_link`) are not recognised, as for the lints.
+/// (`file open:`, a user `start_link`) are not recognised, as for the lint.
 pub(crate) fn ffi_call_is_process_sensitive(module: &str, selector: &MessageSelector) -> bool {
     erlang_function_name(selector).is_some_and(|function| table_row(module, &function).is_some())
 }
 
-/// Runs both class-method FFI lints over every class-side method of `module`
+/// Runs the `class-method-process-resource` lint over every class-side method
+/// of `module`
 /// (see the module docs).
 pub(crate) fn check_class_method_ffi(
     module: &Module,
@@ -296,23 +179,14 @@ pub(crate) fn check_class_method_ffi(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for class in &module.classes {
-        for method in class
-            .class_methods
-            .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
-        {
+        for method in &class.class_methods {
             check_method(class.name.name.as_str(), method, hierarchy, diagnostics);
         }
     }
     // Standalone `Foo class >> bar => ...` definitions are class methods of
-    // `Foo` too. Package-qualified extensions are left alone: their class is
-    // resolved by package, which the simple-name hierarchy lookup does not
-    // model (same rule as `class-state-abroad`).
+    // `Foo` too.
     for standalone in &module.method_definitions {
-        if standalone.is_class_method
-            && standalone.package.is_none()
-            && standalone.method.kind == MethodKind::Primary
-        {
+        if standalone.is_class_method {
             check_method(
                 standalone.class_name.name.as_str(),
                 &standalone.method,
@@ -333,13 +207,11 @@ fn check_method(
     if ClassInfo::is_process_bound_class_selector(&selector) {
         return;
     }
-    let Some(class) = hierarchy.get_class(class_name) else {
+    if !hierarchy.has_class(class_name)
+        || !hierarchy.runs_class_method_in_caller(class_name, &selector)
+    {
         return;
-    };
-    // The one rule for where a class method runs (ADR 0142 §1: no class
-    // variables in the chain, not process-bound, sealing irrelevant).
-    let runs_in_caller = hierarchy.runs_class_method_in_caller(class_name, &selector);
-    let class_process_hint = class_process_hint(hierarchy, class, &selector);
+    }
 
     for stmt in &method.body {
         walk_expression(&stmt.expression, &mut |expr| {
@@ -355,69 +227,26 @@ fn check_method(
             let Some(entry) = row_for_send(receiver, ffi_selector) else {
                 return;
             };
+            let Some(effect) = entry.in_caller else {
+                return;
+            };
             let site = Site {
                 class_name,
                 selector: &selector,
-                call: entry
-                    .callee
-                    .render(erlang_arity(ffi_selector, arguments.len())),
+                call: format!(
+                    "`{}:{}/{}`",
+                    entry.module,
+                    entry.function,
+                    erlang_arity(ffi_selector, arguments.len())
+                ),
                 expr,
             };
-            let diagnostic = if runs_in_caller {
-                entry.in_caller.map(|e| site.caller(e))
-            } else {
-                entry
-                    .in_class_process
-                    .map(|s| site.class_process(s, &class_process_hint))
-            };
-            diagnostics.extend(diagnostic);
+            diagnostics.push(site.caller(effect));
         });
     }
 }
 
-/// The `class-process-ffi` hint for a class method that runs in the class
-/// process: the reason [`ClassHierarchy::runs_class_method_in_caller`] gave,
-/// and only that one (BT-4301). For a non-process-bound selector it is one of:
-/// a class-variable reflection selector (`hasField:`/`clearField:`/
-/// `fieldAt:`/`fieldAt:put:`, which the class process answers itself); class variables declared by the class or by
-/// a named ancestor; or a superclass chain that could not be resolved, which
-/// the rule treats as a doubt.
-fn class_process_hint(hierarchy: &ClassHierarchy, class: &ClassInfo, selector: &str) -> String {
-    const MOVE: &str = "move the call into an instance method or an Actor";
-    let class_name = class.name.as_str();
-    if ClassInfo::is_class_var_reflection_selector(selector) {
-        return format!(
-            "the class process itself answers `{selector}` sent to a class, so a class method \
-             of that name runs there: rename it, or {MOVE}"
-        );
-    }
-    if class.has_class_variables() {
-        return format!(
-            "`{class_name}` declares class variables, so its class methods run in the class \
-             process: {MOVE}"
-        );
-    }
-    let stateful_ancestor = hierarchy
-        .superclass_chain(class_name)
-        .into_iter()
-        .find(|ancestor| {
-            hierarchy
-                .get_class(ancestor)
-                .is_some_and(ClassInfo::has_class_variables)
-        });
-    match stateful_ancestor {
-        Some(ancestor) => format!(
-            "`{class_name}` inherits from `{ancestor}`, which declares class variables, so its \
-             class methods run in the class process: {MOVE}"
-        ),
-        None => format!(
-            "the superclass chain of `{class_name}` could not be resolved, so its class methods \
-             are assumed to run in the class process: {MOVE}"
-        ),
-    }
-}
-
-/// A matched FFI call inside a class method: what both messages name.
+/// A matched FFI call inside a class method: what the message names.
 struct Site<'a> {
     class_name: &'a str,
     selector: &'a str,
@@ -427,46 +256,6 @@ struct Site<'a> {
 }
 
 impl Site<'_> {
-    /// `class-process-ffi`: the method runs in the class process (its chain
-    /// declares class variables) and the call depends on the calling process.
-    fn class_process(&self, sensitivity: Sensitivity, hint: &str) -> Diagnostic {
-        let Self {
-            class_name,
-            selector,
-            call,
-            expr,
-        } = self;
-        let (why, consequence) = match sensitivity {
-            Sensitivity::Blocking => (
-                "which blocks the calling process",
-                "so every caller queues behind one process",
-            ),
-            Sensitivity::Ownership => (
-                "which depends on the identity or ownership of the calling process",
-                "so it acts on the class process instead of the caller",
-            ),
-            Sensitivity::OwnedTable => (
-                "which creates an ETS table owned by the calling process",
-                "so the class process owns the table and it lives as long as the class process, \
-                 not the caller",
-            ),
-            Sensitivity::OwnedRestrictedTable => (
-                "which creates an access-restricted ETS table owned by the calling process",
-                "so the class process owns the table and callers are refused with \
-                 `access_denied` (every access for `private:`, writes for `protected:`)",
-            ),
-        };
-        Diagnostic::warning(
-            format!(
-                "class method `{class_name} {selector}` calls {call}, {why} — but this method \
-                 runs in the class's gen_server process, not the caller's, {consequence}"
-            ),
-            expr.span(),
-        )
-        .with_hint(hint.to_string())
-        .with_category(DiagnosticCategory::ClassProcessFfi)
-    }
-
     /// `class-method-process-resource`: the method runs in the caller (ADR
     /// 0142) and the call creates a resource tied to, or acts on, the calling
     /// process.
@@ -496,8 +285,8 @@ impl Site<'_> {
             expr.span(),
         )
         .with_hint(format!(
-            "move ownership to an Actor (create the resource in its `initialize`), or declare \
-             `classState:` on `{class_name}` to keep its class methods in the class process"
+            "move ownership to an Actor (create the resource in its `initialize`); class methods \
+             of `{class_name}` run in whichever process calls them"
         ))
         .with_category(DiagnosticCategory::ClassMethodProcessResource)
     }
@@ -508,7 +297,6 @@ mod tests {
     use super::*;
     use crate::compilation::diagnostics_policy::apply_expect_directives;
     use crate::semantic_analysis::analyse;
-    use crate::source_analysis::Severity;
 
     fn module_of(src: &str) -> Module {
         crate::test_helpers::test_support::parse_ok(src)
@@ -520,11 +308,6 @@ mod tests {
             .into_iter()
             .filter(|d| d.category == Some(category))
             .collect()
-    }
-
-    /// `class-process-ffi` findings.
-    fn in_class_process(src: &str) -> Vec<Diagnostic> {
-        of_category(src, DiagnosticCategory::ClassProcessFfi)
     }
 
     /// `class-method-process-resource` findings.
@@ -553,29 +336,14 @@ mod tests {
         /// An open class without class variables: the caller (ADR 0142 §1,
         /// BT-4301).
         OpenStateless,
-        /// A class with class variables: the class process, always.
-        Stateful,
-        /// A stateless subclass of a class with class variables: the class
-        /// process (ADR 0142 §1 rule 2 over the chain).
-        InheritsState,
     }
 
     const IN_CALLER: [Probe; 2] = [Probe::SealedStateless, Probe::OpenStateless];
-    const IN_CLASS_PROCESS: [Probe; 2] = [Probe::Stateful, Probe::InheritsState];
 
-    /// A one-method class making `callee`'s call (every argument `x`) from
+    /// A one-method class making `entry`'s call (every argument `x`) from
     /// `class probe: x`.
-    fn probe_row(callee: Callee, probe: Probe) -> String {
-        let call = match callee {
-            Callee::Erlang { module, function } => format!("(Erlang {module}) {function}: x"),
-            Callee::Class { class, selector } => {
-                let args: Vec<String> = selector
-                    .split_inclusive(':')
-                    .map(|k| format!("{k} x"))
-                    .collect();
-                format!("{class} {}", args.join(" "))
-            }
-        };
+    fn probe_row(entry: &ClassMethodFfi, probe: Probe) -> String {
+        let call = format!("(Erlang {}) {}: x", entry.module, entry.function);
         probe_class_calling(&call, probe)
     }
 
@@ -586,75 +354,27 @@ mod tests {
                 format!("sealed Object subclass: Probe\n  class sealed probe: x => {call}\n")
             }
             Probe::OpenStateless => format!("Object subclass: Probe\n  class probe: x => {call}\n"),
-            Probe::Stateful => format!(
-                "Object subclass: Probe\n  classState: n = 0\n\n  class probe: x => {call}\n"
-            ),
-            Probe::InheritsState => format!(
-                "Object subclass: Base\n  classState: n = 0\n\n\
-                 Base subclass: Probe\n  class probe: x => {call}\n"
-            ),
         }
     }
 
     // ── table: one positive and one negative per row ─────────────────────
 
     #[test]
-    fn every_caller_row_fires_in_the_caller_and_not_in_the_class_process() {
-        for entry in CLASS_METHOD_FFI.iter().filter(|r| r.in_caller.is_some()) {
-            let c = entry.callee;
-            for probe in IN_CALLER {
-                let fires = in_caller(&probe_row(c, probe));
-                assert_eq!(fires.len(), 1, "{c:?} {probe:?}: {fires:?}");
-                assert!(fires[0].message.contains(&c.render(1)), "{fires:?}");
-                assert_eq!(fires[0].severity, Severity::Warning);
-            }
-            for probe in IN_CLASS_PROCESS {
-                let silent = in_caller(&probe_row(c, probe));
-                assert!(silent.is_empty(), "{c:?} {probe:?}: {silent:?}");
-            }
-        }
-    }
-
-    #[test]
     fn rows_without_a_caller_effect_never_fire_class_method_process_resource() {
         for entry in CLASS_METHOD_FFI.iter().filter(|r| r.in_caller.is_none()) {
-            let c = entry.callee;
             for probe in IN_CALLER {
-                let silent = in_caller(&probe_row(c, probe));
-                assert!(silent.is_empty(), "{c:?} {probe:?}: {silent:?}");
+                let silent = in_caller(&probe_row(entry, probe));
+                assert!(silent.is_empty(), "{entry:?} {probe:?}: {silent:?}");
             }
         }
     }
 
     #[test]
-    fn every_class_process_row_fires_in_the_class_process_and_not_in_the_caller() {
-        for entry in CLASS_METHOD_FFI
-            .iter()
-            .filter(|r| r.in_class_process.is_some())
-        {
-            let c = entry.callee;
-            for probe in IN_CLASS_PROCESS {
-                let fires = in_class_process(&probe_row(c, probe));
-                assert_eq!(fires.len(), 1, "{c:?} {probe:?}: {fires:?}");
-                assert!(fires[0].message.contains(&c.render(1)), "{fires:?}");
-            }
+    fn rows_with_a_caller_effect_fire_class_method_process_resource() {
+        for entry in CLASS_METHOD_FFI.iter().filter(|r| r.in_caller.is_some()) {
             for probe in IN_CALLER {
-                let silent = in_class_process(&probe_row(c, probe));
-                assert!(silent.is_empty(), "{c:?} {probe:?}: {silent:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn rows_without_a_class_process_effect_never_fire_class_process_ffi() {
-        for entry in CLASS_METHOD_FFI
-            .iter()
-            .filter(|r| r.in_class_process.is_none())
-        {
-            let c = entry.callee;
-            for probe in IN_CLASS_PROCESS {
-                let silent = in_class_process(&probe_row(c, probe));
-                assert!(silent.is_empty(), "{c:?} {probe:?}: {silent:?}");
+                let found = in_caller(&probe_row(entry, probe));
+                assert_eq!(found.len(), 1, "{entry:?} {probe:?}: {found:?}");
             }
         }
     }
@@ -662,13 +382,11 @@ mod tests {
     #[test]
     fn table_has_no_duplicate_rows() {
         for (i, a) in CLASS_METHOD_FFI.iter().enumerate() {
-            assert!(
-                a.in_class_process.is_some() || a.in_caller.is_some(),
-                "{:?} fires nowhere",
-                a.callee
-            );
             for b in &CLASS_METHOD_FFI[i + 1..] {
-                assert!(a.callee != b.callee, "duplicate row {:?}", a.callee);
+                assert!(
+                    (a.module, a.function) != (b.module, b.function),
+                    "duplicate row {a:?}"
+                );
             }
         }
     }
@@ -689,73 +407,20 @@ mod tests {
         assert!(msg.contains("runs in the caller's process"));
         let h = hint(&diags[0]);
         assert!(h.contains("Actor"), "{h}");
-        assert!(h.contains("`classState:` on `Tables`"), "{h}");
+        assert!(!h.contains("classState:"), "{h}");
     }
 
     // ── Ets constructors (BT-4587) ───────────────────────────────────────
 
     #[test]
-    fn ets_constructor_in_a_class_with_class_variables_warns_the_class_process_owns_it() {
-        let src = "Object subclass: Secrets
-  classState: count = 0
-
-  class table => Ets private: #set
-";
-        let diags = in_class_process(src);
-        assert_eq!(diags.len(), 1, "{diags:?}");
-        let msg = &diags[0].message;
-        assert!(msg.contains("`Secrets table`"), "{msg}");
-        assert!(msg.contains("`Ets private:`"), "{msg}");
-        assert!(msg.contains("access-restricted ETS table"), "{msg}");
-        assert!(msg.contains("`access_denied`"), "{msg}");
-        assert!(hint(&diags[0]).contains("`Secrets` declares class variables"));
-        assert!(in_caller(src).is_empty());
-    }
-
-    #[test]
-    fn named_ets_table_in_the_class_process_does_not_claim_access_denied() {
-        let src = "Object subclass: Registry
-  classState: count = 0
-
-  class cache => Ets newOrExisting: #cache type: #set
-";
-        let diags = in_class_process(src);
-        assert_eq!(diags.len(), 1, "{diags:?}");
-        let msg = &diags[0].message;
-        assert!(msg.contains("lives as long as the class process"), "{msg}");
-        assert!(!msg.contains("access_denied"), "{msg}");
-    }
-
-    #[test]
-    fn following_the_classstate_hint_for_ets_new_silences_both_lints() {
-        let caller = "Object subclass: T\n  class make => (Erlang ets) new: #t with: #()\n";
-        let diags = in_caller(caller);
-        assert_eq!(diags.len(), 1, "{diags:?}");
-        assert!(hint(&diags[0]).contains("`classState:`"));
-        let stateful = "Object subclass: T\n  classState: n = 0\n\n  class make => (Erlang ets) new: #t with: #()\n";
-        assert!(in_caller(stateful).is_empty());
-        assert!(in_class_process(stateful).is_empty());
-    }
-
-    #[test]
-    fn ets_constructor_in_a_class_without_class_variables_is_silent() {
+    fn ets_constructor_in_a_class_method_is_silent() {
+        // In the caller the `Ets` constructors make a table the caller owns,
+        // which is what they are for.
         let src = "Object subclass: Secrets
   class table => Ets private: #set
   class shared => Ets newOrExisting: #shared type: #set
 ";
-        assert!(in_class_process(src).is_empty());
         assert!(in_caller(src).is_empty());
-    }
-
-    #[test]
-    fn package_qualified_or_instance_side_ets_sends_are_silent() {
-        let src = "Object subclass: Secrets
-  classState: count = 0
-
-  class table => other@Ets private: #set
-  table => Ets private: #set
-";
-        assert!(in_class_process(src).is_empty());
     }
 
     #[test]
@@ -800,27 +465,7 @@ mod tests {
 "
             );
             assert!(in_caller(&src).is_empty(), "{header}");
-            assert!(in_class_process(&src).is_empty(), "{header}");
         }
-    }
-
-    #[test]
-    fn process_bound_selectors_are_silent() {
-        let src = "Object subclass: Ctor
-  class new => (Erlang ets) new: #t with: #()
-  class startLink => Erlang erlang self
-  class spawn => Erlang erlang self
-  class run: x => (Erlang erlang) link: x
-";
-        assert!(in_caller(src).is_empty());
-        assert!(in_class_process(src).is_empty());
-        let stateful = "Object subclass: Ctor2
-  classState: n = 0
-
-  class new => Erlang erlang self
-  class startLink => (Erlang gen_tcp) accept: 1
-";
-        assert!(in_class_process(stateful).is_empty());
     }
 
     #[test]
@@ -828,37 +473,10 @@ mod tests {
         let src = "sealed Object subclass: Inst\n  me => Erlang erlang self\n";
         assert!(in_caller(src).is_empty());
         let open = "Object subclass: Inst2\n  me => Erlang erlang self\n";
-        assert!(in_class_process(open).is_empty());
+        assert!(in_caller(open).is_empty());
     }
 
-    // ── class-process-ffi ────────────────────────────────────────────────
-
-    #[test]
-    fn issue_repro_stateful_class_fires_for_each_method() {
-        let src = "Object subclass: Tcp
-  classState: listeners = 0
-
-  class accept: ls => (Erlang gen_tcp) accept: ls
-  class handOff: s to: pid => (Erlang gen_tcp) controlling_process: s with: pid
-  class sendfile: s path: p =>
-    fd := ((Erlang file) open: p with: #(#read, #raw, #binary)) unwrap
-    (Erlang file) sendfile: fd with: s with: 0 with: 0 with: #()
-";
-        let diags = in_class_process(src);
-        assert_eq!(diags.len(), 3, "{diags:?}");
-        assert!(diags[0].message.contains("`Tcp accept:`"), "{diags:?}");
-        assert!(diags[0].message.contains("`gen_tcp:accept/1`"));
-        assert!(diags[0].message.contains("blocks the calling process"));
-        assert!(diags[0].message.contains("queues behind one process"));
-        assert!(diags[1].message.contains("`gen_tcp:controlling_process/2`"));
-        assert!(diags[1].message.contains("ownership"));
-        assert!(diags[2].message.contains("`file:sendfile/5`"));
-        for d in &diags {
-            assert_eq!(d.severity, Severity::Warning);
-            assert!(hint(d).contains("`Tcp` declares class variables"), "{d:?}");
-        }
-        assert!(in_caller(src).is_empty());
-    }
+    // ── where the method runs ───────────────────────────────────────────
 
     #[test]
     fn open_stateless_class_runs_in_the_caller_whatever_is_sealed() {
@@ -868,124 +486,49 @@ mod tests {
             "sealed Object subclass: SealedC\n  class me2 => Erlang erlang self\n",
             "Object subclass: OpenD\n  class me3 => Erlang erlang self\n",
         ] {
-            assert!(in_class_process(src).is_empty(), "{src}");
             assert_eq!(in_caller(src).len(), 1, "{src}");
         }
     }
 
     #[test]
-    fn inherited_class_state_hint_names_the_ancestor() {
-        let src = "Object subclass: Base
-  classState: n = 0
-
-Base subclass: Sub
-  class me => Erlang erlang self
-";
-        let diags = in_class_process(src);
-        assert_eq!(diags.len(), 1, "{diags:?}");
-        let h = hint(&diags[0]);
-        assert!(
-            h.contains("`Sub` inherits from `Base`, which declares class variables"),
-            "{h}"
-        );
-        assert!(in_caller(src).is_empty());
-    }
-
-    #[test]
-    fn unresolved_superclass_chain_hint_says_so() {
-        // `Missing` is not in the hierarchy: the rule treats the chain as a
-        // doubt, and the hint claims no class variables it never saw.
+    fn unresolved_superclass_chain_still_runs_in_the_caller() {
+        // ADR 0153: with no class variables, the chain plays no part in where
+        // a class method runs, so an unknown superclass is no longer a doubt.
         let src = "Missing subclass: Orphan\n  class me => Erlang erlang self\n";
-        let diags = in_class_process(src);
-        assert_eq!(diags.len(), 1, "{diags:?}");
-        let h = hint(&diags[0]);
-        assert!(
-            h.contains("the superclass chain of `Orphan` could not be resolved"),
-            "{h}"
-        );
-        assert!(!h.contains("declares class variables"), "{h}");
+        assert_eq!(in_caller(src).len(), 1);
     }
 
     #[test]
-    fn reflection_selector_hint_names_the_selector() {
-        let src = "Object subclass: Probe\n  class hasField: x => Erlang erlang self\n";
-        let diags = in_class_process(src);
-        assert_eq!(diags.len(), 1, "{diags:?}");
-        let h = hint(&diags[0]);
-        assert!(
-            h.contains("the class process itself answers `hasField:`"),
-            "{h}"
-        );
-        assert!(!h.contains("declares class variables"), "{h}");
-    }
-
-    #[test]
-    fn field_at_reflection_selector_hint_names_the_selector() {
-        // BT-4148: `fieldAt:`/`fieldAt:put:` are class-variable reflection
-        // selectors too, so a class method of that name runs in the class
-        // process and gets the rename hint.
-        for (src, sel) in [
-            (
-                "Object subclass: Reg\n  class fieldAt: k => Erlang erlang self\n",
-                "fieldAt:",
-            ),
-            (
-                "Object subclass: Reg\n  class fieldAt: k put: v => Erlang erlang self\n",
-                "fieldAt:put:",
-            ),
+    fn reflection_selector_methods_run_in_the_caller() {
+        // BT-5155: the class process no longer intercepts `hasField:`/
+        // `fieldAt:`/`fieldAt:put:`/`clearField:`, so a class method of that
+        // name runs in the caller like any other and is reported.
+        for src in [
+            "Object subclass: Probe\n  class hasField: x => Erlang erlang self\n",
+            "Object subclass: Reg\n  class fieldAt: k => Erlang erlang self\n",
+            "Object subclass: Reg\n  class fieldAt: k put: v => Erlang erlang self\n",
         ] {
-            let diags = in_class_process(src);
-            assert_eq!(diags.len(), 1, "{sel}: {diags:?}");
-            let h = hint(&diags[0]);
-            assert!(
-                h.contains(&format!("the class process itself answers `{sel}`")),
-                "{h}"
-            );
-            assert!(in_caller(src).is_empty(), "{sel}");
+            assert_eq!(in_caller(src).len(), 1, "{src}");
         }
     }
 
     #[test]
-    fn class_with_class_state_fires_with_the_move_hint_even_when_sealed() {
-        let src = "sealed Object subclass: Stateful
-  classState: n = 0
-
-  class sealed me => Erlang erlang self
-";
-        let diags = in_class_process(src);
-        assert_eq!(diags.len(), 1, "{diags:?}");
-        let h = hint(&diags[0]);
-        assert!(h.contains("`Stateful` declares class variables"), "{h}");
-        assert!(h.contains("instance method or an Actor"), "{h}");
+    fn process_bound_selectors_are_not_inspected() {
+        let src = "Object subclass: Bound\n  class spawn => Erlang erlang self\n";
         assert!(in_caller(src).is_empty());
-    }
-
-    #[test]
-    fn standalone_class_method_definition_fires() {
-        let src = "Object subclass: Host\n  classState: n = 0\n\nHost class >> me => Erlang erlang self\n";
-        let diags = in_class_process(src);
-        assert_eq!(diags.len(), 1, "{diags:?}");
-        assert!(diags[0].message.contains("`Host me`"));
     }
 
     // ── category / policy / @expect ──────────────────────────────────────
 
     #[test]
     fn expect_category_names_round_trip() {
-        for (name, cat) in [
-            (
-                "class_process_ffi",
-                crate::ast::ExpectCategory::ClassProcessFfi,
-            ),
-            (
-                "class_method_process_resource",
-                crate::ast::ExpectCategory::ClassMethodProcessResource,
-            ),
-        ] {
-            assert_eq!(crate::ast::ExpectCategory::from_name(name), Some(cat));
-            assert_eq!(cat.as_str(), name);
-            assert!(crate::ast::ExpectCategory::valid_names().contains(&name));
-        }
+        let name = "class_method_process_resource";
+        let cat = crate::ast::ExpectCategory::ClassMethodProcessResource;
+        assert_eq!(crate::ast::ExpectCategory::from_name(name), Some(cat));
+        assert_eq!(cat.as_str(), name);
+        assert!(crate::ast::ExpectCategory::valid_names().contains(&name));
+        // ADR 0153 removed `class-process-ffi`: the name is parse-only.
+        assert!(!crate::ast::ExpectCategory::valid_names().contains(&"class_process_ffi"));
     }
 
     fn assert_suppressed(src: &str, category: DiagnosticCategory) {
@@ -1001,18 +544,6 @@ Base subclass: Sub
     }
 
     #[test]
-    fn expect_class_process_ffi_suppresses_the_warning() {
-        let src = "Object subclass: StatefulC
-  classState: n = 0
-
-  class me =>
-    @expect class_process_ffi
-    Erlang erlang self
-";
-        assert_suppressed(src, DiagnosticCategory::ClassProcessFfi);
-    }
-
-    #[test]
     fn expect_class_method_process_resource_suppresses_the_warning() {
         let src = "sealed Object subclass: SealedC
   class sealed me =>
@@ -1020,21 +551,5 @@ Base subclass: Sub
     Erlang erlang self
 ";
         assert_suppressed(src, DiagnosticCategory::ClassMethodProcessResource);
-    }
-
-    #[test]
-    fn expect_class_process_ffi_on_a_method_run_in_the_caller_is_reported_unused() {
-        let src = "Object subclass: OpenC
-  class accept: ls =>
-    @expect class_process_ffi
-    (Erlang gen_tcp) accept: ls
-";
-        let diags = after_expect(src);
-        assert!(
-            diags
-                .iter()
-                .any(|d| d.message.contains("stale @expect class_process_ffi")),
-            "{diags:?}"
-        );
     }
 }

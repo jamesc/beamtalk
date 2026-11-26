@@ -24,12 +24,6 @@ pub fn unique_temp_dir(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(format!("{prefix}_{}_{}_{n}", std::process::id(), nanos))
 }
 
-// BT-3705 (ADR 0130 Phase 1): generated class-variable programs and the
-// reference interpreter. A sibling module (not part of `test_support`) because
-// it is plain data + a pure interpreter with no parser/AST dependency.
-#[cfg(any(test, feature = "test"))]
-pub mod class_var_program;
-
 // BT-3841 (ADR 0131): the statement-position probe matrix, shared by the
 // Phase 0 pin tests and the BEAM measurement harness in `beamtalk-cli`.
 #[cfg(any(test, feature = "test"))]
@@ -56,7 +50,8 @@ pub mod evaluated_block_grid;
 pub mod test_support {
     use crate::ast::{
         Block, BlockParameter, ClassDefinition, ClassModifiers, Expression, ExpressionStatement,
-        Identifier, KeywordPart, Literal, MessageSelector, MethodDefinition, Module,
+        Identifier, KeywordPart, Literal, MatchArm, MessageSelector, MethodDefinition, Module,
+        Pattern,
     };
     use crate::semantic_analysis::class_hierarchy::DeclaredType;
     use crate::source_analysis::{Severity, Span, lex_with_eof, parse};
@@ -115,23 +110,10 @@ pub mod test_support {
     }
 
     /// `value`'s `Debug` form with every span erased, so two trees that
-    /// differ only in source positions compare equal.
+    /// differ only in source positions compare equal. Shares the
+    /// formatter's round-trip span eraser (BT-5183).
     pub fn without_spans(value: &impl std::fmt::Debug) -> String {
-        let debug = format!("{value:?}");
-        let mut out = String::with_capacity(debug.len());
-        let mut rest = debug.as_str();
-        while let Some(at) = rest.find("Span { start: ") {
-            out.push_str(&rest[..at]);
-            out.push_str("Span");
-            match rest[at..].find('}') {
-                Some(close) => rest = &rest[at + close + 1..],
-                None => {
-                    rest = "";
-                }
-            }
-        }
-        out.push_str(rest);
-        out
+        crate::unparse::debug_without_layout(value, &[])
     }
 
     /// Parses `source` and returns the [`Module`] AST, discarding all
@@ -264,6 +246,13 @@ pub mod test_support {
         }
     }
 
+    /// Builds an unguarded wildcard `_ -> body` [`MatchArm`] (full coverage)
+    /// with [`test_span`] spans.
+    #[must_use]
+    pub fn wildcard_arm(body: Expression) -> MatchArm {
+        MatchArm::new(Pattern::Wildcard(test_span()), body, test_span())
+    }
+
     /// Wraps an [`Expression`] in a bare [`ExpressionStatement`].
     #[must_use]
     pub fn bare(expr: Expression) -> ExpressionStatement {
@@ -272,7 +261,7 @@ pub mod test_support {
 
     /// Arbitrary [`DeclaredType`] values, recursively covering every
     /// grouping shape the type-string fidelity properties exercise:
-    /// union, generic, `FalseOr`/optional, difference, intersection, and
+    /// union, generic, difference, intersection, and
     /// the `Self`-family leaves (`Self`, `Self class`, `<Name> class`).
     ///
     /// Shared by `declared_type.rs`'s own `parse`/`Display` fixed-point
@@ -300,9 +289,6 @@ pub mod test_support {
                     prop::collection::vec(inner.clone(), 1..3),
                 )
                     .prop_map(|(base, params)| DeclaredType::generic(base, params)),
-                inner
-                    .clone()
-                    .prop_map(|t| DeclaredType::FalseOr(Box::new(t))),
                 (inner.clone(), inner.clone()).prop_map(|(base, excluded)| {
                     DeclaredType::Difference {
                         base: Box::new(base),
@@ -1056,9 +1042,8 @@ pub mod test_support {
     }
 
     /// Draws `n` programs from [`arb_program`] with a fixed RNG, so a case
-    /// budget is the same corpus on every run and every machine (the sibling
-    /// of [`draw_class_programs`]). Every program is one `run` method on an
-    /// `Object subclass: <class_name>`.
+    /// budget is the same corpus on every run and every machine. Every program
+    /// is one `run` method on an `Object subclass: <class_name>`.
     ///
     /// # Panics
     ///
@@ -1178,54 +1163,6 @@ pub mod test_support {
             }
             _ => {}
         }
-    }
-
-    /// Generates class-variable programs (BT-3705, ADR 0130 Phase 1): the
-    /// sibling of [`arb_program`] for class state, loops, exception handling
-    /// and late-bound sends. A program is a pure function of `(seed, size)`,
-    /// so a failing case is reproducible from the printed pair.
-    ///
-    /// See [`super::class_var_program`] for the program model, the three
-    /// spellings and the ADR 0130 §4 reference interpreter.
-    pub fn arb_class_program(
-        shapes: super::class_var_program::Shapes,
-    ) -> impl Strategy<Value = (u64, u32, super::class_var_program::Program)> {
-        (any::<u64>(), 1u32..=3).prop_map(move |(seed, size)| {
-            (
-                seed,
-                size,
-                super::class_var_program::gen_program(seed, size, shapes),
-            )
-        })
-    }
-
-    /// Draws `n` class programs from [`arb_class_program`] with a fixed RNG,
-    /// so a case budget is the same corpus on every run and every machine.
-    /// Each item is `(seed, size, program)`; the pair reproduces the program.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the strategy cannot produce a value (it never fails).
-    pub fn draw_class_programs(
-        shapes: super::class_var_program::Shapes,
-        n: usize,
-    ) -> Vec<(u64, u32, super::class_var_program::Program)> {
-        use proptest::strategy::ValueTree;
-        use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
-
-        let mut runner = TestRunner::new_with_rng(
-            Config::default(),
-            TestRng::deterministic_rng(RngAlgorithm::ChaCha),
-        );
-        let strategy = arb_class_program(shapes);
-        (0..n)
-            .map(|_| {
-                strategy
-                    .new_tree(&mut runner)
-                    .expect("strategy draws a value")
-                    .current()
-            })
-            .collect()
     }
 
     /// `EcoString` alias local to this generator: proptest's `Strategy`
@@ -1363,25 +1300,6 @@ pub mod test_support {
             cases: default.cases.max(512),
             ..default
         }
-    }
-
-    /// A proptest configuration with a smaller per-run budget than
-    /// [`proptest_config_default`], for properties too slow to run 512 cases
-    /// in every `cargo test` (BT-3767: the class-variable agreement codegen
-    /// properties).
-    ///
-    /// `cases` is `default_cases`, unless the `PROPTEST_CASES` env var is
-    /// set, in which case it wins (that is how `just test-class-var-corpus`
-    /// and the nightly job ask for the full budget).
-    #[must_use]
-    pub fn proptest_config_cases(default_cases: u32) -> proptest::prelude::ProptestConfig {
-        let default = proptest::prelude::ProptestConfig::default();
-        let cases = if std::env::var_os("PROPTEST_CASES").is_some() {
-            default.cases
-        } else {
-            default_cases
-        };
-        proptest::prelude::ProptestConfig { cases, ..default }
     }
 
     #[cfg(test)]

@@ -45,7 +45,7 @@ pub(super) fn highlight_beamtalk(code: &str) -> String {
     result
 }
 
-/// Highlight line or block comments. Returns new index if matched.
+/// Highlight `//` line comments (block comments do not exist, BT-5229). Returns new index if matched.
 fn hl_comment(chars: &[char], i: usize, out: &mut String) -> Option<usize> {
     let len = chars.len();
     if i + 1 >= len || chars[i] != '/' {
@@ -56,16 +56,6 @@ fn hl_comment(chars: &[char], i: usize, out: &mut String) -> Option<usize> {
     if chars[i + 1] == '/' {
         while j < len && chars[j] != '\n' {
             j += 1;
-        }
-    } else if chars[i + 1] == '*' {
-        j += 2;
-        while j + 1 < len && !(chars[j] == '*' && chars[j + 1] == '/') {
-            j += 1;
-        }
-        if j + 1 < len && chars[j] == '*' && chars[j + 1] == '/' {
-            j += 2;
-        } else {
-            j = len;
         }
     } else {
         return None;
@@ -221,20 +211,10 @@ mod tests {
     }
 
     #[test]
-    fn highlights_closed_block_comment() {
+    fn does_not_highlight_block_comment_opener_as_comment() {
+        // BT-5229: `/* ... */` is not a comment in Beamtalk.
         let out = highlight_beamtalk("/* block */ x");
-        assert!(out.starts_with("<span class=\"hl-comment\">/* block */</span>"));
-    }
-
-    #[test]
-    fn highlights_unterminated_block_comment_to_end_of_input() {
-        // No closing `*/`: `hl_comment` must still consume to end-of-input
-        // rather than looping or under-consuming.
-        let out = highlight_beamtalk("/* never closed");
-        assert_eq!(
-            out,
-            "<span class=\"hl-comment\">/* never closed</span>".to_string()
-        );
+        assert!(!out.contains("hl-comment"), "{out}");
     }
 
     #[test]

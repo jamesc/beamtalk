@@ -101,7 +101,7 @@ pub mod well_known;
 // Re-export all public types so `use crate::ast::Foo` continues to work.
 pub use class::*;
 pub use expression::*;
-pub use literal_comments::{LiteralCommentSlots, LiteralComments};
+pub use literal_comments::{GapComments, GapSlot, LiteralCommentSlots, LiteralComments};
 pub use method::*;
 pub use pattern::*;
 pub use pipeline::PipelineSends;
@@ -356,7 +356,7 @@ pub struct Comment {
     pub content: EcoString,
     /// Source location of the comment.
     pub span: Span,
-    /// Whether this is a block comment (`/* */`) or line comment (`//`).
+    /// Whether this is a line comment (`//`) or a `///` doc-style comment.
     pub kind: CommentKind,
     /// Whether this comment was preceded by a blank line in the source.
     pub preceding_blank_line: bool,
@@ -370,17 +370,6 @@ impl Comment {
             content: content.into(),
             span,
             kind: CommentKind::Line,
-            preceding_blank_line: false,
-        }
-    }
-
-    /// Creates a block comment (`/* text */`).
-    #[must_use]
-    pub fn block(content: impl Into<EcoString>, span: Span) -> Self {
-        Self {
-            content: content.into(),
-            span,
-            kind: CommentKind::Block,
             preceding_blank_line: false,
         }
     }
@@ -409,8 +398,6 @@ impl Comment {
 pub enum CommentKind {
     /// A line comment (`// text`).
     Line,
-    /// A block comment (`/* text */`).
-    Block,
     /// A `///` doc-style line comment that isn't attached to any
     /// declaration's `doc_comment` field — e.g. an earlier block
     /// that a blank line broke away from the declaration it precedes.
@@ -952,14 +939,6 @@ mod tests {
     }
 
     #[test]
-    fn type_annotation_false_or() {
-        let inner = TypeAnnotation::simple("Integer", Span::new(0, 7));
-        let ty = TypeAnnotation::false_or(inner, Span::new(0, 15));
-        assert!(matches!(ty, TypeAnnotation::FalseOr { .. }));
-        assert_eq!(ty.span(), Span::new(0, 15));
-    }
-
-    #[test]
     fn type_annotation_span() {
         // Test that span() works for all variants
         let simple = TypeAnnotation::simple("Int", Span::new(0, 3));
@@ -977,12 +956,6 @@ mod tests {
             Span::new(0, 6),
         );
         assert_eq!(generic.span(), Span::new(0, 6));
-
-        let false_or = TypeAnnotation::false_or(
-            TypeAnnotation::simple("X", Span::new(0, 1)),
-            Span::new(0, 9),
-        );
-        assert_eq!(false_or.span(), Span::new(0, 9));
     }
 
     #[test]
@@ -1008,25 +981,6 @@ mod tests {
             Span::new(0, 19),
         );
         assert_eq!(generic.type_name(), "Collection(Integer)");
-
-        let false_or = TypeAnnotation::false_or(
-            TypeAnnotation::simple("Integer", Span::new(0, 7)),
-            Span::new(0, 15),
-        );
-        assert_eq!(false_or.type_name(), "Integer | False");
-
-        // FalseOr with union inner type should parenthesize
-        let false_or_union = TypeAnnotation::false_or(
-            TypeAnnotation::union(
-                vec![
-                    TypeAnnotation::simple("Integer", Span::new(0, 7)),
-                    TypeAnnotation::simple("String", Span::new(10, 16)),
-                ],
-                Span::new(0, 16),
-            ),
-            Span::new(0, 24),
-        );
-        assert_eq!(false_or_union.type_name(), "(Integer | String) | False");
     }
 
     #[test]
@@ -1270,9 +1224,9 @@ mod tests {
         assert_eq!(line.kind, CommentKind::Line);
         assert_eq!(line.content, "hello");
 
-        let block = Comment::block("world", Span::new(0, 9));
-        assert_eq!(block.kind, CommentKind::Block);
-        assert_eq!(block.content, "world");
+        let doc = Comment::doc("world", Span::new(0, 9));
+        assert_eq!(doc.kind, CommentKind::Doc);
+        assert_eq!(doc.content, "world");
     }
 
     #[test]

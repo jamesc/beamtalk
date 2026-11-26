@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Farm — hands jobs to workers round-robin and survives a worker's node
+/// dying mid-call.
+///
+/// A sync send to an actor whose node vanishes raises (`node_down`; ADR 0126
+/// §6). Farm catches only that kind, drops that worker from its live set and
+/// retries the job on a survivor. Any other error (a bug in the job, or a
+/// `timeout` from a worker that may still be running it) is passed on:
+/// dropping a healthy worker, or running the job twice, would hide the real
+/// problem. Remote workers are not linked to anything (ADR 0126
+/// §3), so this retry loop *is* the supervision of remote work.
+Actor subclass: Farm
+  state: live = #()
+  state: results = #()
+  state: lostKinds = #()
+
+  /// The workers to spread jobs over.
+  useWorkers: workers => self.live := workers
+
+  /// Run every job. The job whose id is `killId` is sent to a call that
+  /// halts the worker's node while the call is in flight.
+  runAll: jobs killAt: killId =>
+    jobs do: [:j |
+      self.results := self.results add: (self runOne: j killAt: killId)
+    ]
+    self.results
+
+  runOne: job killAt: killId =>
+    self.live isEmpty ifTrue: [self error: "Farm: no live workers left"]
+    worker := self.live at: ((job id - 1) % self.live size) + 1
+    outcome := [
+      job id =:= killId ifTrue: [
+        worker dieMidCall: job
+      ] ifFalse: [worker process: job]
+    ] on: Error do: [:e | e kind =:= #node_down ifTrue: [e] ifFalse: [e pass]]
+    (outcome isKindOf: JobResult)
+      ifTrue: [outcome]
+      ifFalse: [
+        self.lostKinds := self.lostKinds add: outcome kind
+        self.live := self.live reject: [:w | w =:= worker]
+        self runOne: job killAt: 0
+      ]
+
+  /// The kinds of error that made Farm give up on a worker.
+  lostKinds => self.lostKinds
+
+  liveCount => self.live size

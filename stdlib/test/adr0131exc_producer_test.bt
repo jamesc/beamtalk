@@ -181,36 +181,6 @@ TestCase subclass: Adr0131ExcProducerTest
   testAfterEach =>
     self assert: #[Adr0131ExcProducerClass afterEach, (Adr0131ExcProducerValue new) afterEach, (Adr0131ExcProducerActor spawn) afterEach] equals: #[#[1, 2], #[1, 2], #[1, 2]]
 
-  testClassFieldValueInLoop =>
-    self assert: (Adr0131ExcProducerClass fieldValueInLoop) equals: #[3, 3]
-
-  testClassFieldValueFoldInLoop =>
-    self assert: (Adr0131ExcProducerClass fieldValueFoldInLoop) equals: #[3, 6]
-
-  testClassFieldAssignOnDoInLoop =>
-    self assert: (Adr0131ExcProducerClass fieldAssignOnDoInLoop) equals: #[3, 2]
-
-  testClassFieldValueInCondArm0 =>
-    self assert: (Adr0131ExcProducerClass fieldValueInCondArm: true) equals: #[2, 3]
-
-  testClassFieldValueInCondArm1 =>
-    self assert: (Adr0131ExcProducerClass fieldValueInCondArm: false) equals: #[0, 0]
-
-  testClassFieldValueInArm0 =>
-    self assert: (Adr0131ExcProducerClass fieldValueInArm: true) equals: #[6, 1]
-
-  testClassFieldValueInArm1 =>
-    self assert: (Adr0131ExcProducerClass fieldValueInArm: false) equals: #[0, 0]
-
-  testClassCvarInBody =>
-    self assert: (Adr0131ExcProducerClass cvarInBody) equals: #[1, 1]
-
-  testClassCvarRaise =>
-    self assert: (Adr0131ExcProducerClass cvarRaise) equals: #[0, 0]
-
-  testClassCvarFieldAssign =>
-    self assert: (Adr0131ExcProducerClass cvarFieldAssign) equals: #[4, 1]
-
   testActorFieldValueInLoop =>
     self assert: ((Adr0131ExcProducerActor spawn) fieldValueInLoop) equals: #[3, 3]
 
