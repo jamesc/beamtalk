@@ -839,6 +839,7 @@ mod tests {
             description: None,
             licenses: None,
             strict_deps: false,
+            min_beamtalk: None,
         };
         let cfg = ReleaseConfig::default();
 
