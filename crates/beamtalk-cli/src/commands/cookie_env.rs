@@ -689,8 +689,19 @@ mod tests {
         let cookie = crate::commands::workspace::storage::generate_cookie();
         let name = format!("bt5185_boot_{}", std::process::id());
         let node = format!("{name}@localhost");
-        // Hold the node in its boot window: the restoring step comes late.
-        let eval = format!("timer:sleep(20000), {RESTORE_HOME_EVAL}, halt().");
+        // Hold the node in its boot window until the test kills it: the
+        // restoring step comes after an unbounded `receive`. The node first
+        // writes `ready`, so the probe starts on a real signal (BT-5252): the
+        // first `-eval` only runs once the kernel (and so distribution) is up.
+        // Before, the test polled for a pong in a fixed 10 s window and held
+        // the node with a fixed 20 s sleep; on a loaded CI runner the probe
+        // VMs (one erl boot per poll) overran both and "never answered".
+        let ready = std::env::temp_dir().join(format!("bt5185_ready_{}", std::process::id()));
+        let _ = std::fs::remove_file(&ready);
+        let eval = format!(
+            "file:write_file(\"{}\", <<\"up\">>), receive stop -> ok end, {RESTORE_HOME_EVAL}, halt().",
+            ready.display().to_string().replace('\\', "/")
+        );
         let home = CookieHome::new(&cookie).unwrap();
         let mut cmd = erl_command();
         cmd.args(["-noshell", "-sname", &node])
@@ -703,21 +714,25 @@ mod tests {
         home.apply(&mut cmd);
         let mut child = cmd.spawn().expect("spawn erl");
         let checked = std::panic::catch_unwind(|| {
-            let argv = argv_cookies(child.id());
-            // Wait until the node answers to any cookie we know of.
-            let mut answered = Vec::new();
-            for _ in 0..50 {
-                answered = argv
-                    .iter()
-                    .chain(std::iter::once(&cookie))
-                    .filter(|c| ping_with(&node, c) == "pong")
-                    .cloned()
-                    .collect();
-                if !answered.is_empty() {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(200));
+            // Readiness: the node is up and parked in its first `-eval`.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+            while !ready.exists() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the node never reached its first -eval"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(50));
             }
+            // The node has exec'd into the VM by now, so its argv is final.
+            let argv = argv_cookies(child.id());
+            // One probe per cookie, no retry loop: with the node ready, a
+            // probe with the right cookie must answer.
+            let answered: Vec<String> = argv
+                .iter()
+                .chain(std::iter::once(&cookie))
+                .filter(|c| ping_with(&node, c) == "pong")
+                .cloned()
+                .collect();
             for argv_cookie in &argv {
                 assert!(
                     !answered.contains(argv_cookie),
@@ -731,6 +746,7 @@ mod tests {
         });
         let _ = child.kill();
         let _ = child.wait();
+        let _ = std::fs::remove_file(&ready);
         checked.unwrap();
     }
 }

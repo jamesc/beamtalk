@@ -255,6 +255,19 @@ netsplit_heal_conflict_test_() ->
             ]
         end}}.
 
+%% Sever ordinary distribution and wait until BOTH sides have processed the
+%% nodedown (BT-5252). `disconnect_node/1` returns once this side has dropped
+%% the connection; the peer learns of it asynchronously. If the peer's
+%% `global_name_server` has not yet seen the nodedown when the heal reconnects,
+%% it treats the origin as still synced and runs no conflict resolution, so the
+%% test would hang until its 10 s DOWN timeout. The peer's `nodes()` is
+%% reachable over the `standard_io` control channel, so poll that.
+sever(Peer, PeerNode) ->
+    true = erlang:disconnect_node(PeerNode),
+    ok = beamtalk_test_wait:until(fun() ->
+        not lists:member(node(), peer:call(Peer, erlang, nodes, []))
+    end).
+
 %% Subscribe self() to ActorStopped, forwarding matching events back as
 %% plain messages — mirrors beamtalk_system_announcements_tests.erl's
 %% subscribe_self/1.
@@ -272,7 +285,7 @@ netsplit_heal_resolves_conflict(Peer, PeerNode) ->
     %% nodes. Each side can now register the SAME global name independently
     %% (neither can see the other's global_name_server), exactly like two
     %% real partitions that both kept taking traffic.
-    true = erlang:disconnect_node(PeerNode),
+    ok = sever(Peer, PeerNode),
 
     %% Register the OLDER registrant on the peer side first — via
     %% `peer:call/4`'s own control channel (ordinary `rpc:call/4` would fail;
@@ -397,7 +410,7 @@ supervised_child_loses_heal_conflict(Peer, PeerNode, Mod, Restart) ->
     _Sub = subscribe_self('ActorStopped'),
     Name = beamtalk_test_unique:atom("bt5231_supervised"),
     Args = child_args(Mod),
-    true = erlang:disconnect_node(PeerNode),
+    ok = sever(Peer, PeerNode),
     %% The older registrant, on the peer (unlinked: see
     %% netsplit_heal_resolves_conflict/2).
     {ok, PeerPid} = peer:call(Peer, erlang, apply, [
@@ -452,6 +465,10 @@ supervised_child_loses_heal_conflict(Peer, PeerNode, Mod, Restart) ->
                     %% no restart, so no start and no warning yet.
                     ok
             end,
+            %% The supervisor handles the child's EXIT independently of the
+            %% DOWN/announcement above (no cross-process ordering), so wait
+            %% for it to drop the pid rather than read it once (BT-5252).
+            ok = beamtalk_test_wait:until(fun() -> child_pid(Sup, child) =:= undefined end),
             ?assertEqual(undefined, child_pid(Sup, child)),
             %% A later restartChild: retries; the name is still held, so
             %% the start is ignored again: `Result ok: nil`, not an error.
