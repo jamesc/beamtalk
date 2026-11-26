@@ -1143,6 +1143,25 @@ They are folded into the sections above:
 The user-level performance gates (§ 8) and the split that leaves micro and
 dispatch benchmarks and coverage in beamtalk are also owner decisions.
 
+## Implementation Tracking
+
+**Epic:** BT-5302
+**Status:** Planned (2026-11-26)
+
+`[uat]` issues are implemented in jamesc/beamtalk-uat. `[beamtalk]` issues are implemented here.
+
+| Phase | Issues |
+|-------|--------|
+| 0. Skeleton, governance, artifacts | BT-5303 (uat harness rewrite), BT-5304 (uat governance), BT-5305 (uat J1, J2 and the first contracts), BT-5306 (beamtalk runner pinning and dispatch payload), BT-5307 (beamtalk macOS edge asset and `install.sh --edge`) |
+| 1. Canaries, releases, triage | BT-5308 (beamtalk `min-beamtalk` key), BT-5309 (uat triage), BT-5310 (uat J9), BT-5311 (uat J4, edge-fast, macOS fast set), BT-5312 (beamtalk: retire `cross-repo.yml`, docs) |
+| 2. Thin promotion | BT-5313 (beamtalk build/publish split, pre-release), BT-5314 (uat release-candidate gate flow), BT-5315 (beamtalk `promote.yml` in a protected Environment) |
+| 3. Contracts, registry, workspaces | BT-5316 (uat remaining contracts), BT-5317 (uat J3), BT-5318 (uat J10, J1 edge cases, J2 escript) |
+| 4. Adversarial | BT-5319 (uat public categories), BT-5320 (private `beamtalk-uat-security`) |
+| 5. Performance | BT-5321 (uat perf gates) |
+| 6. Live development and editors | BT-5322 (uat J6), BT-5323 (uat `.vsix` smoke) |
+| 7. Cluster, upgrade, LiveView | BT-5324 (uat J5, J8), BT-5325 (beamtalk nightly IDE archives), BT-5326 (uat J7) |
+| 8. Opt-in PR runs | BT-5327 (beamtalk `ci:uat`) |
+
 ## References
 
 - Related issues:
