@@ -1495,7 +1495,12 @@ version mismatch was silent until the first envelope failed.
 `{wireVersion, beamtalkVersion}` alongside the shape manifest. On a mismatch it
 announces one `NodeVersionSkew`. A peer too old to answer the read is announced
 too, with `nil` remote fields, because that is the rolling-upgrade case this is
-for:
+for. A read that **times out** is different (amended by BT-5240): it is logged
+as a warning and not announced. A slow peer is not evidence of skew, so only a
+real version mismatch, or a peer that answers with an error, is announced. The
+same holds for a peer that drops during the read. The check is tagged with the
+connection it was started for, so a read that outlives a reconnect does not
+announce a second event for the same peer:
 
 ```beamtalk
 sealed typed Announcement subclass: NodeVersionSkew
