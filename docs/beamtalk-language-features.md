@@ -7818,8 +7818,10 @@ SystemAnnouncer current when: NodeVersionSkew do: [:e |
 - **`NodeVersionSkew`** is announced once per connect (best-effort) when
   the peer runs a different wire-format version (`localWireVersion` /
   `remoteWireVersion`) or Beamtalk version (`localBeamtalkVersion` /
-  `remoteBeamtalkVersion`). A peer that cannot report its versions (too
-  old, or too slow to answer) is announced too, with `nil` remote fields.
+  `remoteBeamtalkVersion`). A peer too old to report its versions is
+  announced too, with `nil` remote fields. A peer too slow to answer is
+  not: the timeout is logged as a warning, because a slow peer is not
+  evidence of skew.
   Like `NodeShapeSkew`, it **never refuses the connection**: a Beamtalk
   version mismatch is the normal state of a rolling upgrade. The
   per-message `wire_version_unsupported` check stays the safety net.

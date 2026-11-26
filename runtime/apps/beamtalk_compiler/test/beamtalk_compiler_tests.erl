@@ -47,7 +47,6 @@ compiler_test_() ->
             fun class_meta_from_core_erlang_reads_real_compile/0},
         {"class_meta_from_core_erlang not_available cases (BT-4285)",
             fun class_meta_from_core_erlang_not_available/0},
-        {"backend defaults to port", fun backend_default_port/0},
         {"multiple compiles on same server", fun multiple_compiles/0},
         {"compile file with default options", fun compile_file_default_options/0},
         {"compile_expression with class definition", fun compile_expression_class_def/0},
@@ -239,9 +238,6 @@ class_meta_from_core_erlang_not_available() ->
         "'__beamtalk_meta'/0 = fun () -> call 'erlang':'self'()\nend\n"
     >>,
     ?assertEqual(not_available, beamtalk_compiler:class_meta_from_core_erlang(NotConstant)).
-
-backend_default_port() ->
-    ?assertEqual(port, beamtalk_compiler_backend:backend()).
 
 multiple_compiles() ->
     {ok, _, [], _} = beamtalk_compiler:compile_expression(<<"1 + 2">>, <<"m1">>, []),

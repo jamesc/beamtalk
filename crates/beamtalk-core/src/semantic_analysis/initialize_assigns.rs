@@ -543,7 +543,7 @@ mod tests {
         }
     }
 
-    use crate::test_helpers::test_support::bare;
+    use crate::test_helpers::test_support::{bare, wildcard_arm};
 
     fn block(body: Vec<Expression>) -> Block {
         Block::new(vec![], body.into_iter().map(bare).collect(), span())
@@ -630,10 +630,6 @@ mod tests {
             is_cast: false,
             span: span(),
         }
-    }
-
-    fn wildcard_arm(body: Expression) -> MatchArm {
-        MatchArm::new(Pattern::Wildcard(span()), body, span())
     }
 
     fn symbol_arm(name: &str, body: Expression) -> MatchArm {

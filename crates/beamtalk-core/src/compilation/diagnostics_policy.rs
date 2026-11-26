@@ -128,14 +128,11 @@ const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
     ("empty-body", DiagnosticCategory::EmptyBody),
     ("lint", DiagnosticCategory::Lint),
     ("dead-assignment", DiagnosticCategory::DeadAssignment),
-    ("extension-conflict", DiagnosticCategory::ExtensionConflict),
-    ("deprecation", DiagnosticCategory::Deprecation),
     ("actor-new", DiagnosticCategory::ActorNew),
     ("visibility", DiagnosticCategory::Visibility),
     ("unresolved-class", DiagnosticCategory::UnresolvedClass),
     ("unresolved-ffi", DiagnosticCategory::UnresolvedFfi),
     ("arity-mismatch", DiagnosticCategory::ArityMismatch),
-    ("shadowed-class", DiagnosticCategory::ShadowedClass),
     ("type-annotation", DiagnosticCategory::TypeAnnotation),
     ("inheritance", DiagnosticCategory::Inheritance),
     ("sendability", DiagnosticCategory::Sendability),
@@ -226,13 +223,20 @@ fn value_type_name(value: &toml::Value) -> &'static str {
 /// `[diagnostics]` keys of lints that no longer exist (ADR 0153 removed
 /// `class-state-abroad` and `class-process-ffi` with class variables, and
 /// `class-var-reflection-shadowing` once a class's own `fieldAt:` method
-/// answered on every route, BT-5155). A manifest that still sets one keeps
+/// answered on every route, BT-5155; BT-5196 removed `extension-conflict`,
+/// `deprecation` and `shadowed-class`, whose diagnostics were never emitted;
+/// the `@expect deprecation` / `@expect shadowed_class` names still parse and
+/// are reported stale, `extension-conflict` never had an `@expect` name).
+/// A manifest that still sets one keeps
 /// building: the key is ignored, as the matching `@expect` name is accepted
 /// and reported stale.
 const REMOVED_DIAGNOSTIC_KEYS: &[&str] = &[
     "class-state-abroad",
     "class-process-ffi",
     "class-var-reflection-shadowing",
+    "extension-conflict",
+    "deprecation",
+    "shadowed-class",
 ];
 
 /// Parse and validate the `[diagnostics]` section of a manifest (ADR 0100 Rule 3).
@@ -638,12 +642,10 @@ fn expect_category_unchecked(
         | ExpectCategory::Dnu
         | ExpectCategory::Type
         | ExpectCategory::Unused
-        | ExpectCategory::Deprecation
         | ExpectCategory::ActorNew
         | ExpectCategory::Visibility
         | ExpectCategory::UnresolvedClass
         | ExpectCategory::ArityMismatch
-        | ExpectCategory::ShadowedClass
         | ExpectCategory::TypeAnnotation
         | ExpectCategory::Inheritance
         | ExpectCategory::Sendability
@@ -659,6 +661,9 @@ fn expect_category_unchecked(
         // Deprecated, parse-only (ADR 0153): the lints were removed.
         | ExpectCategory::ClassStateAbroad
         | ExpectCategory::ClassProcessFfi
+        // Deprecated, parse-only (BT-5196): nothing ever produced them.
+        | ExpectCategory::Deprecation
+        | ExpectCategory::ShadowedClass
         | ExpectCategory::ClassVarReflectionShadowing => false,
     }
 }
@@ -951,10 +956,6 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     Some(DiagnosticCategory::DeadAssignment)
                 )
                 | (ExpectCategory::Lint, Some(DiagnosticCategory::Lint))
-                | (
-                    ExpectCategory::Deprecation,
-                    Some(DiagnosticCategory::Deprecation)
-                )
                 | (ExpectCategory::ActorNew, Some(DiagnosticCategory::ActorNew))
                 | (
                     ExpectCategory::Visibility,
@@ -971,10 +972,6 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                 | (
                     ExpectCategory::ArityMismatch,
                     Some(DiagnosticCategory::ArityMismatch)
-                )
-                | (
-                    ExpectCategory::ShadowedClass,
-                    Some(DiagnosticCategory::ShadowedClass)
                 )
                 | (
                     ExpectCategory::Inheritance,
@@ -1164,14 +1161,11 @@ unused = "warn"
 empty-body = "error"
 lint = "off"
 dead-assignment = "warn"
-extension-conflict = "error"
-deprecation = "warn"
 actor-new = "error"
 visibility = "error"
 unresolved-class = "warn"
 unresolved-ffi = "warn"
 arity-mismatch = "warn"
-shadowed-class = "warn"
 type-annotation = "hint"
 inheritance = "error"
 sendability = "hint"
@@ -1489,7 +1483,8 @@ dnu = "error"
     fn removed_class_variable_lint_keys_are_ignored() {
         let value: toml::Value = toml::from_str(
             "class-state-abroad = \"off\"\nclass-process-ffi = \"off\"\n\
-             class-var-reflection-shadowing = \"off\"\ndnu = \"off\"",
+             class-var-reflection-shadowing = \"off\"\nextension-conflict = \"off\"\n\
+             deprecation = \"off\"\nshadowed-class = \"off\"\ndnu = \"off\"",
         )
         .unwrap();
         let table = parse_diagnostics_table(Some(&value)).unwrap();
@@ -1504,6 +1499,8 @@ dnu = "error"
             "class_state_abroad",
             "class_process_ffi",
             "class_var_reflection_shadowing",
+            "deprecation",
+            "shadowed_class",
         ] {
             let source = format!("@expect {name}\n42");
             let (module, parse_diags) = parse(lex_with_eof(&source));
