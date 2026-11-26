@@ -270,34 +270,21 @@ Object subclass: ModeLabel
     ]
 ```
 
-There is a closed set whenever you can name the cases, even for classes: a
-`type` alias over leaf classes, matched with `x :: Class ->` arms. Adding a
-member to the alias makes every match that does not handle it a compile error:
+There is a closed set whenever you can name the cases, classes included: a
+`type` alias over leaf classes, matched with `x :: Class ->` arms. The same
+holds for your own `Value` classes (`type Node = TextNode | VarNode | TagNode`).
+Adding a member to the alias makes every match that does not handle it a
+compile error:
 
 ```beamtalk
-Value subclass: TextPiece
-  field: text :: String = ""
-```
+type Scalar = Integer | String | Symbol
 
-```beamtalk
-Value subclass: VarPiece
-  field: name :: String = ""
-```
-
-```beamtalk
-Value subclass: TagPiece
-  field: tag :: String = ""
-```
-
-```beamtalk
-type Piece = TextPiece | VarPiece | TagPiece
-
-Object subclass: Renderer
-  class render: node :: Piece -> String =>
-    node matchExhaustive: [
-      t :: TextPiece -> t text;
-      v :: VarPiece -> "{" ++ v name ++ "}";
-      g :: TagPiece -> "<" ++ g tag ++ ">"
+Object subclass: Describe
+  class scalar: v :: Scalar -> String =>
+    v matchExhaustive: [
+      n :: Integer -> "number {n}";
+      s :: String -> "text {s}";
+      y :: Symbol -> "symbol {y}"
     ]
 ```
 
