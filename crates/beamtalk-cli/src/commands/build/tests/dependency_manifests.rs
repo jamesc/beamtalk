@@ -8,8 +8,36 @@
 use super::*;
 use beamtalk_core::build_layout::BuildLayout;
 
+/// Register the unknown-key `tracing::warn!` callsite exactly once, before
+/// any test here can race its first registration (BT-5272).
+///
+/// `tracing` registers a callsite lazily, on its first hit anywhere in the
+/// process. A registering thread computes the callsite's cached `Interest`
+/// from the dispatchers it sees, then stores it. If a test's scoped
+/// subscriber is installed in between, its interest rebuild runs first and
+/// the registrant's later store overwrites it with `never`: the subscriber
+/// silently receives nothing. The two tests in this module both reach the
+/// callsite and run in parallel, so the second test's captured log was
+/// occasionally empty. `Once::call_once` blocks every other caller until the
+/// first has finished registering, so afterwards installing a subscriber
+/// rebuilds interest for an already-registered callsite, which is reliable.
+/// Call this first in every test that builds a dependency with unknown keys.
+fn register_unknown_key_callsite() {
+    static REGISTERED: std::sync::Once = std::sync::Once::new();
+    REGISTERED.call_once(|| {
+        let temp = TempDir::new().unwrap();
+        let path = Utf8PathBuf::from_path_buf(temp.path().join("beamtalk.toml")).unwrap();
+        write_test_file(
+            &path,
+            "[package]\nname = \"prime\"\nversion = \"0.1.0\"\nprime_only_key = 1\n",
+        );
+        beamtalk_package::manifest::parse_dependency_manifest_full(&path).unwrap();
+    });
+}
+
 #[test]
 fn build_succeeds_with_a_path_dependency_that_has_unknown_manifest_keys() {
+    register_unknown_key_callsite();
     let temp = TempDir::new().unwrap();
     let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
 
@@ -63,6 +91,8 @@ fn build_rejects_unknown_keys_in_the_project_manifest() {
 /// warning must still appear once per dependency and key.
 #[test]
 fn unknown_key_warning_is_emitted_once_per_dependency_per_build() {
+    register_unknown_key_callsite();
+
     #[derive(Clone, Default)]
     struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
     impl std::io::Write for Captured {
