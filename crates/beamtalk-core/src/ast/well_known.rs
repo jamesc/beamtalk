@@ -256,6 +256,23 @@ impl WellKnownSelector {
         )
     }
 
+    /// Whether this is one of the four instance-field reflection selectors
+    /// (`fieldAt:`, `fieldAt:put:`, `hasField:`, `clearField:`).
+    ///
+    /// THE one list the static side keeps of them: since ADR 0153 decision 7 a
+    /// class has no fields, so the runtime refuses these for a class object
+    /// unless the class defines a class method of that name
+    /// (`beamtalk_object_class:is_field_reflection_selector/1`, BT-5155). The
+    /// runtime's list is pinned to this one by the
+    /// `field_reflection_selectors_match_runtime` test (BT-5241).
+    #[must_use]
+    pub const fn is_field_reflection(self) -> bool {
+        matches!(
+            self,
+            Self::FieldAt | Self::FieldAtPut | Self::HasField | Self::ClearField
+        )
+    }
+
     /// The expected number of arguments for this selector.
     ///
     /// Equivalent to the arity that a parser-produced [`MessageSelector`] would
@@ -397,6 +414,33 @@ mod tests {
     use super::*;
     use crate::ast::KeywordPart;
     use crate::span::Span;
+
+    /// BT-5241: the runtime refuses exactly these selectors for a class object
+    /// (`beamtalk_object_class:is_field_reflection_selector/1`); the two lists
+    /// must agree. Read from the Erlang source, so an edit on either side fails
+    /// here (architecture-principles § Duplication).
+    #[test]
+    fn field_reflection_selectors_match_runtime() {
+        let erl =
+            include_str!("../../../../runtime/apps/beamtalk_runtime/src/beamtalk_object_class.erl");
+        let mut runtime: Vec<&str> = erl
+            .lines()
+            .filter_map(|l| {
+                let rest = l.strip_prefix("is_field_reflection_selector('")?;
+                let (sel, tail) = rest.split_once("') -> ")?;
+                (tail == "true;").then_some(sel)
+            })
+            .collect();
+        runtime.sort_unstable();
+        let mut rust: Vec<&str> = ALL_VARIANTS
+            .iter()
+            .filter(|v| v.is_field_reflection())
+            .map(|v| v.as_str())
+            .collect();
+        rust.sort_unstable();
+        assert_eq!(rust, runtime);
+        assert_eq!(rust.len(), 4);
+    }
 
     /// All variants, used for exhaustive round-trip testing.
     const ALL_VARIANTS: &[WellKnownSelector] = &[
