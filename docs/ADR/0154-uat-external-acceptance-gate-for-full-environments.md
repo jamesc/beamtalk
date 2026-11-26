@@ -196,12 +196,29 @@ bind every agent and human working in the repository:
 
 **Enforcement.** Rule 2 is enforced mechanically, not by trust:
 
-- `CODEOWNERS` makes the owner the required reviewer for `schemas/**`,
-  `bench/thresholds.toml` and `playwright.config.ts`.
-- A CI check, `governance.yml`, fails any PR whose diff removes an assertion,
-  adds `test.skip` / `test.fixme` / `.only`, or raises a number in
-  `thresholds.toml`, unless the PR carries the `uat:owner-approved` label, which
-  only the owner can apply.
+- **The contract surface needs the owner's review.** `CODEOWNERS` names the
+  owner for `schemas/**`, `bench/thresholds.toml`, `playwright.config.ts`,
+  `.github/**` and `CODEOWNERS` itself. Branch protection on `main` requires a
+  code-owner review, so a change there cannot merge without an approving review
+  from the owner's account. The required review is the gate, not a label.
+- **Weakening a test needs the owner's review.** A required check,
+  `governance.yml`, diffs `tests/**` and `lib/**` against the base. It flags a PR
+  as *weakening* if it:
+  - removes or loosens an `expect` (for example `toBe` → `toContain`);
+  - deletes a test or step;
+  - adds `test.skip` / `test.fixme` / `.only`;
+  - raises a timeout;
+  - adds a target exclusion;
+  - lowers a perf iteration count.
+  A weakening PR passes only when the GitHub reviews API shows an **APPROVED
+  review from the owner's login on the PR's current head SHA**. The check reads
+  that from the API, so applying a label proves nothing, and a later push
+  invalidates the approval.
+- Adding tests, steps, assertions or schemas is not weakening and needs no owner
+  review, so the suite can compound freely.
+- The heuristics can miss a cleverly disguised weakening. That is why the
+  review-gated paths hold every *expected value* that is not inline in a step:
+  schemas, thresholds and config. The heuristics backstop the rest.
 
 ### 3. Per-target artifacts and the trigger
 
@@ -385,7 +402,7 @@ Object subclass: HelloWeb
 
 | # | Journey | Steps (abridged) | Catches |
 |---|---------|------------------|---------|
-| **J1** | Install | `install.sh` (Linux and macOS) or zip plus `PATH` (Windows) into a clean `HOME` → `--version` matches the payload → `doctor` is healthy → `--uninstall`. | Packaging, checksums, archive layout, a missing ERTS or OTP app. |
+| **J1** | Install | `install.sh` with the documented channel flag for the artifact under test (`--version vX.Y.Z`, `--nightly` or `--edge`), or the zip plus `PATH` on Windows, into a clean `HOME` → the archive the installer fetched has the sha256 from the payload → `beamtalk --version` matches → `doctor` is healthy → `--uninstall`. | Packaging, checksums, archive layout, a missing ERTS or OTP app. |
 | **J2** | Project lifecycle | `new` → fmt-check clean → `build` → `test` → edit → `lint` finds it → `fmt` fixes it → `run` → `new --app` → `run .` → Ctrl+C exits cleanly. | Scaffold drift (BT-2476), the build cache, output routing. |
 | **J3** | Registry packages | `deps add` from the real registry → lockfile pins the closure → `build --warnings-as-errors` → buccaneer serves HTTP → `deps update` → warm rebuild. | Index resolution, git checkout, the type checker against real packages. |
 | **J4** | Releases | `release` → `start` → `ping` → `rpc "Beamtalk releaseInfo"` → `stop` → leak check; TLS variant (`RELEASE_DISTRIBUTION=tls`, generated CA) plus a loopback client on the same host; `--upgrade-from` flags an unmigrated shape bump. | Launcher verbs, BT-5264-class epmd, TLS preflight, `.cmd` launchers. |
@@ -394,6 +411,17 @@ Object subclass: HelloWeb
 | **J7** | LiveView IDE | Install the IDE archive → `bin/server <workspace-id>` → Playwright: page loads → eval round-trips → System Browser shows the class → edit a method → the workspace sees it. | Bundle/IDE skew, packaging, the Attach topology. |
 | **J8** | Upgrade path | Install the previous release → project and release → install the candidate over it → same project builds, tests and releases → `--upgrade-from` is clean → the old `~/.beamtalk` cache is harmless. | Cache and lockfile compatibility, stale install state. |
 | **J9** | Downstream canaries | For each package in the registry index: its default branch and its latest tag → `beamtalk test --warnings-as-errors`. | BT-5283 / BT-5290. |
+
+**What J1 tests, and when the plain path is exercised.** J1 tests the
+**installer**, pinned with its documented flags. `install.sh --version vX.Y.Z`
+downloads by tag, so it reaches a pre-release, and it verifies the archive
+against the published `.sha256`. J1 also checks that sha256 against the
+dispatch payload, so the installed archive is the one § 3 verified. No
+undocumented pin is used. The unpinned path, `install.sh` with no flags
+resolving `releases/latest`, cannot see a candidate by design. It is exercised
+by a **post-promotion smoke**: once `promote` runs, uat runs J1 unpinned on
+every target and asserts that it installs the version just promoted. That run
+cannot block, because the release is already out. A red files a priority-2 Bug.
 
 J9 reads its package list from the index, so new packages are covered with no
 uat edit. Today the index lists agents, announcements, buccaneer, catalina,
@@ -450,8 +478,11 @@ the user-experience reason beside each. They are calibrated, not guessed:
 | `release.start` | `bin/<n> start` → first successful `ping` | `hello_web` release |
 | `actor.throughput` / `actor.latency` | messages per second and p75 send→reply between local actors | `counter_live` |
 | `cluster.send` | p75 cross-node named-send round trip | `farm_cluster`, two nodes |
-| `registry.resolve` | `deps add` + resolve + fetch, cold and warm index cache | `hello_web` |
-| `lsp.latency` | `hover`, `completion`, `definition` p75 in workspace mode | `hello_web` |
+| `registry.resolve.cold` / `registry.resolve.warm` | `deps add` + resolve + fetch, with an empty / warm index cache | `hello_web` |
+| `lsp.hover` / `lsp.completion` / `lsp.definition` | request→response p75 in workspace mode | `hello_web` |
+
+That is **14 measurements**, each with its own threshold per target. Each is one
+benchmark with 2 + 5 iterations; the `/` rows are separate benchmarks.
 
 These catch what micro-benchmarks miss: release-build flags, packaging,
 startup, install layout and registry behaviour. beamtalk keeps
@@ -472,7 +503,7 @@ breach blocks promotion like any other red (§ 10).
   step observes an earlier one.
 - **Multi-node.** Unique `-sname`s and cookies per test. epmd state is captured
   and reset, and the documented `RELEASE_*` variables are supported.
-- **Network and registry.** J3, J9 and `registry.resolve` use the live registry
+- **Network and registry.** J3, J9 and the `registry.resolve.*` benchmarks use the live registry
   and GitHub. Unreachable hosts are classified `infra` (§ 11), not `toolchain`.
 - **Two kinds of time budget.** A hard per-step **hang guard** ("step `rpc`
   exceeded 60s") is separate from the perf gates, which own the
@@ -499,8 +530,19 @@ the bundle before uat reports. Under this ADR:
 1. A tag push builds every target and publishes the GitHub release as a
    **pre-release**, which `install.sh`'s `releases/latest` lookup does not see.
 2. It dispatches uat with the payload in § 3.
-3. uat runs every layer on every target. Green posts `uat-gate: success`.
-4. A `promote` job in beamtalk, triggered by that status, then:
+3. uat runs every layer on every target. It posts a `uat-gate` commit status
+   for people to see. It also sends a `repository_dispatch` back to beamtalk
+   (`event-type: uat-gate`) with `{tag, sha, version, targets: {<target>:
+   <sha256>}, result, run_id}`. This uses a token scoped to dispatch into
+   beamtalk only. The status is for display; the dispatch is the trigger.
+4. `promote.yml` in beamtalk runs on that dispatch. It promotes only if all of
+   these hold:
+   - `result` is `success`;
+   - the tag still resolves to `sha`;
+   - every `sha256` matches the pre-release's assets;
+   - the GitHub API shows that `run_id` is a completed, successful run of
+     uat's `gate.yml` on uat's `main`, for that tag.
+   If any check fails, it refuses and files a Bug. When all pass, it:
    - marks the release latest, which `install.sh` and the manual-download docs
      follow;
    - publishes the VS Code extension to the Marketplace;
@@ -593,9 +635,9 @@ macOS and Windows runners are slower: budget 1.5× and 2×.
 | Run | Runner-minutes | Wall time | Notes |
 |-----|---------------:|----------:|-------|
 | Per edge publish | ≈ 70 | ≈ 12 min (4 Linux shards, 1 macOS leg in parallel) | After merge, so no PR wall time. Linux ≈ 45 (≈ 30 journeys + J9, ≈ 15 contracts + fast adversarial). macos-arm64 fast set ≈ 25 (≈ 16 Linux-equivalent × 1.5). Plus the macOS edge *build* in beamtalk's `edge.yml`, ≈ 15 to 25 with a warm cache. |
-| Nightly | ≈ 330 | ≈ 60 min | ≈ 200 for functional layers; ≈ 50 Linux + 75 macOS×2 + 40 Windows ≈ 130 for perf (the most expensive line, because of macOS). |
-| Release candidate | ≈ 330 | ≈ 60 min to promotion | Same as nightly, blocking. |
-| Weekly on `latest` | ≈ 330 | ≈ 60 min | Includes J9 on macOS and Windows. |
+| Nightly | ≈ 320 | ≈ 60 min | ≈ 200 for functional layers. Perf ≈ 120: one dedicated ≈ 20-minute Linux job, scaled 1.5× for each macOS target and 2× for Windows (20 + 30 + 30 + 40). macOS is the most expensive part. |
+| Release candidate | ≈ 320 | ≈ 60 min to promotion | Same as nightly, blocking. |
+| Weekly on `latest` | ≈ 320 | ≈ 60 min | Includes J9 on macOS and Windows. |
 
 **BT-5273 lessons, applied:**
 
@@ -606,7 +648,7 @@ macOS and Windows runners are slower: budget 1.5× and 2×.
   - npm by the lockfile;
   - Playwright browsers by the Playwright version;
   - J9 deps by the index HEAD.
-- **Cold where the user is cold.** J3, `compile.cold` and `registry.resolve`
+- **Cold where the user is cold.** J3, `compile.cold` and `registry.resolve.cold`
   always run cold.
 - **Only `main` and scheduled runs save caches** (the `save-if` shape), so PR
   runs can't evict them.
@@ -783,7 +825,7 @@ Each is steelmanned above:
 - Adversarial coverage of cookies, TLS, secrets, locks and atomic writes exists
   for the first time against shipped artifacts.
 - The suite compounds: every escaped regression becomes a permanent test.
-- The governance rules are enforced by CODEOWNERS and a CI check, not trust.
+- The governance rules are enforced by required code-owner reviews and a check that reads the owner's approval from the reviews API, not by trust or labels.
 - There is no compiled harness, so no cold-cache timeouts in uat.
 
 ### Negative
@@ -793,7 +835,7 @@ Each is steelmanned above:
   TypeScript.
 - Real-network tests depend on GitHub. `infra` classification limits the damage
   but cannot remove it.
-- Ongoing cost is about 330 runner-minutes per nightly, weekly and
+- Ongoing cost is about 320 runner-minutes per nightly, weekly and
   release-candidate run, with macOS perf the largest line. Each edge publish
   costs about 70 runner-minutes, plus a macOS edge build in beamtalk.
 - Releases are delayed by about 60 minutes, longer when red. Waivers are
@@ -821,14 +863,14 @@ and ships independently.
 
 | Phase | Scope | Size | Why this order |
 |-------|-------|------|----------------|
-| **0. Skeleton and governance** | In beamtalk-uat: Playwright Test project; `env`, `toolchain`, `proc` and `artifacts` libraries; Zod `schemas/`; teardown and leak checks; failure bundle; 4-target workflow; new `CLAUDE.md` rules; CODEOWNERS; `governance.yml`. **J1**, **J2**, and Layer 1 for the 7 commands today's scenarios cover. Delete the Rust harness. In beamtalk: `edge.yml` builds `macos-arm64` as well as linux, and `edge.yml` and `nightly.yml` dispatch with the § 3 payload. uat: repo-scoped Linear and Claude secrets. | M | Everything builds on it, and governance must exist before the suite grows. |
+| **0. Skeleton and governance** | In beamtalk-uat: Playwright Test project; `env`, `toolchain`, `proc` and `artifacts` libraries; Zod `schemas/`; teardown and leak checks; failure bundle; 4-target workflow; new `CLAUDE.md` rules; CODEOWNERS with required code-owner review on `main`; `governance.yml` (owner approval read from the reviews API). **J1**, **J2**, and Layer 1 for the 7 commands today's scenarios cover. Delete the Rust harness. In beamtalk: `edge.yml` builds `macos-arm64` as well as linux, and `edge.yml` and `nightly.yml` dispatch with the § 3 payload. uat: repo-scoped Linear and Claude secrets. | M | Everything builds on it, and governance must exist before the suite grows. |
 | **1. Canaries on edge, and triage** | **J9** sharded over the registry index; `uat-edge` status; `triage.yml` with fingerprints and classes. Retire `cross-repo.yml`. Permanent tests for BT-5283 (in J9) and BT-5264 (a macOS J4 step). | M | Highest value per effort: J9 would have caught BT-5283 within the hour. |
 | **2. All command contracts; registry and releases** | Layer 1 for the remaining 14 commands. **J3** (buccaneer from the real registry) and **J4** (verbs, TLS on Linux and macOS, `--upgrade-from`, `.cmd` launchers). | M | Covers the newcomer's first-service path and the BT-5264 class. |
 | **3. Adversarial layer** | Layer 3, all eight categories (§ 7), with the fast subset on edge. | M | Cheap once Phase 2's release and node handles exist. Security findings are high-severity. |
 | **4. Performance gates** | `lib/bench.ts` (2 warmup + 5 measured, p50/p75/p95, multiplier); the 14 measurements of § 8 on dedicated jobs; 10 nightly report-only runs; owner sets `thresholds.toml`; gating turned on. | M | Calibration needs real nightly data, so it starts early enough to finish before Phase 7. |
 | **5. Live development** | **J6**: REPL through a pty (ConPTY on Windows) with hot reload of a running actor; MCP flow through the SDK; LSP in workspace mode. | M | Interactive-first is principle #1. |
 | **6. Cluster, upgrade, LiveView** | **J5**, **J8**; beamtalk publishes IDE archives on `nightly` (S); `ide.ts` and **J7** with Playwright, plus the Docker variant. | L (+S in beamtalk) | The most harness work, and J7 needs the pipeline change. |
-| **7. Blocking promotion** | beamtalk: tags publish a pre-release; `promote` job on `uat-gate: success` marks it latest; the triggers of `release-vscode.yml`, `liveview-release.yml`, `liveview-docker.yml` and `desktop-release.yml` move from `release: published` to `promote`; owner waiver path. J5 on Windows graduates to blocking once two weeks green. `ci:uat` label calling uat's reusable workflow with a PR-built bundle. | M | Blocking only after phases 0 to 6 have a few weeks of measured flake rate and calibrated thresholds. |
+| **7. Blocking promotion** | beamtalk: tags publish a pre-release; `promote.yml` on uat's verified `uat-gate` dispatch (§ 10) marks it latest; post-promotion unpinned J1 smoke; the triggers of `release-vscode.yml`, `liveview-release.yml`, `liveview-docker.yml` and `desktop-release.yml` move from `release: published` to `promote`; owner waiver path. J5 on Windows graduates to blocking once two weeks green. `ci:uat` label calling uat's reusable workflow with a PR-built bundle. | M | Blocking only after phases 0 to 6 have a few weeks of measured flake rate and calibrated thresholds. |
 
 **Affected components:**
 
