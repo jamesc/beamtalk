@@ -450,6 +450,17 @@ impl ReplClient {
     pub(crate) fn unload(&mut self, class_name: &str) -> Result<ReplResponse> {
         self.send_request(&RequestBuilder::unload(class_name))
     }
+
+    /// Send the `flush` operation (BT-5204): the one implementation the REPL,
+    /// MCP and LiveView share, including the destructive-tier confirmation
+    /// rule. `confirm_destructive` also applies Tier 2 entries.
+    pub(crate) fn flush(
+        &mut self,
+        scope: beamtalk_repl_protocol::FlushScope<'_>,
+        confirm_destructive: bool,
+    ) -> Result<ReplResponse> {
+        self.send_request(&RequestBuilder::flush(scope, confirm_destructive))
+    }
 }
 
 #[cfg(test)]

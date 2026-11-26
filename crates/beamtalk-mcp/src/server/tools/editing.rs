@@ -40,6 +40,21 @@ pub(crate) fn try_method_expr(class: &str, selector: &str, body: &str) -> String
     )
 }
 
+/// Add the `ChangeLog` warnings an operation reply carries to `text`. A change
+/// whose entry could not be recorded is live but `flush` will not write it, so
+/// say so rather than reporting a clean save.
+fn append_changelog_warnings(text: &mut String, value: Option<&serde_json::Value>) {
+    if let Some(warnings) = value
+        .and_then(|v| v.get("warnings"))
+        .and_then(serde_json::Value::as_array)
+    {
+        for warning in warnings.iter().filter_map(serde_json::Value::as_str) {
+            text.push_str("\nWarning: ");
+            text.push_str(warning);
+        }
+    }
+}
+
 #[tool_router(router = editing_tool_router, vis = "pub(crate)")]
 impl BeamtalkMcp {
     /// Hot-reload a class, migrating running actors to the new code.
@@ -115,7 +130,7 @@ impl BeamtalkMcp {
 
         check_response!(response, "Failed to save method");
 
-        let text = response
+        let mut text = response
             .value
             .as_ref()
             .and_then(|v| v.get("class"))
@@ -125,6 +140,7 @@ impl BeamtalkMcp {
                 || format!("Method {}>>#{} saved", params.class, selector),
                 str::to_string,
             );
+        append_changelog_warnings(&mut text, response.value.as_ref());
 
         timer.ok_text(text)
     }
@@ -232,17 +248,7 @@ impl BeamtalkMcp {
             .and_then(serde_json::Value::as_str)
             .unwrap_or(&params.path);
         let mut text = format!("New class queued for {path}");
-        // A ChangeLog entry that could not be recorded means `flush` will not
-        // write the file; say so rather than reporting a clean "queued".
-        if let Some(warnings) = value
-            .and_then(|v| v.get("warnings"))
-            .and_then(serde_json::Value::as_array)
-        {
-            for warning in warnings.iter().filter_map(serde_json::Value::as_str) {
-                text.push_str("\nWarning: ");
-                text.push_str(warning);
-            }
-        }
+        append_changelog_warnings(&mut text, value);
 
         timer.ok_text(text)
     }

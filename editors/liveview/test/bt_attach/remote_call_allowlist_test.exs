@@ -12,11 +12,12 @@ defmodule BtAttach.RemoteCallAllowlistTest do
   ignored) and fails when a remote call targets a `module:function` outside
   `@allowlist` below.
 
-  `@allowlist` starts as today's set. Each entry is annotated with the issue that
-  migrates it to the operation layer and removes it (`:permanent` entries are the
-  operation layer and the subscription facade themselves). The list can only
-  shrink: a new direct call fails here, and an entry nothing calls any more
-  fails here as stale, so the migrating issue must delete it.
+  `@allowlist` is the closed-out set (BT-5206): the operation layer
+  (`beamtalk_repl_ops`, including the one session API), the subscription facade
+  (`beamtalk_repl_subscriptions`) and nothing else. Every entry is `:permanent`;
+  the migration issues that once annotated entries (BT-5202 to BT-5205) have
+  landed and deleted theirs. A new direct call fails here, and an entry nothing
+  calls any more fails here as stale.
 
   `docs/development/surface-parity.md` § "LiveView direct runtime calls"
   carries the same table with what each call does; the last test pins the two
@@ -36,18 +37,18 @@ defmodule BtAttach.RemoteCallAllowlistTest do
   """
   use ExUnit.Case, async: true
 
-  # {module, function, class, migrating issue}
+  # {module, function, class, :permanent}
   #
-  # class: :operation_layer | :subscription | :session | :capability | :encoding
-  # issue: :permanent, or the issue that migrates the call and deletes the entry
-  # (BT-5200 epic: BT-5202 sessions, BT-5203 editing, BT-5204 workspace state,
-  # BT-5205 git and process navigation, BT-5206 close-out).
+  # class: :operation_layer | :subscription | :encoding
+  # The fourth element stays `:permanent`: an entry that is not permanent is a
+  # leftover direct call, which is migrated to an operation, not listed.
   @allowlist [
     # The operation layer and the subscription facade: where every call ends up.
     {:beamtalk_repl_ops, :request, :operation_layer, :permanent},
     {:beamtalk_repl_ops, :render, :encoding, :permanent},
     {:beamtalk_repl_subscriptions, :subscribe, :subscription, :permanent},
     {:beamtalk_repl_subscriptions, :unsubscribe, :subscription, :permanent},
+    {:beamtalk_repl_subscriptions, :unsubscribe_all, :subscription, :permanent},
     {:beamtalk_repl_subscriptions, :subscribe_object, :subscription, :permanent},
     {:beamtalk_repl_subscriptions, :unsubscribe_object, :subscription, :permanent},
 
@@ -113,17 +114,15 @@ defmodule BtAttach.RemoteCallAllowlistTest do
              "allowlist entries nothing calls any more, delete them: #{inspect(stale)}"
     end
 
-    test "every entry names its migrating issue or is a permanent operation-layer entry" do
+    test "every entry is the operation layer or the subscription facade (BT-5206)" do
       for {m, f, class, issue} <- @allowlist do
-        assert class in [:operation_layer, :subscription, :session, :capability, :encoding]
+        assert class in [:operation_layer, :subscription, :encoding]
 
-        assert issue == :permanent or issue in ~w(BT-5202 BT-5203 BT-5204 BT-5205 BT-5206),
-               "#{m}:#{f} has no valid migrating issue: #{inspect(issue)}"
+        assert issue == :permanent,
+               "#{m}:#{f} is not permanent (#{inspect(issue)}): migrate the call to an operation"
 
-        if issue == :permanent do
-          assert m in [:beamtalk_repl_ops, :beamtalk_repl_subscriptions],
-                 "#{m}:#{f} is marked permanent but is not the operation layer or subscription facade"
-        end
+        assert m in [:beamtalk_repl_ops, :beamtalk_repl_subscriptions],
+               "#{m}:#{f} is not the operation layer or the subscription facade"
       end
 
       keys = Enum.map(@allowlist, fn {m, f, _c, _i} -> {m, f} end)

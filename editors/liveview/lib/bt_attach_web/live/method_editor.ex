@@ -368,20 +368,12 @@ defmodule BtAttachWeb.Live.MethodEditor do
                RequestContext.build(socket)
              ) do
           {:ok, saved_class} ->
-            # The patch is live + logged; refresh the change-history pane so
-            # the new entry is visible (ChangeLog coherence). A successful
-            # compile also clears the active tab's dirty dot and re-bases it
-            # on the compiled source.
-            socket
-            |> assign(
-              save_result: "Saved #{selector} on #{saved_class}",
-              save_error: nil,
-              flush_result: nil,
-              flush_error: nil
-            )
-            |> compile_clean(tab_id, source)
-            |> promote_new_method_tab(tab_id, saved_class, selector)
-            |> WorkspaceLive.assign_changes()
+            method_saved(socket, tab_id, source, selector, saved_class, nil)
+
+          # The method is live but its ChangeLog entry was not recorded, so `flush`
+          # will not write it: say so beside the success status (BT-5206).
+          {:ok, saved_class, warnings} ->
+            method_saved(socket, tab_id, source, selector, saved_class, warnings)
 
           {:error, reason} ->
             # `reason` may be a facade RBAC denial (`:unauthorized`) for a
@@ -390,6 +382,24 @@ defmodule BtAttachWeb.Live.MethodEditor do
             assign(socket, save_result: nil, save_error: FacadeError.render(reason))
         end
     end
+  end
+
+  # The patch is live + logged; refresh the change-history pane so the new entry is
+  # visible (ChangeLog coherence). A successful compile also clears the active
+  # tab's dirty dot and re-bases it on the compiled source.
+  defp method_saved(socket, tab_id, source, selector, saved_class, warnings) do
+    saved = "Saved #{selector} on #{saved_class}"
+
+    socket
+    |> assign(
+      save_result: if(warnings, do: saved <> " — " <> Enum.join(warnings, "; "), else: saved),
+      save_error: nil,
+      flush_result: nil,
+      flush_error: nil
+    )
+    |> compile_clean(tab_id, source)
+    |> promote_new_method_tab(tab_id, saved_class, selector)
+    |> WorkspaceLive.assign_changes()
   end
 
   # Compile a class-definition tab (BT-2494) by evaluating its definition

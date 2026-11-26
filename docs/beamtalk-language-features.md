@@ -7247,10 +7247,10 @@ The REPL `:` commands are convenience aliases that desugar to the native message
 | `:help Counter increment` | `Beamtalk help: Counter selector: #increment` |
 | `:changes` | `Workspace changes` |
 | `:dirty` | `Workspace changes dirtyMethods` |
-| `:flush` | `Workspace flush` |
-| `:flush Counter` | `Workspace flush: Counter` |
-| `:flush #'new-class'` | `Workspace flush: #'new-class'` |
-| `:flush #{ #file => "path" }` | `Workspace flush: #{ #file => "path" }` |
+| `:flush` | the `flush` operation (same effect as `Workspace flush`) |
+| `:flush Counter` | the `flush` operation scoped to a class (`Workspace flush: Counter`) |
+| `:flush #'new-class'` | the `flush` operation scoped to an entry kind (`Workspace flush: #'new-class'`) |
+| `:flush #{ #file => "path" }` | the `flush` operation scoped to a file (`Workspace flush: #{ #file => "path" }`) |
 
 The native forms work from compiled code, scripts, and actor methods — not just
 the REPL.

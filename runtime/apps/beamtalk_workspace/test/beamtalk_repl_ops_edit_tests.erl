@@ -25,6 +25,12 @@ edit_ops_test_() ->
             fun save_method_special_characters/0},
         {"save-method stamps the ChangeLog entry with the given author",
             fun save_method_records_author/0},
+        {"save-method reports a ChangeLog append failure as a warning",
+            fun save_method_reports_changelog_warning/0},
+        {"save-class stamps the ChangeLog entry with the given author",
+            fun save_class_records_author/0},
+        {"save-class rejects a bad author_kind and leaves the caller unstamped",
+            fun save_class_bad_author_kind/0},
         {"save-method on an unknown class is a structured error", fun save_method_unknown_class/0},
         {"save-method rejects a bad author_kind", fun save_method_bad_author_kind/0},
         {"each op names the missing param in a structured error", fun missing_params/0},
@@ -143,6 +149,76 @@ save_method_records_author() ->
         beamtalk_workspace_changelog:entry_class(E) =:= <<"EditOpsAuthor">>
     ],
     ?assertEqual([agent, human], lists:sort(Kinds)).
+
+%% BT-5206: a ChangeLog append that fails for a patch that is already live is
+%% returned as `warnings`, as `save-class` does, instead of being dropped. The
+%% ChangeLog server is unregistered for the call, so the append exits `noproc`.
+save_method_reports_changelog_warning() ->
+    define_class(<<"EditOpsClogWarn">>),
+    Clog = whereis(beamtalk_workspace_changelog),
+    true = erlang:unregister(beamtalk_workspace_changelog),
+    try
+        {value, Value} = request(<<"save-method">>, #{
+            <<"class">> => <<"EditOpsClogWarn">>,
+            <<"selector">> => <<"v">>,
+            <<"source">> => <<"5">>
+        }),
+        ?assertMatch(
+            #{<<"class">> := <<"EditOpsClogWarn">>, <<"warnings">> := [_ | _]},
+            Value
+        ),
+        [Warning | _] = maps:get(<<"warnings">>, Value),
+        ?assertMatch(<<"The change is live", _/binary>>, Warning),
+        %% The patch itself is live, and the process is left unmarked.
+        ?assertEqual(5, current_v(<<"EditOpsClogWarn">>)),
+        ?assertEqual(undefined, erlang:get('$beamtalk_changelog_eval'))
+    after
+        true = erlang:register(beamtalk_workspace_changelog, Clog)
+    end.
+
+%% BT-5206: MCP stamps its saves `agent` (ADR 0082); `save-class` takes the same
+%% `author` / `author_kind` params as `save-method`, so a new class is recorded
+%% as the agent's too, and the stamp does not leak onto the calling process.
+save_class_records_author() ->
+    {ok, #{project_path := Project}} = beamtalk_workspace_meta:get_metadata(),
+    Path = filename:join(Project, <<"EditOpsAuthorNew.bt">>),
+    {value, _} = request(<<"save-class">>, #{
+        <<"source">> => <<"Value subclass: EditOpsAuthorNew">>,
+        <<"path">> => Path,
+        <<"author">> => <<"mcp:save_class">>,
+        <<"author_kind">> => <<"agent">>
+    }),
+    [Entry] = [
+        E
+     || E <- beamtalk_workspace_changelog:entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= <<"EditOpsAuthorNew">>
+    ],
+    ?assertEqual(agent, beamtalk_workspace_changelog:entry_author_kind(Entry)),
+    ?assertEqual(undefined, erlang:get('$beamtalk_author_kind')),
+    ?assertEqual(undefined, erlang:get('$beamtalk_author')),
+    %% Without the params the caller's own (human) author is recorded.
+    Path2 = filename:join(Project, <<"EditOpsHumanNew.bt">>),
+    {value, _} = request(<<"save-class">>, #{
+        <<"source">> => <<"Value subclass: EditOpsHumanNew">>,
+        <<"path">> => Path2
+    }),
+    [Human] = [
+        E
+     || E <- beamtalk_workspace_changelog:entries(),
+        beamtalk_workspace_changelog:entry_class(E) =:= <<"EditOpsHumanNew">>
+    ],
+    ?assertEqual(human, beamtalk_workspace_changelog:entry_author_kind(Human)).
+
+save_class_bad_author_kind() ->
+    {ok, #{project_path := Project}} = beamtalk_workspace_meta:get_metadata(),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = invalid_argument}},
+        request(<<"save-class">>, #{
+            <<"source">> => <<"Value subclass: EditOpsBadKind">>,
+            <<"path">> => filename:join(Project, <<"EditOpsBadKind.bt">>),
+            <<"author_kind">> => <<"robot">>
+        })
+    ).
 
 save_method_unknown_class() ->
     Result = request(<<"save-method">>, #{

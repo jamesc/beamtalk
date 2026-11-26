@@ -641,6 +641,37 @@ fn eval_and_display(client: &mut ReplClient, expr: &str) {
     }
 }
 
+/// Flush through the `flush` operation and show the result. A refused request
+/// is an error; a flush that returned conflicts is reported on stderr as a
+/// failure to write those files, not as a success with a footnote.
+fn flush_and_display(
+    client: &mut ReplClient,
+    scope: beamtalk_repl_protocol::FlushScope<'_>,
+    confirm_destructive: bool,
+) {
+    match client.flush(scope, confirm_destructive) {
+        Ok(response) => display_flush_response(&response, client.raw_mfa()),
+        Err(e) => eprintln!("Error: {e}"),
+    }
+}
+
+fn display_flush_response(response: &ReplResponse, raw_mfa: bool) {
+    if response.is_error() {
+        display_eval_response(response, raw_mfa);
+        return;
+    }
+    let Some(value) = response.value.as_ref() else {
+        println!("Flushed 0 change(s) across 0 file(s)");
+        return;
+    };
+    let report = beamtalk_repl_protocol::format::format_flush_result(value);
+    if report.has_conflicts {
+        eprintln!("{}", report.text);
+    } else {
+        println!("{}", report.text);
+    }
+}
+
 /// Evaluate with reconnect-on-failure logic.
 ///
 /// Returns `true` if the REPL loop should break (fatal communication error).

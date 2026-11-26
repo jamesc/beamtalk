@@ -438,8 +438,9 @@ fn every_selector_the_mcp_cli_and_lsp_send_is_declared_in_the_stdlib() {
         // MCP's `try_method` template; `save_method` sends the `save-method` op
         // now (BT-5203), so nothing builds a `compile:source:` send any more.
         "tryCompile:source:",
+        // `flush:confirmDestructive:` is no longer sent by any template: the MCP
+        // tool, the CLI REPL and LiveView send the `flush` op (BT-5204, BT-5206).
         "flush:",
-        "flush:confirmDestructive:",
         "recheckImage",
         "removeFromSystem",
         "renameTo:",

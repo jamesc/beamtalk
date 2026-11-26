@@ -41,17 +41,46 @@ op_names_are_unique_test() ->
 
 entries_are_well_formed_test() ->
     lists:foreach(
-        fun(#{op := Op, handler := H, params := P, optional := O, capability := C}) ->
+        fun(#{op := Op, handler := H, params := P, optional := O, capability := C, access := A}) ->
             ?assert(is_binary(Op)),
             ?assert(is_atom(H)),
             ?assert(lists:all(fun is_binary/1, P)),
             ?assert(lists:all(fun is_binary/1, O)),
             %% A param is either required or optional, never both.
             ?assertEqual([], [X || X <- P, lists:member(X, O)]),
-            ?assert(lists:member(C, [always, compiler, workspace]))
+            ?assert(lists:member(C, [always, compiler, workspace])),
+            %% BT-5206: every op says who may call it, so none is added without.
+            ?assert(lists:member(A, [read, execute, admin])),
+            ?assertEqual({ok, A}, beamtalk_repl_op_table:access(Op))
         end,
         beamtalk_repl_op_table:ops()
     ).
+
+access_of_an_unknown_op_is_not_permitted_test() ->
+    ?assertEqual(error, beamtalk_repl_op_table:access(<<"no-such-op-bt5206">>)).
+
+%% The ops that run code, change the image/ChangeLog/working tree, or stop
+%% things are never `read` (an Observer must not reach them).
+mutating_ops_are_not_read_test() ->
+    lists:foreach(
+        fun(Op) ->
+            ?assertNotEqual({ok, read}, beamtalk_repl_op_table:access(Op), Op)
+        end,
+        [
+            <<"eval">>,
+            <<"load-source">>,
+            <<"save-method">>,
+            <<"save-class">>,
+            <<"flush">>,
+            <<"revert-method">>,
+            <<"reload-file">>,
+            <<"git-stage">>,
+            <<"git-commit">>,
+            <<"kill">>,
+            <<"shutdown">>
+        ]
+    ),
+    ?assertEqual({ok, admin}, beamtalk_repl_op_table:access(<<"kill">>)).
 
 ws_ops_are_the_transport_ops_test() ->
     ?assertEqual(
