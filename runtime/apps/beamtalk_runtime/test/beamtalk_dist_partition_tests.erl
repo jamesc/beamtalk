@@ -334,7 +334,7 @@ unexpected_remote_results_are_errors(PeerNode) ->
 %%====================================================================
 
 remote_name_registered_to_port(PeerNode) ->
-    Name = list_to_atom("bt5192_port_" ++ beamtalk_test_unique:id()),
+    Name = beamtalk_test_unique:atom("bt5192_port"),
     Holder = rpc:call(PeerNode, erlang, spawn, [?MODULE, hold_registered_port, [Name, self()]]),
     ?awaitMessage({port_registered, Holder}),
     try

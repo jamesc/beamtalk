@@ -115,7 +115,7 @@ global_registration_is_bounded_test_() ->
 
 global_registration_is_bounded() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-    Name = list_to_atom("bt5192_bounded_global_" ++ beamtalk_test_unique:id()),
+    Name = beamtalk_test_unique:atom("bt5192_bounded_global"),
     Holder = hold_global_lock(),
     try
         Result = with_app_env(global_register_timeout_ms, 300, fun() ->
@@ -144,7 +144,7 @@ supervised_global_child_registration_timeout_is_ignored_test_() ->
 
 supervised_global_child_registration_timeout_is_ignored() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-    Name = list_to_atom("bt5192_sup_global_" ++ beamtalk_test_unique:id()),
+    Name = beamtalk_test_unique:atom("bt5192_sup_global"),
     Holder = hold_global_lock(),
     try
         Result = with_app_env(global_register_timeout_ms, 300, fun() ->
