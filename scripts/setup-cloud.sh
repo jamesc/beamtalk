@@ -122,16 +122,17 @@ if [ ! -f "${TOOL_VERSIONS}" ]; then
   fi
 fi
 
-# Optional BEAM tools are installed and verified only when the resolved
-# .tool-versions pins them. A satellite checkout (e.g. jamesc/beamtalk-uat) may
-# pin only erlang + rebar; requiring Elixir there made verify exit 1 (BT-5341).
-# erlang is always installed/verified. A missing/empty .tool-versions yields no
-# pin, so the later "No .tool-versions" failure still fires as before.
-pinned() { awk -v t="$1" '$1==t {f=1} END {exit !f}' "${TOOL_VERSIONS}" 2>/dev/null; }
-if ! pinned elixir; then
-  if [ "${SKIP_ELIXIR:-}" != "1" ]; then
-    warn "elixir not pinned in ${TOOL_VERSIONS} — not installing or verifying it"
-  fi
+# BEAM pins, read once from the resolved .tool-versions; the install and verify
+# steps both key off these. Optional tools (elixir, rebar3) are installed and
+# verified only when pinned: a satellite checkout (e.g. jamesc/beamtalk-uat) may
+# pin only erlang + rebar, and requiring Elixir there made verify exit 1
+# (BT-5341). erlang is always installed/verified. A missing .tool-versions has no
+# pins; the "No .tool-versions" failure below still fires as before.
+PIN_ERLANG="$(awk '/^erlang[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null || true)"
+PIN_ELIXIR="$(awk '/^elixir[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null || true)"
+PIN_REBAR="$(awk '/^rebar[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null || true)"
+if [ -f "${TOOL_VERSIONS}" ] && [ -z "${PIN_ELIXIR}" ]; then
+  [ "${SKIP_ELIXIR:-}" = "1" ] || warn "elixir not pinned in ${TOOL_VERSIONS} — not installing or verifying it"
   SKIP_ELIXIR=1
 fi
 
@@ -602,9 +603,6 @@ set +e +o pipefail
 
 # Read the pins so the assertions stay in lockstep with .tool-versions /
 # rust-toolchain.toml — the single sources of truth.
-PIN_ERLANG="$(awk '/^erlang[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
-PIN_ELIXIR="$(awk '/^elixir[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
-PIN_REBAR="$(awk '/^rebar[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
 PIN_RUST="$(awk -F'"' '/^[[:space:]]*channel[[:space:]]*=/{print $2}' "${REPO_ROOT}/rust-toolchain.toml" 2>/dev/null)"
 # Elixir's pin carries an -otp-NN suffix that `elixir --version` never prints,
 # so compare against just the numeric Elixir version (e.g. 1.20.1-otp-28 -> 1.20.1).

@@ -27,8 +27,14 @@ stub dpkg 'exit 0'
 for t in cargo node npm gh just; do stub "$t" 'exit 0'; done
 STUB_ELIXIR='echo "Elixir 1.20.1 (compiled with Erlang/OTP 28)"'
 
-# Sandboxed PATH: stubs first, then only the system dirs (no real elixir/mix).
-SYSPATH="/usr/bin:/bin"
+# Sandboxed PATH: stubs first, then symlinks to just the system tools the script
+# needs — so a real elixir/mix on the host can never leak in (or skip the test).
+SYS="${WORK}/sys"
+mkdir -p "${SYS}"
+for t in awk grep sed cat dirname basename mktemp rm mkdir id head tr sort uname env bash sh date cut tee ln install curl; do
+  p="$(command -v "$t" 2>/dev/null)" && ln -sf "${p}" "${SYS}/${t}"
+done
+SYSPATH="${SYS}"
 
 # run_case NAME TOOL_VERSIONS_CONTENT WITH_ELIXIR_STUB [SKIP_ELIXIR] → sets OUT, RC
 # Pass SKIP_ELIXIR=1 for cases where elixir is pinned: with SKIP_ERLANG=1 that
@@ -54,12 +60,6 @@ expect() { # DESCRIPTION CONDITION(0=true)
 }
 has() { printf '%s' "${OUT}" | grep -q -- "$1"; }
 
-for t in elixir mix; do
-  if PATH="${SYSPATH}" command -v "$t" >/dev/null 2>&1; then
-    echo "SKIP: real $t found in ${SYSPATH}; cannot sandbox"; exit 0
-  fi
-done
-
 # 1. Satellite checkout (erlang + rebar only, no elixir anywhere): must succeed.
 run_case satellite $'erlang 28.5\nrebar 3.27.0' 0
 expect "satellite (no elixir pin): exit 0" "$([ "${RC}" -eq 0 ]; echo $?)"
@@ -84,6 +84,6 @@ has "elixir NOT FOUND"; expect "pinned elixir missing: reported" $?
 
 # 4. Install step: SKIP_ELIXIR is derived when elixir is unpinned.
 run_case install $'erlang 28.5\nrebar 3.27.0' 0
-has "elixir not pinned"; expect "unpinned elixir: install skipped (SKIP_ELIXIR derived)" $?
+has "not installing or verifying it"; expect "unpinned elixir: install skipped (SKIP_ELIXIR derived)" $?
 
 if [ "${FAILURES}" -eq 0 ]; then echo "All setup-cloud tests passed"; else echo "${FAILURES} failure(s)"; exit 1; fi
