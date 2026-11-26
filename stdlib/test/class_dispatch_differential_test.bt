@@ -106,6 +106,7 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
     // ADR 0153 decision 7 (BT-5155): a class has no fields, so the
     // instance-field reflection selectors sent to a class raise the ordinary
     // does-not-understand on both paths, for the Leaf and its parent Root.
+    @expect dnu
     outcome := self
       classSend: #hasFieldOnClass
       literal: [GuardedDiffClassLeaf hasField: #missing]
@@ -113,6 +114,7 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
       on: GuardedDiffClassLeaf
     self assert: (outcome at: 1) equals: #raised
     self assert: (outcome at: 3) equals: #does_not_understand
+    @expect dnu
     outcome := self
       classSend: #clearFieldOnClass
       literal: [GuardedDiffClassRoot clearField: #missing]
@@ -120,6 +122,7 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
       on: GuardedDiffClassRoot
     self assert: (outcome at: 1) equals: #raised
     self assert: (outcome at: 3) equals: #does_not_understand
+    @expect dnu
     outcome := self
       classSend: #fieldAtOnClass
       literal: [GuardedDiffClassLeaf fieldAt: #missing]
@@ -127,6 +130,7 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
       on: GuardedDiffClassLeaf
     self assert: (outcome at: 1) equals: #raised
     self assert: (outcome at: 3) equals: #does_not_understand
+    @expect dnu
     outcome := self
       classSend: #fieldAtPutOnClass
       literal: [GuardedDiffClassRoot fieldAt: #missing put: 1]
