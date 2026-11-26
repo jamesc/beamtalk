@@ -94,6 +94,105 @@ fn release_output_with_only_lib_dir_is_refused_and_untouched_test() {
     assert!(out.join("lib").is_dir());
 }
 
+/// BT-5230: another beamtalk process holding the output's lock (a live run
+/// writing the same `--output` from a different project) makes a second run
+/// wait *before* interrupted-run recovery, leaving the output, the parked copy
+/// and the live swap journal untouched until the holder lets go.
+#[test]
+fn release_waits_on_held_output_lock_without_touching_output_test() {
+    use fs2::FileExt;
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let project = cli_common::fixture_project();
+    make_releasable(project.path());
+    let root = project.path().join("shared");
+    std::fs::create_dir_all(&root).unwrap();
+    let out = root.join("rel");
+    let parked = root.join("rel.beamtalk-previous");
+    let journal = root.join("rel.beamtalk-swap");
+    // What a live run A looks like mid-swap: previous release parked, its
+    // (still empty) new output in place, `pending` journal written.
+    std::fs::create_dir_all(&out).unwrap();
+    std::fs::create_dir_all(&parked).unwrap();
+    std::fs::write(parked.join("sentinel.txt"), "previous release").unwrap();
+    let journal_text = format!(
+        "beamtalk-release-swap v1\npending\n{}\nprevious-dir: yes\nprevious-tarball: no\n",
+        root.join("a-0.1.0.tar.gz").display()
+    );
+    std::fs::write(&journal, &journal_text).unwrap();
+
+    // Run A holds the output lock for its whole run.
+    let held = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(root.join("rel.beamtalk-lock"))
+        .unwrap();
+    held.lock_exclusive().unwrap();
+
+    let configured = cli_common::beamtalk();
+    let mut cmd = Command::new(configured.get_program());
+    for (key, val) in configured.get_envs() {
+        match val {
+            Some(val) => cmd.env(key, val),
+            None => cmd.env_remove(key),
+        };
+    }
+    let mut child = cmd
+        .current_dir(project.path())
+        .args(["release", "--output"])
+        .arg(&out)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn beamtalk release");
+    let stderr = child.stderr.take().expect("piped stderr");
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut seen = Vec::new();
+    let deadline = Instant::now() + Duration::from_mins(2);
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if let Ok(line) = rx.recv_timeout(remaining) {
+            let waiting = line.contains("waiting for another beamtalk release");
+            seen.push(line);
+            if waiting {
+                break;
+            }
+        } else {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("release never waited on the output lock; stderr: {seen:?}");
+        }
+    }
+    let untouched = out.is_dir()
+        && std::fs::read_to_string(parked.join("sentinel.txt"))
+            .ok()
+            .as_deref()
+            == Some("previous release")
+        && std::fs::read_to_string(&journal).ok().as_deref() == Some(journal_text.as_str());
+    let still_running = child.try_wait().unwrap().is_none();
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(
+        still_running,
+        "release must wait for the held lock: {seen:?}"
+    );
+    assert!(
+        untouched,
+        "output, parked copy and journal must be untouched while locked"
+    );
+}
+
 /// BT-5071: `--output .` (the project root) is refused even with
 /// `--force-output`.
 #[test]

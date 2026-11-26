@@ -128,12 +128,22 @@ pub fn build_release(
     let release_dir = assembly::absolutize(&release_dir)?;
 
     let tarball = release_tarball_path(&release_dir, &release_name, &release_vsn);
-    // A run killed by a signal (or power loss) leaves the previous output
-    // parked; put it back before anything else looks at the paths (BT-5134),
-    // but never beside a protected `--output` (BT-5187).
+    // Exclusive per output, held for the rest of the run and taken before
+    // recovery reads the journal: another run's live `pending` journal must
+    // never be mistaken for a dead run's (BT-5230). Like the project build
+    // lock it waits (with a message) rather than failing, and the kernel
+    // frees it if the holder dies. Lock order: project build lock → this.
+    // A protected `--output` is refused first so no lock file lands beside it.
     if output.is_some() {
         ensure_unprotected_output(&release_dir, &layout)?;
     }
+    let _output_lock = crate::commands::dir_lock::lock_file_announcing(
+        output_lock_path(&release_dir).as_std_path(),
+        "release output",
+        || eprintln!("waiting for another beamtalk release to finish writing '{release_dir}'…"),
+    )?;
+    // A run killed by a signal (or power loss) leaves the previous output
+    // parked; put it back before anything else looks at the paths (BT-5134).
     recover_interrupted_release(&release_dir, &tarball)?;
     ensure_clean_release_dir(&release_dir, output.is_some(), force_output, &layout)?;
     ensure_clean_tarball(&tarball, output.is_some(), force_output)?;
@@ -636,6 +646,12 @@ const PREVIOUS_SUFFIX: &str = ".beamtalk-previous";
 /// new one.
 const JOURNAL_SUFFIX: &str = ".beamtalk-swap";
 
+/// Suffix of the output-scoped lock file beside the release directory
+/// (BT-5230). The project build lock only serialises runs of one project; two
+/// projects (or checkouts) can share an `--output`, and one run's recovery
+/// would then treat the other's live journal as a dead run's.
+const OUTPUT_LOCK_SUFFIX: &str = ".beamtalk-lock";
+
 /// First line of every swap journal; anything else at the journal path is
 /// not ours and stops recovery without touching anything.
 const JOURNAL_HEADER: &str = "beamtalk-release-swap v1";
@@ -899,6 +915,11 @@ fn release_tarball_path(release_dir: &Utf8Path, name: &str, vsn: &str) -> Utf8Pa
 /// `<path>.beamtalk-previous`, where a previous output is parked.
 fn parked_path(path: &Utf8Path) -> Utf8PathBuf {
     Utf8PathBuf::from(format!("{path}{PREVIOUS_SUFFIX}"))
+}
+
+/// `<release_dir>.beamtalk-lock`, the [`OUTPUT_LOCK_SUFFIX`] lock file.
+fn output_lock_path(release_dir: &Utf8Path) -> Utf8PathBuf {
+    Utf8PathBuf::from(format!("{release_dir}{OUTPUT_LOCK_SUFFIX}"))
 }
 
 /// `<release_dir>.beamtalk-swap`, the [`JOURNAL_SUFFIX`] journal.

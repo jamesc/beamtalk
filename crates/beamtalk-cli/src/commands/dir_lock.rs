@@ -61,6 +61,30 @@ pub(crate) fn lock_dir(dir: &Utf8Path, what: &str) -> Result<DirLock> {
 ///
 /// Returns an error if the lock file cannot be opened or locked.
 pub(crate) fn lock_file(lock_path: &std::path::Path, what: &str) -> Result<DirLock> {
+    // A blocking `lock_exclusive()` gives no indication *why* the process
+    // appears to hang if another beamtalk process is stuck holding the lock
+    // (e.g. a `git clone` against an unreachable host, or a workspace still
+    // starting up, which can take over two minutes), so say so once.
+    lock_file_announcing(lock_path, what, || {
+        warn!(
+            "Waiting for {what} lock '{}' held by another beamtalk process...",
+            lock_path.display()
+        );
+    })
+}
+
+/// [`lock_file`] with a caller-supplied notice, run once if the lock is
+/// contended. For locks whose wait must be visible to the user: `warn!` is
+/// silent unless tracing is turned on, as the project build lock found.
+///
+/// # Errors
+///
+/// Returns an error if the lock file cannot be opened or locked.
+pub(crate) fn lock_file_announcing(
+    lock_path: &std::path::Path,
+    what: &str,
+    announce: impl FnOnce(),
+) -> Result<DirLock> {
     if locking_disabled() {
         debug!(
             "not taking the {what} lock ({NO_BUILD_LOCK_ENV} is on): {}",
@@ -68,16 +92,7 @@ pub(crate) fn lock_file(lock_path: &std::path::Path, what: &str) -> Result<DirLo
         );
         return Ok(DirLock { _file: None });
     }
-    // A blocking `lock_exclusive()` gives no indication *why* the process
-    // appears to hang if another beamtalk process is stuck holding the lock
-    // (e.g. a `git clone` against an unreachable host, or a workspace still
-    // starting up, which can take over two minutes), so say so once.
-    let file = open_and_lock(lock_path, what, || {
-        warn!(
-            "Waiting for {what} lock '{}' held by another beamtalk process...",
-            lock_path.display()
-        );
-    })?;
+    let file = open_and_lock(lock_path, what, announce)?;
     Ok(DirLock { _file: Some(file) })
 }
 
