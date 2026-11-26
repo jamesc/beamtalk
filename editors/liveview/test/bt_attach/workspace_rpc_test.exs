@@ -117,7 +117,7 @@ defmodule BtAttach.WorkspaceRpcTest do
   describe "start_session/1,2 — session creation (all rpc branches)" do
     test "start_session/2 returns the remote session pid on success" do
       pid = self()
-      mock_rpc(%{{:beamtalk_session_sup, :start_session} => {:ok, pid}})
+      mock_rpc(%{{:beamtalk_repl_ops, :start_session} => {:ok, pid}})
       assert Workspace.start_session("sess-1", %{kind: "liveview"}) == pid
     end
 
@@ -125,7 +125,7 @@ defmodule BtAttach.WorkspaceRpcTest do
       pid = self()
 
       mock_rpc(%{
-        {:beamtalk_session_sup, :start_session} => fn ["sess-1", %{kind: "liveview"}] ->
+        {:beamtalk_repl_ops, :start_session} => fn ["sess-1", %{kind: "liveview"}] ->
           {:ok, pid}
         end
       })
@@ -134,42 +134,82 @@ defmodule BtAttach.WorkspaceRpcTest do
     end
 
     test "start_session/2 surfaces a badrpc as an unreachable error" do
-      mock_rpc(%{{:beamtalk_session_sup, :start_session} => {:badrpc, :mock_scripted}})
+      mock_rpc(%{{:beamtalk_repl_ops, :start_session} => {:badrpc, :mock_scripted}})
 
       assert Workspace.start_session("sess-1", %{}) ==
                {:error, {:unreachable, :mock_scripted}}
     end
 
     test "start_session/2 wraps any other reply as-is" do
-      mock_rpc(%{{:beamtalk_session_sup, :start_session} => {:error, :quota_exceeded}})
+      mock_rpc(%{{:beamtalk_repl_ops, :start_session} => {:error, :quota_exceeded}})
       assert Workspace.start_session("sess-1", %{}) == {:error, {:error, :quota_exceeded}}
     end
   end
 
-  describe "session_alive?/1 and session_count/0" do
-    test "session_alive?/1 returns the boolean the workspace reports" do
-      mock_rpc(%{{:erlang, :is_process_alive} => true})
-      assert Workspace.session_alive?(self()) == true
+  describe "attach_session/2 — through the shared session API (BT-5202)" do
+    test "calls beamtalk_repl_ops:attach_session and keeps ok / gone / timeout apart" do
+      pid = self()
 
-      mock_rpc(%{{:erlang, :is_process_alive} => false})
-      assert Workspace.session_alive?(self()) == false
+      for {reply, expected} <- [ok: :ok, gone: {:error, :gone}, timeout: {:error, :timeout}] do
+        mock_rpc(%{{:beamtalk_repl_ops, :attach_session} => fn [^pid, ^pid] -> reply end})
+        assert Workspace.attach_session(pid, pid) == expected
+      end
+    end
+
+    test "a badrpc is unreachable; any other reply is unexpected" do
+      mock_rpc(%{{:beamtalk_repl_ops, :attach_session} => {:badrpc, :mock_scripted}})
+      assert Workspace.attach_session(self(), self()) == {:error, {:unreachable, :mock_scripted}}
+
+      mock_rpc(%{{:beamtalk_repl_ops, :attach_session} => :odd})
+      assert Workspace.attach_session(self(), self()) == {:error, {:unexpected_reply, :odd}}
+    end
+  end
+
+  describe "interrupt/1 — through the interrupt operation (BT-5202)" do
+    test "dispatches `interrupt` with the session pid and answers :ok" do
+      pid = self()
+
+      mock_rpc(%{
+        {:beamtalk_repl_ops, :request} => fn ["interrupt", %{}, ^pid] -> {:status, :ok} end
+      })
+
+      assert Workspace.interrupt(pid) == :ok
+    end
+
+    test "surfaces a structured error, a badrpc and an odd reply" do
+      mock_rpc(%{{:beamtalk_repl_ops, :request} => {:error, :boom}})
+      assert Workspace.interrupt(self()) == {:error, :boom}
+
+      mock_rpc(%{{:beamtalk_repl_ops, :request} => {:badrpc, :mock_scripted}})
+      assert Workspace.interrupt(self()) == {:error, {:unreachable, :mock_scripted}}
+
+      mock_rpc(%{{:beamtalk_repl_ops, :request} => :odd})
+      assert Workspace.interrupt(self()) == {:error, {:unexpected_reply, :odd}}
+    end
+  end
+
+  describe "session_alive?/1 and session_count/0 (the session API, BT-5202)" do
+    test "session_alive?/1 returns the boolean the workspace reports for that pid" do
+      pid = self()
+      mock_rpc(%{{:beamtalk_repl_ops, :session_alive} => fn [^pid] -> true end})
+      assert Workspace.session_alive?(pid) == true
+
+      mock_rpc(%{{:beamtalk_repl_ops, :session_alive} => false})
+      assert Workspace.session_alive?(pid) == false
     end
 
     test "session_alive?/1 treats a badrpc as not-alive" do
-      mock_rpc(%{{:erlang, :is_process_alive} => {:badrpc, :mock_scripted}})
+      mock_rpc(%{{:beamtalk_repl_ops, :session_alive} => {:badrpc, :mock_scripted}})
       assert Workspace.session_alive?(self()) == false
     end
 
-    test "session_count/0 reads the active child count" do
-      mock_rpc(%{
-        {:supervisor, :count_children} => [specs: 1, active: 3, supervisors: 0, workers: 1]
-      })
-
+    test "session_count/0 reads the active session count" do
+      mock_rpc(%{{:beamtalk_repl_ops, :session_count} => 3})
       assert Workspace.session_count() == 3
     end
 
     test "session_count/0 surfaces a badrpc as an unreachable error" do
-      mock_rpc(%{{:supervisor, :count_children} => {:badrpc, :mock_scripted}})
+      mock_rpc(%{{:beamtalk_repl_ops, :session_count} => {:badrpc, :mock_scripted}})
       assert Workspace.session_count() == {:error, {:unreachable, :mock_scripted}}
     end
   end
@@ -1179,17 +1219,22 @@ defmodule BtAttach.WorkspaceRpcTest do
 
   describe "list_bindings/1" do
     test "returns name-sorted {name, term} pairs on success" do
-      mock_rpc(%{{:beamtalk_repl_shell, :get_bindings} => {:ok, %{y: 2, x: 1}}})
+      mock_rpc(%{{:beamtalk_repl_ops, :session_bindings} => {:ok, %{y: 2, x: 1}}})
       assert Workspace.list_bindings(self()) == [{"x", 1}, {"y", 2}]
     end
 
     test "surfaces a badrpc as unreachable" do
-      mock_rpc(%{{:beamtalk_repl_shell, :get_bindings} => {:badrpc, :mock_scripted}})
+      mock_rpc(%{{:beamtalk_repl_ops, :session_bindings} => {:badrpc, :mock_scripted}})
       assert Workspace.list_bindings(self()) == {:error, {:unreachable, :mock_scripted}}
     end
 
+    test "surfaces a structured error (a session that has ended)" do
+      mock_rpc(%{{:beamtalk_repl_ops, :session_bindings} => {:error, :session_gone}})
+      assert Workspace.list_bindings(self()) == {:error, :session_gone}
+    end
+
     test "degrades an unrecognised reply to unexpected_reply" do
-      mock_rpc(%{{:beamtalk_repl_shell, :get_bindings} => :odd})
+      mock_rpc(%{{:beamtalk_repl_ops, :session_bindings} => :odd})
       assert Workspace.list_bindings(self()) == {:error, {:unexpected_reply, :odd}}
     end
   end

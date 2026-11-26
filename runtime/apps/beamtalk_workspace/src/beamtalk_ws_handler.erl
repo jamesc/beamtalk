@@ -979,7 +979,9 @@ start_or_resume_session(ResumeId, Meta, State) when is_binary(ResumeId) ->
         {ok, Pid} ->
             %% attach/2 is a call (BT-5084): `gone` means the shell stopped (idle
             %% timeout) between the lookup and now, so fall back to a new session.
-            case is_process_alive(Pid) andalso beamtalk_repl_shell:attach(Pid, self()) =:= ok of
+            case
+                is_process_alive(Pid) andalso beamtalk_repl_ops:attach_session(Pid, self()) =:= ok
+            of
                 true ->
                     MonRef = erlang:monitor(process, Pid),
                     ?LOG_INFO("WebSocket session resumed", #{
@@ -1042,7 +1044,7 @@ maybe_subscribe_all(_State) -> beamtalk_repl_subscriptions:subscribe_all().
 
 -doc "Create a fresh session and send auth_ok + session-started messages.".
 create_session(SessionId, Meta, State) ->
-    case beamtalk_session_sup:start_session(SessionId, Meta) of
+    case beamtalk_repl_ops:start_session(SessionId, Meta) of
         {ok, SessionPid} ->
             MonRef = erlang:monitor(process, SessionPid),
             beamtalk_session_table:insert(SessionId, SessionPid),
@@ -1052,7 +1054,7 @@ create_session(SessionId, Meta, State) ->
                 peer => State#ws_state.peer,
                 domain => [beamtalk, runtime]
             }),
-            _ = beamtalk_repl_shell:attach(SessionPid, self()),
+            _ = beamtalk_repl_ops:attach_session(SessionPid, self()),
             beamtalk_workspace_meta:update_activity(),
             %% Subscribe to all live push streams (Transcript, actors,
             %% classes, bindings, flush) via the stable facade. ADR 0082 Phase 3:
