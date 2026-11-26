@@ -1918,8 +1918,8 @@ written directly in front is part of the literal.
 16rFF + 1   // => 256
 ```
 
-Radix integers have no size limit, like decimal ones (`16rFFFFFFFFFFFFFFFFFF` is
-4722366482869645213695, a BEAM bignum). A radix outside 2-36 (`37r1`), a digit that is not
+Radix integers have no practical size limit, like decimal ones (`16rFFFFFFFFFFFFFFFFFF` is
+4722366482869645213695, a BEAM bignum); a literal over 10,000 characters is rejected. A radix outside 2-36 (`37r1`), a digit that is not
 valid in the radix (`16rG`) and a missing digit (`16r`) are compile errors.
 
 **Exponent floats** are a decimal number, an `e` or `E`, an optional `+` or `-`, and at
@@ -1933,8 +1933,8 @@ point:
 1e3 class       // => Float
 ```
 
-A float prints in the shortest form that reads back as the same number, so `1e3` and
-`1000.0` both print as `1.0e3` and `2.5e10` prints as `2.5e10`.
+A float prints in the shortest form that reads back as the same number, and which form that
+is depends on the value: `1e2` prints `100.0`, while `1e3` and `1000.0` both print `1.0e3`.
 
 An exponent with no digits (`1e`) is a compile error, and so is a literal that overflows a
 64-bit float (`1e309`: "Float literal out of range").
@@ -7937,16 +7937,16 @@ to a cluster without joining it as a peer. Beamtalk's own attach front (ADR
 
 ## Not Yet Supported
 
-Forms the documentation or an ADR describes that the compiler does not accept yet, in one
-place. Each is rejected with a diagnostic (or is a no-op where stated), never silently
-miscompiled.
+Forms the documentation or an ADR describes that the compiler does not accept or honour
+yet, in one place. The Today column says whether each one is rejected with a diagnostic or
+quietly ignored.
 
 | Form | Today | Reference |
 |------|-------|-----------|
 | Trait `aliasing:` clause (`uses: T aliasing: #{#new => #old}`) | Reserved. The parser consumes it for recovery and rejects it. | [ADR 0127](ADR/0127-traits-for-behavioural-reuse.md) |
-| Parametric aliases (`type Option(T) = T \| Nil`) and recursive aliases (`type Json = ... \| List(Json)`) | Not supported; they need lazy alias resolution. | [Named Type Aliases](#named-type-aliases-type-declarations-adr-0108) |
-| Rest patterns in `match:` arms (`#[a, ...rest] -> ...`) | Supported in destructuring assignment only. | [Rest Patterns in Destructuring](#rest-patterns-in-destructuring-bt-1251) |
-| Package-bundled FFI type stubs | Only the project-local `stubs/` directory is searched. | [FFI Type Stub Files](#ffi-type-stub-files-adr-0075-phase-2) |
+| Parametric aliases (`type Option(T) = T \| Nil`) and recursive aliases (`type Json = ... \| List(Json)`) | Rejected with a diagnostic; they need lazy alias resolution. | [Named Type Aliases](#named-type-aliases-type-declarations-adr-0108) |
+| Rest patterns in `match:` arms (`#[a, ...rest] -> ...`) | Supported in destructuring assignment only; in a `match:` arm the compiler reports "not yet supported". | [Rest Patterns in Destructuring](#rest-patterns-in-destructuring-bt-1251) |
+| Package-bundled FFI type stubs | Only the project-local `stubs/` directory is searched; stubs shipped in a dependency are ignored, with no diagnostic. | [FFI Type Stub Files](#ffi-type-stub-files-adr-0075-phase-2) |
 | Cons patterns (`#(head \| tail)` in a `match:` arm or destructuring) | Parse error. The literal form works; the AST has a `Pattern::List` node, but the parser never builds it. | [ADR 0012](ADR/0012-list-literal-syntax.md), [List Cons Literal](#list-cons-literal) |
 
 ## Namespace and Class Visibility
@@ -8073,9 +8073,11 @@ stdlib@Value subclass: Celsius
 
 `json@Parser subclass: LenientParser` is the same form with a dependency named `json`.
 The qualified name is the same class as the short name (`stdlib@Integer == Integer`), so
-the subclass inherits exactly as it would from the short name. A package
-that is neither the current package, `stdlib` nor a declared dependency is a compile error
-(`Unknown package 'json' in superclass reference 'json@Parser'`).
+the subclass inherits exactly as it would from the short name. In a package
+(a directory with a `beamtalk.toml`), a qualifier that is neither the current package,
+`stdlib` nor a declared dependency is a compile error (`Unknown package 'json' in
+superclass reference 'json@Parser'`). A single file compiled with no manifest has no package
+set to check against, so the qualifier is not validated there.
 
 ### Visibility and Access Control (ADR 0071)
 
