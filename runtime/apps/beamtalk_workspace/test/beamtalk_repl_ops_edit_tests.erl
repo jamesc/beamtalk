@@ -33,6 +33,8 @@ edit_ops_test_() ->
             fun revert_nothing_to_revert/0},
         {"save-class refuses a path outside the project", fun save_class_bad_path/0},
         {"reload-file reloads a file's classes", fun reload_file_reloads/0},
+        {"save-class returns no warnings key when the ChangeLog append is clean",
+            fun save_class_clean_has_no_warnings/0},
         {"revert-method rejects an unrecognised side", fun revert_bad_side/0},
         {"reload-file refuses absolute, escaping and non-.bt paths", fun reload_file_bad_paths/0},
         {"reload-file of a missing file is a structured error", fun reload_file_missing/0}
@@ -261,3 +263,16 @@ reload_file_bad_paths() ->
         )
      || Path <- [<<"/etc/passwd">>, <<"../x.bt">>, <<"src/../../x.bt">>, <<"src/Counter.erl">>]
     ].
+
+save_class_clean_has_no_warnings() ->
+    %% The failure path (`{warning, _}` from the ChangeLog append) is queued by
+    %% `note_changelog_result/1`; here we pin that the op collects around the call
+    %% and leaves the process unmarked afterwards.
+    _ = request(<<"save-class">>, #{
+        <<"source">> => <<"Value subclass: EditOpsWarn">>,
+        <<"path">> => <<"../outside/EditOpsWarn.bt">>
+    }),
+    ?assertEqual(undefined, erlang:get('$beamtalk_changelog_eval')),
+    ok = beamtalk_refactor_support:begin_changelog_warnings(),
+    ok = beamtalk_refactor_support:note_changelog_result({warning, <<"w">>}),
+    ?assertEqual([<<"w">>], beamtalk_refactor_support:end_changelog_warnings()).

@@ -225,15 +225,23 @@ impl BeamtalkMcp {
 
         check_response!(response, "Failed to save class");
 
-        let text = format!(
-            "New class queued for {}",
-            response
-                .value
-                .as_ref()
-                .and_then(|v| v.get("path"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or(&params.path)
-        );
+        let value = response.value.as_ref();
+        let path = value
+            .and_then(|v| v.get("path"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(&params.path);
+        let mut text = format!("New class queued for {path}");
+        // A ChangeLog entry that could not be recorded means `flush` will not
+        // write the file; say so rather than reporting a clean "queued".
+        if let Some(warnings) = value
+            .and_then(|v| v.get("warnings"))
+            .and_then(serde_json::Value::as_array)
+        {
+            for warning in warnings.iter().filter_map(serde_json::Value::as_str) {
+                text.push_str("\nWarning: ");
+                text.push_str(warning);
+            }
+        }
 
         timer.ok_text(text)
     }

@@ -121,6 +121,30 @@ async fn save_class_dispatches_the_save_class_op_with_structured_params() {
 }
 
 #[tokio::test]
+async fn save_class_reports_changelog_warnings() {
+    let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+        "value": {"path": "src/greeter.bt", "warnings": ["ChangeLog append failed: disk full"]}
+    })))
+    .await;
+    let result = mcp
+        .save_class(Parameters(SaveClassParams {
+            source: "Object subclass: Greeter".to_string(),
+            path: "src/greeter.bt".to_string(),
+        }))
+        .await
+        .unwrap();
+    let text = call_text(&result);
+    assert!(
+        text.contains("New class queued for src/greeter.bt"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Warning: ChangeLog append failed: disk full"),
+        "{text}"
+    );
+}
+
+#[tokio::test]
 async fn try_method_success_and_error() {
     let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
     let ok = mcp
