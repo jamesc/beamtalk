@@ -18,6 +18,11 @@
 # GitHub reports each asset's digest; an asset without one is downloaded and
 # hashed here so the payload never lacks a hash.
 #
+# IDE_IMAGE (optional env, BT-5313): the release candidate's IDE image pinned by
+# digest, `ghcr.io/<owner>/beamtalk-ide@sha256:<64 hex>`. When set it is added as
+# `ide_image`; anything else is an error. Unset or empty (edge, nightly, or a tag
+# whose image build failed) leaves the key out.
+#
 # Needs: gh authenticated (GH_TOKEN), GITHUB_REPOSITORY, jq, sha256sum.
 
 set -euo pipefail
@@ -50,6 +55,12 @@ esac
 
 otp="$(read_otp)"
 
+ide_image="${IDE_IMAGE:-}"
+if [ -n "${ide_image}" ] && ! [[ "${ide_image}" =~ ^ghcr\.io/[a-z0-9._-]+/beamtalk-ide@sha256:[0-9a-f]{64}$ ]]; then
+    echo "error: IDE_IMAGE must be ghcr.io/<owner>/beamtalk-ide@sha256:<digest>, got '${ide_image}'" >&2
+    exit 2
+fi
+
 # Resolve the release id, then list its assets (paginated, 100 per page): the
 # release object itself embeds at most 30. `.sha256` sidecars are not artifacts.
 release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq '.id')"
@@ -75,6 +86,7 @@ done <<<"${rows}"
 
 jq -n -c \
     --arg channel "${CHANNEL}" --arg version "${VERSION}" --arg tag "${TAG}" --arg sha "${SHA}" \
-    --argjson otp "${otp}" --argjson assets "${assets}" \
+    --argjson otp "${otp}" --argjson assets "${assets}" --arg ide_image "${ide_image}" \
     '{channel: $channel, version: $version, tag: $tag, sha: $sha,
-      otp: $otp, assets: $assets}'
+      otp: $otp, assets: $assets}
+     + (if $ide_image == "" then {} else {ide_image: $ide_image} end)'

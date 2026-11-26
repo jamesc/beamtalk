@@ -4,7 +4,19 @@
 # LiveView IDE Release Pipeline
 # =============================
 # Builds self-contained, ERTS-embedded `mix release` archives of the LiveView
-# IDE (bt_attach) and, on a full release, uploads them to the GitHub Release.
+# IDE (bt_attach). It has two halves (ADR 0154 § 10, BT-5313):
+#
+#   build-and-attach  (`attach` + `tag`) build every platform's archive and
+#                     attach it, with its `.sha256`, to the GitHub (pre-)release
+#                     named by `tag`. release.yml's tag flow runs this, so uat
+#                     tests the exact archives.
+#   publish           (`publish` + `tag`) the archives have no channel of their
+#                     own: they reach users when promotion marks the release
+#                     latest. Publishing them is therefore the last check before
+#                     that, re-hashing every attached `beamtalk-ide-*` archive
+#                     against its sidecar (scripts/ci/verify-release-assets.sh).
+#                     Callable only from promote.yml once RELEASE_PUBLISH_MODE=
+#                     promote (scripts/ci/publish-guard.sh).
 #
 # The IDE ships on its OWN release lane — separate from the compiler/runtime
 # bundle (release.yml) and the VS Code extension (release-vscode.yml) — because:
@@ -14,48 +26,76 @@
 #   3. It can ship fixes without a full compiler release.
 #
 # Trigger modes (mirrors release-vscode.yml):
-#   - workflow_call: invoked by release.yml during a full release (uploads to the
-#     GitHub Release by default).
-#   - workflow_dispatch: manual build (artifacts only unless `publish` is set).
+#   - workflow_call: release.yml (build-and-attach; interim publish) and, from
+#     BT-5315, promote.yml (publish).
+#   - workflow_dispatch: manual build (artifacts only unless `attach`/`publish`).
 #
 # Windows is out of scope: per ADR 0091 the remote IDE host is Linux/macOS;
 # Windows is a browser-only client.
 #
 # Related: release.yml (core bundle), liveview.yml (per-PR CI)
-# Issue: BT-2515 (epic BT-2512)
+# Issue: BT-2515 (epic BT-2512), BT-5313
 
 name: LiveView IDE Release
 
 on:
   workflow_dispatch:
     inputs:
-      publish:
-        description: 'Upload archives to the GitHub Release (otherwise build artifacts only)'
+      attach:
+        description: 'Attach the archives to the GitHub Release named by `tag` (otherwise build artifacts only)'
         required: false
         type: boolean
         default: false
-  workflow_call:
-    inputs:
       publish:
-        description: 'Upload archives to the GitHub Release'
+        description: 'Publish: verify the IDE archives attached to `tag` (no build). Refused unless RELEASE_PUBLISH_MODE allows this caller.'
         required: false
         type: boolean
-        default: true
+        default: false
+      tag:
+        description: 'Release tag to attach to or publish from'
+        required: false
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Commit to build (default: the caller''s ref)'
+        required: false
+        type: string
+        default: ''
+      attach:
+        description: 'Attach the archives to the GitHub Release named by `tag`'
+        required: false
+        type: boolean
+        default: false
+      publish:
+        description: 'Publish: verify the IDE archives attached to `tag` (no build)'
+        required: false
+        type: boolean
+        default: false
+      tag:
+        description: 'Release tag to attach to or publish from'
+        required: false
+        type: string
+        default: ''
 
 concurrency:
-  group: liveview-release-${{ github.ref }}
+  group: liveview-release-${{ github.ref }}-${{ inputs.publish && 'publish' || 'build' }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
+  # ─── Build (and, with attach, attach to the release) ───────────────────
   build:
     name: Build IDE release (${{ matrix.platform }})
+    # A publish-only call checks what is attached; it never rebuilds.
+    if: ${{ !inputs.publish || inputs.attach }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     permissions:
-      contents: write # gh release upload on a full release
+      contents: write # gh release upload with attach
     strategy:
       fail-fast: false
       matrix:
@@ -71,6 +111,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       # The IDE version tracks the repo VERSION file (BT-2514), matching the
@@ -145,15 +186,55 @@ jobs:
             ${{ steps.package.outputs.archive }}.sha256
           retention-days: 7
 
-      # On a full release (release.yml calls this workflow with publish=true),
-      # attach the archive to the GitHub Release. GITHUB_REF_NAME is the tag.
+      # Build-and-attach: onto the (pre-)release release.yml created for the tag.
       - name: Upload to GitHub Release
-        if: github.event_name == 'release' && inputs.publish
+        if: inputs.attach
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
         run: |
-          gh release upload "${GITHUB_REF_NAME}" \
-            "${{ steps.package.outputs.archive }}" \
-            "${{ steps.package.outputs.archive }}.sha256" \
-            --repo "${{ github.repository }}" \
+          if [ -z "${RELEASE_TAG}" ]; then
+            echo "::error::attach is set but no tag was given"
+            exit 1
+          fi
+          gh release upload "${RELEASE_TAG}" "${ARCHIVE}" "${ARCHIVE}.sha256" \
+            --repo "${GITHUB_REPOSITORY}" \
             --clobber
+
+  # ─── Publish: check the attached archives before the release goes out ──
+  publish:
+    needs: build
+    if: ${{ !cancelled() && inputs.publish && contains(fromJSON('["success","skipped"]'), needs.build.result) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            scripts/ci/publish-guard.sh
+            scripts/ci/verify-release-assets.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Check this caller may publish
+        env:
+          RELEASE_PUBLISH_MODE: ${{ vars.RELEASE_PUBLISH_MODE }}
+        run: scripts/ci/publish-guard.sh "LiveView IDE archive publish"
+
+      # Three platforms: linux-x86_64, macos-arm64, macos-x86_64 (the build
+      # matrix). By prefix, not VERSION: the checkout here is the caller's ref,
+      # which need not be the tag.
+      - name: Verify the attached IDE archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -z "${RELEASE_TAG}" ]; then
+            echo "::error::publish is set but no tag was given"
+            exit 1
+          fi
+          scripts/ci/verify-release-assets.sh "${RELEASE_TAG}" beamtalk-ide- 3
