@@ -209,7 +209,7 @@ vm_args_dist_flags_test_() ->
     Flags = fun(Text) -> beamtalk_release_launcher:vm_args_dist_flags(Text) end,
     [
         ?_assertEqual(
-            #{ssl_dist_opt => [], ssl_dist_optfile => [], proto_dist => [], args_file => []},
+            #{ssl_dist_opt => [], ssl_dist_optfile => [], proto_dist => [], problems => []},
             Flags("-mode interactive\n-sname stray\n-detached\n-s init stop\n-eval \"x().\"\n")
         ),
         %% A stray -sname does not hide a later weaker -ssl_dist_opt.
@@ -218,7 +218,7 @@ vm_args_dist_flags_test_() ->
                 ssl_dist_opt => ["server_verify", "verify_none"],
                 ssl_dist_optfile => [],
                 proto_dist => [],
-                args_file => []
+                problems => []
             },
             Flags("-sname stray\n-ssl_dist_opt server_verify verify_none\n")
         ),
@@ -228,11 +228,11 @@ vm_args_dist_flags_test_() ->
                 ssl_dist_opt => ["a"],
                 ssl_dist_optfile => ["f"],
                 proto_dist => ["inet_tls"],
-                args_file => []
+                problems => []
             },
             Flags(
                 <<"# caf", 16#E9,
-                    "\n-ssl_dist_opt a\n+K true\n-ssl_dist_optfile f +P 9\n-proto_dist inet_tls\n+sbwt none\n">>
+                    "\n+K true\n-ssl_dist_opt a\n+A30\n-ssl_dist_optfile f\n+sbt\n-proto_dist inet_tls\n">>
             )
         ),
         ?_assertEqual(
@@ -240,7 +240,7 @@ vm_args_dist_flags_test_() ->
                 ssl_dist_opt => ["a", "b", "c d"],
                 ssl_dist_optfile => ["/p q/o.conf"],
                 proto_dist => ["inet_tls"],
-                args_file => []
+                problems => []
             },
             Flags(
                 "# -ssl_dist_opt commented\n-ssl_dist_opt a b\n-detached\n"
@@ -262,8 +262,73 @@ vm_args_dist_flags_test_() ->
             Flags("-ssl_dist_opt a b\\ c#x\n-ssl_dist_optfile f # note\n")
         ),
         %% A nested argument file is reported, for the launcher to refuse.
-        ?_assertMatch(#{args_file := ["more.args"]}, Flags("-args_file more.args\n"))
+        ?_assertMatch(
+            #{problems := ["sets -args_file more.args" ++ _]}, Flags("-args_file more.args\n")
+        ),
+        %% Words the check cannot place exactly are refused, not guessed.
+        ?_assertMatch(
+            #{problems := ["has a ' or \" quote" ++ _]},
+            Flags("-env OWNER O'Brien\n-ssl_dist_opt server_verify verify_none\n")
+        ),
+        ?_assertMatch(
+            #{
+                problems := [
+                    "has a + emulator flag in the middle of the words of -ssl_dist_opt" ++ _
+                ]
+            },
+            Flags(
+                "-ssl_dist_opt server_verify verify_peer +K true server_fail_if_no_peer_cert false\n"
+            )
+        ),
+        ?_assertMatch(
+            #{problems := []},
+            Flags("-ssl_dist_opt a b\n+A30\n-sname x\n+K true\n-ssl_dist_opt c d\n")
+        )
     ].
+
+%% BT-5260: the reader agrees with erl's own. For each file, the words erl hands
+%% `init:get_argument/1` for the three distribution flags equal ours. Skipped
+%% when no `erl` is on the PATH.
+vm_args_matches_erl_test_() ->
+    case os:find_executable("erl") of
+        false ->
+            [];
+        Erl ->
+            {setup, fun() -> beamtalk_test_fs:tmp_dir("bt5260_vmargs") end,
+                fun beamtalk_test_fs:rm_rf/1, fun(Dir) ->
+                    Cases = [
+                        "-mode interactive\n-sname stray\n-ssl_dist_opt a b\n",
+                        "-ssl_dist_opt a b\n+A30\n-ssl_dist_opt c d\n-proto_dist inet_tls\n",
+                        "-ssl_dist_opt 'a b' \"c d\" e#f\n# -ssl_dist_opt hidden\n-proto_dist x\n",
+                        "-ssl_dist_opt a\\ b c # trailing\n-ssl_dist_optfile /p\n",
+                        "-foo x y#don't\n-ssl_dist_opt server_verify verify_none\n",
+                        "-ssl_dist_opt a b\n-extra -proto_dist other\n"
+                    ],
+                    [
+                        ?_assertEqual(
+                            erl_dist_words(Erl, Dir, N, Text),
+                            ours_dist_words(Text)
+                        )
+                     || {N, Text} <- lists:enumerate(Cases)
+                    ]
+                end}
+    end.
+
+ours_dist_words(Text) ->
+    Ours = beamtalk_release_launcher:vm_args_dist_flags(Text),
+    [{K, maps:get(K, Ours)} || K <- [ssl_dist_opt, ssl_dist_optfile, proto_dist]].
+
+%% What a real `erl -args_file` VM answers for the same three flags.
+erl_dist_words(Erl, Dir, N, Text) ->
+    File = filename:join(Dir, "t" ++ integer_to_list(N) ++ ".args"),
+    ok = file:write_file(File, Text),
+    Eval =
+        "io:format(\"~w.\", [[{K, case init:get_argument(K) of {ok, L} -> lists:append(L); "
+        "error -> [] end} || K <- [ssl_dist_opt, ssl_dist_optfile, proto_dist]]]), halt().",
+    Out = os:cmd(Erl ++ " -noshell -args_file \"" ++ File ++ "\" -eval '" ++ Eval ++ "'"),
+    {ok, Tokens, _} = erl_scan:string(Out),
+    {ok, Words} = erl_parse:parse_term(Tokens),
+    Words.
 
 %% An epmd that already runs on loopback only would hide the node from other
 %% hosts; one that listens on the interface (or none at all) is fine.

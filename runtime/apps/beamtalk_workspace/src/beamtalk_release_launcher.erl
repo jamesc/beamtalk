@@ -392,13 +392,20 @@ them can run, start distribution or silence its output there. Reads erl's
 arg-file syntax: whitespace-separated words, `#` comments to the end of the
 line, `\\` escapes the next character, and single or double quoted words; `-extra` ends the flags. A `+`
 emulator flag ends the words of the flag before it.
+
+What the reader cannot place exactly is reported in `problems` and refused by
+the check, never guessed: a nested `-args_file` (the node loads it, the check
+cannot), a quote with no closing quote, and a plain word after a `+` flag that
+sits inside a distribution flag's words (erlexec removes `+K true` from the
+argument list, so such a word would join the distribution flag). A test
+compares the words with a real `erl -args_file` VM's.
 """.
 -spec vm_args_dist_flags(string() | binary()) ->
     #{
         ssl_dist_opt := [string()],
         ssl_dist_optfile := [string()],
         proto_dist := [string()],
-        args_file := [string()]
+        problems := [string()]
     }.
 vm_args_dist_flags(Text) ->
     Chars =
@@ -407,9 +414,18 @@ vm_args_dist_flags(Text) ->
             %% Not UTF-8 (a Latin-1 comment): erl reads the file bytewise.
             _ -> binary_to_list(iolist_to_binary(Text))
         end,
-    Words = vm_args_words(Chars, [], []),
-    Empty = #{ssl_dist_opt => [], ssl_dist_optfile => [], proto_dist => [], args_file => []},
-    vm_args_collect(Words, none, Empty).
+    Empty = #{ssl_dist_opt => [], ssl_dist_optfile => [], proto_dist => [], problems => []},
+    try vm_args_words(Chars, [], []) of
+        Words -> vm_args_collect(Words, none, Empty)
+    catch
+        throw:unbalanced_quote ->
+            Empty#{
+                problems := [
+                    "has a ' or \" quote with no closing quote; the check cannot tell which "
+                    "words the node reads after it, so close the quote"
+                ]
+            }
+    end.
 
 vm_args_collect([], _Current, Acc) ->
     Acc;
@@ -419,17 +435,44 @@ vm_args_collect(["-ssl_dist_opt" | T], _, Acc) ->
     vm_args_collect(T, ssl_dist_opt, Acc);
 vm_args_collect(["-ssl_dist_optfile" | T], _, Acc) ->
     vm_args_collect(T, ssl_dist_optfile, Acc);
-vm_args_collect(["-args_file" | T], _, Acc) ->
-    vm_args_collect(T, args_file, Acc);
+vm_args_collect(["-args_file", File | _], _, Acc) ->
+    %% The node would load it; this check cannot see inside.
+    problem(
+        io_lib:format(
+            "sets -args_file ~ts: the check cannot read the distribution flags in a "
+            "nested argument file; put -ssl_dist_opt, -ssl_dist_optfile and -proto_dist "
+            "in the [release] vm-args file itself",
+            [File]
+        ),
+        Acc
+    );
 vm_args_collect(["-proto_dist" | T], _, Acc) ->
     vm_args_collect(T, proto_dist, Acc);
-vm_args_collect([[Lead | _] | T], _, Acc) when Lead =:= $-; Lead =:= $+ ->
-    %% A `-flag` or a `+emulator` flag (`+K true`) ends the previous flag's words.
+vm_args_collect([[$+ | _] | T], Flag, Acc) when Flag =:= none; element(1, Flag) =:= after_plus ->
+    vm_args_collect(T, Flag, Acc);
+vm_args_collect([[$+ | _] | T], Flag, Acc) ->
+    %% erlexec takes a `+emulator` flag (and its value, as in `+K true`) out of the
+    %% argument list, so a plain word after it joins the dist flag before it.
+    vm_args_collect(T, {after_plus, Flag}, Acc);
+vm_args_collect([[$- | _] | T], _, Acc) ->
     vm_args_collect(T, none, Acc);
 vm_args_collect([_ | T], none, Acc) ->
     vm_args_collect(T, none, Acc);
+vm_args_collect([_ | _], {after_plus, Flag}, Acc) ->
+    problem(
+        io_lib:format(
+            "has a + emulator flag in the middle of the words of -~ts: the check cannot tell "
+            "which of the words after it the node reads as options; move the + flag "
+            "to its own line before or after",
+            [Flag]
+        ),
+        Acc
+    );
 vm_args_collect([Word | T], Flag, Acc) ->
     vm_args_collect(T, Flag, Acc#{Flag := maps:get(Flag, Acc) ++ [Word]}).
+
+problem(Message, #{problems := Problems} = Acc) ->
+    Acc#{problems := Problems ++ [lists:flatten(Message)]}.
 
 %% Split into words as erl's arg-file reader does (checked against `erl`):
 %% whitespace separates, `#` starts a comment to the end of the line, `\\`
@@ -445,8 +488,10 @@ vm_args_words([$# | T], Cur, Acc) ->
 vm_args_words([$\\, C | T], Cur, Acc) ->
     vm_args_words(T, [C | Cur], Acc);
 vm_args_words([Q | T], Cur, Acc) when Q =:= $"; Q =:= $' ->
-    {Quoted, Rest} = lists:splitwith(fun(C) -> C =/= Q end, T),
-    vm_args_words(lists:nthtail(min(1, length(Rest)), Rest), lists:reverse(Quoted) ++ Cur, Acc);
+    case lists:splitwith(fun(C) -> C =/= Q end, T) of
+        {_, []} -> throw(unbalanced_quote);
+        {Quoted, [_Closing | Rest]} -> vm_args_words(Rest, lists:reverse(Quoted) ++ Cur, Acc)
+    end;
 vm_args_words([C | T], Cur, Acc) ->
     vm_args_words(T, [C | Cur], Acc).
 
@@ -461,16 +506,8 @@ vm_args_flags() ->
             case file:read_file(Path) of
                 {ok, Text} ->
                     case vm_args_dist_flags(Text) of
-                        #{args_file := [Nested | _]} ->
-                            %% The node would load it; this check cannot see inside.
-                            {error,
-                                io_lib:format(
-                                    "'~ts' sets -args_file ~ts: the check cannot read the "
-                                    "distribution flags in a nested argument file; put "
-                                    "-ssl_dist_opt, -ssl_dist_optfile and -proto_dist in the "
-                                    "[release] vm-args file itself",
-                                    [Path, Nested]
-                                )};
+                        #{problems := [Problem | _]} ->
+                            {error, io_lib:format("'~ts' ~ts", [Path, Problem])};
                         Flags ->
                             {ok, Flags}
                     end;
