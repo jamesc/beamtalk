@@ -37,7 +37,11 @@ setup() ->
 
 cleanup({Peer, PeerNode}) ->
     %% A failed test can leave the partition in place; never leak it.
-    catch beamtalk_dist_test_helper:heal(PeerNode),
+    try
+        beamtalk_dist_test_helper:heal(PeerNode)
+    catch
+        _:_ -> ok
+    end,
     beamtalk_dist_test_helper:stop_peer(Peer).
 
 partition_test_() ->
