@@ -1007,7 +1007,7 @@ agent must add each one.
 | `ci:corpus` | `corpus.yml` (Rust corpus tier, `just test-corpus`, two shards, about 33 runner-min) | Every merge | The PR changes state-threading lowering or its analysis, fixes a state-threading or `PIN-BUG` issue, or adds or changes a `*_corpus` / `*agreement*` test |
 | `ci:core-diff` | `core-diff.yml` (corpus `.core` diff vs the PR base) | Never | A codegen refactor should leave generated Core Erlang unchanged |
 | `core-diff:enforce` | `core-diff.yml`, failing on any diff | Never | As above, and any difference must fail the PR |
-| `ci:all-platforms` | `ci-platforms.yml` (macOS, Windows, desktop) | Nightly schedule | The PR is platform-sensitive (paths, processes, file system) |
+| `ci:all-platforms` | `ci-platforms.yml` (macOS, Windows, desktop) | Nightly schedule, and a push to `main` that changes `Cargo.toml`, `Cargo.lock` or `rust-toolchain.toml` (warms the Rust cache, BT-5273) | The PR is platform-sensitive (paths, processes, file system) |
 
 Because `main` runs the corpus tier on every merge, and `ci-triage.yml` files
 an issue for a red `main` run, a PR that should have carried `ci:corpus` but
