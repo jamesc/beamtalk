@@ -314,7 +314,7 @@ fn test_cross_file_protocol_resolution_seeds_pre_loaded_protocols() {
     // actually calls it — over *all* source files in one pass, before
     // any compile happens (a live scan, not a seed from any prior
     // "generated" snapshot).
-    let (protocol_infos, _protocol_defs, _sources) =
+    let (protocol_infos, _protocol_defs, _sources, _files) =
         collect_stdlib_protocol_infos(&[file_a.clone(), file_b.clone()]);
     assert_eq!(
         protocol_infos.len(),
@@ -421,7 +421,7 @@ fn test_cross_file_trait_flattening_seeds_pre_loaded_protocol_defs() {
     )
     .unwrap();
 
-    let (_protocol_infos, protocol_defs, _sources) =
+    let (_protocol_infos, protocol_defs, _sources, _files) =
         collect_stdlib_protocol_infos(&[file_a.clone(), file_b.clone()]);
     assert_eq!(
         protocol_defs.len(),

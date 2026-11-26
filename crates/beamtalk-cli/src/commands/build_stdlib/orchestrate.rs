@@ -17,7 +17,7 @@ use super::generators::{
 use super::metadata::{
     AliasSource, ClassMeta, alias_source_texts_sorted_by_name, collect_stdlib_alias_sources,
     collect_stdlib_protocol_infos, extract_class_metadata, is_protocol_only_file,
-    mark_value_subclasses, protocol_declaring_file_names,
+    mark_value_subclasses,
 };
 use crate::beam_compiler::{
     BeamCompiler, ClassHierarchyContext, CompileContext, compile_source_with_bindings,
@@ -152,9 +152,8 @@ pub fn build_stdlib(quiet: bool, warnings: crate::commands::WarningFlags) -> Res
     let alias_sources = collect_stdlib_alias_sources(&source_files)?;
     // Live same-run protocol pre-pass, mirroring the alias pre-pass
     // immediately above — see `collect_stdlib_protocol_infos`'s doc for why.
-    let (protocol_infos, protocol_defs, protocol_sources) =
+    let (protocol_infos, protocol_defs, protocol_sources, protocol_file_names) =
         collect_stdlib_protocol_infos(&source_files);
-    let protocol_file_names = protocol_declaring_file_names(&source_files);
     let compile_ctx = CompileContext {
         native_type_registry: native_type_registry.map(std::sync::Arc::new),
         hierarchy: ClassHierarchyContext {

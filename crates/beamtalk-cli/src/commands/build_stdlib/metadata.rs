@@ -489,7 +489,7 @@ pub(super) fn collect_stdlib_alias_sources(
 /// no `package` field (protocols have no `internal` modifier at the AST
 /// level — see `collect_project_protocol_and_alias_infos`'s doc in
 /// `build.rs`, which this mirrors). (User compilation gets the stdlib's
-/// provision-bearing protocols from `generated_builtins.rs`'s
+/// protocols from `generated_builtins.rs`'s
 /// `generated_stdlib_protocol_files()` table instead — see
 /// [`generate_protocol_files_section`]; this live pre-pass is what the stdlib
 /// build itself uses.) `ProtocolRegistry::extract_protocol_infos`
@@ -502,6 +502,11 @@ pub(super) fn collect_stdlib_alias_sources(
 /// that file simply contributes no protocols to the merged set, and the same
 /// parse error is already reported through the normal per-file diagnostics
 /// path when that file is compiled on its own.
+///
+/// The fourth element is the file name of every stdlib source that declares
+/// any protocol, provision-bearing or not, sorted and deduplicated — the files
+/// `generate_protocol_files_section` embeds (BT-5338), so requirements-only
+/// protocols (`Printable`, `JsonRepresentable`) reach the type checker.
 ///
 /// Also returns the full AST of every *provision-bearing* protocol found
 /// (ADR 0127 §10a; BT-3591) — the trait-flattening counterpart to the
@@ -524,8 +529,10 @@ pub(super) fn collect_stdlib_protocol_infos(
     Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     Vec<beamtalk_core::ast::ProtocolDefinition>,
     beamtalk_core::semantic_analysis::ProtocolSourceMap,
+    Vec<String>,
 ) {
     let mut all = Vec::new();
+    let mut declaring_files = Vec::new();
     let mut all_defs = Vec::new();
     let mut all_sources = beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
     for file in source_files {
@@ -534,6 +541,9 @@ pub(super) fn collect_stdlib_protocol_infos(
         };
         let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
         let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+        if !module.protocols.is_empty() {
+            declaring_files.extend(file.file_name().map(str::to_string));
+        }
         all.extend(
             beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::extract_protocol_infos(
                 &module,
@@ -555,32 +565,9 @@ pub(super) fn collect_stdlib_protocol_infos(
             all_defs.push(protocol);
         }
     }
-    (all, all_defs, all_sources)
-}
-
-/// The file name (no directory) of every stdlib source file that declares a
-/// protocol, provision-bearing or not, sorted and deduplicated — the files
-/// `generate_protocol_files_section` embeds (BT-5338). Requirements-only
-/// protocols (`Printable`, `JsonRepresentable`) are included so the type
-/// checker sees them in user packages. Unreadable files contribute nothing,
-/// as in [`collect_stdlib_protocol_infos`].
-pub(super) fn protocol_declaring_file_names(source_files: &[Utf8PathBuf]) -> Vec<String> {
-    let mut names: Vec<String> = source_files
-        .iter()
-        .filter(|file| {
-            let Ok(source) = fs::read_to_string(file) else {
-                return false;
-            };
-            let (module, _) = beamtalk_core::source_analysis::parse(
-                beamtalk_core::source_analysis::lex_with_eof(&source),
-            );
-            !module.protocols.is_empty()
-        })
-        .filter_map(|file| file.file_name().map(str::to_string))
-        .collect();
-    names.sort();
-    names.dedup();
-    names
+    declaring_files.sort();
+    declaring_files.dedup();
+    (all, all_defs, all_sources, declaring_files)
 }
 
 /// Extracts `alias_sources`' declaration texts sorted by alias *name* (not

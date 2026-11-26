@@ -219,7 +219,7 @@ mod tests {
         let mut expected = Vec::new();
         for entry in std::fs::read_dir(&stdlib_src).expect("stdlib/src") {
             let path = entry.expect("dir entry").path();
-            // `build_stdlib.rs`'s `provision_bearing_protocol_file_names`
+            // `build_stdlib`'s `generate_protocol_files_section`
             // keys the generated table by file name, which is only unique
             // while `stdlib/src` is flat.
             assert!(

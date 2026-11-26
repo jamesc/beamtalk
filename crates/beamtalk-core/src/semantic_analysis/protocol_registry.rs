@@ -688,52 +688,61 @@ impl ProtocolRegistry {
             .filter_map(|p| p.extending.as_ref().map(|e| e.name.clone()))
             .chain(self.protocols.values().filter_map(|p| p.extending.clone()))
             .collect();
-        self.seed_chain(&mut pending, &own, current_package, false);
+        self.seed_chain(&mut pending, &own, current_package, hierarchy, false);
 
         // BT-5333: every other baked stdlib protocol is also seeded, so a
         // bound (`T :: Comparable`) or annotation (`x :: Comparable`) naming
         // one is checked rather than assumed to conform (an unknown protocol
         // conforms). A class of the same name that is not a protocol's
         // synthetic class entry keeps the name (as in `add_pre_loaded`).
-        let mut pending: Vec<EcoString> = stdlib_protocols::stdlib_protocol_names()
-            .iter()
-            .filter(|n| {
-                hierarchy
-                    .get_class(n)
-                    .is_none_or(|ci| ci.superclass.as_deref() == Some("Protocol"))
-            })
-            .cloned()
-            .collect();
-        self.seed_chain(&mut pending, &own, current_package, true);
+        let mut pending: Vec<EcoString> = stdlib_protocols::stdlib_protocol_names().to_vec();
+        self.seed_chain(&mut pending, &own, current_package, hierarchy, true);
     }
 
     /// Registers each stdlib protocol in `pending` (and, transitively, its
     /// `extending:` parents) unless the module declares it or the registry
     /// already holds it. `seeded_only` records the names for
-    /// [`Self::is_seeded_only`].
+    /// [`Self::is_seeded_only`]; a name reached again with `seeded_only`
+    /// false (an `extending:` parent) is no longer seeded-only. In a
+    /// seeded-only chain a name held by a hierarchy class that is not a
+    /// protocol's synthetic entry keeps that class (as in `add_pre_loaded`).
     fn seed_chain(
         &mut self,
         pending: &mut Vec<EcoString>,
         own: &std::collections::HashSet<&EcoString>,
         current_package: Option<&str>,
+        hierarchy: &ClassHierarchy,
         seeded_only: bool,
     ) {
         while let Some(parent) = pending.pop() {
-            if own.contains(&parent) || self.protocols.contains_key(&parent) {
+            if own.contains(&parent) {
                 continue;
             }
-            // Seeded-only protocols come from the full baked table, so
-            // requirements-only ones (`Printable`) are seen too (BT-5338);
-            // `uses:`-parent seeding keeps the provision-bearing resolver.
-            let def = if seeded_only {
-                if stdlib_protocols::is_stdlib_package(current_package) {
-                    None
-                } else {
-                    stdlib_protocols::stdlib_protocol_definition(&parent)
+            if self.protocols.contains_key(&parent) {
+                if !seeded_only {
+                    self.seeded_only.remove(&parent);
                 }
-            } else {
-                trait_expansion::resolve_stdlib_protocol(&parent, current_package)
-            };
+                continue;
+            }
+            if seeded_only
+                && hierarchy
+                    .get_class(&parent)
+                    .is_some_and(|ci| ci.superclass.as_deref() != Some("Protocol"))
+            {
+                continue;
+            }
+            // Both chains resolve from the full baked table, so a
+            // requirements-only parent (`extending: Printable`) registers
+            // like a provision-bearing one (BT-5338). The `uses:` resolver
+            // goes first so a qualified key still resolves.
+            let def =
+                trait_expansion::resolve_stdlib_protocol(&parent, current_package).or_else(|| {
+                    if stdlib_protocols::is_stdlib_package(current_package) {
+                        None
+                    } else {
+                        stdlib_protocols::stdlib_protocol_definition(&parent)
+                    }
+                });
             let Some(def) = def else {
                 continue;
             };
@@ -2380,5 +2389,62 @@ Value subclass: Version
             "Pre-loaded protocol should not collide with synthetic protocol class, got: {diags:?}"
         );
         assert!(registry.has_protocol("Tickable"));
+    }
+
+    #[test]
+    fn dependency_requirements_only_printable_is_not_replaced_by_seeding() {
+        // BT-5338: a dependency's own requirements-only `Printable` is
+        // registered from the pre-loaded set first, so seeding the baked
+        // stdlib `Printable` must neither replace nor flag it.
+        let (module, parse_diags) = crate::source_analysis::parse(
+            crate::source_analysis::lex_with_eof("Object subclass: Holder\n"),
+        );
+        assert!(parse_diags.is_empty(), "{parse_diags:?}");
+        let dep_printable = ProtocolInfo {
+            name: "Printable".into(),
+            type_params: vec![],
+            type_param_bounds: vec![],
+            extending: None,
+            methods: vec![],
+            class_methods: vec![],
+            package: Some("dep".into()),
+            span: span(),
+            provided: vec![],
+        };
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.seed_and_register_module(
+            &module,
+            vec![dep_printable],
+            &hierarchy,
+            Some("app"),
+        );
+        assert!(diags.is_empty(), "{diags:?}");
+        let printable = registry.get("Printable").expect("Printable registered");
+        assert_eq!(printable.package.as_deref(), Some("dep"));
+        assert!(printable.methods.is_empty(), "the dependency's wins");
+        assert!(!registry.is_seeded_only("Printable"));
+        // Every other baked protocol is still seeded.
+        assert!(registry.has_protocol("JsonRepresentable"));
+        assert!(registry.is_seeded_only("JsonRepresentable"));
+    }
+
+    #[test]
+    fn extending_requirements_only_parent_is_not_seeded_only() {
+        // BT-5338: `extending: Printable` registers the parent like
+        // `extending: Comparable` does, so it stays visible to selector
+        // narrowing and the visibility validator.
+        let (module, parse_diags) =
+            crate::source_analysis::parse(crate::source_analysis::lex_with_eof(
+                "Protocol define: Pretty extending: Printable\n  pretty -> String\n",
+            ));
+        assert!(parse_diags.is_empty(), "{parse_diags:?}");
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut registry = ProtocolRegistry::new();
+        let diags = registry.seed_and_register_module(&module, vec![], &hierarchy, None);
+        assert!(diags.is_empty(), "{diags:?}");
+        assert!(registry.has_protocol("Printable"));
+        assert!(!registry.is_seeded_only("Printable"));
+        assert!(registry.is_seeded_only("JsonRepresentable"));
     }
 }
