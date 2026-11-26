@@ -70,3 +70,13 @@ TestCase subclass: CollectionMaxMinTest
     self assert: #(7) max equals: 7
     self assert: (((Set new add: 3) add: 9) add: 4) max equals: 9
     self assert: (1 to: 5) min equals: 1
+
+  /// A `>` that answers a non-Boolean is sent `ifTrue:ifFalse:`, exactly as
+  /// `Number>>max:` does, so both raise the same `does_not_understand`.
+  testNonBooleanComparisonRaisesLikePairwiseMax =>
+    a := Sloppy new
+    b := Sloppy new
+    e1 := [(self mixed: a with: b) max] on: Error do: [:x | x]
+    e2 := [a > b ifTrue: [a] ifFalse: [b]] on: Error do: [:x | x]
+    self assert: e1 kind equals: e2 kind
+    self assert: e1 kind equals: #does_not_understand

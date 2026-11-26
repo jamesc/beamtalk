@@ -185,22 +185,15 @@ fold_dispatched([Elem | Rest], Acc, Op) ->
     case beamtalk_message_dispatch:send(Acc, Op, [Elem]) of
         true -> fold_dispatched(Rest, Acc, Op);
         false -> fold_dispatched(Rest, Elem, Op);
-        Other -> raise_not_boolean(Op, Other)
+        Other ->
+            %% `Number>>max:` is `(self > other) ifTrue: [self] ifFalse: [other]`,
+            %% so a non-Boolean answer is *sent* `ifTrue:ifFalse:` (DNU unless
+            %% it understands it). Do exactly that, for the same error.
+            Chosen = beamtalk_message_dispatch:send(Other, 'ifTrue:ifFalse:', [
+                fun() -> Acc end, fun() -> Elem end
+            ]),
+            fold_dispatched(Rest, Chosen, Op)
     end.
-
-%% `Number>>max:` uses `ifTrue:ifFalse:`, which rejects a non-Boolean; so does
-%% this fold.
--spec raise_not_boolean('>' | '<', term()) -> no_return().
-raise_not_boolean(Op, Other) ->
-    Error0 = beamtalk_error:new(type_error, 'Collection'),
-    Error1 = beamtalk_error:with_selector(Error0, Op),
-    Hint = iolist_to_binary([
-        <<"Comparing elements with ">>,
-        atom_to_binary(Op, utf8),
-        <<" must answer a Boolean, got ">>,
-        io_lib:format("~p", [Other])
-    ]),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, Hint)).
 
 -doc """
 Return the mean of the elements as a float.
