@@ -605,12 +605,12 @@ for the full model.
 |---------|-------------------|-------------|
 | `:changes` | `Workspace changes` | Show the ChangeLog (returns a `ChangeLog` object) |
 | `:dirty` | `Workspace changes dirtyMethods` | Per-class set of dirty selectors |
-| `:flush` | `Workspace flush` | Write every durable + flushable Tier 1 entry back to its source file |
-| `:flush Counter` | `Workspace flush: Counter` | Flush entries targeting one class |
-| `:flush #'new-class'` | `Workspace flush: #'new-class'` | Flush only entries of one kind |
-| `:flush #{ #file => "path" }` | `Workspace flush: #{ #file => "path" }` | Flush entries against one file |
-| `:flush-destructive` | `Workspace flushIncludingDestructive` | Flush all pending entries including Tier 2 (`remove-class` — file deletion); prompts `y/N` |
-| `:flush-destructive Counter` | `Workspace flush: Counter confirmDestructive: true` | Destructive flush scoped to one class; prompts `y/N` |
+| `:flush` | `flush` operation (as `Workspace flush`) | Write every durable + flushable Tier 1 entry back to its source file |
+| `:flush Counter` | `flush` operation, class scope | Flush entries targeting one class |
+| `:flush #'new-class'` | `flush` operation, kind scope (`new-class`, `remove-method`, `remove-class`, `rename-class`, `rename-method`) | Flush only entries of one kind |
+| `:flush #{ #file => "path" }` | `flush` operation, file scope | Flush entries against one file |
+| `:flush-destructive` | `flush` operation with `confirm_destructive` | Flush all pending entries including Tier 2 (`remove-class` — file deletion); prompts `y/N` |
+| `:flush-destructive Counter` | `flush` operation, class scope, `confirm_destructive` | Destructive flush scoped to one class; prompts `y/N` |
 | `:remove-method Counter increment` | `Counter removeSelector: #increment` | Remove a method from a class (strips optional `#` from selector) |
 | `:remove-class Counter` | `Counter removeFromSystem` | Remove a class entirely (memory-only; prompts `y/N`). Flush separately to delete the file |
 | `:rename-class Counter Accumulator` | `Counter renameTo: #Accumulator` | Rename a class (memory-only; prompts `y/N`). Flush separately (`:flush-destructive`) to move the file and rewrite cross-file references |

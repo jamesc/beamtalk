@@ -45,10 +45,14 @@ Term-returning handler for the editing ops.
 
 * `save-method` (`class`, `selector`, `source`; optional `author`,
   `author_kind` = `human` | `agent`) → `{value, #{<<"class">> => _,
-  <<"selector">> => _}}`. The patch is durable: installed in memory and logged
+  <<"selector">> => _}}`, plus `<<"warnings">>` (a list of Strings) when the
+  ChangeLog entry could not be recorded, so `flush` will not write it. The
+  patch is durable: installed in memory and logged
   as a keepable ChangeLog entry. Without `author` the author is the one the
   calling process is stamped with (`repl` / `human` when nothing stamps it).
-* `save-class` (`source`, `path`) → `{value, #{<<"path">> => _}}`.
+* `save-class` (`source`, `path`; optional `author`, `author_kind` as for
+  `save-method`) → `{value, #{<<"path">> => _}}`, plus `<<"warnings">>` when the
+  ChangeLog entry could not be recorded.
 * `revert-method` (`class`, `selector`; optional `side` = `instance` | `class`)
   → `{value, #{<<"class">> => _, <<"selector">> => _}}`.
 * `reload-file` (`path`) → `{value, #{<<"classes">> => [Name]}}`.
@@ -76,22 +80,11 @@ handle_term(<<"save-class">>, Params, _Msg, _SessionPid) ->
         ])
     of
         {ok, [Source, Path]} ->
-            %% A failed ChangeLog append for the new class is queued as a warning
-            %% (BT-5084), not raised: collect it and return it, so the caller
-            %% learns `flush` will not write the file.
-            {Result, Warnings} = beamtalk_refactor_support:collect_changelog_warnings(fun() ->
-                beamtalk_repl_loader_newclass:new_class(Source, Path)
-            end),
-            case Result of
-                {ok, _ClassObjects} ->
-                    Value = #{<<"path">> => Path},
-                    {value,
-                        case Warnings of
-                            [] -> Value;
-                            _ -> Value#{<<"warnings">> => Warnings}
-                        end};
-                {error, Reason} ->
-                    {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
+            case author(<<"save-class">>, Params) of
+                {ok, Author} ->
+                    save_class(Source, Path, Author);
+                {error, _} = Err ->
+                    Err
             end;
         {missing, Key} ->
             missing_param(<<"save-class">>, Key)
@@ -179,15 +172,24 @@ project_relative_bt_path(Path) ->
 
 -spec save_method(binary(), binary(), binary(), map()) -> beamtalk_repl_ops:op_result().
 save_method(Class, Selector, Source, Params) ->
-    case author(Params) of
+    case author(<<"save-method">>, Params) of
         {ok, {Author, AuthorKind}} ->
-            case
+            %% A failed ChangeLog append for a patch that is already live is queued
+            %% as a warning (BT-5084), not raised: collect it and return it, as
+            %% `save-class` does, so the caller learns `flush` will not write it.
+            {Result, Warnings} = beamtalk_refactor_support:collect_changelog_warnings(fun() ->
                 beamtalk_repl_eval:compile_method(
                     Class, Selector, Source, durable, Author, AuthorKind
                 )
-            of
+            end),
+            case Result of
                 {ok, ClassName} ->
-                    {value, #{<<"class">> => ClassName, <<"selector">> => Selector}};
+                    Value = #{<<"class">> => ClassName, <<"selector">> => Selector},
+                    {value,
+                        case Warnings of
+                            [] -> Value;
+                            _ -> Value#{<<"warnings">> => Warnings}
+                        end};
                 {error, Reason} ->
                     {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
             end;
@@ -195,10 +197,52 @@ save_method(Class, Selector, Source, Params) ->
             Err
     end.
 
+%% `save-class` records a `new-class` ChangeLog entry whose author is read from
+%% the process dictionary (`beamtalk_repl_loader_changelog_entries`), so stamp the
+%% request's author there for the duration of the call and put back what was
+%% there. A failed ChangeLog append for the new class is queued as a warning
+%% (BT-5084), not raised: collect it and return it, so the caller learns `flush`
+%% will not write the file.
+-spec save_class(binary(), binary(), {binary(), human | agent}) -> beamtalk_repl_ops:op_result().
+save_class(Source, Path, {Author, AuthorKind}) ->
+    Prev = {erlang:get('$beamtalk_author'), erlang:get('$beamtalk_author_kind')},
+    erlang:put('$beamtalk_author', Author),
+    erlang:put('$beamtalk_author_kind', AuthorKind),
+    try
+        beamtalk_refactor_support:collect_changelog_warnings(fun() ->
+            beamtalk_repl_loader_newclass:new_class(Source, Path)
+        end)
+    of
+        {{ok, _ClassObjects}, Warnings} ->
+            Value = #{<<"path">> => Path},
+            {value,
+                case Warnings of
+                    [] -> Value;
+                    _ -> Value#{<<"warnings">> => Warnings}
+                end};
+        {{error, Reason}, _Warnings} ->
+            {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
+    after
+        restore_author(Prev)
+    end.
+
+-spec restore_author({term(), term()}) -> ok.
+restore_author({Author, Kind}) ->
+    restore_key('$beamtalk_author', Author),
+    restore_key('$beamtalk_author_kind', Kind).
+
+-spec restore_key(atom(), term()) -> ok.
+restore_key(Key, undefined) ->
+    _ = erlang:erase(Key),
+    ok;
+restore_key(Key, Value) ->
+    _ = erlang:put(Key, Value),
+    ok.
+
 %% The audit author: explicit `author` / `author_kind` params, else whatever
 %% the calling process is stamped with.
--spec author(map()) -> {ok, {binary(), human | agent}} | {error, #beamtalk_error{}}.
-author(Params) ->
+-spec author(binary(), map()) -> {ok, {binary(), human | agent}} | {error, #beamtalk_error{}}.
+author(Op, Params) ->
     {DefaultAuthor, DefaultKind} = beamtalk_refactor_support:current_author_context(),
     Author =
         case maps:get(<<"author">>, Params, undefined) of
@@ -217,7 +261,7 @@ author(Params) ->
                 beamtalk_repl_errors:make(
                     invalid_argument,
                     'Workspace',
-                    <<"save-method: author_kind must be \"human\" or \"agent\"">>,
+                    <<Op/binary, ": author_kind must be \"human\" or \"agent\"">>,
                     <<"Omit author_kind to use the caller's own.">>
                 )}
     end.

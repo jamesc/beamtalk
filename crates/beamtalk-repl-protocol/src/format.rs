@@ -343,6 +343,78 @@ pub fn format_trace_step(step: &serde_json::Value, mode: OutputMode) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// format_flush_result
+// ---------------------------------------------------------------------------
+
+/// A `flush` result rendered for a person.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlushReport {
+    /// The summary line, then one line per conflict and per skipped entry.
+    pub text: String,
+    /// Whether any file was left unwritten for a conflict (an external edit,
+    /// or a target that already exists). The caller reports this as a failure
+    /// to flush, not a success with a footnote.
+    pub has_conflicts: bool,
+}
+
+/// Render the `FlushResult` map a `flush` operation answers (`flushed`,
+/// `files`, `skipped`, `conflicts`).
+///
+/// A flush that returned conflicts is not a clean success: the report leads
+/// with the conflicts, so a surface never shows "Flushed N change(s)" over a
+/// file that was not written.
+#[must_use]
+pub fn format_flush_result(value: &serde_json::Value) -> FlushReport {
+    let list = |key: &str| {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_array)
+            .map_or(&[][..], Vec::as_slice)
+    };
+    let text_of = |entry: &serde_json::Value, key: &str| {
+        entry
+            .get(key)
+            .map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_string))
+    };
+    let flushed = value
+        .get("flushed")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let files = list("files").len();
+    let conflicts = list("conflicts");
+    let skipped = list("skipped");
+
+    let mut lines = Vec::new();
+    if !conflicts.is_empty() {
+        lines.push(format!(
+            "Flush found {} conflict(s); the files below were not written:",
+            conflicts.len()
+        ));
+        for conflict in conflicts {
+            lines.push(format!(
+                "  conflict: {} ({})",
+                text_of(conflict, "file").unwrap_or_else(|| "?".to_string()),
+                text_of(conflict, "reason").unwrap_or_else(|| "unknown".to_string())
+            ));
+        }
+    }
+    lines.push(format!(
+        "Flushed {flushed} change(s) across {files} file(s)"
+    ));
+    for entry in skipped {
+        lines.push(format!(
+            "  skipped: {} ({})",
+            text_of(entry, "class").unwrap_or_else(|| "?".to_string()),
+            text_of(entry, "reason").unwrap_or_else(|| "unknown".to_string())
+        ));
+    }
+    FlushReport {
+        text: lines.join("\n"),
+        has_conflicts: !conflicts.is_empty(),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // format_test_result
 // ---------------------------------------------------------------------------
 
@@ -447,6 +519,37 @@ pub fn format_class_list(classes: &[ClassInfo], mode: OutputMode) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn flush_result_leads_with_conflicts_and_is_not_a_success() {
+        let value = serde_json::json!({
+            "flushed": 1,
+            "files": ["src/a.bt"],
+            "skipped": [{"seq": 3, "class": "Gone", "reason": "destructive"}],
+            "conflicts": [{"file": "src/b.bt", "reason": "external_edit", "seqs": [2]}]
+        });
+        let report = super::format_flush_result(&value);
+        assert!(report.has_conflicts);
+        let lines: Vec<&str> = report.text.lines().collect();
+        assert!(lines[0].contains("1 conflict(s)"), "{}", report.text);
+        assert_eq!(lines[1], "  conflict: src/b.bt (external_edit)");
+        assert_eq!(lines[2], "Flushed 1 change(s) across 1 file(s)");
+        assert_eq!(lines[3], "  skipped: Gone (destructive)");
+    }
+
+    #[test]
+    fn clean_flush_result_is_a_summary_line() {
+        let value =
+            serde_json::json!({"flushed": 2, "files": ["a", "b"], "skipped": [], "conflicts": []});
+        let report = super::format_flush_result(&value);
+        assert!(!report.has_conflicts);
+        assert_eq!(report.text, "Flushed 2 change(s) across 2 file(s)");
+        // A missing summary reads as nothing flushed, never a panic.
+        assert_eq!(
+            super::format_flush_result(&serde_json::json!(null)).text,
+            "Flushed 0 change(s) across 0 file(s)"
+        );
+    }
+
     use super::*;
 
     fn strip_ansi(s: &str) -> String {

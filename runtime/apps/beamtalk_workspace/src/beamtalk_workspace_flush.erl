@@ -368,6 +368,7 @@ set. A pending `'remove-class'` entry left out of the applied set because
 
 -export([
     is_kind_filter/1,
+    kind_filters/0,
     flush/0,
     flush/1,
     %% ADR 0113 Phase 2: `flush/2` threads the `confirmDestructive` filter
@@ -691,9 +692,17 @@ Whether the symbol `Sel` given to `flush/1,2` selects ChangeEntries by kind
 """.
 -spec is_kind_filter(atom()) -> boolean().
 is_kind_filter(Sel) ->
-    lists:member(Sel, [
-        'new-class', 'remove-method', 'remove-class', 'rename-class', 'rename-method'
-    ]).
+    lists:member(Sel, kind_filters()).
+
+-doc """
+The five entry kinds a flush can be scoped to (`flush`'s `kind` param). The one
+list: `is_kind_filter/1`, the `flush` op's error hint, the MCP `flush` tool
+description and `docs/repl-protocol.md` all name these, and the Rust
+`FLUSH_KINDS` test reads this function.
+""".
+-spec kind_filters() -> [atom()].
+kind_filters() ->
+    ['new-class', 'remove-method', 'remove-class', 'rename-class', 'rename-method'].
 
 filter_entries(Entries, any) ->
     Entries;

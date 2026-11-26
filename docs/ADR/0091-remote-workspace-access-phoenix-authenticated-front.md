@@ -751,10 +751,17 @@ middle "Collaborator" RBAC rung; reintroducing `inet_tls_dist` (removed PR #1401
 - **Workspace-side `beamtalk_authorized_ops` allowlist — ship in v1 or defer?**
   Cheap defense-in-depth against Phoenix app-bugs; does not contain host compromise.
 
-## Decisions recorded after acceptance (BT-5112)
+## Decisions recorded after acceptance (BT-5112, BT-5206)
 
-- **Reserved ops.** The facade declares seven ops with no `invoke/3` clause: `actors`, `info`, `kill`, `load_source`, `rotate_cookie`, `sessions` and `subscribe_actors`. They are **reserved vocabulary**, not planned work. They keep their capability class (so a future implementation cannot land with a weaker one), and an authorized call answers `{:error, {:unsupported_op, op}}`. Removing one needs its own decision; implementing one needs an issue that names the surface that calls it.
+- **No reserved ops (BT-5206).** The facade once declared seven ops with no `invoke/3` clause. BT-5206 closed them out: `actors`, `info`, `kill`, `load_source`, `sessions` and `subscribe_actors` are implemented by dispatch, and `rotate_cookie` was **removed**. Cookie rotation belongs in the release tooling, not the editor, and nothing in the cockpit calls it. `BtAttach.Facade` has no reserved list: every op in `@ops` has an `invoke/3` clause, and `facade_parity_test.exs` fails if one lacks it.
+- **One table for capability classes (BT-5206).** The facade's per-op class (`:read | :execute | :admin`) is checked against the runtime's op table. `beamtalk_repl_op_table` gives every operation an `access` class, and `BtAttach.Facade` names the wire operations each of its ops sends (`Facade.wire_ops/1`). `facade_parity_test.exs` reads the table's JSON snapshot and fails when an op's class differs from the class of a wire operation it sends. A new runtime operation cannot be added without an `access` class, because the table's entry constructor requires one, and a new facade op cannot be added without saying what it sends.
 - **Completion and hover run in the live workspace.** The LiveView front's autocomplete and hover call the workspace's `complete` and `hover` ops over distribution (`BtAttach.Workspace.complete/2`, `hover/…`), so they answer from the live image, in the caller's session, with the REPL's receiver-aware ranking. They do not use the LSP's in-process AST analysis. This is intended: the cockpit edits classes that may exist only in the image, and binding-aware completion needs the session. The cost is that a disconnected workspace has no completion; the editor degrades to none, not to a second implementation.
+
+## Implementation note: one operation layer (BT-5200)
+
+Both transports now share one implementation of every operation. The WebSocket handler (`beamtalk_ws_handler`) and the LiveView front call `beamtalk_repl_ops:request/3` (operations) and `beamtalk_repl_subscriptions` (push streams); the WebSocket edge only encodes the result to JSON, and LiveView keeps the terms. VS Code, MCP, the CLI REPL and LiveView therefore differ in transport and rendering, not in what an operation does. `BtAttach.RemoteCallAllowlistTest` fails the build when a LiveView source file calls any other `beamtalk_*` module, so a new capability starts as an operation in `beamtalk_repl_op_table`.
+
+The facade is Phoenix-side discipline, not a sandbox. It decides what the browser may ask for; it does not stop code on the Phoenix node from calling the workspace over distribution. The workspace-side `beamtalk_authorized_ops` allowlist (Open Questions) is still deferred.
 
 ## References
 - Related issues: BT-2400 (this ADR), BT-2411 (Wave 5 — auth + non-localhost),

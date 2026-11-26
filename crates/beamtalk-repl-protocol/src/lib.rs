@@ -33,7 +33,7 @@ pub mod test_versions;
 #[cfg(feature = "ws-client")]
 pub mod ws_client;
 
-pub use request::{FlushScope, RequestBuilder, next_msg_id};
+pub use request::{Author, AuthorKind, FLUSH_KINDS, FlushScope, RequestBuilder, next_msg_id};
 pub use response::{
     ActorInfo, ClassInfo, ReplResponse, SessionInfo, StackFrameInfo, Warning, render_raw_frames,
     render_repl_error_frames, render_run_error_frames,

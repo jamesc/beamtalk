@@ -162,6 +162,46 @@ defmodule BtAttach.WorkspaceConnectTest do
       assert Workspace.readiness() == {:error, :dead_workspace}
     end
 
+    # BT-5206: a workspace older than this front has no operation layer, so the
+    # `info` call lands as `undef` (no `beamtalk_repl_ops:request/3`) or, with the
+    # layer but no `info` op, as `unknown_op`. Both say "too old", not "dead".
+    test "an undef beamtalk_repl_ops:request/3 is :workspace_too_old, not :dead_workspace" do
+      :meck.expect(:erpc, :call, fn
+        _node, :beamtalk_repl_ops, :request, ["info", _params, _pid], _timeout ->
+          {:badrpc,
+           {:EXIT, {:undef, [{:beamtalk_repl_ops, :request, ["info", %{}, self()], []}]}}}
+
+        node, mod, fun, args, timeout ->
+          :meck.passthrough([node, mod, fun, args, timeout])
+      end)
+
+      assert Workspace.readiness() == {:error, :workspace_too_old}
+    end
+
+    test "an unknown_op reply to info is :workspace_too_old" do
+      :meck.expect(:erpc, :call, fn
+        _node, :beamtalk_repl_ops, :request, ["info", _params, _pid], _timeout ->
+          {:error, {:beamtalk_error, :unknown_op, :REPL, "Unknown operation: info", nil, %{}}}
+
+        node, mod, fun, args, timeout ->
+          :meck.passthrough([node, mod, fun, args, timeout])
+      end)
+
+      assert Workspace.readiness() == {:error, :workspace_too_old}
+    end
+
+    test "an undef in some other module stays :dead_workspace" do
+      :meck.expect(:erpc, :call, fn
+        _node, :beamtalk_repl_ops, :request, ["info", _params, _pid], _timeout ->
+          {:badrpc, {:EXIT, {:undef, [{:some_other, :thing, [], []}]}}}
+
+        node, mod, fun, args, timeout ->
+          :meck.passthrough([node, mod, fun, args, timeout])
+      end)
+
+      assert Workspace.readiness() == {:error, :dead_workspace}
+    end
+
     test "a version-report map succeeds with :ok" do
       report = %{
         runtime_version: "1.2.3",

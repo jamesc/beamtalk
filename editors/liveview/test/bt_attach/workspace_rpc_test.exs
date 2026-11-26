@@ -114,6 +114,75 @@ defmodule BtAttach.WorkspaceRpcTest do
     }
   end
 
+  describe "save_method/3 ChangeLog warnings (BT-5206)" do
+    test "a clean save is {:ok, class}" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:value, %{"class" => "Counter"}}))
+      assert Workspace.save_method("Counter", "inc", "1") == {:ok, "Counter"}
+    end
+
+    test "a save whose ChangeLog entry was not recorded carries the warnings" do
+      mock_rpc(
+        decode_ok(
+          {:beamtalk_repl_ops, :request},
+          {:value, %{"class" => "Counter", "warnings" => ["ChangeLog append failed"]}}
+        )
+      )
+
+      assert Workspace.save_method("Counter", "inc", "1") ==
+               {:ok, "Counter", ["ChangeLog append failed"]}
+    end
+
+    test "an empty warnings list is a clean save" do
+      mock_rpc(
+        decode_ok(
+          {:beamtalk_repl_ops, :request},
+          {:value, %{"class" => "Counter", "warnings" => []}}
+        )
+      )
+
+      assert Workspace.save_method("Counter", "inc", "1") == {:ok, "Counter"}
+    end
+  end
+
+  describe "format_flush_conflicts/1 (BT-5206)" do
+    test "lists each conflicted file and reason, string or atom keys" do
+      assert Workspace.format_flush_conflicts(%{
+               "conflicts" => [%{"file" => "src/a.bt", "reason" => "external_edit"}]
+             }) == "Flush found 1 conflict(s); not written: src/a.bt (external_edit)"
+
+      assert Workspace.format_flush_conflicts(%{
+               conflicts: [
+                 %{file: "a.bt", reason: :target_exists},
+                 %{file: "b.bt", reason: "external_edit"}
+               ]
+             }) ==
+               "Flush found 2 conflict(s); not written: a.bt (target_exists); b.bt (external_edit)"
+    end
+
+    test "no conflicts, or no summary, is nil" do
+      assert Workspace.format_flush_conflicts(%{"conflicts" => []}) == nil
+      assert Workspace.format_flush_conflicts(%{}) == nil
+      assert Workspace.format_flush_conflicts(:odd) == nil
+    end
+  end
+
+  describe "unsubscribe_all/1 (BT-5206)" do
+    test "asks the subscription facade to drop the pid from every stream" do
+      pid = self()
+
+      mock_rpc(%{
+        {:beamtalk_repl_subscriptions, :unsubscribe_all} => fn [^pid] -> :ok end
+      })
+
+      assert Workspace.unsubscribe_all(pid) == :ok
+    end
+
+    test "a dead workspace is a badrpc, never a crash (a LiveView terminates through it)" do
+      mock_rpc(%{{:beamtalk_repl_subscriptions, :unsubscribe_all} => {:badrpc, :mock_scripted}})
+      assert Workspace.unsubscribe_all(self()) == {:badrpc, :mock_scripted}
+    end
+  end
+
   describe "start_session/1,2 — session creation (all rpc branches)" do
     test "start_session/2 returns the remote session pid on success" do
       pid = self()

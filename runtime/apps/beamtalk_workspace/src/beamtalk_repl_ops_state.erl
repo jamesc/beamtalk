@@ -161,14 +161,18 @@ scope(Params) ->
             end
     end.
 
-%% A scope param is a String or absent (missing or ""). Any other type is
-%% refused: reading it as absent would widen a scoped flush into an unscoped
-%% one.
+%% A scope param is a non-empty String or absent. Any other type, and the empty
+%% String, is refused: reading it as absent would widen a scoped flush into an
+%% unscoped one.
 -spec scope_param(binary(), term()) -> {ok, binary() | undefined} | {error, #beamtalk_error{}}.
 scope_param(_Key, undefined) ->
     {ok, undefined};
-scope_param(_Key, <<>>) ->
-    {ok, undefined};
+scope_param(Key, <<>>) ->
+    {error,
+        invalid_scope(
+            iolist_to_binary([<<"flush: ">>, Key, <<" must not be empty">>]),
+            iolist_to_binary([<<"Pass ">>, Key, <<" as a non-empty String, or omit it.">>])
+        )};
 scope_param(_Key, Bin) when is_binary(Bin) ->
     {ok, Bin};
 scope_param(Key, _Other) ->
@@ -204,7 +208,14 @@ unknown_kind(Kind) ->
     {error,
         invalid_scope(
             iolist_to_binary([<<"flush: unknown kind ">>, Kind]),
-            <<"Use new-class, remove-class, remove-method, rename-class or rename-method.">>
+            iolist_to_binary([
+                <<"Use one of ">>,
+                lists:join(<<", ">>, [
+                    atom_to_binary(K, utf8)
+                 || K <- beamtalk_workspace_flush:kind_filters()
+                ]),
+                <<".">>
+            ])
         )}.
 
 %% Exactly `true` confirms. Absent is `false`; anything else is refused so a

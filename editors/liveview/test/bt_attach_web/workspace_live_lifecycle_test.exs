@@ -227,6 +227,22 @@ defmodule BtAttachWeb.WorkspaceLiveLifecycleTest do
       assert {:resumed, ^second_id, _pid} = SessionRegistry.checkout(token)
     end
 
+    test "a LiveView exit drops its subscription to every push stream (BT-5206)", %{conn: conn} do
+      # `terminate/2` named only the transcript and bindings streams, leaving the
+      # classes and reload_check subscriptions to the bus's monitor (up to
+      # `net_ticktime` of pushes to a dead pid). It now asks the subscription
+      # facade to drop the pid from every stream, so a later stream is covered too.
+      {:ok, view, _} = live(conn, "/")
+      pid = view.pid
+
+      Process.flag(:trap_exit, true)
+      ref = Process.monitor(pid)
+      GenServer.stop(pid, :shutdown)
+      assert_receive {:DOWN, ^ref, :process, _pid, _reason}, 2_000
+
+      assert {:unsubscribe_all, pid} in StubWorkspaceClient.calls()
+    end
+
     test "closing a tokened tab stashes its desk and defers teardown", %{conn: conn} do
       token = unique_token()
 

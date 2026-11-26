@@ -71,6 +71,7 @@ pub fn failure_reason_str(reason: &FailureReason) -> String {
         FailureReason::EpmdAbsent => "epmd_absent".to_string(),
         FailureReason::BadCookie => "bad_cookie".to_string(),
         FailureReason::DeadWorkspace => "dead_workspace".to_string(),
+        FailureReason::WorkspaceTooOld => "workspace_too_old".to_string(),
         FailureReason::ProtocolMismatch { .. } => "protocol_mismatch".to_string(),
         FailureReason::Unknown(s) => s.clone(),
     }
@@ -119,4 +120,23 @@ pub enum AttachOutcome {
     /// loading/probing state and let the next `list_workspaces` poll pick up
     /// the result once the in-flight attach resolves.
     AlreadyAttaching,
+}
+
+#[cfg(test)]
+mod failure_reason_tests {
+    use super::*;
+
+    /// BT-5206: the readiness taxonomy reaches the shell's JSON by name, so a
+    /// too-old workspace is not shown as an unknown reason.
+    #[test]
+    fn workspace_too_old_has_its_own_reason_string() {
+        assert_eq!(
+            failure_reason_str(&FailureReason::WorkspaceTooOld),
+            "workspace_too_old"
+        );
+        assert_eq!(
+            failure_reason_str(&FailureReason::DeadWorkspace),
+            "dead_workspace"
+        );
+    }
 }

@@ -13,15 +13,28 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 
 pub use beamtalk_repl_protocol::ReplResponse;
-use beamtalk_repl_protocol::RequestBuilder;
 use beamtalk_repl_protocol::handshake;
 use beamtalk_repl_protocol::ws_client;
+use beamtalk_repl_protocol::{Author, AuthorKind, RequestBuilder};
 use futures_util::SinkExt;
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::{
     Error as WsError, Message, error::ProtocolError as WsProtocolError,
 };
 use tracing::instrument;
+
+/// The `ChangeLog` author of an MCP `save_method` (ADR 0082: MCP saves are
+/// `agent`, not the connection's own `repl`/human).
+const MCP_SAVE_METHOD_AUTHOR: Author<'static> = Author {
+    name: "mcp:save_method",
+    kind: AuthorKind::Agent,
+};
+
+/// The `ChangeLog` author of an MCP `save_class`.
+const MCP_SAVE_CLASS_AUTHOR: Author<'static> = Author {
+    name: "mcp:save_class",
+    kind: AuthorKind::Agent,
+};
 
 /// Default timeout for REPL I/O operations.
 const REPL_IO_TIMEOUT: Duration = Duration::from_secs(30);
@@ -585,7 +598,8 @@ impl ReplClient {
     /// Send a `save-method` operation: durably install a method (BT-5203).
     ///
     /// Uses [`send_once`] (no retry): the op appends a `ChangeLog` entry, so a
-    /// retry after a dropped connection could record the patch twice.
+    /// retry after a dropped connection could record the patch twice. The patch
+    /// is recorded as an agent's (ADR 0082), not as the connection's own author.
     pub async fn save_method(
         &self,
         class: &str,
@@ -593,7 +607,7 @@ impl ReplClient {
         source: &str,
     ) -> Result<ReplResponse, String> {
         self.send_once_with_timeout(
-            &RequestBuilder::save_method(class, selector, source),
+            &RequestBuilder::save_method_by(class, selector, source, MCP_SAVE_METHOD_AUTHOR),
             eval_io_timeout(),
         )
         .await
@@ -601,9 +615,13 @@ impl ReplClient {
 
     /// Send a `save-class` operation: create a class from source at a path
     /// (BT-5203). Uses [`send_once`] (no retry), like [`save_method`](Self::save_method).
+    /// The new class is recorded as an agent's (ADR 0082).
     pub async fn save_class(&self, source: &str, path: &str) -> Result<ReplResponse, String> {
-        self.send_once_with_timeout(&RequestBuilder::save_class(source, path), eval_io_timeout())
-            .await
+        self.send_once_with_timeout(
+            &RequestBuilder::save_class_by(source, path, MCP_SAVE_CLASS_AUTHOR),
+            eval_io_timeout(),
+        )
+        .await
     }
 
     /// Send a `flush` operation: write pending `ChangeLog` entries to disk

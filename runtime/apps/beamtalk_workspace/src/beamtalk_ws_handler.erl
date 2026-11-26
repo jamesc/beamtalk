@@ -531,9 +531,9 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
     %% Unsubscribe from all live push streams (Transcript, actors,
     %% classes, bindings, flush) via the stable facade.
     beamtalk_repl_subscriptions:unsubscribe_all(),
-    %% Unsubscribe from log streaming — a separate diagnostic stream,
-    %% not part of the workspace push-stream facade.
-    beamtalk_ws_log_handler:unsubscribe(),
+    %% Unsubscribe from log streaming — a separate diagnostic stream, named by
+    %% the same facade (`subscribe_logs/1`, BT-5206).
+    beamtalk_repl_subscriptions:unsubscribe_logs(),
     %% Keep the session alive so the client can resume it, but don't stop it or
     %% delete its table row here. The shell monitors this connection process
     %% (`beamtalk_repl_shell:attach/2`), so it notices the disconnect itself: it
@@ -1606,7 +1606,7 @@ do_subscribe_logs(Msg, State) ->
     Params = beamtalk_repl_protocol:get_params(Msg),
     case parse_log_level(maps:get(<<"level">>, Params, undefined)) of
         {ok, Level} ->
-            beamtalk_ws_log_handler:subscribe(Level),
+            beamtalk_repl_subscriptions:subscribe_logs(Level),
             Response = beamtalk_repl_protocol:encode_status(
                 ok, Msg, fun beamtalk_repl_json:term_to_json/1
             ),
@@ -1618,7 +1618,7 @@ do_subscribe_logs(Msg, State) ->
     end.
 
 handle_unsubscribe_logs(Msg, State) ->
-    beamtalk_ws_log_handler:unsubscribe(),
+    beamtalk_repl_subscriptions:unsubscribe_logs(),
     Response = beamtalk_repl_protocol:encode_status(
         ok, Msg, fun beamtalk_repl_json:term_to_json/1
     ),

@@ -38,6 +38,8 @@ defmodule BtAttachWeb.Live.DockFakeClient do
   defdelegate browse_protocols(class, side), to: StubWorkspaceClient
   defdelegate browse_categories(class), to: StubWorkspaceClient
   defdelegate list_bindings(pid), to: StubWorkspaceClient
+  # BT-5206: the destructive flush re-reads the ChangeLog after a forced `flush` reply.
+  defdelegate change_history(), to: StubWorkspaceClient
 end
 
 defmodule BtAttachWeb.Live.DockTest do
@@ -515,6 +517,27 @@ defmodule BtAttachWeb.Live.DockTest do
       assert socket.assigns.flush_error == nil
     end
 
+    test "BT-5206: a destructive flush that returned conflicts shows them, not the success message" do
+      force_workspace_replies(%{
+        flush:
+          {:ok,
+           %{
+             "flushed" => 0,
+             "files" => [],
+             "skipped" => [],
+             "conflicts" => [%{"file" => "src/foo.bt", "reason" => "external_edit"}]
+           }}
+      })
+
+      {:noreply, socket} =
+        Dock.handle_event("flush_destructive", %{"class" => "Foo"}, base_socket())
+
+      assert socket.assigns.flush_result == nil
+      assert socket.assigns.flush_error =~ "1 conflict(s)"
+      assert socket.assigns.flush_error =~ "src/foo.bt (external_edit)"
+      refute socket.assigns.flush_error =~ "Flushed the pending removal"
+    end
+
     test "a successful destructive flush of a rename-class row reports the rename message" do
       {:noreply, socket} =
         Dock.handle_event(
@@ -533,6 +556,24 @@ defmodule BtAttachWeb.Live.DockTest do
 
       assert socket.assigns.flush_result != nil
       assert socket.assigns.flush_error == nil
+    end
+
+    test "BT-5206: Save All to Disk shows conflicts as an error, not only a count" do
+      force_workspace_replies(%{
+        flush:
+          {:ok,
+           %{
+             "flushed" => 1,
+             "files" => ["src/a.bt"],
+             "skipped" => [],
+             "conflicts" => [%{"file" => "src/b.bt", "reason" => "external_edit"}]
+           }}
+      })
+
+      {:noreply, socket} = Dock.handle_event("flush", %{}, base_socket())
+
+      assert socket.assigns.flush_error =~ "src/b.bt (external_edit)"
+      assert socket.assigns.flush_result =~ "Flushed 1 change(s)"
     end
 
     test "revert re-installs the prior body and refreshes the Changes pane" do
