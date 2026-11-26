@@ -740,9 +740,8 @@ impl Parser {
             // that matches unconditionally.
             //
             // A trailing `:: ClassName` (e.g. `nil :: SomeClass`) is
-            // consumed and rejected here too — type patterns aren't supported nested
-            // inside a constructor pattern at all (see `generate_pattern`'s
-            // `Pattern::Type` codegen restriction), but leaving `::
+            // consumed and rejected here too — `nil` already fully
+            // determines the match, and leaving `::
             // ClassName` unconsumed would desync the constructor-pattern
             // keyword loop and cascade into a second "Expected '->' after
             // pattern" diagnostic, exactly like the `true`/`false` and
@@ -766,11 +765,8 @@ impl Parser {
             // arm below would silently parse `Result ok: true` as
             // `Pattern::Variable(Identifier{name: "true"})` — an
             // unconditional catch-all that matches *any* wrapped value, not
-            // a boolean-literal test. Unlike the top-level fix, the
-            // diagnostic here can't point at `x :: True`/`x :: False`
-            // (`Pattern::Type` has no codegen when nested inside a
-            // constructor pattern — see `generate_pattern`), so it points at
-            // the guard-clause idiom instead, which is already supported
+            // a boolean-literal test. The diagnostic points at the
+            // guard-clause idiom (`x :: True` also works, BT-5294), which is supported
             // (`Result ok: v when: [v =:= true]`) — spelled with the
             // explicit `=:=` (strict equality, per
             // `docs/beamtalk-language-features.md`'s Equality section)

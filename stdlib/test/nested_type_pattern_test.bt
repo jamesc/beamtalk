@@ -151,6 +151,26 @@ TestCase subclass: NestedTypePatternTest
     self assert: (f value: #{#id => 3}) equals: 3
     self assert: (f value: #{#id => "3"}) equals: -1
 
+  testStringKeyMapValueTypeRejectsNull =>
+    f := [:body |
+      body match: [
+        #{"errors" => errors :: List} -> errors size;
+        _ -> -1
+      ]
+    ]
+    self assert: (f value: #{"errors" => #(1, 2)}) equals: 2
+    self assert: (f value: #{"errors" => nil}) equals: -1
+
+  testWildcardDictionaryType =>
+    f := [:v |
+      v match: [
+        _ :: Dictionary -> #dict;
+        _ -> #other
+      ]
+    ]
+    self assert: (f value: #{#a => 1}) equals: #dict
+    self assert: (f value: 3) equals: #other
+
   testNestedTypeFallsThroughToLaterNestedTypeArm =>
     f := [:v |
       v match: [
