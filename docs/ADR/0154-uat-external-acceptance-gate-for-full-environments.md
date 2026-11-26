@@ -209,7 +209,10 @@ bind every agent and human working in the repository:
   - adds `test.skip` / `test.fixme` / `.only`;
   - raises a timeout;
   - adds a target exclusion;
-  - lowers a perf iteration count.
+  - changes the perf method in `lib/bench.ts`: fewer warmup or measured
+    iterations, a gated percentile other than p75, or a hard-coded or overriding
+    multiplier. The method's constants live in that file and nowhere else, so
+    the check matches them exactly.
   A weakening PR passes only when the GitHub reviews API shows an **APPROVED
   review from the owner's login on the PR's current head SHA**. The check reads
   that from the API, so applying a label proves nothing, and a later push
@@ -456,9 +459,13 @@ are discarded, then **5 measured** iterations. It reports **p50, p75 and p95** a
 p75 ≤ threshold[benchmark][target] × BEAMTALK_UAT_BENCH_MULTIPLIER
 ```
 
-The multiplier defaults to `1.0` on a developer machine. CI sets it per runner
-class in the workflow, starting at `1.5` for GitHub-hosted runners, and an owner
-can change it under governance rule 2.
+The multipliers live in `bench/thresholds.toml` beside the thresholds, as a
+`[multiplier]` table keyed by runner class: `local = 1.0`, and
+`github-hosted = 1.5` to start. That makes them review-gated (§ 2). The workflow
+passes only the runner class name, never a number. `BEAMTALK_UAT_BENCH_MULTIPLIER`
+is read only for local runs; when `CI` is set it is ignored and the run says so.
+The gated percentile (p75) and the 2 + 5 iteration counts are constants in
+`lib/bench.ts`, guarded by `governance.yml` (§ 2).
 
 **Thresholds** live in `bench/thresholds.toml`, per benchmark and target, with
 the user-experience reason beside each. They are calibrated, not guessed:
