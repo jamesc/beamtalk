@@ -108,21 +108,61 @@ impl TypeChecker {
     /// of `x isError ifTrue: [^x. x := …]` keeps its fact.
     pub(super) fn block_child_env(block: &crate::ast::Block, env: &TypeEnv) -> TypeEnv {
         let mut block_env = env.child();
-        if block_env.has_result_error_variants() {
-            let writes =
-                crate::semantic_analysis::block_facts::outer_local_writes(block, &|name| {
-                    env.get_local(name).is_some()
-                });
-            for write in writes {
-                if matches!(
-                    write.kind,
-                    crate::semantic_analysis::block_facts::WriteKind::Local
-                ) {
-                    block_env.clear_result_error_variant(&EnvKey::local(write.name));
-                }
+        Self::forget_error_variants_written_by(block, &mut block_env);
+        block_env
+    }
+
+    /// BT-5290: forget the `Result` error-variant fact of every outer local
+    /// `block` may write.
+    fn forget_error_variants_written_by(block: &crate::ast::Block, env: &mut TypeEnv) {
+        if !env.has_result_error_variants() {
+            return;
+        }
+        let writes = crate::semantic_analysis::block_facts::outer_local_writes(block, &|name| {
+            env.get_local(name).is_some()
+        });
+        for write in writes {
+            if matches!(
+                write.kind,
+                crate::semantic_analysis::block_facts::WriteKind::Local
+            ) {
+                env.clear_result_error_variant(&EnvKey::local(write.name));
             }
         }
-        block_env
+    }
+
+    /// BT-5290: before a send's arguments are inferred, forget the `Result`
+    /// error-variant fact of every local any of its block arguments may write.
+    /// Those writes are joined into `env` only after every argument is
+    /// inferred (BT-4636), but a sibling block can run between runs of
+    /// another (`do:separatedBy:`, an `on:do:` handler that retries), so a
+    /// `^x` in one may return a value the other rebound. The two-armed
+    /// conditionals run exactly one arm, so their arms keep the fact.
+    pub(super) fn forget_error_variants_written_by_send_blocks(
+        selector: &crate::ast::MessageSelector,
+        arguments: &[Expression],
+        env: &mut TypeEnv,
+    ) {
+        if !env.has_result_error_variants()
+            || arguments.len() < 2
+            || matches!(
+                selector.well_known(),
+                Some(
+                    WellKnownSelector::IfTrueIfFalse
+                        | WellKnownSelector::IfNilIfNotNil
+                        | WellKnownSelector::IfNotNilIfNil
+                )
+            )
+            || selector.name() == "ifFalse:ifTrue:"
+            || selector.name() == "ifOk:ifError:"
+        {
+            return;
+        }
+        for arg in arguments {
+            if let Expression::Block(block) = arg {
+                Self::forget_error_variants_written_by(block, env);
+            }
+        }
     }
 
     /// Join each deferred block write into `env`: the local's current type

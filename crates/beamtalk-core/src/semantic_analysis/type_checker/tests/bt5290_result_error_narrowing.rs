@@ -492,3 +492,47 @@ fn narrowing_does_not_reach_rest_of_method_after_guard() {
         "post-guard `^line` is not narrowed: {diags:?}"
     );
 }
+
+/// A sibling block argument of the same send can rebind the local between
+/// runs of the block holding `^x` (Claude review on #5869).
+#[test]
+fn sibling_block_rebinding_drops_narrowing() {
+    let diags = type_messages(
+        r"typed Object subclass: ZzMint
+  readLine: ms :: Integer -> Result(Binary, Object) => Result ok: <<>>
+  readHead: ms :: Integer -> Result(Tuple, Object) =>
+    line := self readLine: ms
+    line isError ifTrue: [
+      #(1, 2) do: [:i | ^line] separatedBy: [line := self readLine: ms]
+    ]
+    Result ok: {#head}
+",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|m| m.contains("declares return type Result(Tuple, Object)")),
+        "the separator may rebind `line` before the next `^line`: {diags:?}"
+    );
+}
+
+/// The arms of a two-armed conditional are exclusive: a write in one does
+/// not undo the guard in the other.
+#[test]
+fn exclusive_arm_write_keeps_narrowing() {
+    let diags = type_messages(
+        r"typed Object subclass: ZzMint
+  readLine: ms :: Integer -> Result(Binary, Object) => Result ok: <<>>
+  readHead: ms :: Integer -> Result(Tuple, Object) =>
+    line := self readLine: ms
+    line isError ifTrue: [
+      ms > 0 ifTrue: [^line] ifFalse: [line := self readLine: ms]
+    ]
+    Result ok: {#head}
+",
+    );
+    assert!(
+        return_mismatches(&diags).is_empty(),
+        "only one arm runs: {diags:?}"
+    );
+}
