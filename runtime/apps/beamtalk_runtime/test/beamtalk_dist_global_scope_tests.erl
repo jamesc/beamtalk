@@ -250,7 +250,11 @@ netsplit_heal_conflict_test_() ->
                     "the older registrant, gracefully STOPS the loser (not "
                     "exit(Pid, kill)), and its ActorStopped announcement carries "
                     "reason: #globalNameConflict",
-                    fun() -> netsplit_heal_resolves_conflict(Peer, PeerNode) end
+                    %% BT-5252: EUnit gives each test inside a group its own 5 s
+                    %% default; the outer `{timeout, 60, ...}` bounds only the
+                    %% group (see beamtalk_dist_test_helper's "EUnit timeouts").
+                    %% A netsplit + heal + awaits overruns 5 s on a loaded runner.
+                    {timeout, 60, fun() -> netsplit_heal_resolves_conflict(Peer, PeerNode) end}
                 }
             ]
         end}}.
@@ -395,7 +399,10 @@ supervised_global_child_heal_conflict_test_() ->
             [
                 {
                     lists:flatten(io_lib:format("~p ~p child stays down", [Mod, Restart])),
-                    fun() -> supervised_child_loses_heal_conflict(Peer, PeerNode, Mod, Restart) end
+                    %% Per-test timeout, as above (BT-5252).
+                    {timeout, 60, fun() ->
+                        supervised_child_loses_heal_conflict(Peer, PeerNode, Mod, Restart)
+                    end}
                 }
              || {Mod, Restart} <- [
                     {test_counter, permanent},
