@@ -798,3 +798,15 @@ fn manifest_with_malformed_min_beamtalk_is_a_diagnostic_not_a_panic() {
         assert!(err.contains("min-beamtalk"), "{bad}: {err}");
     }
 }
+
+#[test]
+fn dependency_manifest_with_malformed_min_beamtalk_still_parses() {
+    // The key is informational and unenforced: a dependency's malformed
+    // value must not break its consumers' builds (lenient dependency read).
+    let temp = TempDir::new().unwrap();
+    let path = write_manifest(
+        &temp,
+        "[package]\nname = \"p\"\nversion = \"1.0.0\"\nmin-beamtalk = \">=0.7\"\n",
+    );
+    assert!(parse_dependency_manifest_full(&path.join("beamtalk.toml")).is_ok());
+}

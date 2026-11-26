@@ -1115,6 +1115,52 @@ mod tests {
     }
 
     #[test]
+    fn test_render_version_block_writes_min_beamtalk_when_declared() {
+        let block = render_version_block(
+            "0.3.0",
+            "https://example.test/mint",
+            "v0.3.0",
+            Some("0.7.0"),
+        );
+        assert!(block.contains("min-beamtalk = \"0.7.0\"\n"), "{block}");
+        let new_entry = render_new_index_entry_with_licenses(
+            "mint",
+            None,
+            &[],
+            "0.3.0",
+            "https://example.test/mint",
+            "v0.3.0",
+            Some("0.7.0"),
+        );
+        let appended = append_version_block(
+            &new_entry,
+            "0.4.0",
+            "https://example.test/mint",
+            "v0.4.0",
+            Some("0.8.0"),
+        );
+        let parsed = registry::parse_index_entry("mint", &appended).unwrap();
+        assert_eq!(
+            parsed
+                .find_version("0.3.0")
+                .unwrap()
+                .min_beamtalk
+                .as_deref(),
+            Some("0.7.0")
+        );
+        assert_eq!(
+            parsed
+                .find_version("0.4.0")
+                .unwrap()
+                .min_beamtalk
+                .as_deref(),
+            Some("0.8.0")
+        );
+        let without = render_version_block("0.3.0", "https://example.test/mint", "v0.3.0", None);
+        assert!(!without.contains("min-beamtalk"), "{without}");
+    }
+
+    #[test]
     fn test_render_new_index_entry_includes_description() {
         let content = render_new_index_entry(
             "yaml",
@@ -1233,7 +1279,12 @@ mod tests {
     fn add_package_key(fixture: &TestFixture, extra: &str) {
         let path = fixture.library.path().join("beamtalk.toml");
         let manifest = std::fs::read_to_string(&path).unwrap();
-        let manifest = manifest.replacen("\n[registry]", &format!("{extra}\n\n[registry]"), 1);
+        let updated = manifest.replacen("\n[registry]", &format!("{extra}\n\n[registry]"), 1);
+        assert_ne!(
+            updated, manifest,
+            "fixture manifest has no [registry] table"
+        );
+        let manifest = updated;
         std::fs::write(&path, manifest).unwrap();
         run_git(fixture.library.path(), &["commit", "-am", "declare key"]);
     }

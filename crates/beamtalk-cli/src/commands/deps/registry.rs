@@ -1216,6 +1216,12 @@ git = "https://example.test/mint"
 tag = "v0.3.0"
 min-beamtalk = "0.7.0"
 "#;
+        // The real parser must keep ignoring keys it does not know alongside
+        // `min-beamtalk` (guards against `deny_unknown_fields` creeping in).
+        let future = format!("{content}future-key = 1\n");
+        let parsed = parse_index_entry("mint", &future).unwrap();
+        assert_eq!(parsed.versions.len(), 1);
+
         let old: OldEntry = toml::from_str(content).unwrap();
         assert_eq!(old.name, "mint");
         assert_eq!(old.versions[0].version, "0.3.0");

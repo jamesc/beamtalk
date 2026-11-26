@@ -461,6 +461,15 @@ fn validate_package_identity(package: &PackageManifest) -> Result<()> {
     if let Err(msg) = validate_package_version(&package.version) {
         miette::bail!("Invalid [package] version: {msg}");
     }
+    Ok(())
+}
+
+/// Validate `[package] min-beamtalk` (informational, ADR 0154 § 10).
+///
+/// Only the package's *own* manifest is checked: a dependency's manifest is
+/// read leniently (BT-5186) and the key is not enforced, so a malformed value
+/// there must not break its consumers.
+fn validate_min_beamtalk(package: &PackageManifest) -> Result<()> {
     if let Some(min) = &package.min_beamtalk
         && let Err(reason) = validate_exact_version(min)
     {
@@ -539,6 +548,7 @@ pub fn parse_manifest(path: &Utf8Path) -> Result<PackageManifest> {
     let manifest = parse_manifest_raw(path)?;
 
     validate_package_identity(&manifest.package)?;
+    validate_min_beamtalk(&manifest.package)?;
 
     Ok(manifest.package)
 }
@@ -705,6 +715,9 @@ fn parsed_from_raw(
     dependency: bool,
 ) -> Result<ParsedManifest> {
     validate_package_identity(&manifest.package)?;
+    if !dependency {
+        validate_min_beamtalk(&manifest.package)?;
+    }
 
     let dependencies = parse_dependencies(manifest.dependencies.as_ref())
         .wrap_err_with(|| format!("Failed to parse [dependencies] in '{path}'"))?;
@@ -921,6 +934,7 @@ pub fn find_application_config(project_root: &Utf8Path) -> Result<Option<Applica
     }
     let manifest = parse_manifest_raw(&manifest_path)?;
     validate_package_identity(&manifest.package)?;
+    validate_min_beamtalk(&manifest.package)?;
     Ok(manifest.application)
 }
 
