@@ -736,7 +736,7 @@ writes from the cell before answering. Optionally skip the store when no
 field write happened since the last sync (§7). The exit gate is a generated
 actor-field-closure corpus (block shape × send kind × at home or away ×
 position), compiled and run on a BEAM, with every case answering what the
-rule in ADR 0137 says. Remove the flag and bump the module ABI marker (done in BT-4009: `class_var_abi` is the one marker, now 2).
+rule in ADR 0137 says. Remove the flag and bump the module ABI marker (done in BT-4009: the one marker, now 2; ADR 0153 renamed it `module_abi`).
 
 **Phase 3 (M).** Delete the §8 table and whatever the oracle confirms
 after Phase 2b. In `docs/beamtalk-language-features.md`, replace the BT-3922

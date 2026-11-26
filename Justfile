@@ -2000,7 +2000,7 @@ test-hermetic-home:
 # `stdlib/bootstrap-test/*.btscript` (exercised by `test-stdlib`) is
 # bootstrap-primitive-only — arithmetic, booleans, equality, strings — and
 # contains no Actor code, so it never reaches the actor-state-threading
-# invariants (gen_server routing, class-var shadow-writes, self-send
+# invariants (gen_server routing, self-send
 # sequencing) this verifier spends most of its checks on. Those are
 # exercised by `stdlib/test/*.bt` (via `test-bunit`): specifically
 # `actor_self_send_position_matrix_test.bt`, `value_type_mutation_matrix_test.bt`,

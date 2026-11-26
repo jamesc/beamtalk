@@ -1,7 +1,7 @@
 # ADR 0153: Remove Class Variables (`classState:`)
 
 ## Status
-Accepted (2026-11-24)
+Implemented (2026-11-26) — Epic BT-5144. Accepted 2026-11-24. See [Implementation Tracking](#implementation-tracking).
 
 The owner has decided the following; this ADR records and details it.
 - Mutable class variables are removed, with no deprecation period.
@@ -513,6 +513,32 @@ The draft listed seven open questions. The owner settled all seven when acceptin
 5. **`PersistentTerm` refuses a top-level pid, actor or class as a value**, with a clear error. The package-prefix key convention is enough; keys are not checked.
 6. **No lint for hand-rolled `persistent_term` use.** A doc note points at the helper.
 7. **Class-side `fieldAt:` after removal raises the ordinary does-not-understand error**, as do `fieldAt:put:`, `hasField:` and `clearField:` sent to a class. Phase 2 pins this with a test.
+
+## Implementation Tracking
+
+**Epic:** [BT-5144](https://linear.app/beamtalk/issue/BT-5144). **Status:** Implemented.
+
+| Phase | Issue | What |
+|---|---|---|
+| 0 | BT-5145 | Inventory of `classState:` uses, downstream search, baseline benchmark |
+| 1 | BT-5146, BT-5147, BT-5168 | `PersistentTerm` stdlib helper; `beamtalk-hpack` moved onto it; its return type |
+| 2a-2c | BT-5148, BT-5149, BT-5150 | Tests, REPL-protocol cases and benchmarks migrated off `classState:` |
+| 2d | BT-5151 | Class-variable fuzz harness, agreement corpus and nightly job deleted |
+| 2e | BT-5152 | `classState:`, `late classState:` and class-side `self.x` are compile errors on every surface |
+| 2f | BT-5153 | Codegen stops emitting class-variable code (no snapshot before `on:do:`) |
+| 2g | BT-5154 | Class-variable analysis deleted (`class-state-abroad`, `class-process-ffi`) |
+| 2h | BT-5155, BT-5242 | Stdlib class-variable surface removed; `beamtalk-exdura` stops using `performLocally:` |
+| 2i | BT-5157 | Docs sweep, ADR annotations, AGENTS.md rules |
+| 3a | BT-5158 | Class-variable input removed from the shadow flags and class metadata |
+| 3b | BT-5160 | Class-variable home removed from `invoke_class_method/7` |
+| 3c | BT-5159 | `protect/1` and the snapshot/restore pair removed from every catch boundary |
+| 3d | BT-5161 | Class methods that are ADR 0084 runtime funs run in the caller |
+| 3e | BT-5162 | `with_snapshot/2`, class-state snapshot rows and `performLocally:` removed |
+| 3f | BT-5163, BT-5255 | `beamtalk_class_vars*` deleted; `module_abi` gate refuses older modules; codegen drops the empty `'classState'` entry |
+
+**Compiled code from before this change** is refused by the `module_abi` load gate (`beamtalk_module_abi`, which replaced `beamtalk_class_var_abi`). The build stamp (`BEAMTALK_VERSION`) already rebuilds project, dependency and workspace-persisted BEAMs, so a normal build never reaches the gate. A module that does (a hand-copied BEAM, a release assembled from stale parts) declares no `module_abi`, and is refused with an `abi_mismatch` that names the module and says to recompile, not an `undef` from `beamtalk_class_vars:snapshot/0`. The value is `4`: `1`-`3` were the class-variable conventions of ADR 0130, 0137 and 0142.
+
+Follow-ups, outside this epic's removal work: BT-5164 (measure the per-send guard read) and BT-5241 (type-checker warning for `fieldAt:` family sent to a class).
 
 ## References
 - Related issues: BT-5141 (ADR 0152 removal, must land first), BT-4983 (dispatch overhead research), BT-4987 (per-send guard read), BT-4363 / BT-4504 (constant class methods), BT-3701 (ADR 0130 epic), BT-4297 (ADR 0142 epic), BT-3691 (lost write), BT-4148 (class-side `fieldAt:`)

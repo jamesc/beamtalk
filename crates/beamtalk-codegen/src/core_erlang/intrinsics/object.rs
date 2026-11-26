@@ -313,10 +313,10 @@ impl CoreErlangGenerator {
         let recv_var = self.fresh_temp_var("KindOfRecv");
 
         let runtime_answer = |this: &mut Self, answer: &'static str| {
-            let class_var = this.fresh_temp_var("KindOfClass");
+            let class_term = this.fresh_temp_var("KindOfClass");
             docvec![
                 "let ",
-                leaf::var(class_var.clone()),
+                leaf::var(class_term.clone()),
                 " = ",
                 class_doc.clone(),
                 " in call 'beamtalk_behaviour_intrinsics':",
@@ -324,7 +324,7 @@ impl CoreErlangGenerator {
                 "(",
                 leaf::var(recv_var.clone()),
                 ", ",
-                leaf::var(class_var),
+                leaf::var(class_term),
                 ", ",
                 Document::Str(answer),
                 ")"
@@ -957,16 +957,16 @@ impl CoreErlangGenerator {
         msg_var: &str,
         start: impl FnOnce(Document<'static>) -> BeamtalkErrorChain,
     ) -> Document<'static> {
-        let class_var = self.fresh_temp_var("Class");
+        let class_term = self.fresh_temp_var("Class");
         let err0 = self.fresh_temp_var("Err");
         let err1 = self.fresh_temp_var("Err");
         docvec![
             "let ",
-            leaf::var(class_var.clone()),
+            leaf::var(class_term.clone()),
             " = call 'beamtalk_primitive':'class_of'(",
             leaf::var(recv_var.to_string()),
             ") in ",
-            start(leaf::var(class_var))
+            start(leaf::var(class_term))
                 .message(leaf::var(msg_var.to_string()))
                 .build(
                     vec![ErrorBinding::plain(err0), ErrorBinding::plain(err1.clone()),],
@@ -1283,7 +1283,7 @@ impl CoreErlangGenerator {
         let name_doc = seq.next();
         let receiver_var = self.fresh_var("Receiver");
         let name_var = self.fresh_var("Name");
-        let class_var = self.fresh_var("Class");
+        let class_term = self.fresh_var("Class");
         let error_base = self.fresh_var("Err");
         let error_sel = self.fresh_var("Err");
         let error_hint = self.fresh_var("Err");
@@ -1341,11 +1341,11 @@ impl CoreErlangGenerator {
             ", 'fieldAt:', [",
             leaf::var(name_var),
             "]) <_> when 'true' -> let ",
-            leaf::var(class_var.clone()),
+            leaf::var(class_term.clone()),
             " = call 'beamtalk_primitive':'class_of'(",
             leaf::var(receiver_var),
             ") in ",
-            super::super::errors::BeamtalkErrorChain::new("immutable_value", leaf::var(class_var))
+            super::super::errors::BeamtalkErrorChain::new("immutable_value", leaf::var(class_term))
                 .selector(Document::Str("'fieldAt:'"))
                 .hint(hint)
                 .build(
@@ -1419,7 +1419,7 @@ impl CoreErlangGenerator {
         let receiver_var = self.fresh_var("Receiver");
         let name_var = self.fresh_var("Name");
         let value_var = self.fresh_var("Value");
-        let class_var = self.fresh_var("Class");
+        let class_term = self.fresh_var("Class");
         let error_base = self.fresh_var("Err");
         let error_sel = self.fresh_var("Err");
         let error_hint = self.fresh_var("Err");
@@ -1458,11 +1458,11 @@ impl CoreErlangGenerator {
             "<'true'> when 'true' -> ",
             dispatch_call,
             " <_> when 'true' -> let ",
-            leaf::var(class_var.clone()),
+            leaf::var(class_term.clone()),
             " = call 'beamtalk_primitive':'class_of'(",
             leaf::var(receiver_var),
             ") in ",
-            super::super::errors::BeamtalkErrorChain::new("immutable_value", leaf::var(class_var))
+            super::super::errors::BeamtalkErrorChain::new("immutable_value", leaf::var(class_term))
                 .selector(Document::Str("'fieldAt:put:'"))
                 .hint(hint)
                 .build(

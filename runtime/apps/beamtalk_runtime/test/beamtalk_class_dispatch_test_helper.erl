@@ -24,7 +24,6 @@ Function naming convention follows Beamtalk's `class_` prefix scheme:
 -export([
     class_testSuccess/1,
     class_testSelf/1,
-    class_testObserveHome/1,
     'class_testWith:'/2,
     'class_testSleep:'/2,
     class_testInternalUndef/1,
@@ -35,8 +34,7 @@ Function naming convention follows Beamtalk's `class_` prefix scheme:
     class_testNlrThrow/1,
     'class_testTwoArgs:and:'/3,
     class_testGroupLeader/1,
-    class_testClassSelf/1,
-    class_testHasCount/1
+    class_testClassSelf/1
 ]).
 
 -doc """
@@ -52,15 +50,6 @@ class_testSelf(_ClassSelf) ->
 -spec class_testSuccess(term()) -> term().
 class_testSuccess(_ClassSelf) ->
     test_success_result.
-
--doc """
-Zero-argument class method that answers the class-variable home it runs
-under: the map under the receiver's key and the live home's key. Both are
-`undefined` since ADR 0153 removed the home (BT-5160 pins that).
-""".
--spec class_testObserveHome(term()) -> {term(), term()}.
-class_testObserveHome(#beamtalk_object{class = Tag}) ->
-    {erlang:get(beamtalk_class_vars:key_for_tag(Tag)), beamtalk_class_vars_test_support:home_key()}.
 
 -doc """
 One-argument keyword class method that echoes its argument.
@@ -168,11 +157,3 @@ class_testGroupLeader(_ClassSelf) ->
 -spec class_testClassSelf(term()) -> term().
 class_testClassSelf(ClassSelf) ->
     ClassSelf.
-
--doc """
-Zero-argument class method that tests for a class variable `count`, as a
-compiled `self hasField: #count` does (BT-4300: no home in the caller).
-""".
--spec class_testHasCount(term()) -> boolean().
-class_testHasCount(ClassSelf) ->
-    beamtalk_class_vars:has(ClassSelf, count).

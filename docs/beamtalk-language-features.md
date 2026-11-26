@@ -1142,7 +1142,9 @@ aMoney := (Money new) withCents: 500   // Money as defined below
 nil < 3          // => ERROR: UndefinedObject does not understand '<'
 ```
 
-`nil < 3` and `3 < nil` now fail the same way, so one `on: RuntimeError do:` handler covers both (and `3 + nil`). A value type that should compare with numbers implements the hooks:
+`nil < 3` and `3 < nil` now fail the same way, so one `on: RuntimeError do:` handler covers both (and `3 + nil`).
+
+Collection `max` / `min` follow the same rule: all numbers, all Strings or all Symbols compare natively, and any other mix is folded pairwise with the dispatched `>` / `<`, so `#(3, nil) max` raises as `3 max: nil` does. A value type that should compare with numbers implements the hooks:
 
 ```beamtalk
 Value subclass: Money
@@ -4215,9 +4217,9 @@ The `new`/`new:` direct-construction verdicts of `Value` classes are still baked
 
 | Error kind | Raised when |
 |---|---|
-| `abi_mismatch` | The loader refuses a compiled class module built for an older class calling convention (every module compiled before ADR 0153 included): recompile. See below. |
+| `abi_mismatch` | The loader refuses a compiled class module built for a different runtime ABI (every module compiled before ADR 0153 included): recompile. See below. |
 
-**Class-module ABI.** Until the ADR 0153 Phase 3 issues replace this gate, every compiled class module records its calling convention as `class_var_abi` in `__beamtalk_meta/0`. The loader (class registration, hot reload, and the release upgrade preflight) refuses a module whose `class_var_abi` is missing or differs from the running runtime's, including every module compiled before ADR 0130 or ADR 0153, with a structured `abi_mismatch` error that names the module and says to recompile. Hot upgrades across the release that changed the convention are not supported: restart the node and recompile every package.
+**Class-module ABI.** Every compiled class module records the runtime ABI it was built for as `module_abi` (currently `4`) in `__beamtalk_meta/0`. The loader (class registration, hot reload, and the release upgrade preflight) refuses a module whose `module_abi` is missing or differs from the running runtime's, with a structured `abi_mismatch` error that names the module and says to recompile. Every module compiled before ADR 0153 declares no `module_abi` (it declared `class_var_abi` instead) and is refused this way, not with an `undef` from a deleted runtime module. This gate is the backstop behind the build stamp: a normal build is invalidated when `BEAMTALK_VERSION` changes, so a stale BEAM rarely reaches it. Hot upgrades across a release that changed the ABI are not supported: restart the node and recompile every package.
 
 ### Actor-to-Actor Coordination
 

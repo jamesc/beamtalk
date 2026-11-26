@@ -2833,10 +2833,10 @@ fn section6_field_stored_literal_that_writes_a_field_is_accepted() {
 }
 
 /// BT-3922: in a class method a `Dictionary` lookup handler that writes only a
-/// class variable writes it in place (ADR 0130), so it is not an escape;
+/// field is not an escape;
 /// `stdlib/test/lookup_field_write_test.bt` proves the write survives.
 #[test]
-fn section6_lookup_handler_that_writes_a_class_variable_is_not_an_escape() {
+fn section6_lookup_handler_that_writes_a_class_side_field_is_not_an_escape() {
     for (body, actor_errors) in [
         (
             "self.cache at: 1 ifAbsent: [self.misses := self.misses + 1. nil]\nnil",

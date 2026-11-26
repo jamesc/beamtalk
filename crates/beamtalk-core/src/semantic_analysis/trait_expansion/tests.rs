@@ -1673,7 +1673,7 @@ fn self_field_write_in_provision_is_error() {
 
 #[test]
 fn state_declaration_in_protocol_body_is_parse_error() {
-    // The parser rejects `state:`/`field:`/`classState:` inside a protocol
+    // The parser rejects `state:`/`field:` inside a protocol
     // body directly (ADR 0127 §7, §13) — it never reaches `ProtocolDefinition`
     // at all, so this is a parser-level test, not `check_after_hierarchy`.
     use crate::source_analysis::{lex_with_eof, parse};
@@ -1696,7 +1696,6 @@ fn late_state_declaration_in_protocol_body_leaks_no_phantom_late_selector() {
     for decl in [
         "late state: total :: Integer = 0",
         "late field: total :: Integer = 0",
-        "late classState: total :: Integer = 0",
     ] {
         let src = format!("Protocol define: Counting\n  {decl}\n  count -> Integer");
         let (module, diagnostics) = parse(lex_with_eof(&src));

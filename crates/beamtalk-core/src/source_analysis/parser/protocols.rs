@@ -404,7 +404,7 @@ impl Parser {
                 continue;
             }
 
-            // `state:`/`field:`/`classState:` — protocols are stateless (ADR
+            // `state:`/`field:` — protocols are stateless (ADR
             // 0127 §7, §13). Parsed and discarded (rather than left for the
             // signature parser below, which would see a non-signature token
             // and silently end the body early) so a real diagnostic is

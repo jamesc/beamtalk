@@ -24,10 +24,6 @@ fn wrap_body_with_nlr_catch_class_method_no_vars_contains_nlr_scaffolding() {
         !out.contains("'reply'"),
         "should not contain actor-reply: {out}"
     );
-    assert!(
-        !out.contains("'class_var_result'"),
-        "should not contain class_var_result: {out}"
-    );
 }
 
 #[test]

@@ -1018,7 +1018,7 @@ fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static
                     "beamtalk_exception_handler",
                     "matches_class",
                     [
-                        leaf::var(vars.ex_class_var.clone()),
+                        leaf::var(vars.ex_class_term.clone()),
                         leaf::var(vars.ex_obj_var.clone()),
                     ],
                 ),

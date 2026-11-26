@@ -97,8 +97,8 @@ Actor subclass: MutationCorpusActor
 
   // A nested loop where only the OUTER loop's top-level body mutates the actor
   // state field (the inner loop touches only its own local) — the compiling
-  // counterpart of BT-3172's rejected inner-mutates shape. Class-var/state-field
-  // threading is top-level-body-only by design (`loop_body_threads_class_vars`),
+  // counterpart of BT-3172's rejected inner-mutates shape. State-field
+  // threading is top-level-body-only by design,
   // so this shape threads correctly and must keep doing so. The outer body
   // reads the inner loop's local back (`+ j`), so a lost inner write shows
   // (BT-3776).
