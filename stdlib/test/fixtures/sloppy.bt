@@ -5,6 +5,7 @@
 // (`nil`), so `max` / `min` must raise what `Number>>max:` raises.
 
 Value subclass: Sloppy
+
   /// Answers `nil`, not a Boolean.
   > _other => nil
 
