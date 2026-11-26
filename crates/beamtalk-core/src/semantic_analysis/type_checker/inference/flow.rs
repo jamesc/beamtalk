@@ -162,7 +162,12 @@ impl TypeChecker {
     /// type inside the arm. A top-level type pattern is narrowed by
     /// `infer_match` itself, from the scrutinee's residual type; `_ :: T`
     /// binds nothing.
-    fn narrow_nested_type_patterns(&mut self, pattern: &Pattern, env: &mut TypeEnv) {
+    fn narrow_nested_type_patterns(
+        &mut self,
+        pattern: &Pattern,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+    ) {
         if matches!(pattern, Pattern::Type { .. }) {
             return;
         }
@@ -173,7 +178,11 @@ impl TypeChecker {
         for (name, class) in nested {
             if name != "_" {
                 let declared = self.resolve_pattern_class(class);
-                env.set_local(name, declared);
+                // `Object` is never a useful typed-send target; keep the
+                // unchecked `Dynamic` binding, as destructuring does.
+                if !Self::is_dynamic_position(&declared, hierarchy) {
+                    env.set_local(name, declared);
+                }
             }
         }
     }
@@ -200,11 +209,6 @@ impl TypeChecker {
             }
             Pattern::Array { elements, .. } => {
                 for e in elements {
-                    Self::collect_type_patterns(e, &mut |b, c, _| visit(b, c, None));
-                }
-            }
-            Pattern::List { elements, tail, .. } => {
-                for e in elements.iter().chain(tail.as_deref()) {
                     Self::collect_type_patterns(e, &mut |b, c, _| visit(b, c, None));
                 }
             }
@@ -692,8 +696,6 @@ impl TypeChecker {
                 // ADR 0147: a map pattern types its variables from a shape
                 // scrutinee.
                 self.bind_map_pattern_types(&arm.pattern, &residual_scrutinee_ty, &mut arm_env);
-                // BT-5332: nested `x :: T` bindings narrow to `T`.
-                self.narrow_nested_type_patterns(&arm.pattern, &mut arm_env);
 
                 // ADR 0107 Phase A: a `binding :: ClassName`
                 // arm narrows `binding` to `ClassName`, computed the
@@ -739,12 +741,17 @@ impl TypeChecker {
                     } else {
                         // Deliberately overwrites whatever
                         // `bind_pattern_vars` (above) just set for
-                        // this key: today that's always `Dynamic` for
-                        // a pattern-bound variable, so the residual
+                        // this key: today that's `Dynamic` for
+                        // a pattern-bound variable (a nested `x :: T` is
+                        // narrowed again afterwards), so the residual
                         // here is strictly more precise.
                         arm_env.set(key.clone(), residual_scrutinee_ty.clone());
                     }
                 }
+                // BT-5332: nested `x :: T` bindings narrow to `T`, after the scrutinee-key
+                // rewrite above so a nested binding that shadows the
+                // scrutinee variable keeps its narrowed type.
+                self.narrow_nested_type_patterns(&arm.pattern, hierarchy, &mut arm_env);
                 // Guard sees `binding`/scrutinee already narrowed
                 // above (ADR 0107: "scope includes the arm's `when:`
                 // guard, not just its body").

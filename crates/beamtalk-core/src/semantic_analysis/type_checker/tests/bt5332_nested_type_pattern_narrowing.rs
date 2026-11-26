@@ -78,3 +78,20 @@ fn nested_wildcard_type_binds_nothing() {
     let msgs = type_messages(&fixture("{_ :: Integer, n}", "n"));
     assert!(msgs.is_empty(), "unexpected diagnostics: {msgs:?}");
 }
+
+#[test]
+fn nested_binding_shadowing_the_scrutinee_variable_keeps_its_narrowed_type() {
+    // The scrutinee-key rewrite in `infer_match` must not clobber a nested
+    // binding that reuses the scrutinee variable's name.
+    assert_narrowed(
+        "{#ok, v :: Integer}",
+        "self needsStr: v",
+        "self needsInt: v",
+    );
+}
+
+#[test]
+fn nested_object_type_stays_dynamic() {
+    let msgs = type_messages(&fixture("{#ok, o :: Object}", "self needsInt: o"));
+    assert!(msgs.is_empty(), "unexpected diagnostics: {msgs:?}");
+}

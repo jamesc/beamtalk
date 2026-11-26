@@ -722,3 +722,25 @@ fn test_match_top_level_named_type_pattern_still_binds() {
         "named binding kept. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_match_guarded_type_patterns_use_guard_position_case() {
+    // BT-5332: the guard wrapper shared by the top-level and the nested type
+    // arm is `case 'true' of <'true'> when GUARD -> body <'true'> when 'true'
+    // -> rest end`, so a guard that raises falls through to the next arm.
+    for pattern in [
+        "n :: Integer",
+        "{_, n :: Integer}",
+        "{_ :: Atom, n :: Integer}",
+    ] {
+        let src = format!(
+            "Object subclass: Foo\n  test: x =>\n    x match: [\n      {pattern} when: [n > 5] -> n;\n      _ -> 0\n    ]\n"
+        );
+        let code = codegen_named(&src, "foo");
+        assert_has(
+            "guard sits in guard position with a fallthrough clause",
+            &code,
+            &["case 'true' of <'true'> when ", "<'true'> when 'true' -> "],
+        );
+    }
+}

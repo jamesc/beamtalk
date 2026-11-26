@@ -367,7 +367,9 @@ impl CoreErlangGenerator {
         // ordering rationale as `generate_array_match_arm`.
         self.push_scope();
         let core_binding = Self::to_core_erlang_var(&binding.name);
-        self.bind_var(&binding.name, &core_binding);
+        if binding.name != "_" {
+            self.bind_var(&binding.name, &core_binding);
+        }
         let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
         self.pop_scope();
 
