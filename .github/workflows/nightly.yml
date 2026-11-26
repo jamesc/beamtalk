@@ -670,11 +670,23 @@ jobs:
             "Nightly Build (${NIGHTLY_DATE}, ${NIGHTLY_SHA})" nightly-notes.md \
             dist-artifacts/*
 
-      # Hand uat the exact published bytes (ADR 0154 § 3, BT-5306): every
-      # asset's sha256 plus the OTP window. Runs only after the release is updated.
+  # ─── uat dispatch (ADR 0154 § 3, BT-5306) ───────────────────────────
+  # Hands uat the exact published bytes: every asset's sha256 plus the OTP window.
+  # A separate job so a failed dispatch can be re-run on its own, without
+  # rebuilding or re-publishing the release.
+  notify-uat:
+    needs: [publish-nightly]
+    if: github.ref == 'refs/heads/main'
+    # Pinned, not floating: ADR 0154 § 3.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Build uat dispatch payload
         id: uat
-        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -685,7 +697,6 @@ jobs:
           echo "payload=${payload}" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch beamtalk-artifact to uat
-        if: github.ref == 'refs/heads/main'
         uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
         with:
           token: ${{ secrets.UAT_DISPATCH_TOKEN }}

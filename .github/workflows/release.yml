@@ -417,11 +417,16 @@ jobs:
   # ─── beamtalk-artifact dispatch (ADR 0154 § 3, BT-5306) ──────────────────
   # The payload uat verifies: every asset's sha256 and the OTP window. It waits
   # for the lanes that attach assets to the release (VS Code .vsix, LiveView IDE
-  # archives) so `assets` is complete. The `beamtalk-release` dispatch above stays
-  # until uat accepts both event types; a follow-up removes it.
+  # archives, desktop installers) so `assets` is complete, but runs whether or
+  # not those lanes succeed: it is gated on the four platform builds only, and a
+  # failed lane just contributes no assets. The `beamtalk-release` dispatch above
+  # stays until uat accepts both event types; a follow-up removes it.
   notify-uat-artifact:
-    needs: [linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, vscode-extension, liveview-ide]
-    if: github.event_name == 'release'
+    needs: [linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, vscode-extension, liveview-ide, desktop-app]
+    if: >-
+      ${{ !cancelled() && github.event_name == 'release'
+      && needs.linux-x86_64.result == 'success' && needs.macos-x86_64.result == 'success'
+      && needs.macos-arm64.result == 'success' && needs.windows-x86_64.result == 'success' }}
     # Pinned, not floating: ADR 0154 § 3.
     runs-on: ubuntu-24.04
     timeout-minutes: 10

@@ -49,3 +49,26 @@ fn otp_matrix_output_is_well_formed_json_array_of_strings() {
         );
     }
 }
+
+/// `scripts/ci/uat-dispatch-payload.sh` reads `otp-support.toml` in shell to build
+/// the `beamtalk-artifact` payload (ADR 0154 § 3). Pin it to the Rust reader.
+#[cfg(unix)]
+#[test]
+fn uat_dispatch_payload_otp_matches_declared_window() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let output = std::process::Command::new("bash")
+        .current_dir(&root)
+        .args(["scripts/ci/uat-dispatch-payload.sh", "--otp"])
+        .output()
+        .expect("run uat-dispatch-payload.sh --otp");
+    assert!(output.status.success(), "--otp should exit 0");
+
+    let window = beamtalk_cli::otp_support::window();
+    let majors = window.majors();
+    let (min, max) = (majors.first().unwrap(), majors.last().unwrap());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        format!("{{\"min-major\":{min},\"max-major\":{max}}}"),
+        "the dispatch payload's otp object must equal the window in otp-support.toml"
+    );
+}

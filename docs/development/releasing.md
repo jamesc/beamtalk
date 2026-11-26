@@ -44,9 +44,9 @@ The **Rust toolchain** is pinned in `rust-toolchain.toml`; update it there when 
 | `tag` | `edge`, `nightly`, or the release tag |
 | `sha` | the commit the artifacts were built from (`GITHUB_SHA`) |
 | `otp` | `min-major` / `max-major` read from `otp-support.toml` |
-| `assets` | asset name → sha256 for every asset on the release except `.sha256` sidecars; for a tag this includes the LiveView IDE archives and the `.vsix` |
+| `assets` | asset name → sha256 for every asset on the release except `.sha256` sidecars; for a tag this includes the LiveView IDE archives, the desktop installers and the `.vsix` |
 
-- **Timing.** `edge` and `nightly` dispatch after the rolling release is updated, and only from `main`. `release` dispatches in `notify-uat-artifact`, which waits for the VS Code and LiveView IDE lanes so the asset map is complete.
+- **Timing.** `edge` and `nightly` dispatch after the rolling release is updated, and only from `main`. `release` dispatches in `notify-uat-artifact`, which waits for the VS Code, LiveView IDE and desktop lanes so the asset map is complete. It is gated on the four platform builds only: a failed lane contributes no assets but does not stop the dispatch. Each dispatch is its own job (`notify-uat`) so it can be re-run without rebuilding.
 - **Runner images.** `release.yml`, `edge.yml`, `nightly.yml` and `liveview-release.yml` pin `ubuntu-24.04` and `macos-15` (not `*-latest`), because uat tests each target on the image that built it. Bumping an image is a reviewed change on both sides.
 - **Legacy event.** `release.yml` still sends `beamtalk-release` (`version` and `tag` only) until uat accepts both types; a follow-up removes it.
 - The payload is tested by `scripts/ci/test-uat-dispatch-payload.sh`.
