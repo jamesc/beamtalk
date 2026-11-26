@@ -1520,10 +1520,8 @@ fn release_launcher_tls_distribution_opt_in_test() {
 
     // A loopback client (no opt-in) cannot reach the TLS node. It shares the
     // node's epmd here, so it does dial the TLS listener with a plain
-    // handshake, and the next TLS client must still get through. Linux only:
-    // on macOS CI the listener stopped accepting after such a client, which
-    // BT-5256 investigates.
-    #[cfg(target_os = "linux")]
+    // handshake, and the next TLS client must still get through.
+    // BT-5256 diagnostic run: every platform, with the epmd listeners dumped.
     {
         let plain = launcher_command(&output_dir, name)
             .arg("ping")
@@ -1543,9 +1541,15 @@ fn release_launcher_tls_distribution_opt_in_test() {
             .env("RELEASE_COOKIE", &cookie)
             .output()
             .expect("spawn bin/<name> ping");
+        let listeners = std::process::Command::new("lsof")
+            .args(["-nP", &format!("-iTCP:{epmd_port}"), "-sTCP:LISTEN"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default();
         assert!(
             ping.status.success(),
-            "the TLS node must still answer after a plain client: {}",
+            "the TLS node must still answer after a plain client: {} \
+             epmd listeners: {listeners}",
             String::from_utf8_lossy(&ping.stderr)
         );
     }
