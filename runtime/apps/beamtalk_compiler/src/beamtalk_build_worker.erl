@@ -8,7 +8,7 @@
 -moduledoc """
 Batch compiler worker for `beamtalk build' (ADR 0022, Phase 3).
 
-Replaces `compile.escript' with an in-memory compilation pipeline.
+Compiles in memory (the former `compile.escript' backend was removed in BT-5198).
 Uses `core_scan:string/1' → `core_parse:parse/1' → `compile:forms/2'
 to compile Core Erlang to BEAM bytecode without temporary files.
 Includes `debug_info' for hot code reload support.
@@ -318,7 +318,7 @@ compile_core_forms(CoreModule) ->
             %% ever runs, and `Warnings' is unconditionally `[]' whenever
             %% `Errors' is non-empty for this pipeline. `_Warnings' is kept
             %% bound (not `_') on purpose, matching the sibling clause in
-            %% `beamtalk_compiler_server.erl' and `compile.escript', and
+            %% `beamtalk_compiler_server.erl', and
             %% `compile_core_erlang_error_warnings_are_always_empty_test/0'
             %% below pins the invariant so a future OTP pass-order change
             %% would fail CI instead of silently losing information here.
