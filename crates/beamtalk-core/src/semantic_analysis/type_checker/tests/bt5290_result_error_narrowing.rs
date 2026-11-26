@@ -583,3 +583,26 @@ fn on_do_retry_rebinding_drops_narrowing() {
         "a retry may return the rebound `line`: {diags:?}"
     );
 }
+
+/// The sibling-write rule also covers the messages of a cascade (Claude
+/// review on #5869).
+#[test]
+fn cascade_sibling_block_rebinding_drops_narrowing() {
+    let diags = type_messages(
+        r"typed Object subclass: ZzMint
+  readLine: ms :: Integer -> Result(Binary, Object) => Result ok: <<>>
+  readHead: ms :: Integer -> Result(Tuple, Object) =>
+    line := self readLine: ms
+    line isError ifTrue: [
+      #(1, 2) size; do: [:i | ^line] separatedBy: [line := self readLine: ms]
+    ]
+    Result ok: {#head}
+",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|m| m.contains("declares return type Result(Tuple, Object)")),
+        "a cascade's separator may rebind `line`: {diags:?}"
+    );
+}

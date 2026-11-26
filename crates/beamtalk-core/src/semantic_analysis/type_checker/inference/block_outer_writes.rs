@@ -140,8 +140,12 @@ impl TypeChecker {
     /// after every argument is inferred (BT-4636), so a `^x` in one may
     /// return a value the other rebound. The two-armed conditionals run
     /// exactly one arm, so their arms keep the fact.
+    ///
+    /// `receiver` is `None` where the receiver was already inferred (the
+    /// argument-only pass in `infer_send_arg_types`, which also covers every
+    /// message of a cascade); clearing twice is harmless.
     pub(in crate::semantic_analysis::type_checker) fn forget_error_variants_written_by_send_blocks(
-        receiver: &Expression,
+        receiver: Option<&Expression>,
         selector: &crate::ast::MessageSelector,
         arguments: &[Expression],
         env: &mut TypeEnv,
@@ -162,7 +166,8 @@ impl TypeChecker {
         {
             return;
         }
-        let blocks: Vec<&crate::ast::Block> = std::iter::once(receiver)
+        let blocks: Vec<&crate::ast::Block> = receiver
+            .into_iter()
             .chain(arguments)
             .filter_map(|e| match e {
                 Expression::Block(block) => Some(block),
