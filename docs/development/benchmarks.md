@@ -1979,6 +1979,33 @@ stack frame a returning call gives the site (ADR 0116 § The failing arm).
 11n and 11o go through dispatch (~100 ns) either way; the extra guard in the
 primitive body is lost in it.
 
+### BT-5261: comparison guards test the `String` tag, not `is_binary`
+
+The inlined comparison guard took `is_binary` as its `String` test, but since
+BT-4170 a `String` is the tagged `{beamtalk_string, Bin}` term, so no
+`String` passed it. The unknown-receiver guard is now `is_number` alone: a
+raw `Binary` dispatches and raises `does_not_understand`. A declared
+`String` receiver is now tested with the `String` tag and runs inline, with
+the BT-5213 argument test. New row 11p (`a :: String < b :: String`)
+measures that path on both sides. The setup is the same as for BT-5213:
+`main` at `8088582` against this change, repo dev builds, three runs per
+side, alternating. Full tables:
+`benchmarks/vs-elixir/results/bench-bt5261.md`.
+
+| Row | base ns (1 / 2 / 3) | after ns (1 / 2 / 3) | red / words (base → after) |
+|---|---|---|---|
+| 11i `a < b` untyped | 9.28 / 7.78 / 7.18 | 8.04 / 7.96 / 7.51 | 0 / 0 → 0 / 0 |
+| 11n `a < b` Strings | 117 / 90.7 / 92.8 | 110 / 108 / 99.5 | 12 / 2 → 12 / 2 |
+| 11p `a :: String < b :: String` | 106 / 98.1 / 96.7 | 8.01 / 7.97 / 7.73 | 12 / 2 → 0 / 0 |
+
+The gate holds. 11i and 11n keep their reductions and words: 11i loses only
+the `is_binary` arm, which a number never reaches, and 11n's tagged Strings
+dispatched before and still do. Their ns stays within the spread both sides
+show (11n runs 90–117 ns either way). Rows 11d, 11e, 11h, 11k, 11m and 11o
+compile to the same code and measured the same. 11p is the gain: a declared
+`String` comparison went from a dispatch to `String>><` (~100 ns,
+12 reductions) to an inline test (~8 ns, 0 reductions).
+
 ## ADR 0153 baseline: class variables, before removal (BT-5145)
 
 The "before" run for removing `classState:` (epic BT-5144). It records what the class-variable snapshot before every compiled `on:do:`, `protect/1` in `Result tryDo:` and the class-variable input to the per-send class guard cost, so the "after" run (BT-5164, and the ADR 0153 Phase 3 gate) has something to compare against.

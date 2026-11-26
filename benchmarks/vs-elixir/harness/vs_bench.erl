@@ -191,6 +191,8 @@ rows() ->
         ]},
         {"11n", dispatch, "a < b, both untyped Strings / a < b", 200000, 'untypedStrLess:a:b:',
             string_pair, [{less_ab, string_pair}]},
+        {"11p", dispatch, "a < b, a :: String, b :: String / a < b", 200000, 'typedStrLess:a:b:',
+            string_pair, [{less_ab, string_pair}]},
         {"11o", dispatch, "#m < b, b untyped / :m < b", 200000, 'litSymLess:b:', symbol, [
             {lit_sym_less, symbol}
         ]},
@@ -266,7 +268,7 @@ fixtures() ->
         dict => {Bt(dict), ?EX:dict()},
         dict100 => {Bt(dict100), ?EX:dict100()},
         string => {Bt(string), ?EX:string()},
-        %% 11n: both operands are the string on each side (Elixir gets the pair).
+        %% 11n, 11p: both operands are the string on each side (Elixir gets the pair).
         string_pair => {Bt(string), {?EX:string(), ?EX:string()}},
         symbol => hello,
         binary => {Bt(binary), ?EX:string()},
@@ -642,11 +644,12 @@ compiles_to("11e") -> "is_number guard (declared Integer, BT-4823), erlang:'<'";
 compiles_to("11f") -> "letrec loop; is_number guard on the typed limit (BT-4823), its number arm an is_number(I) test (ADR 0116 addendum, BT-5210), erlang:'>'; else send_number_comparison/4";
 compiles_to("11g") -> "Number>>max: (self guarded: Number is not a proven class; the declared other is tested, BT-5210), erlang:'>'";
 compiles_to("11h") -> "case is_number(B): erlang:'<'(5, B); else send_number_comparison(B, 'lessThanFromNumber:', [5], '<') (ADR 0116 addendum, BT-5210; the call arm gives the site a frame)";
-compiles_to("11i") -> "is_number(A) -> is_number(B) ? erlang:'<'(A, B) : send_number_comparison/4; else is_binary(A) ? erlang:'<'(A, B) : send(A, '<', [B]) (BT-5210)";
+compiles_to("11i") -> "is_number(A) -> is_number(B) ? erlang:'<'(A, B) : send_number_comparison/4; else send(A, '<', [B]) (BT-5210; no is_binary arm since BT-5261)";
 compiles_to("11j") -> "as 11e, with B untyped: is_number guard on the declared-Integer A, its true arm is_number(B) ? erlang:'<'(A, B) : send_number_comparison/4 (BT-5210)";
 compiles_to("11k") -> "erlang:'+'(5, B) in a try; on badarith an is_number(B) test then send_number_coercion/4 (the arithmetic reference the comparison addendum matches)";
 compiles_to("11m") -> "case is_record(B, beamtalk_string, 2): erlang:'<'(\"m\", B); else erlang:error({beamtalk_ordering_type_error, \"m\", '<', B}) (BT-5213; frame-free)";
-compiles_to("11n") -> "is_number(A) / is_binary(A) both false for a tagged String: send(A, '<', [B]) -> String>>< body: is_record(B, beamtalk_string, 2) ? erlang:'<' : erlang:error({beamtalk_ordering_type_error, ...}) (BT-5213)";
+compiles_to("11n") -> "is_number(A) false for a tagged String: send(A, '<', [B]) -> String>>< body: is_record(B, beamtalk_string, 2) ? erlang:'<' : erlang:error({beamtalk_ordering_type_error, ...}) (BT-5213)";
+compiles_to("11p") -> "is_record(A, beamtalk_string, 2) -> is_record(B, beamtalk_string, 2) ? erlang:'<'(A, B) : erlang:error({beamtalk_ordering_type_error, ...}); else send(A, '<', [B]) (BT-5261; inline, was a dispatch to String>><)";
 compiles_to("11o") -> "send(A, '<', [B]) -> Symbol>>< body: is_atom(B) and not nil/true/false ? erlang:'<' : erlang:error({beamtalk_ordering_type_error, ...}) (BT-5213)";
 compiles_to("11l") -> "as 7a; in the actor the loop is a StateAcc letrec (whole state map threaded, one maps:put per iteration); the condition 0 < self.count is a guarded operator (BT-5210): a BT-4279 fast path is_number(Count) -> erlang:'<', else store, send_number_comparison/4, take";
 compiles_to("12a") -> "typed receiver (BT-4127): is_map + tag guard, erlang:whereis + class-object tuple with the pinned module; untyped: beamtalk_primitive:class_of_object derived-cache hit";

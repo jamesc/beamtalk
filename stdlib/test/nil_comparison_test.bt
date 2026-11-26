@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-3924: when a comparison receiver (`< > <= >=`) is not statically known to
-// be a number, character or string, codegen emits a runtime guard. Numbers,
-// characters and strings take the bare Erlang comparison BIF; every other
-// receiver is sent the operator as a message. `nil`, booleans, lists and
+// be a number, character or string, codegen emits a runtime guard. Numbers and
+// characters take the bare Erlang comparison BIF; every other receiver,
+// a `String` or a raw `Binary` included (BT-5261), is sent the operator as a
+// message. `nil`, booleans, lists and
 // tuples define no `<`, so they raise `does_not_understand` instead of being
 // silently term-ordered (`nil < 5` used to answer `false`). Symbols define
 // `< > <= >=` (alphabetical by name), so `#a < #b` keeps working.
@@ -105,3 +106,14 @@ TestCase subclass: NilComparisonTest
   testWrongKindArgumentRaises =>
     self should: [self lt: 5 with: nil] raise: #does_not_understand
     self should: [self lt: #a with: 5] raise: #type_error
+
+  /// BT-5261: a raw `Binary` defines no ordering. Through an untyped
+  /// receiver (the inlined guard) and through `perform:` it raises
+  /// `does_not_understand` alike, instead of term-ordering inline.
+  testRawBinaryReceiverRaises =>
+    bin := Binary fromBytes: #(104, 105)
+    self should: [self lt: bin with: 5] raise: #does_not_understand
+    self should: [self ge: bin with: bin] raise: #does_not_understand
+    self should: [
+      bin perform: #'<' withArguments: #(5)
+    ] raise: #does_not_understand

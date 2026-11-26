@@ -270,7 +270,8 @@ defmodule VeBench do
   defbench(:less_ab, {a, b}, do: a < b)
   defbench(:lit_add, b, do: 5 + b)
 
-  # 11m-11o (BT-5213): String and Symbol receivers.
+  # 11m-11o (BT-5213): String and Symbol receivers. 11n (BT-5213) and 11p
+  # (BT-5261) reuse less_ab with the string pair.
   defbench(:lit_str_less, b, do: "m" < b)
   defbench(:lit_sym_less, b, do: :m < b)
 

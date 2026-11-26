@@ -9,11 +9,15 @@
 //! * **Receivers:** a number, float or character literal, a `String` literal;
 //!   a parameter declared `Integer`, `Character`, `Integer | String` or
 //!   `String`, an untyped one; `self` in `Integer`, `Float`, `Character` and
-//!   `String` (BT-5213).
+//!   `String` (BT-5213); a field declared `Integer | String` (both kind
+//!   arms, BT-5261). A `String` value is the tagged `{beamtalk_string, Bin}`
+//!   tuple (BT-4170), and the `String`-accepting declared receivers and the
+//!   untyped one are run with a raw binary (a `Binary`) too (BT-5261).
 //! * **Right operands:** a proven numeric one (an integer, float or character
 //!   literal), a `String` literal (BT-5213), an untyped parameter and a
 //!   parameter declared `Integer` (tested, not trusted), each run with numbers
-//!   and with non-numbers (`nil`, a symbol, a string, a list, a boolean).
+//!   and with non-numbers (`nil`, a symbol, a `String`, a raw binary, a
+//!   list, a boolean).
 //! * **Positions:** a plain expression, a loop condition, an `ifTrue:ifFalse:`
 //!   receiver, a guard-return shape (`c ifTrue: [^a]. b`, BT-4452), and in an
 //!   actor the cell bracket around a send and a field-writing loop condition
@@ -28,9 +32,10 @@
 //! number on the right compare numerically; a number on the left and anything
 //! else send the hook; a proven `String` on the left (a literal, `self` in
 //! `String`) compares against a `String` and raises the frame-free
-//! `beamtalk_ordering_type_error` for anything else (BT-5213); a raw binary on
-//! the left (a declared or untyped receiver's `is_binary` arm) term-orders;
-//! any other receiver dispatches the operator.
+//! `beamtalk_ordering_type_error` for anything else (BT-5213), and so does a
+//! `String` in a receiver declared `String` (BT-5261); any other receiver
+//! dispatches the operator: an untyped `String`, and a raw binary wherever it
+//! stands (a `Binary` defines no `<`, BT-5261).
 
 use super::value_type_fold_family_corpus::{core_module_name, run_erlang_probes};
 
@@ -39,10 +44,11 @@ use super::value_type_fold_family_corpus::{core_module_name, run_erlang_probes};
 enum V {
     Int(i64),
     Float(f64),
-    /// A string as a raw binary.
+    /// A raw binary: a `Binary`, not a `String` (BT-4170), so it has no
+    /// ordering of its own (BT-5261).
     Str(&'static str),
-    /// A `String` literal: a tagged `{beamtalk_string, Binary}` tuple at run
-    /// time (BT-4170), which the comparison BIF term-orders as a tuple.
+    /// A `String`: a tagged `{beamtalk_string, Binary}` tuple at run time
+    /// (BT-4170), which the comparison BIF term-orders as a tuple.
     Tagged(&'static str),
     /// An atom (`nil`, `true`, a symbol).
     Atom(&'static str),
@@ -68,17 +74,6 @@ impl V {
             V::Int(i) => Some(i as f64),
             V::Float(f) => Some(f),
             _ => None,
-        }
-    }
-
-    /// Erlang's term order rank, for the kinds the corpus uses.
-    fn rank(self) -> u8 {
-        match self {
-            V::Int(_) | V::Float(_) => 0,
-            V::Atom(_) => 1,
-            V::Tagged(_) => 2,
-            V::List => 3,
-            V::Str(_) => 4,
         }
     }
 }
@@ -142,19 +137,14 @@ fn reference(left: V, op: Op, right: V, receiver: Recv) -> Outcome {
     match (left_number, right.number()) {
         (Some(l), Some(r)) => Outcome::Bif(op.holds(l.partial_cmp(&r).expect("no NaN"))),
         (Some(_), None) => Outcome::Hook(op.hook(), left.erl()),
+        // A `String` in a receiver with a `String` arm (proven or declared,
+        // BT-5213, BT-5261) orders against a `String` and raises otherwise;
+        // anything else, a raw binary included, dispatches.
         (None, _) => match left {
-            // Only a proven `String` receiver holds a tagged String.
-            V::Tagged(l) => match right {
+            V::Tagged(l) if receiver.string_arm_accepts() => match right {
                 V::Tagged(r) => Outcome::Bif(op.holds(l.cmp(r))),
                 _ => Outcome::TypeError(op.src()),
             },
-            V::Str(_) if receiver.string_arm_accepts() => {
-                let ord = match (left, right) {
-                    (V::Str(l), V::Str(r)) => l.cmp(r),
-                    _ => left.rank().cmp(&right.rank()),
-                };
-                Outcome::Bif(op.holds(ord))
-            }
             _ => Outcome::Send(op.src()),
         },
     }
@@ -232,7 +222,7 @@ enum Host {
 impl Host {
     fn header(self) -> &'static str {
         match self {
-            Host::Value => "Value subclass: CmpProbe\n",
+            Host::Value => "Value subclass: CmpProbe\n  field: mixed :: Integer | String = 0\n",
             Host::Integer => "Object subclass: Integer\n",
             Host::Float => "Object subclass: Float\n",
             Host::Character => "Object subclass: Character\n",
@@ -306,7 +296,20 @@ const RECEIVERS: &[Recv] = &[
         src: "a",
         param: Some("a :: Integer | String"),
         host: Host::Value,
-        values: &[V::Int(5), V::Str("m"), V::Atom("nil")],
+        values: &[V::Int(5), V::Tagged("m"), V::Str("m"), V::Atom("nil")],
+        // A union parameter is not a declared comparison kind (only a simple
+        // type is, `param_comparison_kinds`), so it takes the unknown
+        // receiver's guard: no `String` arm (BT-5261).
+        arms: (Arm::Number, false),
+    },
+    // A declared union *field* is a declared comparison kind (a parameter is
+    // not): its guard has both a number arm and a `String` arm (BT-5261).
+    Recv {
+        name: "declared-union-field",
+        src: "self.mixed",
+        param: None,
+        host: Host::Value,
+        values: &[V::Int(5), V::Tagged("m"), V::Str("m"), V::Atom("nil")],
         arms: (Arm::Number, true),
     },
     Recv {
@@ -314,7 +317,7 @@ const RECEIVERS: &[Recv] = &[
         src: "a",
         param: Some("a :: String"),
         host: Host::Value,
-        values: &[V::Str("m"), V::Int(5)],
+        values: &[V::Tagged("m"), V::Str("m"), V::Int(5)],
         arms: (Arm::None, true),
     },
     Recv {
@@ -322,8 +325,14 @@ const RECEIVERS: &[Recv] = &[
         src: "a",
         param: Some("a"),
         host: Host::Value,
-        values: &[V::Int(5), V::Float(1.5), V::Str("m"), V::Atom("nil")],
-        arms: (Arm::Number, true),
+        values: &[
+            V::Int(5),
+            V::Float(1.5),
+            V::Tagged("m"),
+            V::Str("m"),
+            V::Atom("nil"),
+        ],
+        arms: (Arm::Number, false),
     },
     Recv {
         name: "self-integer",
@@ -375,6 +384,7 @@ const ALL_VALUES: &[V] = &[
     V::Int(109),
     V::Atom("nil"),
     V::Atom("sym"),
+    V::Tagged("str"),
     V::Str("str"),
     V::List,
     V::Atom("true"),
@@ -415,7 +425,7 @@ const RIGHTS: &[Right] = &[
         name: "declared-integer",
         src: "b",
         param: Some("b :: Integer"),
-        values: &[V::Int(4), V::Atom("nil"), V::Str("str")],
+        values: &[V::Int(4), V::Atom("nil"), V::Tagged("str"), V::Str("str")],
     },
 ];
 
@@ -502,11 +512,17 @@ const VALUE_POSITIONS: [Position; 4] = [
     Position::GuardReturn,
 ];
 
-/// The actor receivers: a literal (proven), a declared and an untyped one.
+/// The actor receivers: a literal (proven), a declared number and `String`
+/// (BT-5261), and an untyped one.
 fn actor_receivers() -> Vec<Recv> {
     RECEIVERS
         .iter()
-        .filter(|r| matches!(r.name, "int-literal" | "declared-integer" | "untyped"))
+        .filter(|r| {
+            matches!(
+                r.name,
+                "int-literal" | "declared-integer" | "declared-string" | "untyped"
+            )
+        })
         .copied()
         .collect()
 }
@@ -580,10 +596,13 @@ fn methods() -> Vec<Method> {
                         if params[1] {
                             args.push(value.erl());
                         }
-                        let self_term = recv
-                            .host
-                            .self_value()
-                            .map_or_else(|| "Self".to_string(), V::erl);
+                        let self_term = if recv.src == "self.mixed" {
+                            format!("Self#{{mixed => {}}}", left.erl())
+                        } else {
+                            recv.host
+                                .self_value()
+                                .map_or_else(|| "Self".to_string(), V::erl)
+                        };
                         let call = if position.actor() {
                             format!(
                                 "bt_probe:observe(fun() -> 'bt@cmp_actor':'dispatch'('{selector}', [{}], 'self_ref', #{{n => 0}}) end)",

@@ -149,6 +149,76 @@ fn symbol_and_unknown_receivers_still_dispatch() {
     }
 }
 
+/// BT-5261: a declared `String` receiver is tested with the `String` routing
+/// guard (the tagged `{beamtalk_string, Bin}` term, BT-4170), not
+/// `is_binary`, so a real `String` takes the inline arm instead of always
+/// dispatching. That arm tests the right operand like a proven `String`
+/// receiver's: the bare BIF for a `String`, else the frame-free `type_error`.
+#[test]
+fn a_declared_string_receiver_is_tested_inline_with_the_string_tag() {
+    let code = codegen(
+        "Object subclass: P\n\
+         \x20 lt: s :: String with: t :: String => s < t\n\
+         \x20 five: s :: String => s < 5\n\
+         \x20 lit: s :: String => s < \"m\"\n",
+    );
+    let left_tag = "case call 'erlang':'is_record'(_BinLeft";
+    for selector in ["lt:with:", "five:", "lit:"] {
+        let body = method(&code, selector);
+        assert!(
+            body.contains(left_tag),
+            "{selector}: a declared String receiver is tested with the String tag:\n{body}"
+        );
+        assert!(
+            !body.contains("is_binary"),
+            "{selector}: a String is never a raw binary (BT-4170):\n{body}"
+        );
+        assert!(
+            body.contains("call 'erlang':'<'(_BinLeft"),
+            "{selector}: a String receiver answers inline:\n{body}"
+        );
+    }
+    for selector in ["lt:with:", "five:"] {
+        let body = method(&code, selector);
+        assert!(
+            body.contains(STRING_TEST) && body.contains(RAISE),
+            "{selector}: an unproven right operand is tested and a wrong kind raises:\n{body}"
+        );
+    }
+    // A proven String on the right needs no right-operand test.
+    let lit = method(&code, "lit:");
+    assert!(
+        !lit.contains(STRING_TEST) && !lit.contains("beamtalk_ordering_type_error"),
+        "a String literal on the right is proven:\n{lit}"
+    );
+    assert_compiles_through_erlc("test", &code);
+}
+
+/// BT-5261: an unknown receiver's guard no longer takes `is_binary` for a
+/// `String`, so a raw `Binary` dispatches (and raises `does_not_understand`,
+/// `Binary` defines no `<`) instead of term-ordering on the bare BIF.
+#[test]
+fn an_unknown_receiver_guard_has_no_binary_arm() {
+    let code = codegen(
+        "Object subclass: P\n\
+         \x20 any: a with: x => a < x\n\
+         \x20 five: a => a < 5\n",
+    );
+    for selector in ["any:with:", "five:"] {
+        let body = method(&code, selector);
+        assert!(
+            !body.contains("is_binary"),
+            "{selector}: a raw binary must dispatch, not term-order:\n{body}"
+        );
+        assert!(
+            body.contains("case call 'erlang':'is_number'(_BinLeft")
+                && body.contains("'beamtalk_message_dispatch':'send'("),
+            "{selector}: numbers inline, everything else dispatches:\n{body}"
+        );
+    }
+    assert_compiles_through_erlc("test", &code);
+}
+
 /// The guard kinds the expression renderer covers, run against the `case`
 /// renderers of record over the same terms: the two must agree on every one.
 #[test]

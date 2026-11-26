@@ -26,8 +26,10 @@ use beamtalk_core::source_analysis::Span;
 pub(in crate::core_erlang) enum OperatorGuard {
     /// `+ - * /`: `is_number` → bare BIF; anything else → message dispatch.
     Arithmetic,
-    /// `< > <= >=`: primitive-comparable (`is_number` or `is_binary`) → bare
-    /// BIF; anything else → message dispatch (BT-3924).
+    /// `< > <= >=`: a number (`is_number`, which covers a `Character`) →
+    /// bare BIF; anything else → message dispatch (BT-3924). A raw binary
+    /// is a `Binary`, which defines no `<`, so it dispatches and raises
+    /// `does_not_understand`; a `String` reaches `String>><` (BT-5261).
     Comparison,
     /// `< > <= >=` on a receiver whose kind is *declared* (a typed parameter
     /// or field) but not proven: the same shape as [`Self::Comparison`] with
@@ -52,30 +54,32 @@ impl OperatorGuard {
     ///
     /// * Arithmetic — `is_number(L)`: non-numbers would `badarith` in the BIF,
     ///   so they dispatch (user overload or DNU).
-    /// * Comparison — `is_number(L) or is_binary(L)`: exactly the receivers
-    ///   whose builtin `<` *is* the Erlang term-order BIF — `Integer`/`Float`,
-    ///   `Character` (a codepoint integer at runtime, see
-    ///   `beamtalk_primitive:class_of/1`) and `String`/`Binary` (binaries).
-    ///   Erlang's `<` is a total order over every term and never raises, so
-    ///   any other receiver on the bare BIF would *silently* term-order it
-    ///   (`nil < 5` used to answer `false`). Everything else therefore
-    ///   dispatches: `nil`/booleans/lists/tuples raise `does_not_understand`,
-    ///   a `Symbol` reaches `Symbol>><`, and objects reach their overload
-    ///   (`Money>><`).
+    /// * Comparison — `is_number(L)`: exactly the receivers whose builtin `<`
+    ///   *is* the Erlang term-order BIF against a number — `Integer`/`Float`
+    ///   and `Character` (a codepoint integer at runtime, see
+    ///   `beamtalk_primitive:class_of/1`). Erlang's `<` is a total order over
+    ///   every term and never raises, so any other receiver on the bare BIF
+    ///   would *silently* term-order it (`nil < 5` used to answer `false`,
+    ///   a raw `Binary` until BT-5261). Everything else therefore
+    ///   dispatches: `nil`/booleans/lists/tuples/binaries raise
+    ///   `does_not_understand`, a `String` or `Symbol` reaches its own `<`,
+    ///   and objects reach their overload (`Money>><`).
+    /// * `DeclaredComparison` — the declared kinds' tests, `or`ed: the number
+    ///   arm's BIF and, when a `String` is declared, the `String` routing
+    ///   guard ([`OrderingKind::test_doc`]).
     fn predicate_doc(self, subject: &str) -> Document<'static> {
         let test = |bif: &'static str| form::call("erlang", bif, [var(subject.to_string())]);
-        let either = |first: Document<'static>, second: Document<'static>| {
-            form::call("erlang", "or", [first, second])
-        };
         match self {
             Self::Arithmetic => test("is_number"),
             Self::Comparison | Self::DeclaredComparison(_) => {
-                let (first, second) = self
-                    .comparison_kind_tests()
+                let (number, string) = self
+                    .comparison_kind_arms()
                     .expect("a receiver-tested comparison guard has kind tests");
-                match second {
-                    Some(second) => either(test(first), test(second)),
-                    None => test(first),
+                let string = string.then(|| OrderingKind::String.test_doc(subject));
+                match (number.map(test), string) {
+                    (Some(n), Some(s)) => form::call("erlang", "or", [n, s]),
+                    (Some(only), None) | (None, Some(only)) => only,
+                    (None, None) => unreachable!("a ComparisonKinds always holds a kind"),
                 }
             }
             // No receiver test: the receiver's kind is proven. (Its guard is
@@ -84,26 +88,29 @@ impl OperatorGuard {
         }
     }
 
-    /// The comparison guard's receiver tests split by kind (ADR 0116
-    /// § Addendum, BT-5176): the number arm's test, which gains the
-    /// right-operand test, and the `String` arm's, which does not. `None`
-    /// for a guard with no number arm (a declared `String`) or no receiver
-    /// test at all ([`Self::Proven`]), and for arithmetic.
-    fn number_and_string_tests(self) -> Option<(&'static str, Option<&'static str>)> {
+    /// The comparison guard's receiver arms (ADR 0116 § Addendum, BT-5176,
+    /// BT-5261): the number arm's `erlang` type-test BIF, if any, and
+    /// whether it has a `String` arm. The one table behind
+    /// [`Self::predicate_doc`] and the right-tested split
+    /// ([`CoreErlangGenerator::right_tested_comparison`]). `None` for a guard
+    /// with no receiver test ([`Self::Proven`]) and for arithmetic.
+    fn comparison_kind_arms(self) -> Option<(Option<&'static str>, bool)> {
         match self {
-            Self::DeclaredComparison(kinds) if !kinds.has_number_kind() => None,
-            _ => self.comparison_kind_tests(),
+            Self::Comparison => Some((Some("is_number"), false)),
+            Self::DeclaredComparison(kinds) => Some((kinds.number_test(), kinds.holds_string())),
+            Self::Arithmetic | Self::Proven(_) => None,
         }
     }
 
-    /// The comparison guard's receiver kind tests: the first, and a second
-    /// to `or` with it (always `is_binary` when present). The one table
-    /// behind [`Self::predicate_doc`] and [`Self::number_and_string_tests`].
-    fn comparison_kind_tests(self) -> Option<(&'static str, Option<&'static str>)> {
+    /// Whether the guard has a `String` arm: a proven `String` receiver, or a
+    /// declared one (BT-5261). Its right operand is then always tested unless
+    /// proven a `String`, since the bare BIF would term-order a wrong kind.
+    fn has_string_arm(self) -> bool {
         match self {
-            Self::Comparison => Some(("is_number", Some("is_binary"))),
-            Self::DeclaredComparison(kinds) => Some(kinds.type_tests()),
-            Self::Arithmetic | Self::Proven(_) => None,
+            Self::Proven(kind) => kind == ProvenKind::String,
+            _ => self
+                .comparison_kind_arms()
+                .is_some_and(|(_, string)| string),
         }
     }
 }
@@ -425,14 +432,14 @@ impl CoreErlangGenerator {
         // Both guards test for the primitive types whose builtin operator *is*
         // the bare BIF and dispatch everything else:
         //   * Arithmetic — `is_number`: number→BIF, anything else→dispatch.
-        //   * Comparison — `is_number or is_binary` (numbers, characters,
-        //     binaries): Erlang `<` is a total order over every term and never
-        //     raises, so a bare BIF on any other receiver would *silently*
-        //     term-order it (`nil < 5` → `false`). Every other receiver —
-        //     objects, but also `nil`, symbols, lists, tuples (including
-        //     tagged `String`s, BT-4170 — dispatch term-compares them with
-        //     the same outcome, one hop slower) — dispatches, so
-        //     it reaches its own `<` or raises `does_not_understand` (BT-3924).
+        //   * Comparison — `is_number` (numbers, characters): Erlang `<` is a
+        //     total order over every term and never raises, so a bare BIF on
+        //     any other receiver would *silently* term-order it (`nil < 5` →
+        //     `false`). Every other receiver — objects, but also `nil`,
+        //     symbols, lists, tuples, raw binaries (BT-5261) and tagged
+        //     `String`s (BT-4170) — dispatches, so it reaches its own `<` or
+        //     raises `does_not_understand` (BT-3924). A *declared* `String`
+        //     is tested inline with the `String` tag instead (BT-5261).
         // `%`/`**`/equality are not message-dispatched here.
         let is_arithmetic = is_arithmetic_operator(op);
         let guard = self.operator_guard(op, left, &arguments[0]);
@@ -476,10 +483,17 @@ impl CoreErlangGenerator {
         // right operand unless the compiler proves it numeric. A declared
         // right operand (`n :: Integer`) is tested, not trusted. A proven
         // receiver is guarded only when its right operand is not proven of
-        // its kind (`"a" < 5`, BT-5213), so it is always tested.
+        // its kind (`"a" < 5`, BT-5213), so it is always tested. A guard with
+        // a `String` arm (a declared `String`, BT-5261) tests it too: a
+        // proven number on the right is the wrong kind for that arm.
         let right_tested = is_ordering_comparison(op)
-            && (matches!(guard, Some(OperatorGuard::Proven(_)))
-                || !self.is_proven_numeric(&arguments[0]));
+            && guard.is_some_and(|g| {
+                matches!(g, OperatorGuard::Proven(_))
+                    || g.has_string_arm()
+                    || !self.is_proven_numeric(&arguments[0])
+            });
+        let right_proven =
+            proven_comparison_kind(&arguments[0], self.self_instance_class().as_deref());
 
         let call_doc = if let Some(guard) = guard {
             let parts = self.guarded_op_doc(
@@ -491,6 +505,7 @@ impl CoreErlangGenerator {
                 RightOperand {
                     statically_numeric: right_is_statically_numeric,
                     tested: right_tested,
+                    proven: right_proven,
                 },
             );
             // BT-4279: when the guard's true arm is the bare BIF (it runs no
@@ -711,10 +726,10 @@ impl CoreErlangGenerator {
     ///
     /// * Arithmetic (`is_number`): numbers take the BIF; everything else routes
     ///   through dispatch (overload or DNU).
-    /// * Comparison (`is_number or is_binary`): numbers, characters and strings
-    ///   take the BIF; everything else dispatches (so `aMoney < bMoney` reaches
-    ///   `Money>><`, `#a < #b` reaches `Symbol>><`, and `nil < 5` raises a DNU
-    ///   instead of silently term-ordering — BT-3924).
+    /// * Comparison (`is_number`): numbers and characters take the BIF;
+    ///   everything else dispatches (so `aMoney < bMoney` reaches `Money>><`,
+    ///   `#a < #b` reaches `Symbol>><`, and `nil < 5` or a raw `Binary` raises
+    ///   a DNU instead of silently term-ordering — BT-3924, BT-5261).
     ///
     /// `erlang_op` and the predicate BIF names are static literals (safe as
     /// `Document::Str`); the dispatch selector uses `leaf::atom` for the original
@@ -758,6 +773,7 @@ impl CoreErlangGenerator {
         let RightOperand {
             statically_numeric: right_is_statically_numeric,
             tested: right_tested,
+            proven: right_proven,
         } = right;
         let left_var = self.fresh_temp_var("BinLeft");
         let right_var = self.fresh_temp_var("BinRight");
@@ -781,8 +797,14 @@ impl CoreErlangGenerator {
         // ADR 0116 § Addendum (BT-5176): a numeric comparison whose right
         // operand is not proven numeric tests it on its number arm.
         if right_tested
-            && let Some(parts) =
-                self.right_tested_comparison(guard, op, &left_var, &right_var, &bare_bif)
+            && let Some(parts) = self.right_tested_comparison(
+                guard,
+                op,
+                &left_var,
+                &right_var,
+                right_proven,
+                &bare_bif,
+            )
         {
             return GuardedOpParts {
                 bindings,
@@ -793,8 +815,8 @@ impl CoreErlangGenerator {
         // ADR 0116: see this function's doc comment — the arithmetic
         // guard's bare-BIF branch becomes the coercion `try`/`catch` when the
         // right operand's type is genuinely unknown; every other case (a
-        // comparison with a proven numeric right operand, a declared `String`,
-        // or a statically-numeric right operand) keeps the bare BIF unchanged.
+        // comparison with a proven numeric right operand, or a
+        // statically-numeric right operand) keeps the bare BIF unchanged.
         let coerces = matches!(guard, OperatorGuard::Arithmetic) && !right_is_statically_numeric;
         let bif_branch = if coerces {
             self.number_coercion_try_catch(
@@ -857,96 +879,124 @@ impl CoreErlangGenerator {
 impl CoreErlangGenerator {
     /// ADR 0116 § Addendum (BT-5176): the guard `case` of an ordering
     /// comparison whose right operand is tested, and its BT-4279 fast path
-    /// `(test, bare BIF)`. `None` for a guard with no number arm (a declared
-    /// `String`, which is unchanged), so the caller keeps its shape.
+    /// `(test, bare BIF)`. `None` for a guard with no comparison arms
+    /// (arithmetic), so the caller keeps its shape.
     ///
-    /// The number arm is [`Self::number_comparison_arm`]. Around it, by
-    /// receiver:
+    /// Each kind arm tests the right operand unless `right_proven` is of its
+    /// kind (then it is the bare BIF): the number arm is
+    /// [`Self::number_comparison_arm`], the `String` arm
+    /// [`Self::wrong_kind_raising_arm`] (BT-5213). Around them, by receiver:
     ///
     /// * proven number — the number arm alone;
-    /// * proven `String` — the bare BIF when the right operand is a `String`,
-    ///   else [`ordering_type_error_raise`] (BT-5213);
-    /// * unknown, or declared with a number kind (a union with `String`
-    ///   too) — split by kind:
+    /// * proven `String` — the `String` arm alone;
+    /// * unknown, or declared — split by kind:
     ///
     /// ```erlang
-    /// case call 'erlang':'is_number'(BinLeft) of      %% the declared kind's test
+    /// case call 'erlang':'is_number'(BinLeft) of      %% the declared number kind's test
     ///   <'true'> when 'true' -> <number arm>
     ///   <'false'> when 'true' ->
-    ///     case call 'erlang':'is_binary'(BinLeft) of  %% only when a String is held
-    ///       <'true'> when 'true' -> <bare BIF>        %% String receiver: unchanged
+    ///     case call 'erlang':'is_record'(BinLeft, 'beamtalk_string', 2) of
+    ///       <'true'> when 'true' -> <String arm>      %% only when a String is declared
     ///       <'false'> when 'true' -> <dispatch op>    %% BT-3924
     ///     end
     /// end
     /// ```
     ///
-    /// The fast path's test implies the bare BIF arm: the right operand's
-    /// [`OrderingKind::test_doc`] for a proven receiver; otherwise
-    /// `<kind test>(L) and is_number(R)`, `or` `is_binary(L)` when a `String`
-    /// is held.
+    /// (A declared `String` alone has only the inner `case`, BT-5261.) The
+    /// fast path's test implies the bare BIF arm: the right operand's
+    /// [`OrderingKind::test_doc`] for a proven receiver; otherwise each arm's
+    /// receiver test `and` its right-operand test, `or`ed.
     fn right_tested_comparison(
         &mut self,
         guard: OperatorGuard,
         op: &str,
         left_var: &str,
         right_var: &str,
+        right_proven: Option<ProvenKind>,
         bare_bif: &Document<'static>,
     ) -> Option<(Document<'static>, (Document<'static>, Document<'static>))> {
-        let test = |bif: &'static str, v: &str| form::call("erlang", bif, [var(v.to_string())]);
-        let right_is_number = test("is_number", right_var);
         if let OperatorGuard::Proven(kind) = guard {
-            let arm = match kind {
-                ProvenKind::Number => {
-                    self.number_comparison_arm(op, left_var, right_var, bare_bif.clone())
-                }
-                ProvenKind::String => {
-                    self.wrong_kind_raising_arm(op, left_var, right_var, bare_bif.clone())
-                }
-            };
+            let arm = self.kind_arm(kind, op, left_var, right_var, bare_bif);
             let kind_test = OrderingKind::from(kind).test_doc(right_var);
             return Some((arm, (kind_test, bare_bif.clone())));
         }
-        let (number_test, string_test) = guard.number_and_string_tests()?;
-        let number_arm = self.number_comparison_arm(op, left_var, right_var, bare_bif.clone());
+        let (number_test, has_string) = guard.comparison_kind_arms()?;
+        let mut arms: Vec<(Document<'static>, Document<'static>, Document<'static>)> = Vec::new();
+        for (kind, receiver_test) in [
+            (
+                ProvenKind::Number,
+                number_test.map(|bif| form::call("erlang", bif, [var(left_var.to_string())])),
+            ),
+            (
+                ProvenKind::String,
+                has_string.then(|| OrderingKind::String.test_doc(left_var)),
+            ),
+        ] {
+            let Some(receiver_test) = receiver_test else {
+                continue;
+            };
+            let (arm, fast) = if right_proven == Some(kind) {
+                (bare_bif.clone(), receiver_test.clone())
+            } else {
+                (
+                    self.kind_arm(kind, op, left_var, right_var, bare_bif),
+                    form::call(
+                        "erlang",
+                        "and",
+                        [
+                            receiver_test.clone(),
+                            OrderingKind::from(kind).test_doc(right_var),
+                        ],
+                    ),
+                )
+            };
+            arms.push((receiver_test, arm, fast));
+        }
         let dispatch = self.runtime_send_call(
             var(left_var.to_string()),
             op,
             vec![var(right_var.to_string())],
         );
-        let boolean_case = |this: &mut Self, scrutinee, on_true, on_false| {
-            let fallback = this.fresh_temp_var("BinOpNoMatch");
-            form::case_of(
-                scrutinee,
+        let mut case_doc = dispatch;
+        let mut fast_test: Option<Document<'static>> = None;
+        for (receiver_test, arm, fast) in arms.into_iter().rev() {
+            let fallback = self.fresh_temp_var("BinOpNoMatch");
+            case_doc = form::case_of(
+                receiver_test,
                 [
-                    form::clause([atom("true")], None, on_true, form::Layout::Flat),
-                    form::clause([atom("false")], None, on_false, form::Layout::Flat),
+                    form::clause([atom("true")], None, arm, form::Layout::Flat),
+                    form::clause([atom("false")], None, case_doc, form::Layout::Flat),
                     Self::case_clause_fallback_clause(fallback),
                 ],
                 form::Layout::Flat,
-            )
-        };
-        let not_a_number = match string_test {
-            Some(string_test) => boolean_case(
-                self,
-                test(string_test, left_var),
-                bare_bif.clone(),
-                dispatch,
-            ),
-            None => dispatch,
-        };
-        let case_doc = boolean_case(self, test(number_test, left_var), number_arm, not_a_number);
-        let number_fast = form::call(
-            "erlang",
-            "and",
-            [test(number_test, left_var), right_is_number],
-        );
-        let fast_test = match string_test {
-            Some(string_test) => {
-                form::call("erlang", "or", [number_fast, test(string_test, left_var)])
-            }
-            None => number_fast,
-        };
+            );
+            fast_test = Some(match fast_test {
+                Some(rest) => form::call("erlang", "or", [fast, rest]),
+                None => fast,
+            });
+        }
+        let fast_test = fast_test.expect("a ComparisonKinds always holds a kind");
         Some((case_doc, (fast_test, bare_bif.clone())))
+    }
+
+    /// The arm of a right-tested comparison whose receiver is of `kind`:
+    /// [`Self::number_comparison_arm`] or [`Self::wrong_kind_raising_arm`].
+    fn kind_arm(
+        &mut self,
+        kind: ProvenKind,
+        op: &str,
+        left_var: &str,
+        right_var: &str,
+        bare_bif: &Document<'static>,
+    ) -> Document<'static> {
+        match kind {
+            ProvenKind::Number => {
+                self.number_comparison_arm(op, left_var, right_var, bare_bif.clone())
+            }
+            ProvenKind::String => {
+                self.wrong_kind_raising_arm(op, left_var, right_var, bare_bif.clone())
+            }
+        }
     }
 
     /// The number arm of a right-tested ordering comparison (ADR 0116
@@ -1047,6 +1097,9 @@ struct RightOperand {
     /// receiver's kind, so it is tested (ADR 0116 § Addendum, BT-5176,
     /// BT-5213).
     tested: bool,
+    /// Ordering comparison: the kind the compiler proves the right operand
+    /// has, so the arm of that kind needs no right-operand test (BT-5261).
+    proven: Option<ProvenKind>,
 }
 
 /// The pieces of a guarded operator ([`CoreErlangGenerator::guarded_op_doc`]):

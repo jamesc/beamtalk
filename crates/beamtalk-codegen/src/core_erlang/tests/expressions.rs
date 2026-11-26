@@ -608,7 +608,10 @@ fn test_union_typed_field_operators_follow_non_nil_members() {
         ]))
     };
     for member in ["Point", "Integer"] {
-        for (op, guard) in [("+", "is_number"), ("<", "is_binary")] {
+        for (op, guard) in [
+            ("+", "is_number"),
+            ("<", "'beamtalk_message_dispatch':'send'("),
+        ] {
             let guarded = member == "Point" || op == "<";
             let mut generator = CoreErlangGenerator::new("test");
             generator
@@ -663,7 +666,7 @@ fn test_bt3892_untyped_and_union_fields_with_object_values_are_guarded() {
     }
     for sel in ["ltUntyped:", "ltUnion:"] {
         assert!(
-            method_body_contains(&core, sel, "'is_binary'("),
+            method_body_contains(&core, sel, "call 'erlang':'is_number'(_BinLeft"),
             "{sel} must guard its self.<field> receiver:\n{core}"
         );
     }
@@ -686,7 +689,8 @@ fn test_bt3924_nilable_primitive_field_comparison_is_guarded() {
     );
     for sel in ["ltN:", "geS:"] {
         assert!(
-            method_body_contains(&core, sel, "call 'erlang':'is_binary'("),
+            method_body_contains(&core, sel, "call 'erlang':'is_number'(_BinLeft")
+                && method_body_contains(&core, sel, "'beamtalk_message_dispatch':'send'("),
             "{sel} on a nilable primitive field must be guarded:\n{core}"
         );
     }
@@ -697,7 +701,7 @@ fn test_bt3924_nilable_primitive_field_comparison_is_guarded() {
     // BT-4823: a declared `Integer` field is kind-tested, not bare.
     assert!(
         method_body_contains(&core, "ltC:", "call 'erlang':'is_number'(")
-            && !method_body_contains(&core, "ltC:", "is_binary"),
+            && !method_body_contains(&core, "ltC:", "is_record"),
         "comparison on an `Integer` field tests only its declared kind:\n{core}"
     );
 }
@@ -721,7 +725,10 @@ fn test_bt3925_untyped_actor_counter_is_guarded_and_typed_counter_is_bare() {
         assert_has(
             "an untyped counter must be guarded",
             &untyped,
-            &["call 'erlang':'is_number'(", "'is_binary'("],
+            &[
+                "call 'erlang':'is_number'(_BinLeft",
+                "'beamtalk_message_dispatch':'send'(",
+            ],
         );
     }
     let typed = crate::core_erlang::tests::codegen(
@@ -739,7 +746,7 @@ fn test_bt3925_untyped_actor_counter_is_guarded_and_typed_counter_is_bare() {
     assert_lacks(
         "an `:: Integer` counter's arithmetic stays bare and its comparison tests only `is_number`",
         &typed,
-        &["'is_binary'("],
+        &["'is_record'(_BinLeft"],
     );
 }
 
@@ -770,7 +777,7 @@ fn test_bt3921_rebound_typed_param_name_is_guarded() {
     }
     for sel in ["blockLt:in:", "localLt:with:", "patternLt:from:"] {
         assert!(
-            method_body_contains(&core, sel, "'is_binary'("),
+            method_body_contains(&core, sel, "'beamtalk_message_dispatch':'send'("),
             "{sel}: a rebound typed-param name must be guarded:\n{core}"
         );
     }
@@ -785,14 +792,14 @@ fn test_bt3921_rebound_typed_param_name_is_guarded() {
     for sel in ["plainAdd:", "plainRight:"] {
         assert!(
             !method_body_contains(&core, sel, "is_number")
-                && !method_body_contains(&core, sel, "'is_binary'(")
+                && !method_body_contains(&core, sel, "'is_record'(")
                 && !method_body_contains(&core, sel, "try call"),
             "{sel}: an unshadowed typed param must stay bare:\n{core}"
         );
     }
     assert!(
         method_body_contains(&core, "plainLt:", "call 'erlang':'is_number'(")
-            && !method_body_contains(&core, "plainLt:", "'is_binary'("),
+            && !method_body_contains(&core, "plainLt:", "'is_record'("),
         "a trusted typed param's comparison tests only its declared kind:\n{core}"
     );
 }
@@ -801,9 +808,9 @@ fn test_bt3921_rebound_typed_param_name_is_guarded() {
 // bare-BIF fast path holds for *proven* receivers (numeric / char / string
 // literals, `self` in Integer/Float/Character/String); declared params and
 // fields get a kind test (BT-4823); everything else gets a runtime
-// primitive-comparable guard (`is_number or is_binary`) that keeps the bare
-// comparison BIF for numbers/characters/strings and dispatches everything else
-// — objects, but also `nil`, symbols, lists and tuples (BT-3924).
+// `is_number` guard that keeps the bare comparison BIF for numbers/characters
+// and dispatches everything else — objects, but also `nil`, symbols, lists,
+// tuples, raw binaries and `String`s (BT-3924, BT-5261).
 
 #[test]
 fn test_comparison_bare_bif_for_literal_receivers() {
@@ -836,7 +843,7 @@ fn test_comparison_bare_bif_for_literal_receivers() {
         assert_lacks(
             "literal receiver must skip the comparison guard",
             &output,
-            &["is_binary"],
+            &["'beamtalk_message_dispatch':'send'("],
         );
     }
 }
@@ -877,7 +884,7 @@ fn test_comparison_bare_bif_for_self_in_comparable_class() {
         assert_lacks(
             &format!("`self > x` in {class} must be a bare BIF"),
             &output,
-            &["is_binary"],
+            &["'beamtalk_message_dispatch':'send'("],
         );
     }
 }
@@ -889,11 +896,11 @@ fn test_comparison_declared_param_gets_a_kind_test() {
     // otherwise. Only a proven receiver stays bare.
     use beamtalk_core::ast::Identifier;
     for (ty, test, absent) in [
-        ("Integer", "'is_number'(", "is_binary"),
-        ("Float", "'is_number'(", "is_binary"),
-        ("Number", "'is_number'(", "is_binary"),
-        ("Character", "'is_integer'(", "is_binary"),
-        ("String", "'is_binary'(", "is_number"),
+        ("Integer", "'is_number'(", "is_record"),
+        ("Float", "'is_number'(", "is_record"),
+        ("Number", "'is_number'(", "is_record"),
+        ("Character", "'is_integer'(", "is_record"),
+        ("String", "'is_record'(_BinLeft", "is_number'(_BinLeft"),
     ] {
         let mut generator = CoreErlangGenerator::new("test");
         generator
@@ -936,20 +943,20 @@ fn test_comparison_declared_union_field_gets_an_or_of_its_kind_tests() {
     let has = |m: &str, s: &str| method_body_contains(&core, m, s);
     assert!(
         has("ltA:", "case call 'erlang':'is_number'(_BinLeft")
-            && has("ltA:", "case call 'erlang':'is_binary'(_BinLeft")
+            && has("ltA:", "case call 'erlang':'is_record'(_BinLeft")
             && has("ltA:", "case call 'erlang':'is_number'(_BinRight"),
-        "Integer | String tests is_number then is_binary, the number arm the right operand:\n{core}"
+        "Integer | String tests is_number then the String tag, the number arm the right operand:\n{core}"
     );
     assert!(
         has("ltB:", "case call 'erlang':'is_integer'(_BinLeft")
-            && has("ltB:", "case call 'erlang':'is_binary'(_BinLeft")
+            && has("ltB:", "case call 'erlang':'is_record'(_BinLeft")
             && !has("ltB:", "is_number'(_BinLeft"),
-        "Character | String tests is_integer then is_binary, never is_number on the receiver:\n{core}"
+        "Character | String tests is_integer then the String tag, never is_number on the receiver:\n{core}"
     );
     assert!(
         has("ltC:", "case call 'erlang':'is_number'(_BinLeft")
             && !has("ltC:", "'or'(")
-            && !has("ltC:", "is_binary"),
+            && !has("ltC:", "is_record"),
         "Integer | Float collapses to one is_number:\n{core}"
     );
 }
@@ -969,8 +976,9 @@ fn test_comparison_guard_for_unknown_receiver() {
         .to_pretty_string();
     // BT-3924: primitive-comparable test → bare BIF, everything else → send.
     // ADR 0116 § Addendum (BT-5176): split by kind; the number arm tests the
-    // right operand and sends a non-number its reflected hook, the binary arm
-    // is the bare BIF unchanged. The tests are inline `erlang` type-test BIFs.
+    // right operand and sends a non-number its reflected hook. Every other
+    // receiver, a raw binary or a `String` included, dispatches (BT-5261).
+    // The tests are inline `erlang` type-test BIFs.
     let flat: String = output.split_whitespace().collect::<Vec<_>>().join(" ");
     assert_has(
         "unknown comparison receiver must split by kind",
@@ -981,15 +989,14 @@ fn test_comparison_guard_for_unknown_receiver() {
              <'true'> when 'true' -> call 'erlang':'<'(_BinLeft@1, _BinRight@2) \
              <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_comparison'(\
              _BinRight@2, 'lessThanFromNumber:', [_BinLeft@1], '<')",
-            "<'false'> when 'true' -> case call 'erlang':'is_binary'(_BinLeft@1) of \
-             <'true'> when 'true' -> call 'erlang':'<'(_BinLeft@1, _BinRight@2) \
-             <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@1, '<', [_BinRight@2])",
+            "<'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@1, '<', [_BinRight@2])",
         ],
     );
     assert_lacks(
-        "comparison guard must not call into the runtime's type tests",
+        "comparison guard must not call into the runtime's type tests, \
+         nor take a raw binary for a String (BT-5261)",
         &output,
-        &["beamtalk_primitive"],
+        &["beamtalk_primitive", "is_binary"],
     );
     assert_lacks("guard must not use try/catch", &output, &["try "]);
 }
@@ -1012,7 +1019,7 @@ fn test_comparison_guard_for_self_in_non_comparable_class() {
     assert_has(
         "`self < x` in a non-comparable class must be guarded",
         &output,
-        &["call 'erlang':'is_binary'("],
+        &["'beamtalk_message_dispatch':'send'("],
     );
 }
 
@@ -1056,7 +1063,7 @@ fn test_comparison_object_typed_field_is_guarded() {
     assert_has(
         "object-typed self.<field> comparison must be guarded",
         &output,
-        &["call 'erlang':'is_binary'("],
+        &["'beamtalk_message_dispatch':'send'("],
     );
 }
 
@@ -1093,7 +1100,7 @@ fn test_comparison_numeric_typed_field_stays_bare() {
         assert_lacks(
             &format!("field {field_name} ({fact:?}) comparison must stay bare"),
             &output,
-            &["is_binary"],
+            &["is_record"],
         );
     }
 }
@@ -1151,7 +1158,7 @@ fn test_untyped_field_is_guarded_for_arith_and_comparison() {
     assert_has(
         "untyped field comparison must be guarded",
         &compare,
-        &["call 'erlang':'is_binary'("],
+        &["'beamtalk_message_dispatch':'send'("],
     );
 }
 

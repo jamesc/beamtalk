@@ -519,6 +519,13 @@ sealed Object subclass: VbBench
     n timesRepeat: [last := a < b]
     last
 
+  // BT-5261: a declared `:: String` receiver and right operand: tested inline
+  // with the `String` tag on both sides, no dispatch.
+  class typedStrLess: n :: Integer a: a :: String b: b :: String -> Object =>
+    last := false
+    n timesRepeat: [last := a < b]
+    last
+
   // A `Symbol` literal receiver, untyped right operand: dispatches to `Symbol>><`.
   class litSymLess: n :: Integer b: b -> Object =>
     last := false

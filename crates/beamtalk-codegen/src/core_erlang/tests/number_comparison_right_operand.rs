@@ -175,8 +175,9 @@ fn every_operator_sends_its_own_hook() {
 
 /// A `String` receiver never takes the number arm's test or hook: a literal
 /// tests its right operand for a `String` instead (BT-5213,
-/// `string_symbol_comparison_right_operand.rs`), and a declared `String`
-/// dispatches a tagged String to its primitive body.
+/// `string_symbol_comparison_right_operand.rs`), and a declared `String` is
+/// tested inline with the `String` tag, its arm testing the right operand for
+/// a `String` too (BT-5261).
 #[test]
 fn a_string_receiver_and_a_declared_string_get_no_number_test() {
     let code = codegen(
@@ -203,16 +204,29 @@ fn fast_path_head(out: &str) -> Option<&str> {
 #[test]
 fn the_fast_path_test_includes_the_right_operand() {
     // Unknown receiver: the number arm's fast test is
-    // `is_number(L) and is_number(R)`, the `String` case unchanged.
+    // `is_number(L) and is_number(R)`; it has no `String` arm (BT-5261).
     let unknown =
         codegen("Actor subclass: Probe\n  state: n = 0\n\n  cmp: a with: b => self.n := a < b\n");
     let head = fast_path_head(&unknown).expect("a fast-path bracket");
     assert!(
-        head.contains("call 'erlang':'or'(call 'erlang':'and'(call 'erlang':'is_number'(_BinLeft")
+        head.contains("call 'erlang':'and'(call 'erlang':'is_number'(_BinLeft")
             && head.contains("call 'erlang':'is_number'(_BinRight")
-            && head.contains("call 'erlang':'is_binary'(_BinLeft"),
+            && !head.contains("is_binary"),
         "{head}"
     );
+    // A declared `String` receiver (BT-5261): its arm's fast test is the
+    // `String` tag on both operands.
+    let string = codegen(
+        "Actor subclass: Probe\n  state: n = 0\n\n  cmp: a :: String with: b => self.n := a < b\n",
+    );
+    let head = fast_path_head(&string).expect("a fast-path bracket");
+    assert!(
+        head.contains("call 'erlang':'and'(call 'erlang':'is_record'(_BinLeft")
+            && head.contains("call 'erlang':'is_record'(_BinRight")
+            && !head.contains("is_number"),
+        "{head}"
+    );
+    assert_compiles_through_erlc("test", &string);
     assert_compiles_through_erlc("test", &unknown);
 
     // Proven receiver with a tested right operand: it now dispatches, so it
