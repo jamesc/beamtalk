@@ -299,6 +299,33 @@ impl TypeChecker {
         }
     }
 
+    /// BT-5290: an error-variant return (`Result(Never, E)`, a `^x` under
+    /// `x isError ifTrue:`) with its success slot filled from the declared
+    /// `-> Result(U, E')`, giving `Result(U, E)`. It is checked the same way
+    /// (`Never` and `U` both fit `U`), but a mismatch then reads "body returns
+    /// `Result(U, E)`" and names the error type, not a `Never` the user never
+    /// wrote. A declared return that is not a two-argument `Result` leaves
+    /// `ty` unchanged.
+    pub(in super::super) fn error_variant_as_declared_success(
+        &self,
+        method: &crate::ast::MethodDefinition,
+        ty: &InferredType,
+    ) -> InferredType {
+        let Some(declared) = method.return_type.as_ref() else {
+            return ty.clone();
+        };
+        let (expected, _) = type_resolver::resolve_type_annotation_with_alias_deps(
+            declared,
+            &type_resolver::SubstitutionMap::new(),
+            None,
+            self.alias_registry.as_deref(),
+        );
+        match Self::result_type_args(&expected) {
+            Some((declared_success, _)) => Self::with_result_success(ty, declared_success.clone()),
+            None => ty.clone(),
+        }
+    }
+
     /// BT-4440: warn when a method whose body is a class object (`C class` /
     /// `P class`) declares a return type that class object does not fit,
     /// judged by [`Self::metatype_assignable_to`] with the

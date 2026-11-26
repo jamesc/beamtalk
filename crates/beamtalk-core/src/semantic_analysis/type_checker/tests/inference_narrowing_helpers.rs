@@ -225,8 +225,9 @@ fn detect_narrowing_is_error() {
 
 #[test]
 fn refine_result_narrowing_with_result_type() {
-    // When the variable has type Result(String, Error), refine should set
-    // true_type and false_type to the full Result type.
+    // When the variable has type Result(String, Error), an `isOk` check keeps
+    // the full Result type in the true (ok) branch and narrows the false
+    // branch to the error variant `Result(Never, Error)` (BT-5290).
     let mut env = TypeEnv::new();
     let result_ty = InferredType::Known {
         class_name: "Result".into(),
@@ -248,10 +249,26 @@ fn refine_result_narrowing_with_result_type() {
         class_test: None,
     };
     let hierarchy = ClassHierarchy::with_builtins();
-    let refined = TypeChecker::refine_result_narrowing(info, &env, &hierarchy, None, None);
+    let refined = TypeChecker::refine_result_narrowing(info.clone(), &env, &hierarchy, None, None);
+    let error_variant = InferredType::Known {
+        class_name: "Result".into(),
+        type_args: vec![InferredType::Never, InferredType::known("Error")],
+        provenance: crate::semantic_analysis::TypeProvenance::Inferred(span()),
+    };
     assert_eq!(refined.true_type, result_ty);
-    assert_eq!(refined.false_type, Some(result_ty));
+    assert_eq!(refined.false_type, Some(error_variant.clone()));
     assert!(refined.is_result_ok_check);
+
+    // `isError` is the mirror image: error variant in the true branch.
+    let is_error = NarrowingInfo {
+        is_result_ok_check: false,
+        is_result_error_check: true,
+        ..info
+    };
+    let refined = TypeChecker::refine_result_narrowing(is_error, &env, &hierarchy, None, None);
+    assert_eq!(refined.true_type, error_variant);
+    assert_eq!(refined.false_type, Some(result_ty));
+    assert!(refined.is_result_error_check);
 }
 
 #[test]

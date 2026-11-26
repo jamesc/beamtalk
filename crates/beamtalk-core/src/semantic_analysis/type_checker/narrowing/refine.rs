@@ -23,7 +23,7 @@ use crate::source_analysis::Span;
 use ecow::EcoString;
 
 use super::super::well_known::WellKnownClass;
-use super::super::{InferredType, TypeChecker, TypeEnv, TypeProvenance};
+use super::super::{EnvKey, InferredType, TypeChecker, TypeEnv, TypeProvenance};
 use super::{ClassTestInfo, ClassTestKind, NarrowingInfo};
 
 impl TypeChecker {
@@ -160,11 +160,13 @@ impl TypeChecker {
 
     /// Refines a Result `isOk` / `ok` / `isError` narrowing.
     ///
-    /// When the variable has type `Result(T, E)`, both true and false branches
-    /// keep the full `Result(T, E)` type — generic substitution already resolves
-    /// `value -> T` and `error -> E`.  The narrowing ensures the branches get
-    /// typed environments (via `infer_block_with_narrowing`) rather than falling
-    /// through to the no-narrowing path.
+    /// When a local has type `Result(T, E)`, the branch that only runs for
+    /// the error variant (`isError` true, `isOk` / `ok` false) narrows it to
+    /// [`Self::result_error_variant`] — `Result(Never, E)` — which the env
+    /// keeps as a flow fact beside the unchanged binding, so `^x` there fits
+    /// any declared `Result(U, E')` with `E` fitting `E'` (BT-5290). The
+    /// other branch, and both branches for a `self.<field>`, keep the full
+    /// `Result(T, E)`.
     ///
     /// If the variable is not typed as `Result`, the result-specific flags are
     /// cleared and `true_type` is set to the variable's current type so the
@@ -192,10 +194,21 @@ impl TypeChecker {
                 if WellKnownClass::from_str(class_name) == Some(WellKnownClass::Result)
         );
         if is_result {
-            // Both branches keep the full Result(T, E) type so generic
-            // substitution continues to resolve value->T / error->E.
-            info.true_type = current_ty.clone();
-            info.false_type = Some(current_ty);
+            // BT-5290: locals only — a field's binding may be absent here
+            // (resolved from the hierarchy), so the env could not tell an
+            // error-variant fact from an ordinary narrowing.
+            let error_variant = if matches!(info.variable, EnvKey::Local(_)) {
+                Self::result_error_variant(&current_ty)
+            } else {
+                current_ty.clone()
+            };
+            if info.is_result_error_check {
+                info.true_type = error_variant;
+                info.false_type = Some(current_ty);
+            } else {
+                info.true_type = current_ty;
+                info.false_type = Some(error_variant);
+            }
         } else {
             // Not a Result — clear the result flags so downstream code doesn't
             // treat this as a Result narrowing.  Set true_type to the variable's
@@ -206,6 +219,63 @@ impl TypeChecker {
             info.false_type = None;
         }
         info
+    }
+
+    /// The success and error type arguments of a two-argument `Result(T, E)`;
+    /// `None` for any other type (a bare `Result` included).
+    pub(in crate::semantic_analysis::type_checker) fn result_type_args(
+        ty: &InferredType,
+    ) -> Option<(&InferredType, &InferredType)> {
+        match ty {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } if type_args.len() == 2
+                && WellKnownClass::from_str(class_name) == Some(WellKnownClass::Result) =>
+            {
+                Some((&type_args[0], &type_args[1]))
+            }
+            _ => None,
+        }
+    }
+
+    /// BT-5290: the error variant of a `Result(T, E)` — `Result(Never, E)`.
+    ///
+    /// A value known to be the error variant carries no success value, so its
+    /// success slot is `Never` (the bottom type): it fits a declared
+    /// `Result(U, E')` for any `U`. This is the type an error-branch narrowing
+    /// fact carries and the type a `^x` of such a value is recorded as; a
+    /// local's binding keeps `Result(T, E)` (see `TypeEnv::push_refinement`).
+    /// Any other type — a bare `Result` with no type arguments included — is
+    /// returned unchanged.
+    pub(in crate::semantic_analysis::type_checker) fn result_error_variant(
+        ty: &InferredType,
+    ) -> InferredType {
+        Self::with_result_success(ty, InferredType::Never)
+    }
+
+    /// `Result(T, E)` with its success slot replaced by `success`; any other
+    /// type unchanged.
+    pub(in crate::semantic_analysis::type_checker) fn with_result_success(
+        ty: &InferredType,
+        success: InferredType,
+    ) -> InferredType {
+        match (Self::result_type_args(ty), ty) {
+            (
+                Some((_, error)),
+                InferredType::Known {
+                    class_name,
+                    provenance,
+                    ..
+                },
+            ) => InferredType::Known {
+                class_name: class_name.clone(),
+                type_args: vec![success, error.clone()],
+                provenance: provenance.clone(),
+            },
+            _ => ty.clone(),
+        }
     }
 
     /// Refines a singleton (in)equality narrowing `x = #foo` / `#foo = x`.

@@ -1374,6 +1374,13 @@ Object subclass: Validator
 
 The type checker checks every `^` — a top-level early return, one inside a block, one in a match arm — against the method's declared return type (BT-5283). That includes a `^` in a block the method returns or stores: `^` always answers the home method, so `-> Block` with `[:x | ^x]` where `x` is an `Integer` warns that the body returns `Integer`.
 
+Propagating a `Result`'s error is not a mismatch (BT-5290). Where a `Result(T, E)` variable `x` can only be the error variant, the checker treats `^x` as `Result(Never, E)`, which fits any declared `Result(U, E')` whose `E'` accepts `E`. So `x isError ifTrue: [^x]` type-checks in a `-> Result(U, E)` method for any `T` and `U`. The narrowing covers:
+
+- the true block of `x isError ifTrue:` (and `ifTrue:ifFalse:`), and the false block of `x isOk ifFalse:` / `x ok ifFalse:`, including `^x` nested anywhere inside that block;
+- the error block of `x ifError: [:e | ...]` and of `x ifOk: [...] ifError: [:e | ...]`.
+
+It ends at any reassignment of `x`, including one inside a nested block, and it does not reach the rest of the method after the guard. A `^x` anywhere else (no guard, `isOk ifTrue:`, the `ifOk:` block) is checked with the full `Result(T, E)` type, so a mismatched success type is still reported. `x` must be a local: `self.res isError ifTrue: [^self.res]` is not narrowed, because a send in the block could reassign the field. Copy it to a local first (`res := self.res`). The narrowing only changes how `^x` is checked: inside the block `x` keeps its `Result(T, E)` type, so `x error` answers `E` and `x valueOr: d` answers `T` as before. A mismatched error type is reported with the declared success type, e.g. `body returns Result(Tuple, String)` for a `-> Result(Tuple, Integer)` method.
+
 Guard clauses like `Validator>>validate:` above compile to plain branches, with no non-local-return frame. A method whose only block `^`s are early returns from inlined conditionals at its top level (`ifTrue:`, `ifFalse:`, `ifNil:`, `ifNotNil:` and their two-branch forms) compiles them as if written `x isNil ifTrue: ["missing"] ifFalse: [...]`. A receiver that turns out not to be a Boolean is still sent `ifTrue:` with a block that returns from the method. For an `ifTrue:`/`ifFalse:` guard whose receiver might not be a Boolean, this holds when the block is just `^` and a literal, a variable or a field of `self`. Other guard blocks compile this way only when the receiver is a Boolean by construction: `true`, `false`, an `==`/`=:=`/`/=`/`=/=` comparison, or a `<`/`>`/`<=`/`>=` comparison whose left operand is a number, string or character literal or a parameter typed `:: Integer`, `Float`, `Number`, `Character` or `String` that the method never rebinds (codegen compiles that comparison to the bare Erlang comparison, which never sends). Any other block `^`, including one inside a real closure (`do:`, `detect:`, a stored block), needs the non-local-return throw/catch, and the method then compiles every `^` that way.
 
 ### Abstract and Stub Methods
@@ -3607,6 +3614,7 @@ render: coll :: Printable | Nil -> String =>
 | `(x =:= false) ifTrue: [...] ifFalse: [...]` | `x` is `False` in the true block, `T \ False` in the false block | Each block |
 | `(x =:= nil) ifFalse: [...]` / `(x =:= nil) ifTrue: [^...]` | same as `x isNil` | False block / rest of method |
 | `(x =/= nil) ifTrue: [...]` / `(x =/= nil) ifFalse: [^...]` | same as `x notNil`: `x` is non-nil in the true block / after the statement | True block / rest of method |
+| `x isError ifTrue: [...]`, `x isOk ifFalse: [...]`, `x ifError: [:e \| ...]`, the `ifError:` block of `x ifOk:ifError:` | a local `x :: Result(T, E)` is known to be the error variant, so `^x` fits any `Result(U, E)` return; sends on `x` are typed as before (BT-5290) | That block only |
 
 **Known gaps (accepted, BT-4788).** The checker misses these on purpose; each is a missed warning or a wider type, never a crash.
 

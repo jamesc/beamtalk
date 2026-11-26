@@ -139,6 +139,10 @@ impl TypeChecker {
             let mut arms = vec![before.clone()];
             arms.extend(writes.iter().map(|w| w.ty.clone()));
             if arms.iter().skip(1).all(|ty| *ty == before) {
+                // BT-5290: the block may have rebound the local, so it is no
+                // longer known to be a `Result`'s error variant, even though
+                // its type is unchanged.
+                env.clear_result_error_variant(&key);
                 match remote {
                     Some(remote) => env.mark_known_remote(key, remote),
                     None => env.clear_known_remote(&key),

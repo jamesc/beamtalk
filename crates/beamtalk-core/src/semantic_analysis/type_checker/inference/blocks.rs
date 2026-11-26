@@ -1414,10 +1414,43 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> InferredType {
+        self.infer_block_with_typed_params_narrowed(
+            block,
+            block_span,
+            param_types,
+            &[],
+            hierarchy,
+            env,
+            in_abstract_method,
+        )
+    }
+
+    /// [`Self::infer_block_with_typed_params`] with `narrowings` applied to
+    /// the block's own environment (block-scoped, like
+    /// [`Self::infer_block_with_narrowings`]): the error block of
+    /// `x ifError:` / `x ifOk:ifError:` sees `x` as the error variant
+    /// (BT-5290).
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::semantic_analysis::type_checker) fn infer_block_with_typed_params_narrowed(
+        &mut self,
+        block: &crate::ast::Block,
+        block_span: Span,
+        param_types: &[InferredType],
+        narrowings: &[(&EnvKey, &InferredType)],
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> InferredType {
         // BT-4102: explicit `:: T` annotations win over the pushed-down type,
         // which wins over `Dynamic(UnannotatedParam)`.
         let resolved = self.resolve_block_param_types(block, param_types, hierarchy);
         let mut block_env = env.child();
+        for (var_key, narrowed_type) in narrowings {
+            block_env.push_refinement(RefinementLayer::block_scope(
+                (*var_key).clone(),
+                (*narrowed_type).clone(),
+            ));
+        }
         for (param, ty) in block.parameters.iter().zip(resolved.iter()) {
             block_env.set_local(param.name.clone(), ty.clone());
         }

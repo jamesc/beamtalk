@@ -25,7 +25,9 @@
 
 use crate::ast::{Expression, ExpressionStatement, Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::type_checker::CollectedReturn;
 use crate::semantic_analysis::type_checker::diagnostic_facts::DynamicInTypedClass;
+use crate::semantic_analysis::type_checker::narrowing::extract::extract_variable_name;
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{
@@ -455,7 +457,15 @@ impl TypeChecker {
             let mut seen: Vec<InferredType> = tail_returned;
             // A body that ends in `^expr` is already checked as the body type.
             seen.push(body_type.clone());
-            for ty in collected_returns {
+            for returned in collected_returns {
+                let ty = match returned {
+                    CollectedReturn::Value(ty) => ty,
+                    // BT-5290: report an error-variant `^x` with the declared
+                    // success type, so a mismatch names the error type.
+                    CollectedReturn::ResultErrorVariant(ty) => {
+                        self.error_variant_as_declared_success(method, &ty)
+                    }
+                };
                 if matches!(ty, InferredType::Dynamic(_) | InferredType::Never)
                     || seen.contains(&ty)
                 {
@@ -840,8 +850,18 @@ impl TypeChecker {
             // Returns propagate the value type
             Expression::Return { value, .. } => {
                 let ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
-                // BT-5283: every `^` answers the enclosing method.
-                self.collected_returns.push(ty.clone());
+                // BT-5283: every `^` answers the enclosing method. BT-5290: a
+                // `^x` where `x` is known to be a `Result`'s error variant
+                // (`x isError ifTrue: [^x]`) answers no success value, so it
+                // is recorded as `Result(Never, E)` and fits any declared
+                // `Result(U, E')` whose `E'` accepts `E`.
+                let error_variant = extract_variable_name(value)
+                    .is_some_and(|key| env.is_result_error_variant(&key));
+                self.collected_returns.push(if error_variant {
+                    CollectedReturn::ResultErrorVariant(Self::result_error_variant(&ty))
+                } else {
+                    CollectedReturn::Value(ty.clone())
+                });
                 ty
             }
             // Cascades: all messages dispatch to the UNDERLYING receiver of

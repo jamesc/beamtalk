@@ -17,6 +17,7 @@ use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType, Me
 use crate::semantic_analysis::protocol_registry::ProtocolMethodRequirement;
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::type_checker::known_remote;
+use crate::semantic_analysis::type_checker::narrowing::extract::extract_variable_name;
 use crate::semantic_analysis::type_checker::narrowing::facts::{CondFacts, Facts, FactsCtx};
 use crate::semantic_analysis::type_checker::narrowing::visitors::expr_contains_returning_self_send;
 use crate::semantic_analysis::type_checker::type_resolver;
@@ -548,6 +549,9 @@ impl TypeChecker {
                 env,
                 in_abstract_method,
             )]
+        } else if let Some(types) = self.infer_args_for_result_branches(ctx, env) {
+            // BT-5290: the error block of `x ifError:` / `x ifOk:ifError:`.
+            types
         } else {
             self.infer_generic_send_args(
                 arguments,
@@ -565,6 +569,79 @@ impl TypeChecker {
         Self::apply_deferred_block_widenings(&deferred, env);
 
         (arg_types, is_object_then)
+    }
+
+    /// BT-5290: infer the block arguments of `x ifError:` and
+    /// `x ifOk:ifError:` when `x` is a variable typed `Result(T, E)`.
+    ///
+    /// The `ifOk:` block's parameter is `T` and the `ifError:` block's is
+    /// `E`, exactly as the generic signature path types them; in addition the
+    /// error block runs only for the error variant, so `x` is narrowed there
+    /// to [`Self::result_error_variant`] (`Result(Never, E)`), the same
+    /// narrowing as `x isError ifTrue:`. `^x` inside it then fits any
+    /// declared `Result(U, E')`.
+    ///
+    /// Answers `None` (the caller keeps the generic path) for any other
+    /// selector, a receiver that is not a local (a `self.<field>` is not
+    /// narrowed, as for `isError`), or a receiver type that is not a
+    /// two-argument `Result`.
+    fn infer_args_for_result_branches(
+        &mut self,
+        ctx: &SendCtx<'_>,
+        env: &mut TypeEnv,
+    ) -> Option<Vec<InferredType>> {
+        let SendCtx {
+            receiver,
+            receiver_ty,
+            selector_name,
+            arguments,
+            hierarchy,
+            in_abstract_method,
+            ..
+        } = *ctx;
+        // Index of the error block in the argument list.
+        let error_index = match selector_name.as_str() {
+            "ifError:" => 0,
+            "ifOk:ifError:" => 1,
+            _ => return None,
+        };
+        let var_key = extract_variable_name(receiver)?;
+        if !matches!(var_key, EnvKey::Local(_)) {
+            return None;
+        }
+        let (success_ty, error_ty) = Self::result_type_args(receiver_ty)?;
+        let (success_ty, error_ty) = (success_ty.clone(), error_ty.clone());
+        let error_variant = Self::result_error_variant(receiver_ty);
+        let types = arguments
+            .iter()
+            .enumerate()
+            .map(|(i, arg)| {
+                let Expression::Block(block) = arg else {
+                    return self.infer_expr(arg, hierarchy, env, in_abstract_method);
+                };
+                if i == error_index {
+                    self.infer_block_with_typed_params_narrowed(
+                        block,
+                        arg.span(),
+                        std::slice::from_ref(&error_ty),
+                        &[(&var_key, &error_variant)],
+                        hierarchy,
+                        env,
+                        in_abstract_method,
+                    )
+                } else {
+                    self.infer_block_with_typed_params(
+                        block,
+                        arg.span(),
+                        std::slice::from_ref(&success_ty),
+                        hierarchy,
+                        env,
+                        in_abstract_method,
+                    )
+                }
+            })
+            .collect();
+        Some(types)
     }
 
     /// Selectors whose result is decided before any receiver-kind dispatch:
