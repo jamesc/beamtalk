@@ -21,6 +21,10 @@ before the split.
 
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
+
+%% Default upper bound on a `global:register_name/3` (BT-5192);
+%% `global_register_timeout_ms` (application env) overrides it.
+-define(GLOBAL_REGISTER_TIMEOUT_MS, 5000).
 -export([
     async_init_and_loop/2,
     await_initialize/1,
@@ -367,14 +371,15 @@ safe_spawn_gen_named(global, Link, Name, Module, InitArgs) ->
         )
     of
         {ok, Pid} ->
-            case
-                global:register_name(Name, Pid, fun ?BT_ACTOR_WIRE_MODULE:resolve_global_conflict/3)
-            of
+            case bounded_global_register(Name, Pid) of
                 yes ->
                     {ok, Pid};
                 no ->
                     gen_server:stop(Pid, normal, 5000),
-                    {error, {already_started, global:whereis_name(Name)}}
+                    {error, {already_started, global:whereis_name(Name)}};
+                timeout ->
+                    gen_server:stop(Pid, normal, 5000),
+                    {error, {register_timeout, Name}}
             end;
         {error, Reason} ->
             {error, Reason}
@@ -584,7 +589,9 @@ native_stop_observer_wait(MonRef, Pid, Class) ->
 %% BT-4577: register a just-started native actor under its name, or stop it
 %% when the name cannot be registered.
 -spec register_native_started(none | {local | global, atom()}, pid()) ->
-    {ok, pid()} | {error, {already_started, pid() | port()} | {register_failed, atom()}}.
+    {ok, pid()}
+    | {error,
+        {already_started, pid() | port()} | {register_failed, atom()} | {register_timeout, atom()}}.
 
 register_native_started(none, Pid) ->
     {ok, Pid};
@@ -596,9 +603,61 @@ register_native_started({local, Name} = Registration, Pid) ->
     end;
 register_native_started({global, Name} = Registration, Pid) ->
     ok = record_native_start_time(Pid),
-    case global:register_name(Name, Pid, fun ?BT_ACTOR_WIRE_MODULE:resolve_global_conflict/3) of
-        yes -> {ok, Pid};
-        no -> refuse_unregistered_native(Registration, Pid)
+    case bounded_global_register(Name, Pid) of
+        yes ->
+            {ok, Pid};
+        no ->
+            refuse_unregistered_native(Registration, Pid);
+        timeout ->
+            ok = stop_unregistered_native(Pid),
+            {error, {register_timeout, Name}}
+    end.
+
+-doc """
+`global:register_name/3` with `resolve_global_conflict/3` as the conflict
+resolver, waiting at most `global_register_timeout_ms` (application env,
+default `?GLOBAL_REGISTER_TIMEOUT_MS`) for an answer (BT-5192).
+
+`global` registers a name under its cluster-wide lock, and waits for as long
+as another node holds that lock (a registration, a `global:trans/2`, a
+partition-heal name sync). The call runs in a monitored helper so the caller
+gets `timeout` instead of blocking indefinitely. The registrar may still
+register the name after the deadline: every caller stops `Pid` on `timeout`,
+and `global` drops a name whose process has exited, so a late registration
+never outlives the refused start. A helper that crashes re-raises its exit
+in the caller, as the inline call did.
+""".
+-spec bounded_global_register(atom(), pid()) -> yes | no | timeout.
+bounded_global_register(Name, Pid) ->
+    Timeout = application:get_env(
+        beamtalk_runtime, global_register_timeout_ms, ?GLOBAL_REGISTER_TIMEOUT_MS
+    ),
+    Caller = self(),
+    Tag = make_ref(),
+    {Helper, Ref} = spawn_monitor(fun() ->
+        Caller !
+            {Tag,
+                global:register_name(
+                    Name, Pid, fun ?BT_ACTOR_WIRE_MODULE:resolve_global_conflict/3
+                )}
+    end),
+    receive
+        {Tag, Answer} ->
+            erlang:demonitor(Ref, [flush]),
+            Answer;
+        {'DOWN', Ref, process, Helper, Reason} ->
+            exit(Reason)
+    after Timeout ->
+        exit(Helper, kill),
+        erlang:demonitor(Ref, [flush]),
+        receive
+            {Tag, Late} -> Late
+        after 0 ->
+            ?LOG_WARNING("Global name registration did not finish in time", #{
+                name => Name, timeout_ms => Timeout, domain => [beamtalk, runtime]
+            }),
+            timeout
+        end
     end.
 
 %% BT-4956: give a `native:` actor the `'$beamtalk_actor_started_at'` key that a

@@ -84,6 +84,10 @@ selectors (ADR 0126 Phase 2) apply the same rule rather than re-deriving it.
 
 %% Upper bound on the `global:sync/0` every successful `connect` waits for (BT-5173, BT-5179).
 -define(GLOBAL_SYNC_TIMEOUT_MS, 5000).
+
+%% Default upper bound on the host lookup `connect_policy/2` makes (BT-5192);
+%% `node_resolve_timeout_ms` (application env) overrides it.
+-define(HOST_RESOLVE_TIMEOUT_MS, 3000).
 -define(INVALID_NAME_HINT, <<"expected name@host">>).
 -define(INSECURE_HINT,
     <<"configure TLS distribution with peer verification (ADR 0126 §9) or use a tunnel"/utf8>>
@@ -495,10 +499,11 @@ remote_shape_manifest(Name) ->
 The ADR 0126 §9 item 2 connect guard, as a pure-ish decision: `ok` if a
 connection to `Node` may be attempted, or `{error, #beamtalk_error{kind =
 insecure_distribution}}` if `Node`'s host is not this host and `TlsEnabled`
-is false. Host resolution uses `inet:getaddrs/2`; an IP-literal host, and a
-name under the RFC 6761 `invalid` TLD, are decided without any lookup. A
-host that does not resolve at all cannot be proven local, so it falls under
-the policy too.
+is false. Host resolution uses `inet:getaddrs/2`, bounded as a whole
+(`bounded_host_addrs/1`, BT-5192); an IP-literal host, and a name under the
+RFC 6761 `invalid` TLD, are decided without any lookup. A host that does not
+resolve at all, or not in time, cannot be proven local, so it falls under the
+policy too.
 """.
 -spec connect_policy(node(), boolean()) -> ok | {error, #beamtalk_error{}}.
 connect_policy(_Node, true) ->
@@ -689,8 +694,50 @@ BT-3829). Any other name goes through `inet:getaddrs/2`.
 """.
 -spec resolves_locally(string()) -> boolean().
 resolves_locally(Host) ->
-    Addrs = host_addrs(Host),
+    Addrs = bounded_host_addrs(Host),
     Addrs =/= [] andalso lists:all(fun is_local_addr/1, Addrs).
+
+-doc """
+`host_addrs/1` with one deadline for the whole lookup (BT-5192): the
+`node_resolve_timeout_ms` application env, default
+`?HOST_RESOLVE_TIMEOUT_MS`. `inet:getaddrs/2` has no timeout of its own,
+and an unresponsive resolver stalled `connect` (and every `connect_policy/2`
+caller: `spawnOn:`, `named:on:`, `ping`) for as long as the resolver kept
+retrying, per address family.
+
+The lookup runs in a monitored process so the bound holds whichever resolver
+is configured (`native` or `dns`); a lookup still running at the deadline is
+killed, and the host counts as not resolving: it cannot be proven local, so
+the policy refuses it without TLS (`insecure_distribution`), as it does for a
+host that does not resolve.
+""".
+-spec bounded_host_addrs(string()) -> [inet:ip_address()].
+bounded_host_addrs(Host) ->
+    Timeout = application:get_env(
+        beamtalk_runtime, node_resolve_timeout_ms, ?HOST_RESOLVE_TIMEOUT_MS
+    ),
+    Caller = self(),
+    Tag = make_ref(),
+    {Pid, Ref} = spawn_monitor(fun() -> Caller ! {Tag, host_addrs(Host)} end),
+    receive
+        {Tag, Addrs} ->
+            erlang:demonitor(Ref, [flush]),
+            Addrs;
+        {'DOWN', Ref, process, Pid, _Reason} ->
+            []
+    after Timeout ->
+        exit(Pid, kill),
+        erlang:demonitor(Ref, [flush]),
+        %% A reply sent just before the kill must not linger in the mailbox.
+        receive
+            {Tag, _} -> ok
+        after 0 -> ok
+        end,
+        ?LOG_WARNING("Node connect: host lookup did not finish in time", #{
+            host => Host, timeout_ms => Timeout, domain => [beamtalk, runtime]
+        }),
+        []
+    end.
 
 -spec host_addrs(string()) -> [inet:ip_address()].
 host_addrs(Host) ->
