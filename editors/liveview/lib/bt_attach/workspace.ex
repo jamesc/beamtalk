@@ -116,8 +116,9 @@ defmodule BtAttach.Workspace do
   worker runs, so it works mid-eval.
   """
   def interrupt(session_pid) when is_pid(session_pid) do
-    case rpc(:beamtalk_repl_shell, :interrupt, [session_pid]) do
-      :ok -> :ok
+    case dispatch_simple("interrupt", %{}, session_pid) do
+      {:status, :ok} -> :ok
+      {:error, reason} -> {:error, reason}
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
       other -> {:error, {:unexpected_reply, other}}
     end
@@ -212,7 +213,7 @@ defmodule BtAttach.Workspace do
   side, so an unexpected value is harmless.
   """
   def start_session(session_id, meta) when is_binary(session_id) and is_map(meta) do
-    case rpc(:beamtalk_session_sup, :start_session, [session_id, meta]) do
+    case rpc(:beamtalk_repl_ops, :start_session, [session_id, meta]) do
       {:ok, pid} when is_pid(pid) -> pid
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
       other -> {:error, other}
@@ -231,7 +232,7 @@ defmodule BtAttach.Workspace do
   front's sessions leaked and could block workspace idle shutdown.
   """
   def attach_session(session_pid, client_pid) when is_pid(session_pid) and is_pid(client_pid) do
-    case rpc(:beamtalk_repl_shell, :attach, [session_pid, client_pid]) do
+    case rpc(:beamtalk_repl_ops, :attach_session, [session_pid, client_pid]) do
       :ok -> :ok
       # BT-5084: `attach` is a call; `gone` means the session stopped (its idle
       # period ran out) between the caller finding it and attaching.
@@ -340,35 +341,37 @@ defmodule BtAttach.Workspace do
   process actually exists — the workspace could have restarted between the
   disconnect and the reconnect, leaving the registry entry stale.
 
-  `is_process_alive/1` is evaluated **on the workspace node**, where the session
-  pid is local (a remote `is_process_alive/1` would `badarg`). Returns a boolean
-  for a reachable workspace; an unreachable workspace yields `{:badrpc, _}`, which
-  the caller treats as not-alive (resume falls back to a fresh session).
+  Answered by the `sessions` operation (BT-5202): a session is alive when its
+  shell pid is among the sessions the workspace lists, which is evaluated **on the
+  workspace node** where the pid is local. Returns a boolean; an unreachable or
+  erroring workspace counts as not-alive (resume falls back to a fresh session).
   """
   def session_alive?(session_pid) when is_pid(session_pid) do
-    case rpc(:erlang, :is_process_alive, [session_pid]) do
-      result when is_boolean(result) -> result
-      {:badrpc, _reason} -> false
+    case sessions_op() do
+      {:sessions, sessions} -> Enum.any?(sessions, &(Map.get(&1, :pid) == session_pid))
+      _ -> false
     end
   end
 
   @doc """
   Count the workspace-supervised sessions currently alive (BT-2410 Wave 4).
 
-  A read-only probe of `beamtalk_session_sup`'s active children, used by the
+  A read-only count of the `sessions` operation's rows (BT-5202), used by the
   session-teardown tests to assert that closing a LiveView (after the resume
   grace window) leaves no orphaned session. Returns the active-child count for a
   reachable workspace, or `{:error, {:unreachable, _}}` otherwise.
   """
   def session_count do
-    case rpc(:supervisor, :count_children, [:beamtalk_session_sup]) do
-      counts when is_list(counts) ->
-        Keyword.get(counts, :active, 0)
-
-      {:badrpc, reason} ->
-        {:error, {:unreachable, reason}}
+    case sessions_op() do
+      {:sessions, sessions} -> length(sessions)
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      {:error, reason} -> {:error, reason}
+      other -> {:error, {:unexpected_reply, other}}
     end
   end
+
+  # The `sessions` op with the short lookup timeout the pid probes always had.
+  defp sessions_op, do: request_op("sessions", %{}, self(), @rpc_timeout)
 
   @doc """
   Evaluate a Beamtalk expression in `session_pid` through the curated op layer's
@@ -1176,6 +1179,8 @@ defmodule BtAttach.Workspace do
   # BT-5199: a session close runs from a terminating LiveView; against a hung
   # workspace it must give up quickly.
   defp simple_op_timeout("close"), do: @rpc_interactive_timeout
+  # BT-5202: interrupt keeps the single-lookup timeout it had as a direct call.
+  defp simple_op_timeout("interrupt"), do: @rpc_timeout
   defp simple_op_timeout(_op), do: @rpc_long_timeout
 
   # `session_pid` is `request/3`'s SessionPid: `self()` for the workspace-global
@@ -1529,8 +1534,8 @@ defmodule BtAttach.Workspace do
   @doc """
   List the current workspace bindings for `session_pid` as `{name, term}` pairs.
 
-  Reads the session's live binding map through the read-surface
-  (`beamtalk_repl_shell:get_bindings/1`, ADR 0085): the values are **live Erlang
+  Reads the session's live binding map through the operation layer's
+  `session_bindings/1` (BT-5202, ADR 0085): the values are **live Erlang
   terms** — a bound `Counter spawn` is a real `{:beamtalk_object, class, module,
   pid}` handle, not a flattened display string — so the Inspector can follow them
   by reference. Display rendering is a separate concern handled by the caller via
@@ -1541,11 +1546,14 @@ defmodule BtAttach.Workspace do
   unexpected shape (the call site renders the error rather than crashing).
   """
   def list_bindings(session_pid) when is_pid(session_pid) do
-    case rpc(:beamtalk_repl_shell, :get_bindings, [session_pid]) do
+    case rpc(:beamtalk_repl_ops, :session_bindings, [session_pid]) do
       {:ok, bindings} when is_map(bindings) ->
         bindings
         |> Enum.map(fn {name, term} -> {to_string(name), term} end)
         |> Enum.sort_by(fn {name, _term} -> name end)
+
+      {:error, reason} ->
+        {:error, reason}
 
       {:badrpc, reason} ->
         {:error, {:unreachable, reason}}

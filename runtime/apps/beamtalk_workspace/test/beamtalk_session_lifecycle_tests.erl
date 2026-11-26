@@ -332,11 +332,14 @@ idle_period_is_settable_from_environment(_) ->
     end}.
 
 sessions_op_lists_ids_that_resume_accepts(_) ->
-    {"sessions returns session ids, not pids", fun() ->
+    {"sessions returns the resumable id (and the shell pid for term callers, BT-5202)", fun() ->
         Session = new_session(<<"lc-8">>),
         Msg = beamtalk_test_repl:make_msg(<<"sessions">>, <<"s-1">>, undefined),
         {sessions, List} = beamtalk_repl_ops:dispatch(<<"sessions">>, #{}, Msg, self()),
-        ?assertEqual([#{id => <<"lc-8">>}], List),
+        ?assertEqual([#{id => <<"lc-8">>, pid => Session}], List),
+        %% The wire encoding carries the id only.
+        #{<<"sessions">> := Rows} = json:decode(beamtalk_repl_ops:encode({sessions, List}, Msg)),
+        ?assertEqual([#{<<"id">> => <<"lc-8">>}], Rows),
         %% The listed id resolves through the same table `resume` uses.
         ?assertEqual({ok, Session}, beamtalk_session_table:lookup_alive(<<"lc-8">>))
     end}.

@@ -24,6 +24,9 @@ layer into two halves:
   request from an op name and a flat params map, then calls `dispatch/4`.
 * `render/2` — the one rendering function for such a caller (display text for
   a term, a term list or an error).
+* `start_session/2`, `attach_session/2`, `session_bindings/1` — the one
+  implementation of "start a session", "attach an owner to it" and "read its
+  live bindings" (BT-5202), used by the WebSocket handler and by LiveView. A session is not an op: it exists before any op can run in it.
 * `encode/2` — encodes an `op_result()` to the protocol JSON binary at the
   **WebSocket transport edge only**. The browser wire format is unchanged.
 
@@ -92,7 +95,9 @@ dist-attached clients consume the live terms directly without any JSON step.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
--export([dispatch/4, request/3, render/2, encode/2]).
+-export([
+    dispatch/4, request/3, render/2, encode/2, start_session/2, attach_session/2, session_bindings/1
+]).
 
 -export_type([op_result/0]).
 
@@ -155,6 +160,77 @@ request(Op, Params, SessionPid) when is_binary(Op), is_map(Params), is_pid(Sessi
             %% Unreachable while `op` is always set; keeps the "return, never
             %% raise" contract if decode_map/1 ever validates more.
             unknown_op(Op)
+    end.
+
+-doc """
+Start a workspace-supervised REPL session and register its id (BT-5202).
+
+The one implementation of "start a session", shared by the WebSocket handler
+(at auth) and by dist-attached LiveView (at mount). It starts the shell under
+`beamtalk_session_sup` (which normalises `kind` in `Meta`) and records the id in
+`beamtalk_session_table` so `resume`, `close` with a `session` field and
+`Session withId:` find it. Attaching an owner is the separate
+`attach_session/2`, because the two callers attach at different points.
+
+Returns `{ok, SessionPid}` or `{error, #beamtalk_error{}}`.
+""".
+-spec start_session(binary(), map()) -> {ok, pid()} | {error, #beamtalk_error{}}.
+start_session(SessionId, Meta) when is_binary(SessionId), is_map(Meta) ->
+    case beamtalk_session_sup:start_session(SessionId, Meta) of
+        {ok, SessionPid} ->
+            beamtalk_session_table:insert(SessionId, SessionPid),
+            {ok, SessionPid};
+        {error, Reason} ->
+            {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
+    end.
+
+-doc """
+Make `OwnerPid` an owner (client) of the session (BT-5202).
+
+The one implementation of "attach", shared by the WebSocket handler (create and
+resume) and LiveView. The shell monitors the owner: while one is attached the
+session never idles out; when the last goes away it counts as detached and the
+workspace's idle reaping covers it (BT-5012). Returns the shell's reply
+unchanged: `ok`; `gone` (the shell stopped, e.g. its idle period ran out, before
+it handled the attach); or `timeout` (a busy shell did not answer within 5 s; it
+is alive, so the caller must not discard the session).
+""".
+-spec attach_session(pid(), pid()) -> ok | gone | timeout.
+attach_session(SessionPid, OwnerPid) when is_pid(SessionPid), is_pid(OwnerPid) ->
+    beamtalk_repl_shell:attach(SessionPid, OwnerPid).
+
+-doc """
+The session's live bindings, as terms (BT-5202).
+
+A term-only session API, deliberately not a wire op: BT-2369 removed the
+`bindings` protocol op, and the other surfaces read bindings through `eval`
+(`Session current bindings`). A dist-attached client that needs the values as
+live terms (a bound actor is a real `{beamtalk_object, ...}` handle the
+Inspector follows) asks here. Returns `{ok, #{atom() => term()}}` or
+`{error, #beamtalk_error{}}` (`session_not_found` if the shell is gone,
+`session_busy` if it did not answer in 5 s).
+""".
+-spec session_bindings(pid()) -> {ok, map()} | {error, #beamtalk_error{}}.
+session_bindings(SessionPid) when is_pid(SessionPid) ->
+    try beamtalk_repl_shell:get_bindings(SessionPid) of
+        {ok, Bindings} when is_map(Bindings) -> {ok, Bindings}
+    catch
+        exit:{timeout, _} ->
+            {error,
+                beamtalk_repl_errors:make(
+                    session_busy,
+                    'REPL',
+                    <<"Session did not answer">>,
+                    <<"The session is busy; try again.">>
+                )};
+        exit:_ ->
+            {error,
+                beamtalk_repl_errors:make(
+                    session_not_found,
+                    'REPL',
+                    <<"Session not found">>,
+                    <<"The session has ended; start a new one.">>
+                )}
     end.
 
 -doc """

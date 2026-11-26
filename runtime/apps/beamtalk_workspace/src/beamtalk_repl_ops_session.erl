@@ -25,7 +25,7 @@ handle(Op, Params, Msg, SessionPid) ->
 
 -doc """
 Term-returning handler for sessions/close/health/shutdown.
-Returns `{sessions, [Meta]}`, `{status, ok}` (close/shutdown), `{health, WorkspaceId, Nonce}`, or
+Returns `{sessions, [Meta]}` (`Meta` carries `id` and the shell `pid`; the wire encoding emits `id` only), `{status, ok}` (close/shutdown), `{health, WorkspaceId, Nonce}`, or
 `{error, #beamtalk_error{}}` — no JSON in this path.
 """.
 -spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
@@ -42,7 +42,7 @@ handle_term(<<"sessions">>, _Params, _Msg, _SessionPid) ->
                 fun
                     ({_Id, Pid, _Type, _Modules}) when is_pid(Pid) ->
                         try beamtalk_repl_shell:get_session_id(Pid, 1000) of
-                            {ok, SessionId} -> {true, #{id => SessionId}}
+                            {ok, SessionId} -> {true, #{id => SessionId, pid => Pid}}
                         catch
                             exit:_ -> false
                         end;
