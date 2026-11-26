@@ -312,17 +312,18 @@ install_beamtalk() {
     trap 'rm -rf "${TMPDIR}"' EXIT
 
     echo "Downloading beamtalk ${VERSION} for ${PLATFORM}..."
-    # Only the rolling edge release is republished under a reader's feet, so
-    # only it retries (4 attempts, backoff 5s/10s/20s; BEAMTALK_RETRY_DELAY
-    # overrides the first delay). Every other install is a single attempt.
+    # Only the rolling releases (edge, nightly) are republished under a
+    # reader's feet, so only they retry (4 attempts, backoff 5s/10s/20s;
+    # BEAMTALK_RETRY_DELAY overrides the first delay). Tagged releases make a
+    # single attempt.
     MAX_ATTEMPTS=1
-    if [ "${EDGE}" = "1" ]; then MAX_ATTEMPTS=4; fi
+    if [ "${EDGE}" = "1" ] || [ "${NIGHTLY}" = "1" ]; then MAX_ATTEMPTS=4; fi
     DELAY="${BEAMTALK_RETRY_DELAY:-5}"
     case "${DELAY}" in ''|*[!0-9]*) DELAY=5 ;; esac
     ATTEMPT=1
     while ! fetch_and_verify; do
         if [ "${ATTEMPT}" -ge "${MAX_ATTEMPTS}" ]; then exit 1; fi
-        echo "The edge release may be mid-publish (a merge to main republishes it)."
+        echo "The ${TAG} release may be mid-publish; the error above is usually transient."
         echo "  Retrying in ${DELAY}s (attempt $((ATTEMPT + 1)) of ${MAX_ATTEMPTS})..."
         sleep "${DELAY}"
         DELAY=$((DELAY * 2))
