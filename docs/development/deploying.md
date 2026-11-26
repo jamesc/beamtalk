@@ -225,7 +225,7 @@ connections are not affected. So:
   your hosts.
 
 **macOS and a wildcard interface.** On macOS, an epmd that listens on every
-interface (`RELEASE_DIST_INTERFACE=0.0.0.0`) does not stop a second,
+interface (`RELEASE_DIST_INTERFACE=0.0.0.0` or `::`) does not stop a second,
 loopback-only epmd from starting on the same port; Linux refuses the second
 one. Any non-TLS Erlang node started later on that host (a loopback release,
 a `bin/<name> ping` without the TLS variables, a beamtalk REPL) starts that
@@ -233,7 +233,7 @@ loopback epmd, which then answers every loopback lookup and does not know this
 node. The node keeps running and other hosts still reach it, but the local
 `ping`, `stop`, `rpc` and `remote_console` report it as down until that epmd
 is stopped (`epmd -kill`, with its nodes stopped). On macOS, name a specific
-interface address instead of `0.0.0.0`: epmd then holds loopback on that port
+interface address instead of a wildcard: epmd then holds loopback on that port
 itself, and a second epmd cannot start there.
 
 ## Docker

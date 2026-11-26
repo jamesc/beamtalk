@@ -1519,8 +1519,9 @@ fn release_launcher_tls_distribution_opt_in_test() {
     }
 
     // A loopback client (no opt-in) cannot reach the TLS node, and does not
-    // hold it up: the next TLS client gets through at once, with no retry, so
-    // a stall of any length fails the test (BT-5256). The plain client shares
+    // hold it up: the next TLS client gets one try, no retry, so a stall
+    // longer than its handshake timeout (`net_setuptime`) fails the test
+    // (BT-5256). The plain client shares
     // the node's epmd, so it dials the TLS listener with a plain handshake.
     // Not on macOS against this node: its epmd listens on every interface,
     // and macOS lets the plain client start a second, loopback-only epmd on
@@ -1540,13 +1541,19 @@ fn release_launcher_tls_distribution_opt_in_test() {
         let loopback_epmd_port = loopback_epmd.0.to_string();
         let node = format!("{node}_lo");
         let mut good = tls_env(&tls_dir.join("good.conf"));
+        let mut replaced = 0;
         for (key, value) in &mut good {
             match *key {
                 "ERL_EPMD_PORT" => *value = loopback_epmd_port.clone().into(),
                 "RELEASE_DIST_INTERFACE" => *value = "127.0.0.1".into(),
-                _ => {}
+                _ => continue,
             }
+            replaced += 1;
         }
+        assert_eq!(
+            replaced, 2,
+            "the loopback node needs its own epmd port and interface"
+        );
         let env: Vec<(&str, &std::ffi::OsStr)> =
             good.iter().map(|(k, v)| (*k, v.as_os_str())).collect();
         let mut foreground =
