@@ -63,31 +63,72 @@
 # desktop/README.md). Windows installers are never code-signed. Wired into
 # release.yml's `desktop-app` job.
 #
+# Two halves (ADR 0154 § 10, BT-5313), mirroring liveview-release.yml:
+#
+#   build-and-attach  (`attach` + `tag`) build every platform's installers and
+#                     attach them, with their `.sha256`, to the GitHub
+#                     (pre-)release named by `tag`. release.yml's tag flow runs
+#                     this, so uat can test the exact installers.
+#   publish           (`publish` + `tag`) the installers have no store of their
+#                     own: they reach users when promotion marks the release
+#                     latest. Publishing them is the last check before that,
+#                     re-hashing every attached `beamtalk-desktop-*` installer
+#                     against its sidecar (scripts/ci/verify-release-assets.sh).
+#                     Callable only from promote.yml once RELEASE_PUBLISH_MODE=
+#                     promote (scripts/ci/publish-guard.sh). A future store
+#                     upload (e.g. a signed update feed) belongs in this half.
+#
 # Trigger modes (mirrors liveview-release.yml):
-#   - workflow_dispatch: manual build (artifacts only unless `publish` is set).
-#   - workflow_call: invoked by release.yml's `desktop-app` job.
+#   - workflow_dispatch: manual build (artifacts only unless `attach`/`publish`).
+#   - workflow_call: release.yml (build-and-attach; interim publish) and, from
+#     BT-5315, promote.yml (publish).
 #
 # Related: liveview-release.yml (the bt_attach release this lane bundles),
 #          desktop/README.md, docs/ADR/0097-desktop-attach-client-node-per-workspace.md
-# Issues: BT-2987 (Linux/macOS), BT-2988 (Windows) — epic BT-2982
+# Issues: BT-2987 (Linux/macOS), BT-2988 (Windows) — epic BT-2982; BT-5313
 
 name: Desktop App Release
 
 on:
   workflow_dispatch:
     inputs:
-      publish:
-        description: 'Has no effect here — the upload step also requires github.event_name == release, which a manual dispatch never is (no release tag exists for it to attach to). Only meaningful when this workflow is called from release.yml via workflow_call.'
+      attach:
+        description: 'Attach the installers to the GitHub Release named by `tag` (otherwise build artifacts only)'
         required: false
         type: boolean
         default: false
-  workflow_call:
-    inputs:
       publish:
-        description: 'Upload archives to the GitHub Release'
+        description: 'Publish: verify the installers attached to `tag` (no build). Refused unless RELEASE_PUBLISH_MODE allows this caller.'
         required: false
         type: boolean
-        default: true
+        default: false
+      tag:
+        description: 'Release tag to attach to or publish from'
+        required: false
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Commit to build (default: the caller''s ref)'
+        required: false
+        type: string
+        default: ''
+      attach:
+        description: 'Attach the installers to the GitHub Release named by `tag`'
+        required: false
+        type: boolean
+        default: false
+      publish:
+        description: 'Publish: verify the installers attached to `tag` (no build)'
+        required: false
+        type: boolean
+        default: false
+      tag:
+        description: 'Release tag to attach to or publish from'
+        required: false
+        type: string
+        default: ''
     # All optional: their absence is the documented fail-open path (unsigned
     # build), not a missing-input error. A future caller (release.yml, per
     # the header note above) needs to pass these explicitly — reusable
@@ -115,7 +156,9 @@ on:
         required: false
 
 concurrency:
-  group: desktop-release-${{ github.ref }}
+  # Keyed by tag/commit too: two release.yml runs from one branch must not
+  # cancel each other's lane and leave a half-attached pre-release.
+  group: desktop-release-${{ inputs.tag || inputs.ref || github.ref }}-${{ inputs.publish && 'publish' || 'build' }}
   cancel-in-progress: true
 
 permissions:
@@ -126,12 +169,15 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  # ─── Build (and, with attach, attach to the release) ───────────────────
   build:
     name: Build desktop app (${{ matrix.platform }})
+    # A publish-only call checks what is attached; it never rebuilds.
+    if: ${{ !inputs.publish || inputs.attach }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     permissions:
-      contents: write # gh release upload on a full release
+      contents: write # gh release upload with attach
     # Every step below runs under Git Bash, including on Windows — see the
     # header comment's rationale. GitHub-hosted Windows runners ship Git Bash
     # at a fixed location `shell: bash` resolves automatically; no PATH setup
@@ -144,10 +190,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-latest
+          # Pinned, not floating (ADR 0154 § 3): uat tests these installers.
+          - runner: ubuntu-24.04
             platform: linux-x86_64
             bundles: appimage,deb
-          - runner: macos-latest
+          - runner: macos-15
             platform: macos-arm64
             bundles: app,dmg
           - runner: macos-15-intel
@@ -161,6 +208,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       # The app version tracks the repo VERSION file, same convention as
@@ -387,19 +435,23 @@ jobs:
           path: beamtalk-desktop-${{ steps.version.outputs.version }}-${{ matrix.platform }}.*
           retention-days: 7
 
-      # On a full release (release.yml calls this workflow with publish=true,
-      # via its `desktop-app` job), attach each archive to the
-      # GitHub Release.
+      # Build-and-attach: onto the (pre-)release release.yml created for the
+      # tag (its `desktop-app` job calls this with attach=true).
       - name: Upload to GitHub Release
-        if: github.event_name == 'release' && inputs.publish
+        if: inputs.attach
         env:
           GH_TOKEN: ${{ github.token }}
           ARCHIVES: ${{ steps.package.outputs.archives }}
           REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
+          if [ -z "${RELEASE_TAG}" ]; then
+            echo "::error::attach is set but no tag was given"
+            exit 1
+          fi
           while IFS= read -r archive; do
             [ -n "${archive}" ] || continue
-            gh release upload "${GITHUB_REF_NAME}" \
+            gh release upload "${RELEASE_TAG}" \
               "${archive}" "${archive}.sha256" \
               --repo "${REPO}" \
               --clobber
@@ -423,3 +475,39 @@ jobs:
           [ -f "${keychain}" ] && security delete-keychain "${keychain}"
           rm -f "${cert}"
           true
+
+  # ─── Publish: check the attached installers before the release goes out ─
+  publish:
+    needs: build
+    if: ${{ !cancelled() && inputs.publish && contains(fromJSON('["success","skipped"]'), needs.build.result) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            scripts/ci/publish-guard.sh
+            scripts/ci/verify-release-assets.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Check this caller may publish
+        env:
+          RELEASE_PUBLISH_MODE: ${{ vars.RELEASE_PUBLISH_MODE }}
+        run: scripts/ci/publish-guard.sh "Desktop installer publish"
+
+      # Two installers per platform, four platforms (package-desktop-release.sh).
+      # By prefix, not VERSION: the checkout here is the caller's ref.
+      - name: Verify the attached installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -z "${RELEASE_TAG}" ]; then
+            echo "::error::publish is set but no tag was given"
+            exit 1
+          fi
+          scripts/ci/verify-release-assets.sh "${RELEASE_TAG}" beamtalk-desktop- 8
