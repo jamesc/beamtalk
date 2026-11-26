@@ -114,4 +114,6 @@ TestCase subclass: NilComparisonTest
     bin := Binary fromBytes: #(104, 105)
     self should: [self lt: bin with: 5] raise: #does_not_understand
     self should: [self ge: bin with: bin] raise: #does_not_understand
-    self should: [bin perform: #< withArguments: #(5)] raise: #does_not_understand
+    self should: [
+      bin perform: #'<' withArguments: #(5)
+    ] raise: #does_not_understand
