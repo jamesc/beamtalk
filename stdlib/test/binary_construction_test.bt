@@ -375,11 +375,21 @@ TestCase subclass: BinaryConstructionTest
       _ -> #other
     ]
     self assert: result equals: #matched
-    self assert: (bin match: [<<v:72>> -> v; _ -> nil]) equals: 100000000000000000000
+    self
+      assert: (bin match: [
+        <<v:72>> -> v;
+        _ -> nil
+      ])
+      equals: 100000000000000000000
 
   testNegativeBignumSegmentRoundTrip =>
     bin := <<-100000000000000000000:72/signed>>
-    self assert: (bin match: [<<v:72/signed>> -> v; _ -> nil]) equals: -100000000000000000000
+    self
+      assert: (bin match: [
+        <<v:72/signed>> -> v;
+        _ -> nil
+      ])
+      equals: -100000000000000000000
 
   testHexBignumSegment =>
     bin := <<16rFFFFFFFFFFFFFFFFFF:72>>
@@ -388,4 +398,9 @@ TestCase subclass: BinaryConstructionTest
   testBignumSegmentWithVariableSize =>
     n := 72
     bin := <<100000000000000000000:n>>
-    self assert: (bin match: [<<v:72>> -> v; _ -> nil]) equals: 100000000000000000000
+    self
+      assert: (bin match: [
+        <<v:72>> -> v;
+        _ -> nil
+      ])
+      equals: 100000000000000000000
