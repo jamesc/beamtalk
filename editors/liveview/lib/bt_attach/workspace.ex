@@ -1779,7 +1779,9 @@ defmodule BtAttach.Workspace do
   Returns `{:ok, rows, truncated}` (the empty list for a supervisor with no
   running children). `truncated` is the runtime's own flag: true when the
   `children` op cut the list at its cap, so the Inspector can say the rows are
-  not the whole supervisor. The cap itself is never copied here. Or `{:error, reason_term}` for a dead/unreachable supervisor (a
+  not the whole supervisor. The cap itself is never copied here.
+
+  Returns `{:error, reason_term}` for a dead/unreachable supervisor (a
   structured `#beamtalk_error{}`), so the caller renders a clear empty state.
   """
   @spec supervisor_children(pid()) :: {:ok, [map()], boolean()} | {:error, term()}

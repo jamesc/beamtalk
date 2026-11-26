@@ -1319,6 +1319,22 @@ defmodule BtAttachWeb.Live.InspectorTest do
       refute Enum.any?(win.rows, & &1.drillable)
     end
 
+    test "a cut children list marks the window target; a whole one does not (BT-5293)" do
+      cut = {:beamtalk_supervisor, :CutSup, :CutSup, self()}
+      whole = {:beamtalk_supervisor, :AppSup, :AppSup, self()}
+
+      assert [win] = Inspector.open_window_for_term(base_socket(), "cut", cut).assigns.windows
+      assert win.target.children_cut == 3
+
+      assert Inspector.children_cut_notice(win.target) ==
+               "Showing the first 3 children; the list is cut."
+
+      assert [win] = Inspector.open_window_for_term(base_socket(), "ok", whole).assigns.windows
+      assert win.target.children_cut == nil
+      assert Inspector.children_cut_notice(win.target) == nil
+      assert Inspector.children_cut_notice(%{label: "x"}) == nil
+    end
+
     test "a window on an unreachable supervisor shows the error head and drops its watch" do
       dead = {:beamtalk_supervisor, :DeadSup, :DeadSup, self()}
 
