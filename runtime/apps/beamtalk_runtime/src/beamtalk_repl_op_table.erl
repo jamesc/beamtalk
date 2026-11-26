@@ -334,7 +334,14 @@ ops() ->
         ),
         %% --- System Browser (ADR 0095) ---
         e(<<"browse-classes">>, beamtalk_repl_ops_browse, [], [], always, read),
-        e(<<"browse-protocols">>, beamtalk_repl_ops_browse, [<<"class">>, <<"side">>], [], always, read),
+        e(
+            <<"browse-protocols">>,
+            beamtalk_repl_ops_browse,
+            [<<"class">>, <<"side">>],
+            [],
+            always,
+            read
+        ),
         e(
             <<"browse-method-source">>,
             beamtalk_repl_ops_browse,
