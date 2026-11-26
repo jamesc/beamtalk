@@ -375,6 +375,7 @@ async fn flush_success_no_filter() {
             class: None,
             file: None,
             kind: None,
+            selector: None,
             confirm_destructive: None,
         }))
         .await
@@ -391,6 +392,7 @@ async fn flush_scoped_by_class_with_confirm_destructive() {
             class: Some("Counter".to_string()),
             file: None,
             kind: None,
+            selector: None,
             confirm_destructive: Some(true),
         }))
         .await
@@ -418,6 +420,7 @@ async fn flush_dispatches_the_flush_op_with_structured_params() {
             class: None,
             file: None,
             kind: None,
+            selector: None,
             confirm_destructive: None,
         }))
         .await
@@ -432,6 +435,7 @@ async fn flush_dispatches_the_flush_op_with_structured_params() {
                 class: Some("Counter".to_string()),
                 file: None,
                 kind: None,
+                selector: None,
                 confirm_destructive: Some(true),
             },
             serde_json::json!({
@@ -443,6 +447,7 @@ async fn flush_dispatches_the_flush_op_with_structured_params() {
                 class: None,
                 file: Some("src/counter.bt".to_string()),
                 kind: None,
+                selector: None,
                 confirm_destructive: Some(false),
             },
             serde_json::json!({"op": "flush", "file": "src/counter.bt"}),
@@ -452,6 +457,7 @@ async fn flush_dispatches_the_flush_op_with_structured_params() {
                 class: None,
                 file: None,
                 kind: Some("#'new-class'".to_string()),
+                selector: None,
                 confirm_destructive: None,
             },
             serde_json::json!({"op": "flush", "kind": "new-class"}),
@@ -461,6 +467,7 @@ async fn flush_dispatches_the_flush_op_with_structured_params() {
                 class: None,
                 file: None,
                 kind: None,
+                selector: None,
                 confirm_destructive: Some(true),
             },
             serde_json::json!({"op": "flush", "confirm_destructive": true}),
@@ -489,11 +496,74 @@ async fn flush_scoped_by_kind() {
             class: None,
             file: None,
             kind: Some("new-class".to_string()),
+            selector: None,
             confirm_destructive: None,
         }))
         .await
         .unwrap();
     assert_eq!(result.is_error, Some(false));
+}
+
+/// BT-5297: a selector scope is sent as the op's `selector` param, alone or
+/// with its class; `#` and quotes are stripped like the `kind` spelling.
+#[tokio::test]
+async fn flush_selector_scope_dispatches_the_selector_param() {
+    let summary = serde_json::json!({"flushed": 1, "files": [], "skipped": [], "conflicts": []});
+    for (class, selector, expected) in [
+        (
+            None,
+            "increment",
+            serde_json::json!({"op": "flush", "selector": "increment"}),
+        ),
+        (
+            Some("Counter"),
+            "#'at:put:'",
+            serde_json::json!({"op": "flush", "class": "Counter", "selector": "at:put:"}),
+        ),
+    ] {
+        let (_fake, mcp) = fake_mcp(respond_only_to(
+            expected.clone(),
+            serde_json::json!({"value": summary.clone()}),
+        ))
+        .await;
+        let result = mcp
+            .flush(Parameters(FlushParams {
+                class: class.map(str::to_string),
+                file: None,
+                kind: None,
+                selector: Some(selector.to_string()),
+                confirm_destructive: None,
+            }))
+            .await
+            .unwrap();
+        assert_ne!(
+            result.is_error,
+            Some(true),
+            "{expected}: {}",
+            call_text(&result)
+        );
+    }
+}
+
+#[tokio::test]
+async fn flush_selector_combines_only_with_class() {
+    for (file, kind, selector) in [
+        (Some("a.bt"), None, "increment"),
+        (None, Some("new-class"), "increment"),
+        (None, None, ""),
+        (None, None, "#"),
+    ] {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({"flushed": 1}))).await;
+        mcp.flush(Parameters(FlushParams {
+            class: None,
+            file: file.map(str::to_string),
+            kind: kind.map(str::to_string),
+            selector: Some(selector.to_string()),
+            confirm_destructive: Some(true),
+        }))
+        .await
+        .expect_err("an unreadable or conflicting selector scope should be rejected");
+    }
 }
 
 #[tokio::test]
@@ -504,6 +574,7 @@ async fn flush_rejects_multiple_filters() {
             class: Some("Counter".to_string()),
             file: Some("src/counter.bt".to_string()),
             kind: None,
+            selector: None,
             confirm_destructive: None,
         }))
         .await
@@ -526,6 +597,7 @@ async fn flush_rejects_an_empty_scope() {
                 class: class.map(str::to_string),
                 file: file.map(str::to_string),
                 kind: kind.map(str::to_string),
+                selector: None,
                 confirm_destructive: Some(true),
             }))
             .await
@@ -546,6 +618,7 @@ async fn flush_rejects_invalid_kind() {
             class: None,
             file: None,
             kind: Some("bad kind!".to_string()),
+            selector: None,
             confirm_destructive: None,
         }))
         .await
@@ -561,6 +634,7 @@ async fn flush_error() {
             class: None,
             file: None,
             kind: None,
+            selector: None,
             confirm_destructive: None,
         }))
         .await

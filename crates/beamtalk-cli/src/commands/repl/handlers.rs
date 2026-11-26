@@ -343,9 +343,10 @@ fn handle_remove_class(arg: &str, client: &mut ReplClient) {
     }
 }
 
-const FLUSH_USAGE: &str = "Usage: :flush [<Class>|#kind|#{ #file => \"path\" }]";
+const FLUSH_USAGE: &str =
+    "Usage: :flush [<Class>|#kind|#selector|<Class>>>#selector|#{ #file => \"path\" }]";
 const FLUSH_DESTRUCTIVE_USAGE: &str =
-    "Usage: :flush-destructive [<Class>|#kind|#{ #file => \"path\" }]";
+    "Usage: :flush-destructive [<Class>|#kind|#selector|<Class>>>#selector|#{ #file => \"path\" }]";
 
 /// Bare `:flush-destructive` (ADR 0113 Phase 4): prompts `y/N` before sending
 /// the unscoped `flush` with `confirm_destructive`, which deletes every pending
@@ -368,7 +369,7 @@ fn handle_flush_destructive_arg(selector: &str, client: &mut ReplClient) {
     match beamtalk_cli::repl_meta_exprs::flush_scope_for(selector) {
         Some(scope) => {
             if confirm_destructive_action(&format!(
-                "This permanently deletes the source file for the pending class removal matching `{selector}`. Continue?"
+                "This applies the pending destructive changes matching `{selector}` (deleting or moving source files). Continue?"
             )) {
                 flush_and_display(client, scope.as_scope(), true);
             } else {

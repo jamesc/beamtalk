@@ -1998,6 +1998,8 @@ defmodule BtAttach.Workspace do
 
     * `:class`, `:file`, `:kind` — at most one; scope the flush to one class, one
       source file or one ChangeEntry kind (e.g. `"new-class"`)
+    * `:selector` — scope the flush to one method selector, alone or with
+      `:class` (not with `:file` or `:kind`)
     * `:confirm_destructive` — `true` also applies pending Tier 2 entries
       (`remove-class`, `rename-class`, `rename-method`) within that scope;
       anything but the boolean `true` leaves them withheld (reported in `skipped`)
@@ -2012,6 +2014,7 @@ defmodule BtAttach.Workspace do
             class: "class",
             file: "file",
             kind: "kind",
+            selector: "selector",
             confirm_destructive: "confirm_destructive"
           ],
           (value = Keyword.get(opts, key)) != nil,

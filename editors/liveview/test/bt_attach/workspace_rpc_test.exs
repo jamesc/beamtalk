@@ -1139,6 +1139,19 @@ defmodule BtAttach.WorkspaceRpcTest do
       assert Workspace.flush() == {:ok, summary}
     end
 
+    test "flush/1 sends a selector scope, alone or with its class (BT-5297)" do
+      mock_rpc(
+        decode_asserting(
+          fn request ->
+            assert request == %{"op" => "flush", "class" => "Counter", "selector" => "increment"}
+          end,
+          {:value, %{"flushed" => 0}}
+        )
+      )
+
+      assert {:ok, _} = Workspace.flush(class: "Counter", selector: "increment")
+    end
+
     test "flush/1 sends the scope and the confirmation as the operation's own params" do
       mock_rpc(
         decode_asserting(
