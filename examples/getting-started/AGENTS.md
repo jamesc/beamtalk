@@ -13,11 +13,15 @@ getting-started/
 │   ├── hanoi.bt             # Towers of Hanoi (recursion)
 │   ├── logging_counter.bt   # Inheritance and super
 │   ├── transparent_proxy.bt # Transparent proxy pattern
+│   ├── shipping.bt          # Patterns, destructuring, matchExhaustive:
+│   ├── report.bt            # Bounded type parameter (T :: Printable)
 │   └── stream.bt            # Lazy pipelines
 ├── test/
 │   ├── example_counter_test.bt  # BUnit tests for Counter
 │   ├── hello_test.bt            # BUnit tests for Hello
 │   ├── hanoi_test.bt            # BUnit tests for Hanoi
+│   ├── shipping_test.bt         # BUnit tests for Shipping
+│   ├── report_test.bt           # BUnit tests for Report
 │   └── logging_counter_test.bt  # BUnit tests for LoggingCounter
 ├── AGENTS.md            # This file
 ├── .mcp.json            # MCP server config

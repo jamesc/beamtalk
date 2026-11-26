@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for Report: a type parameter bounded by Printable.
+
+TestCase subclass: ReportTest
+
+  testRenderJoinsLines =>
+    self assert: (Report withAll: #(700, 1500)) render equals: "700\n1500"
