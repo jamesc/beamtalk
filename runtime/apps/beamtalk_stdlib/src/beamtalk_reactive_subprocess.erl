@@ -30,7 +30,9 @@ no deferred-reply slots.
   stderr_pending => binary(),             % partial line fragment
   exit_code      => nil | non_neg_integer(),
   port_closed    => boolean(),
-  stdin_dropped  => binary()              % only once the exec port dropped a write
+  stdin_dropped  => binary(),             % only once the exec port dropped a write
+  stdin_waiters  => queue:queue(From),     % writeLine: callers awaiting stdin_queued
+  stdin_unwritten => queue:queue(From)     % queued, awaiting stdin_written/failed
 }
 ```
 
@@ -296,8 +298,20 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             cast_notify(NewState, 'subprocessExit:from:', [Code]),
             {noreply, NewState};
         {stdin_queued, _ChildId} ->
-            %% BT-5248: the oldest writeLine: was accepted.
-            {noreply, beamtalk_subprocess_port:write_queued(State)};
+            %% BT-5248: the oldest writeLine: was accepted; it waits on for
+            %% the writer thread's report (BT-5269).
+            {noreply, beamtalk_subprocess_port:write_queued('ReactiveSubprocess', State)};
+        {stdin_written, _ChildId} ->
+            %% BT-5269: the oldest queued line is in the child's stdin pipe.
+            {noreply, beamtalk_subprocess_port:write_written(State)};
+        {stdin_failed, _ChildId, Reason} ->
+            %% BT-5269: the child exited or closed its stdin before taking the
+            %% oldest queued line: it and every line queued behind it raise,
+            %% and so does every later writeLine:.
+            ?LOG_WARNING("ReactiveSubprocess stdin write failed", #{
+                reason => Reason, domain => [beamtalk, stdlib]
+            }),
+            {noreply, beamtalk_subprocess_port:write_failed('ReactiveSubprocess', Reason, State)};
         {error, _ChildId, write_stdin, Reason} ->
             %% A line was not delivered (the child is not reading its input,
             %% or closed it): that writeLine: raises, and so does every later

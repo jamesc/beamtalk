@@ -523,11 +523,15 @@ impl Backend {
         let outcome_override: Option<bool> = None;
 
         let pending_owned = pending.clone();
-        let Ok((registry, known_erlang_modules, extracted)) =
+        let Ok((registry, known_erlang_modules, test_helpers, extracted)) =
             tokio::task::spawn_blocking(move || {
                 let mut registry = NativeTypeRegistry::new();
                 let mut known_erlang_modules =
                     beamtalk_core::ffi_type_specs::KnownErlangModules::default();
+                // BT-5251: per-root `native/test/` helpers, for test files only
+                // (loaded once per session, like the set above: helpers added
+                // later need an LSP restart).
+                let mut test_helpers = Vec::new();
                 // Roots whose specs were extracted; only these are marked loaded.
                 let mut extracted = Vec::new();
                 for root_path in &pending_owned {
@@ -549,8 +553,12 @@ impl Backend {
                     known_erlang_modules.extend(
                         &beamtalk_core::ffi_type_specs::collect_known_erlang_modules(&root),
                     );
+                    test_helpers.push((
+                        root.clone(),
+                        beamtalk_core::ffi_type_specs::collect_project_test_helper_modules(&root),
+                    ));
                 }
-                (registry, known_erlang_modules, extracted)
+                (registry, known_erlang_modules, test_helpers, extracted)
             })
             .await
         else {
@@ -561,6 +569,12 @@ impl Backend {
             return;
         };
 
+        {
+            let mut svc = self.service.lock_recover();
+            for (root, helpers) in test_helpers {
+                svc.set_test_helper_modules(root, helpers);
+            }
+        }
         let (registry, known_erlang_modules) = {
             let mut cache = self.type_cache.lock_recover();
             cache.roots.extend(extracted);

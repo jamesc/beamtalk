@@ -224,6 +224,47 @@ fn every_write_is_answered_and_the_overflowing_one_gets_the_error() {
     port.wait_for_exit(1);
 }
 
+// ── BT-5269: the writer thread reports each queued write ────────
+
+/// A queued write that reaches the pipe is reported `stdin_written`, after
+/// its `stdin_queued`. The child is this binary's own `--cat` mode, so the
+/// test runs on every platform.
+#[test]
+fn a_write_the_child_takes_is_reported_written() {
+    let mut port = PortProcess::start();
+    port.send(&spawn(1, &exec_binary(), strs(&["--cat"])));
+    port.send(&write_stdin(1, b"hello\n"));
+    port.wait_for("stdin_queued", |e| is_event(e, "stdin_queued", 1));
+    port.wait_for("stdin_written", |e| is_event(e, "stdin_written", 1));
+    port.send(&command("close_stdin", 1, vec![]));
+    assert_eq!(port.wait_for_exit(1), int_term(0));
+    assert_eq!(port.output("stdout", 1), b"hello\n");
+}
+
+/// Before BT-5269 a queued write whose child had closed its stdin was lost
+/// with no event: only the next write got an `error`.
+#[cfg(unix)]
+#[test]
+fn a_queued_write_whose_child_closed_stdin_is_reported_failed() {
+    let mut port = PortProcess::start();
+    port.send(&spawn(
+        1,
+        "/bin/sh",
+        strs(&["-c", "exec 0<&-; echo closed; exec sleep 300"]),
+    ));
+    port.wait_for("stdout", |e| is_event(e, "stdout", 1));
+    port.send(&write_stdin(1, b"lost\n"));
+    port.wait_for("stdin_queued", |e| is_event(e, "stdin_queued", 1));
+    let failed = port.wait_for("stdin_failed", |e| {
+        is_event(e, "stdin_failed", 1) || is_event(e, "stdin_written", 1)
+    });
+    assert!(is_event(&failed, "stdin_failed", 1), "{failed:?}");
+    let reason = term_to_string(payload(&failed)).expect("reason is a binary");
+    assert!(reason.contains("no longer reads"), "{reason}");
+    port.send(&command("kill", 1, vec![]));
+    port.wait_for_exit(1);
+}
+
 // ── BT-5195 item 1: a grandchild holding the pipes ──────────────
 
 /// Before BT-5195 `exit` waited for the pipes to close, which a background
