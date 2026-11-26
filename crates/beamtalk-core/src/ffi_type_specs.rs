@@ -1414,12 +1414,51 @@ fn collect_beam_stems(ebin_dir: &std::path::Path, out: &mut std::collections::Ha
 /// helper modules a package's tests may call and be typed against. A package
 /// that dropped `native/test/` gets `None`, so stale helper beams are never
 /// treated as known modules (specs already extracted from them stay in the
-/// shared type cache until it is cleaned). The LSP and `lint` do not consult
-/// this yet, so they flag a test's helper calls as unresolved (BT-5251).
+/// shared type cache until it is cleaned). The LSP and `lint` reach the helpers
+/// through [`collect_project_test_helper_modules`] (BT-5251).
 #[must_use]
 pub fn project_test_helper_ebin_dir(project_root: &Utf8Path) -> Option<Utf8PathBuf> {
     let helpers = BuildLayout::new(project_root).native_test_ebin_dir();
     (project_root.join("native").join("test").is_dir() && helpers.is_dir()).then_some(helpers)
+}
+
+/// The Erlang modules only a package's *tests* may call: the `native/test/`
+/// helpers (BT-5251).
+///
+/// The union of the `native/test/*.erl` file stems (known before any build,
+/// non-recursive like `native/*.erl`) and the `.beam` stems of
+/// [`project_test_helper_ebin_dir`]. Deliberately not part of
+/// [`collect_project_known_erlang_modules`]: a `src/` call to a test helper
+/// must stay unresolved, so surfaces add this set only for files under
+/// `test/` ([`is_project_test_file`]).
+#[must_use]
+pub fn collect_project_test_helper_modules(
+    project_root: &Utf8Path,
+) -> std::collections::HashSet<String> {
+    let mut modules = std::collections::HashSet::new();
+    if let Ok(entries) = std::fs::read_dir(project_root.join("native").join("test")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file()
+                && path.extension().is_some_and(|ext| ext == "erl")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+            {
+                modules.insert(stem.to_string());
+            }
+        }
+    }
+    if let Some(ebin) = project_test_helper_ebin_dir(project_root) {
+        collect_beam_stems(ebin.as_std_path(), &mut modules);
+    }
+    modules
+}
+
+/// Whether `file` is a test source of the package at `project_root`, i.e.
+/// lives under `<root>/test/` — the files that may call `native/test/`
+/// helpers (BT-5251).
+#[must_use]
+pub fn is_project_test_file(project_root: &Utf8Path, file: &Utf8Path) -> bool {
+    file.starts_with(project_root.join("test"))
 }
 
 /// Collect the ebin directories for a project's native and path dependencies.
@@ -2207,6 +2246,44 @@ mod tests {
             known.contains("my_nif"),
             "compiled own-native .beam stem should be known: {known:?}"
         );
+    }
+
+    #[test]
+    fn test_helper_modules_cover_sources_and_ebin_but_not_project_set() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let src_dir = root.join("native").join("test");
+        std::fs::create_dir_all(&src_dir).unwrap();
+        std::fs::write(src_dir.join("src_helper.erl"), b"-module(src_helper).").unwrap();
+        let ebin = root
+            .join("_build")
+            .join("dev")
+            .join("native_test")
+            .join("ebin");
+        std::fs::create_dir_all(&ebin).unwrap();
+        std::fs::write(ebin.join("beam_helper.beam"), b"fake beam").unwrap();
+
+        let helpers = collect_project_test_helper_modules(&root);
+        assert!(helpers.contains("src_helper") && helpers.contains("beam_helper"));
+        let project = collect_project_known_erlang_modules(&root);
+        assert!(
+            !project.contains("src_helper") && !project.contains("beam_helper"),
+            "src/ must not see test helpers: {project:?}"
+        );
+    }
+
+    #[test]
+    fn is_project_test_file_only_under_test_dir() {
+        let root = Utf8PathBuf::from("/p");
+        assert!(is_project_test_file(
+            &root,
+            Utf8Path::new("/p/test/a_test.bt")
+        ));
+        assert!(!is_project_test_file(&root, Utf8Path::new("/p/src/a.bt")));
+        assert!(!is_project_test_file(
+            &root,
+            Utf8Path::new("/p/testing/a.bt")
+        ));
     }
 
     // -----------------------------------------------------------------------
