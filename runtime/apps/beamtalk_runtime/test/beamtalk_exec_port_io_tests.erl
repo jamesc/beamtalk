@@ -190,6 +190,8 @@ decode_event(Bin, ChildId) ->
         {exit, ChildId, Code} -> {exit, Code};
         {stderr, ChildId, _} -> ignore;
         {stdin_queued, ChildId} -> queued;
+        {stdin_written, ChildId} -> written;
+        {stdin_failed, ChildId, Reason} -> error({exec_port_stdin_failed, ChildId, Reason});
         {error, ChildId, Command, Reason} -> error({exec_port_error, ChildId, Command, Reason});
         _ -> ignore
     end.

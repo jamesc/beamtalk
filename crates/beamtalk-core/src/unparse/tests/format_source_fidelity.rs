@@ -93,10 +93,7 @@ fn safety_net_rejects_output_that_does_not_parse() {
 fn safety_net_accepts_layout_only_changes() {
     assert_eq!(verify("x   :=   1   //c\n", "x := 1  // c\n"), Ok(()));
     assert_eq!(
-        verify(
-            "x := 1\n/* a\n     b */\ny := 2\n",
-            "x := 1\n/* a\n b */\ny := 2\n"
-        ),
+        verify("x := 1\n//   a\ny := 2\n", "x := 1\n// a\ny := 2\n"),
         Ok(())
     );
 }
@@ -248,13 +245,6 @@ fn crlf_file_keeps_crlf_line_endings() {
 }
 
 #[test]
-fn crlf_block_comment_keeps_crlf_line_endings() {
-    let source = "/* one\r\n   two */\r\nx := 1\r\n";
-    let out = fmt(source).expect("CRLF source formats");
-    assert!(!out.replace("\r\n", "").contains('\n'), "{out:?}");
-}
-
-#[test]
 fn line_break_inside_a_quoted_symbol_is_part_of_its_value() {
     // The symbol's raw line break is its value, not layout: it is kept as
     // written whatever the file's line endings are.
@@ -322,10 +312,6 @@ fn comment_between_keyword_parts_is_kept() {
         "x\n  foo: 1\n  // own line\n  bar: 2\n",
     );
     assert_formats_to("x // r\n  foo: 1\n", "x  // r\n  foo: 1\n");
-    assert_formats_to(
-        "x foo: 1 /* b */ bar: 2\n",
-        "x\n  foo: 1\n  /* b */\n  bar: 2\n",
-    );
     assert_formats_to(
         "Object subclass: Foo\n  bar => x foo: 1 // c\n    bar: 2\n",
         "Object subclass: Foo\n\n  bar =>\n    x\n      foo: 1  // c\n      bar: 2\n",

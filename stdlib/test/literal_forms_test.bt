@@ -1,0 +1,73 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5218: executes every example in the "Number Literals", "List Cons
+// Literal" and "Package-Qualified Superclass" sections of
+// docs/beamtalk-language-features.md, so a doc example cannot drift from the
+// compiler. Fixtures: fixtures/literal_forms_qualified_base.bt and
+// fixtures/literal_forms_qualified_child.bt.
+
+TestCase subclass: LiteralFormsTest
+
+  // === Radix integers ===
+  testRadixHex => self assert: 16rFF equals: 255
+
+  testRadixBinary => self assert: 2r1010 equals: 10
+
+  testRadixLowercaseDigits => self assert: 16rff equals: 255
+
+  testRadixHighestBase => self assert: 36rZZ equals: 1295
+
+  testRadixNegative => self assert: -16rFF equals: -255
+
+  testRadixBignum =>
+    self assert: 16rFFFFFFFFFFFFFFFFFF equals: 4722366482869645213695
+
+  testRadixInExpression => self assert: 16rFF + 1 equals: 256
+
+  testRadixIsInteger => self assert: (2r1010 isKindOf: Integer)
+
+  // === Exponent floats ===
+  testExponentWithFraction => self assert: 2.5e10 equals: 25000000000.0
+
+  testExponentNegative => self assert: 1e-3 equals: 0.001
+
+  testExponentWithoutFractionIsFloat =>
+    self assert: 1e3 equals: 1000.0
+    self assert: 1e3 class equals: Float
+
+  testExponentUppercaseE => self assert: 2.5E2 equals: 250.0
+
+  testExponentExplicitPlus => self assert: 1.5e+2 equals: 150.0
+
+  testExponentNegativeLiteral => self assert: -1e3 equals: -1000.0
+
+  // === List cons literal ===
+  testConsPrepend =>
+    tail := #(1, 2, 3)
+    self assert: #(0 | tail) equals: #(0, 1, 2, 3)
+
+  testConsSeveralHeads =>
+    tail := #(3, 4)
+    self assert: #(1, 2 | tail) equals: #(1, 2, 3, 4)
+
+  testConsOntoEmpty => self assert: #(1 | #()) equals: #(1)
+
+  testConsDoesNotMutateTail =>
+    tail := #(2, 3)
+    longer := #(1 | tail)
+    self assert: longer equals: #(1, 2, 3)
+    self assert: tail equals: #(2, 3)
+
+  testConsTailIsUnaryExpression =>
+    self assert: #(0 | #(1, 2) reversed) equals: #(0, 2, 1)
+
+  // === Package-qualified superclass ===
+  testQualifiedSuperclassResolves =>
+    self assert: LiteralFormsQualifiedBase new answer equals: 42
+
+  testQualifiedSuperclassIsTheSameClassAsUnqualified =>
+    self assert: LiteralFormsQualifiedBase superclass equals: Value
+
+  testSubclassOfQualifiedSuperclassInherits =>
+    self assert: LiteralFormsQualifiedChild new answer equals: 43

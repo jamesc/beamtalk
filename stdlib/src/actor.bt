@@ -272,6 +272,9 @@ Object subclass: Actor
   /// - `reserved_name` — `name` is in the OTP kernel / stdlib blocklist
   /// - `type_error` — `name` is not a Symbol, or `scope` is neither
   ///   `#local` nor `#global`
+  /// - `timeout` — `#global` only: the cluster-wide name registry did not
+  ///   answer within 5 seconds (another node held its lock); the new actor
+  ///   was stopped
   ///
   /// ## Examples
   /// ```beamtalk

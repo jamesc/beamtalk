@@ -42,6 +42,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 - [Application Telemetry Events (ADR 0069 amendment)](#application-telemetry-events-adr-0069-amendment)
 - [Announcements — Typed Events (ADR 0093)](#announcements--typed-events-adr-0093)
 - [Distribution — Location-Transparent Actors (ADR 0126)](#distribution--location-transparent-actors-adr-0126)
+- [Not Yet Supported](#not-yet-supported)
 - [Namespace and Class Visibility](#namespace-and-class-visibility)
   - [Visibility and Access Control (ADR 0071)](#visibility-and-access-control-adr-0071)
 - [Smalltalk + BEAM Mapping](#smalltalk--beam-mapping)
@@ -90,7 +91,7 @@ crlf := "\r\n"                   // 1 grapheme — byte-identical to (Character 
 //   "hello"  →  {beamtalk_string, <<"hello">>}
 ```
 
-**Source text and literal limits (BT-5182).** A source file may start with a UTF-8 byte-order mark, which is ignored, and may use CRLF line endings; the `\r` is never part of a comment's text. A string literal may span lines, but not a line that starts a class or protocol definition (`Object subclass: Foo`, `Protocol define: P`, at column 1). A string with no closing `"` is reported as `unterminated string literal starting at line L, column C` (or, when a definition line comes first, `string literal starting at line L, column C is not closed before the definition on line M`), covering only the line it opens on; parsing resumes on the next line, so the definitions after a missing quote still compile and still show in the editor. An unterminated `/* */` comment ends before the next class or protocol definition. Integer literals have no size limit: `100000000000000000000` and `16rFFFFFFFFFFFFFFFFFF` are BEAM bignums, up to 10,000 digits, and a `-` written directly before a radix literal is part of it (`-16rFF` is -255).
+**Source text and literal limits (BT-5182).** A source file may start with a UTF-8 byte-order mark, which is ignored, and may use CRLF line endings; the `\r` is never part of a comment's text. A string literal may span lines, but not a line that starts a class or protocol definition (`Object subclass: Foo`, `Protocol define: P`, at column 1). A string with no closing `"` is reported as `unterminated string literal starting at line L, column C` (or, when a definition line comes first, `string literal starting at line L, column C is not closed before the definition on line M`), covering only the line it opens on; parsing resumes on the next line, so the definitions after a missing quote still compile and still show in the editor. Block comments (`/* */`) do not exist: a `/*` is reported as `block comments are not supported; use `//` on each line`, covering the `/*` to the end of its line, and parsing resumes on the next line (BT-5229). Integer literals have no size limit: `100000000000000000000` and `16rFFFFFFFFFFFFFFFFFF` are BEAM bignums, up to 10,000 digits, and a `-` written directly before a radix literal is part of it (`-16rFF` is -255).
 
 ### Character Encoding
 
@@ -1656,7 +1657,7 @@ Value subclass: Point
     Point x: self.x + other x y: self.y + other y
 ```
 
-**Format:** a leading `//` line comment whose trimmed text is `=+ <name> =+`, where the leading and trailing `=` runs are the same length (3 or more) and `<name>` is non-empty. Triple-slash (`///`) and block (`/* */`) comments are not recognized as dividers. A `=`-bordered comment that looks like a divider but doesn't parse as one (mismatched `=` run lengths, too-short runs, `///`/`/* */` instead of `//`) is flagged by `beamtalk lint` as a near-miss (BT-3240). A class with no dividers keeps the existing flat outline — no behavior change.
+**Format:** a leading `//` line comment whose trimmed text is `=+ <name> =+`, where the leading and trailing `=` runs are the same length (3 or more) and `<name>` is non-empty. Triple-slash (`///`) comments are not recognized as dividers. A `=`-bordered comment that looks like a divider but doesn't parse as one (mismatched `=` run lengths, too-short runs, `///` instead of `//`) is flagged by `beamtalk lint` as a near-miss (BT-3240). A class with no dividers keeps the existing flat outline — no behavior change.
 
 Methods following a divider belong to that category until the next divider or end of class. Instance-side and class-side methods are merged in true source order (not grouped by side). The REPL falls back to the flat alphabetical listing when grouping can't be trusted (no on-disk `.bt` file, no dividers, or unflushed `>>` patches). The stdlib uses this convention throughout (BT-2601, BT-2626, BT-3237, BT-3239, BT-3240).
 
@@ -1899,6 +1900,62 @@ pair at: 2                  // inferred Integer
 A non-literal index (`pair at: i`) or an out-of-range literal falls back to
 `Dynamic` — no false-positive warning. An untyped `tuple()` spec (unknown
 arity) stays bare `Tuple`, so `at:` on it remains `Dynamic` as before.
+
+### Number Literals
+
+Integers and floats have three spellings beyond plain decimal digits. All of them are
+ordinary `Integer` and `Float` values at run time; the spelling only matters in source.
+
+**Radix integers** are written `<radix>r<digits>`: the radix is a decimal number from 2 to
+36, and the digits are `0`-`9` and `A`-`Z` (upper or lower case) for that radix. A `-`
+written directly in front is part of the literal.
+
+```beamtalk
+16rFF       // => 255
+2r1010      // => 10
+36rZZ       // => 1295
+-16rFF      // => -255
+16rFF + 1   // => 256
+```
+
+Radix integers have no practical size limit, like decimal ones (`16rFFFFFFFFFFFFFFFFFF` is
+4722366482869645213695, a BEAM bignum); a literal over 10,000 characters is rejected. A radix outside 2-36 (`37r1`), a digit that is not
+valid in the radix (`16rG`) and a missing digit (`16r`) are compile errors.
+
+**Exponent floats** are a decimal number, an `e` or `E`, an optional `+` or `-`, and at
+least one digit. A literal with an exponent is always a `Float`, even with no decimal
+point:
+
+```beamtalk
+2.5e3 == 2500.0 // => true
+1e-3 == 0.001   // => true
+1e3 == 1000.0   // => true
+1e3 class       // => Float
+```
+
+A float prints in the shortest form that reads back as the same number, and which form that
+is depends on the value: `1e2` prints `100.0`, while `1e3` and `1000.0` both print `1.0e3`.
+
+An exponent with no digits (`1e`) is a compile error, and so is a literal that overflows a
+64-bit float (`1e309`: "Float literal out of range").
+
+`beamtalk fmt` keeps the spelling you wrote (`16rFF` stays `16rFF`, `1e-3` stays `1e-3`).
+
+### List Cons Literal
+
+`#(head | tail)` builds a list by prepending to an existing list, the expression form of
+Erlang's `[H | T]`. Several heads may come before the `|`, and the tail is any unary
+expression (parenthesise a binary or keyword send). The tail list is not changed:
+
+```beamtalk
+tail := #(1, 2, 3)
+#(0 | tail)        // => #(0, 1, 2, 3)
+#(1, 2 | #(3, 4))  // => #(1, 2, 3, 4)
+#(1 | #())         // => #(1)
+```
+
+This is a literal form only. There is no cons *pattern* yet: `#(h | t)` is a parse error in a
+`match:` arm or on the left of `:=`. See [Not Yet Supported](#not-yet-supported).
 
 ### Tuple Literals (ADR 0136)
 
@@ -7641,7 +7698,9 @@ worker disconnect                               // => true
 `connect` (and `ping`, which auto-connects) apply a security policy (see
 Security, below): a same-host connection always succeeds; an off-host
 connection is refused with `kind = insecure_distribution` unless this node
-runs TLS distribution. `Node named:` only validates the `name@host` shape and
+runs TLS distribution. Deciding whether a host is this host takes a name
+lookup, which is bounded at 2 seconds per address family: a host that has not
+resolved by then is treated as off-host. `Node named:` only validates the `name@host` shape and
 never touches the network, so it always succeeds for a well-formed name —
 reachability is only proven by `connect`/`ping`.
 
@@ -7713,6 +7772,14 @@ real operational cost, not just a lookup convenience:
 > **Connect waits for `global`.** `Node connect` answers only after OTP's
 > `global` has synced names with the new peer, so a `scope: #global` name
 > registered right after `connect` is visible from the peer at once.
+
+> **Registration is bounded.** Registering a global name waits for `global`'s
+> cluster-wide lock, which another node may be holding. `spawnAs:scope: #global`
+> waits at most 5 seconds for it; if the lock is not free by then the new
+> actor is stopped and the result is an `Error` tagged `timeout`, whose
+> `details` name the requested name. A supervised `withName:scope: #global`
+> child in that situation is not started (a warning is logged), like one
+> whose name is held on another node.
 
 When a netsplit heals and the same global name was registered on both sides,
 Beamtalk's own resolver keeps the *older* registrant (by start time) and
@@ -7817,14 +7884,16 @@ SystemAnnouncer current when: NodeVersionSkew do: [:e |
   guard: when a node connects, and again whenever a class reloads while
   peers stay connected, this node compares its own `Beamtalk shapeManifest`
   against each connected peer's and announces one event per class whose
-  version differs. It **never refuses the connection** — doing so would make
+  version differs. A skew is announced once per connection: again only if
+  the class matches and then skews again, its versions change, or the peer
+  reconnects. It **never refuses the connection** — doing so would make
   ADR 0125's rolling-upgrade procedure impossible — it only makes skew
   visible before the first send actually fails on it (the per-message check
   above is the real safety net). `aNode shapeSkew` (below) surfaces the same
   information as a point-in-time, queryable snapshot rather than only a
   live event stream. The count is kept on both sides: when one node reloads
-  a class, both it and the peer announce `NodeShapeSkew` and update their
-  counts. A peer that disconnects drops out of the count.
+  a class, both it and the peer update their counts, and each announces
+  `NodeShapeSkew` if the class's skew is new to it. A peer that disconnects drops out of the count.
 - **`NodeVersionSkew`** is announced once per connect (best-effort) when
   the peer runs a different wire-format version (`localWireVersion` /
   `remoteWireVersion`) or Beamtalk version (`localBeamtalkVersion` /
@@ -7877,6 +7946,20 @@ to a cluster without joining it as a peer. Beamtalk's own attach front (ADR
 `NodeUp` on its members.
 
 ---
+
+## Not Yet Supported
+
+Forms the documentation or an ADR describes that the compiler does not accept or honour
+yet, in one place. The Today column says whether each one is rejected with a diagnostic or
+quietly ignored.
+
+| Form | Today | Reference |
+|------|-------|-----------|
+| Trait `aliasing:` clause (`uses: T aliasing: #{#new => #old}`) | Reserved. The parser consumes it for recovery and rejects it. | [ADR 0127](ADR/0127-traits-for-behavioural-reuse.md) |
+| Parametric aliases (`type Option(T) = T \| Nil`) and recursive aliases (`type Json = ... \| List(Json)`) | Rejected with a diagnostic; they need lazy alias resolution. | [Named Type Aliases](#named-type-aliases-type-declarations-adr-0108) |
+| Rest patterns in `match:` arms (`#[a, ...rest] -> ...`) | Supported in destructuring assignment only; in a `match:` arm the compiler reports "not yet supported". | [Rest Patterns in Destructuring](#rest-patterns-in-destructuring-bt-1251) |
+| Package-bundled FFI type stubs | Only the project-local `stubs/` directory is searched; stubs shipped in a dependency are ignored, with no diagnostic. | [FFI Type Stub Files](#ffi-type-stub-files-adr-0075-phase-2) |
+| Cons patterns (`#(head \| tail)` in a `match:` arm or destructuring) | Parse error. The literal form works; the AST has a `Pattern::List` node, but the parser never builds it. | [ADR 0012](ADR/0012-list-literal-syntax.md), [List Cons Literal](#list-cons-literal) |
 
 ## Namespace and Class Visibility
 
@@ -7989,6 +8072,24 @@ dependencies are a compile error, resolved with qualified `package@Class` names.
 [Package Management guide](beamtalk-packages.md) for `beamtalk.toml`, dependencies, and
 qualified names. [ADR 0031](ADR/0031-flat-namespace-for-v01.md) (superseded by ADR 0070)
 records the original v0.1 flat-namespace decision.
+
+#### Package-Qualified Superclass
+
+A class definition may name its superclass as `package@Class`, which picks the class from
+that package even when two dependencies define a class with the same short name:
+
+```beamtalk
+stdlib@Value subclass: Celsius
+  degrees => 21
+```
+
+`json@Parser subclass: LenientParser` is the same form with a dependency named `json`.
+The qualified name is the same class as the short name (`stdlib@Integer == Integer`), so
+the subclass inherits exactly as it would from the short name. In a package
+(a directory with a `beamtalk.toml`), a qualifier that is neither the current package,
+`stdlib` nor a declared dependency is a compile error (`Unknown package 'json' in
+superclass reference 'json@Parser'`). A single file compiled with no manifest has no package
+set to check against, so the qualifier is not validated there.
 
 ### Visibility and Access Control (ADR 0071)
 
@@ -9049,6 +9150,16 @@ asString => @primitive
 // In stdlib/src/exception.bt — explicit override (method 'signal' → runtime 'classSignal')
 class signal => @primitive 'classSignal'
 ```
+
+**`no_user_code` (stdlib only).** A selector-based `@primitive` may end with the word `no_user_code` on the same line. It promises the primitive never runs user code for any argument, so the compiler can skip the state-threading bracket around the call in an actor method (ADR 0137 §4):
+
+```beamtalk
+// In stdlib/src/list.bt
+size -> Integer => @primitive no_user_code
+isEmpty -> Boolean => @primitive no_user_code
+```
+
+The promise is checked when the stdlib is built (`beamtalk build-stdlib` fails on a bad mark): the class must be `sealed`, the pragma selector-based (not `@intrinsic`, not an explicit quoted selector), and every parameter a primitive type or a sealed value type (a block or an open class could run user code). It is for stdlib authors; `stdlib/src/` is its only use, and the stdlib tests run through it. See [actor-state-cell.md](development/actor-state-cell.md).
 
 **`@intrinsic` (unquoted)** — compiler structural intrinsics:
 ```beamtalk

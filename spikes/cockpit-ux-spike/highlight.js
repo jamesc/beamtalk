@@ -35,7 +35,6 @@
 
   const RULES = [
     { cls: "comment", re: /^\/\/[^\n]*/ },                 // // line comment
-    { cls: "comment", re: /^\/\*[\s\S]*?\*\// },           // /* block comment */
     { cls: "_string", re: /^"(?:\\.|[^"\\])*"/ },          // "double quoted string"
     { cls: "symbol", re: /^#(?:'(?:''|[^'])*'|\{|\(|[A-Za-z_][\w]*[:]?|[-+*/~<>=&|@%,?!]+)/ }, // #sym #{ #(
     { cls: "field", re: /^\.[A-Za-z_]\w*/ },               // .field (after self/obj)

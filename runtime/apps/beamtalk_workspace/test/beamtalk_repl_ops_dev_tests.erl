@@ -714,7 +714,8 @@ keyword_in_string_or_comment_is_none_test() ->
     %% comment that must not fall back to a one-keyword lookup.
     ?assertEqual(none, kw(<<"x := \"Fetcher fetch:">>, <<" u\"">>)),
     ?assertEqual(none, kw(<<"// Foo bar:">>, <<" x">>)),
-    ?assertEqual(none, kw(<<"/* Foo bar:">>, <<" x */">>)).
+    %% BT-5229: `/*` is no comment, but a stray opener skips to the end of its line.
+    ?assertEqual(none, kw(<<"/* Foo bar:">>, <<" x">>)).
 
 hover_docs_keyword_send_unclassifiable_receiver_is_empty_test() ->
     ?assertEqual(

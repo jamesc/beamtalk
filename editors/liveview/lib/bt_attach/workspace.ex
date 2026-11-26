@@ -17,7 +17,7 @@ defmodule BtAttach.Workspace do
   ## Term contract, not JSON (BT-2399)
 
   Eval goes through the term-returning op-layer seam
-  (`beamtalk_repl_ops:dispatch/4`), which returns a live Erlang term
+  (`beamtalk_repl_ops:request/3`), which returns a live Erlang term
   (`op_result()`), *not* the JSON the browser receives. Over distribution that
   means `Counter spawn` hands back a real, messageable remote pid wrapped in a
   `{:beamtalk_object, class, module, pid}` tuple, not a flattened display
@@ -25,7 +25,7 @@ defmodule BtAttach.Workspace do
   `docs/development/repl-op-term-contract.md`.
 
   Display (`render_term/1`) is a *separate* concern from the data path: it
-  reuses the workspace's own `beamtalk_repl_json:term_to_json/1` formatter — the
+  reuses the workspace's own formatter (`beamtalk_repl_ops:render/2`) — the
   same one the browser WebSocket protocol uses — so the LiveView shows
   byte-identical values to the Phase-1 browser workspace, surface-consistent for
   free, while `eval/2` still returns the live term.
@@ -100,9 +100,6 @@ defmodule BtAttach.Workspace do
   #     not keep the session busy.
   @rpc_timeout 10_000
   @rpc_interactive_timeout 5_000
-  # BT-5199: `close`'s decode/get_params prelude builds a no-param request; a
-  # workspace that cannot do that within a second is not going to close it.
-  @rpc_close_prelude_timeout 1_000
   @rpc_long_timeout 60_000
   @rpc_eval_timeout 35_000
   # BT-5129: a whole test run is bounded by the suite, not by a lookup; the old
@@ -119,8 +116,9 @@ defmodule BtAttach.Workspace do
   worker runs, so it works mid-eval.
   """
   def interrupt(session_pid) when is_pid(session_pid) do
-    case rpc(:beamtalk_repl_shell, :interrupt, [session_pid]) do
-      :ok -> :ok
+    case dispatch_simple("interrupt", %{}, session_pid) do
+      {:status, :ok} -> :ok
+      {:error, reason} -> {:error, reason}
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
       other -> {:error, {:unexpected_reply, other}}
     end
@@ -215,7 +213,7 @@ defmodule BtAttach.Workspace do
   side, so an unexpected value is harmless.
   """
   def start_session(session_id, meta) when is_binary(session_id) and is_map(meta) do
-    case rpc(:beamtalk_session_sup, :start_session, [session_id, meta]) do
+    case rpc(:beamtalk_repl_ops, :start_session, [session_id, meta]) do
       {:ok, pid} when is_pid(pid) -> pid
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
       other -> {:error, other}
@@ -234,7 +232,7 @@ defmodule BtAttach.Workspace do
   front's sessions leaked and could block workspace idle shutdown.
   """
   def attach_session(session_pid, client_pid) when is_pid(session_pid) and is_pid(client_pid) do
-    case rpc(:beamtalk_repl_shell, :attach, [session_pid, client_pid]) do
+    case rpc(:beamtalk_repl_ops, :attach_session, [session_pid, client_pid]) do
       :ok -> :ok
       # BT-5084: `attach` is a call; `gone` means the session stopped (its idle
       # period ran out) between the caller finding it and attaching.
@@ -343,39 +341,39 @@ defmodule BtAttach.Workspace do
   process actually exists — the workspace could have restarted between the
   disconnect and the reconnect, leaving the registry entry stale.
 
-  `is_process_alive/1` is evaluated **on the workspace node**, where the session
-  pid is local (a remote `is_process_alive/1` would `badarg`). Returns a boolean
-  for a reachable workspace; an unreachable workspace yields `{:badrpc, _}`, which
-  the caller treats as not-alive (resume falls back to a fresh session).
+  Answered on the workspace node by `beamtalk_repl_ops:session_alive/1`
+  (BT-5202), where the pid is local: one check of the session supervisor's
+  children that does not depend on any other session answering. Returns a
+  boolean; an unreachable workspace counts as not-alive (resume falls back to a
+  fresh session).
   """
   def session_alive?(session_pid) when is_pid(session_pid) do
-    case rpc(:erlang, :is_process_alive, [session_pid]) do
-      result when is_boolean(result) -> result
-      {:badrpc, _reason} -> false
+    case rpc(:beamtalk_repl_ops, :session_alive, [session_pid]) do
+      alive when is_boolean(alive) -> alive
+      _ -> false
     end
   end
 
   @doc """
   Count the workspace-supervised sessions currently alive (BT-2410 Wave 4).
 
-  A read-only probe of `beamtalk_session_sup`'s active children, used by the
-  session-teardown tests to assert that closing a LiveView (after the resume
-  grace window) leaves no orphaned session. Returns the active-child count for a
+  A read-only count of the session supervisor's active children
+  (`beamtalk_repl_ops:session_count/0`, BT-5202), used by the session-teardown
+  tests to assert that closing a LiveView (after the resume grace window) leaves
+  no orphaned session, even one whose shell is wedged. Returns the count for a
   reachable workspace, or `{:error, {:unreachable, _}}` otherwise.
   """
   def session_count do
-    case rpc(:supervisor, :count_children, [:beamtalk_session_sup]) do
-      counts when is_list(counts) ->
-        Keyword.get(counts, :active, 0)
-
-      {:badrpc, reason} ->
-        {:error, {:unreachable, reason}}
+    case rpc(:beamtalk_repl_ops, :session_count, []) do
+      count when is_integer(count) -> count
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
     end
   end
 
   @doc """
   Evaluate a Beamtalk expression in `session_pid` through the curated op layer's
-  term-returning seam (`beamtalk_repl_ops:dispatch/4`, BT-2399).
+  term-returning seam (`beamtalk_repl_ops:request/3`, BT-2399).
 
   Returns the **live Erlang term** the workspace produced — no JSON. The term
   contract is the only coupling between Phoenix and the workspace:
@@ -941,7 +939,7 @@ defmodule BtAttach.Workspace do
 
   Unlike `complete/2` and `hover/2`, no `session_pid` is involved: diagnostics
   analyse the buffer in isolation (no receiver / binding resolution), so the op
-  is workspace-global and `self()` is passed only to satisfy `dispatch/4`'s arity
+  is workspace-global and `self()` is passed only to satisfy `request/3`'s arity
   (mirroring the browse ops).
 
   Each diagnostic is normalised to a binary-keyed map
@@ -1018,7 +1016,7 @@ defmodule BtAttach.Workspace do
   Pure reflection over the live class registry (`beamtalk_test_runner:discover_tests/0`):
   runs **no** test code and mutates nothing, consistent with the facade's
   `:read` capability (the Observer may list tests). The op ignores the session
-  (workspace-global discovery), so `self()` is passed only for `dispatch/4`'s
+  (workspace-global discovery), so `self()` is passed only for `request/3`'s
   arity, mirroring the browse ops.
 
   Returns `{:ok, [%{"class" => binary, "selectors" => [binary]}]}` (sorted by
@@ -1164,9 +1162,9 @@ defmodule BtAttach.Workspace do
   defp stringify_detail(detail) when is_binary(detail), do: detail
   defp stringify_detail(detail), do: inspect(detail)
 
-  # Decode + dispatch a term op (workspace-global: discovery, test runs, actors,
+  # Dispatch a term op (workspace-global: discovery, test runs, actors,
   # sessions, kill; plus `close`, which names its session). For the global ops
-  # `self()` is passed as `dispatch/4`'s SessionPid only to satisfy its arity —
+  # `self()` is passed as `request/3`'s SessionPid only to satisfy its arity —
   # they do not read session bindings — mirroring
   # `dispatch_browse/2`. Unlike `dispatch_browse/2`, which normalises everything
   # to `{:value, _} | {:error, _}`, this returns the op-result term VERBATIM (no
@@ -1177,128 +1175,58 @@ defmodule BtAttach.Workspace do
   # simple ops (list/load) stay on the long tier.
   defp simple_op_timeout(op) when op in ["test", "test-all"], do: @rpc_test_run_timeout
   # BT-5199: a session close runs from a terminating LiveView; against a hung
-  # workspace it must give up quickly, on every one of its three calls.
+  # workspace it must give up quickly.
   defp simple_op_timeout("close"), do: @rpc_interactive_timeout
+  # BT-5202: interrupt keeps the single-lookup timeout it had as a direct call.
+  defp simple_op_timeout("interrupt"), do: @rpc_timeout
   defp simple_op_timeout(_op), do: @rpc_long_timeout
 
-  # The decode/get_params prelude is a lookup; `close` bounds it tighter still
-  # (so a close takes at most 1 + 1 + 5 s), every other op keeps the default.
-  defp simple_prelude_timeout("close"), do: @rpc_close_prelude_timeout
-  defp simple_prelude_timeout(_op), do: @rpc_timeout
-
-  # `session_pid` is `dispatch/4`'s SessionPid: `self()` for the workspace-global
+  # `session_pid` is `request/3`'s SessionPid: `self()` for the workspace-global
   # ops, the session to close for `close` (BT-5199).
   defp dispatch_simple(op, params, session_pid \\ self())
        when is_binary(op) and is_map(params) and is_pid(session_pid) do
-    request = Map.put(params, "op", op)
-
-    prelude_timeout = simple_prelude_timeout(op)
-
-    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)], prelude_timeout) do
-      {:ok, msg} ->
-        decoded_params = rpc(:beamtalk_repl_protocol, :get_params, [msg], prelude_timeout)
-
-        rpc(
-          :beamtalk_repl_ops,
-          :dispatch,
-          [op, decoded_params, msg, session_pid],
-          simple_op_timeout(op)
-        )
-
-      {:badrpc, reason} ->
-        {:error, {:unreachable, reason}}
-
-      other ->
-        {:error, {:unexpected_reply, other}}
-    end
+    request_op(op, params, session_pid, simple_op_timeout(op))
   end
 
-  # Build the browse request as a plain map, decode it to a `protocol_msg()` on
-  # the workspace node, then dispatch through the term-returning op layer. The
-  # browse ops ignore the session pid (they are workspace-global reflection), so
-  # `self()` is passed only to satisfy `dispatch/4`'s arity. The `{:value, _}`
+  # Dispatch a browse op through the op layer's request entry point
+  # (`beamtalk_repl_ops:request/3`). The browse ops ignore the session pid (they
+  # are workspace-global reflection), so `self()` is passed only to satisfy `request/3`'s arity. The `{:value, _}`
   # term is returned verbatim — `encode/2` (JSON) is never invoked, so the
   # wire-shaped rows arrive live over distribution (BT-2399 / ADR 0096).
   defp dispatch_browse(op, params) when is_binary(op) and is_map(params) do
-    # The protocol is FLAT: `decode_map/1` reads each op param as a TOP-LEVEL key
-    # (`params = maps:without([op, id, session], Map)`), not from a nested
-    # `"params"` sub-map. Merge the op's params straight in alongside `"op"`.
-    request = Map.put(params, "op", op)
-
-    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
-      {:ok, msg} ->
-        decoded_params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
-
-        case rpc(
-               :beamtalk_repl_ops,
-               :dispatch,
-               [op, decoded_params, msg, self()],
-               @rpc_long_timeout
-             ) do
-          {:value, value} -> {:value, value}
-          {:error, reason} -> {:error, reason}
-          {:badrpc, reason} -> {:error, {:unreachable, reason}}
-          other -> {:error, {:unexpected_reply, other}}
-        end
-
-      {:badrpc, reason} ->
-        {:error, {:unreachable, reason}}
-
-      other ->
-        {:error, {:unexpected_reply, other}}
+    case request_op(op, params, self(), @rpc_long_timeout) do
+      {:value, value} -> {:value, value}
+      {:error, reason} -> {:error, reason}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
     end
   end
 
-  # Build the protocol request as a plain map, decode it to a `protocol_msg()`
-  # on the workspace node (so we don't depend on the record's `.hrl`), then
-  # dispatch through the term-returning op layer. `dispatch/4` returns the
-  # `op_result()` term directly — JSON encoding (`encode/2`) is never invoked.
+  # Dispatch `eval` through the op layer's request entry point. `request/3`
+  # returns the `op_result()` term directly — JSON encoding (`encode/2`) is
+  # never invoked.
   defp dispatch_eval(session_pid, expression) do
-    # Flat protocol: `code` is a top-level key, NOT nested under `"params"` (see
-    # `dispatch_browse/2`). A nested map decodes to `params = %{"params" => …}`,
-    # so the eval op never finds `code` and reports an empty expression.
-    request = %{"op" => "eval", "code" => expression}
-
-    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
-      {:ok, msg} ->
-        params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
-        rpc(:beamtalk_repl_ops, :dispatch, ["eval", params, msg, session_pid], @rpc_eval_timeout)
-
-      other ->
-        other
-    end
+    # Flat protocol: `code` is a top-level param, NOT nested under `"params"`
+    # (see `request_op/4`).
+    request_op("eval", %{"code" => expression}, session_pid, @rpc_eval_timeout)
   end
 
   # Build the `complete` request as a flat map (`code` + `cursor` top-level,
-  # mirroring `dispatch_eval`), decode it on the workspace node, and dispatch
+  # mirroring `dispatch_eval`), and send it with one `request/3` call, which dispatches
   # through the term-returning op layer so the `{completions, _}` term arrives
-  # live (no JSON edge). `session_pid` is passed as `dispatch/4`'s SessionPid so
+  # live (no JSON edge). `session_pid` is passed as `request/3`'s SessionPid so
   # the op resolves the session's bindings for instance-method completion
   # (BT-1045); `cursor` (the byte length of the line prefix) makes the op take
   # its context-aware path (BT-783) rather than bare-prefix completion.
   defp dispatch_complete(session_pid, code) do
-    request = %{"op" => "complete", "code" => code, "cursor" => byte_size(code)}
-
-    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
-      {:ok, msg} ->
-        params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
-
-        rpc(
-          :beamtalk_repl_ops,
-          :dispatch,
-          ["complete", params, msg, session_pid],
-          @rpc_interactive_timeout
-        )
-
-      other ->
-        other
-    end
+    params = %{"code" => code, "cursor" => byte_size(code)}
+    request_op("complete", params, session_pid, @rpc_interactive_timeout)
   end
 
   # Build the `hover` request as a flat map (`code` top-level, mirroring
-  # `dispatch_complete`), decode it on the workspace node, and dispatch through
+  # `dispatch_complete`), and send it with one `request/3` call, which dispatches through
   # the term-returning op layer so the `{docs, _}` term arrives live (no JSON
-  # edge). `session_pid` is passed as `dispatch/4`'s SessionPid so the op
+  # edge). `session_pid` is passed as `request/3`'s SessionPid so the op
   # resolves the session's bindings for receiver classification (BT-1045).
   #
   # Unlike `dispatch_complete`, no `cursor` is sent: completion uses `cursor`'s
@@ -1306,61 +1234,40 @@ defmodule BtAttach.Workspace do
   # whereas hover always resolves the hovered token against its line context, so
   # the distinction does not apply here.
   defp dispatch_hover(session_pid, code, context) do
-    request = %{
-      "op" => "hover",
-      "code" => code,
-      "before" => Map.get(context, :before, ""),
-      "suffix" => Map.get(context, :suffix, "")
-    }
+    before = Map.get(context, :before, "")
+    suffix = Map.get(context, :suffix, "")
+    {class, side} = hover_scope(context)
 
-    # BT-4463: the edited method's class, only when a method editor sent one.
-    request =
-      case context do
-        %{class: class, side: side} when is_binary(class) and is_binary(side) ->
-          Map.merge(request, %{"class" => class, "side" => side})
+    params =
+      %{"code" => code, "before" => before, "suffix" => suffix}
+      |> maybe_put_param("class", class)
+      |> maybe_put_param("side", side)
 
-        _ ->
-          request
-      end
-
-    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
-      {:ok, msg} ->
-        params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
-
-        rpc(
-          :beamtalk_repl_ops,
-          :dispatch,
-          ["hover", params, msg, session_pid],
-          @rpc_interactive_timeout
-        )
-
-      other ->
-        other
-    end
+    request_op("hover", params, session_pid, @rpc_interactive_timeout)
   end
 
+  # BT-4463: the edited method's class and side, only when a method editor sent
+  # both.
+  defp hover_scope(%{class: class, side: side}) when is_binary(class) and is_binary(side),
+    do: {class, side}
+
+  defp hover_scope(_context), do: {nil, nil}
+
   # Build the `diagnostics` request as a flat map (`code` + `mode` top-level),
-  # decode it on the workspace node, and dispatch through the term-returning op
+  # and send it with one `request/3` call, which dispatches through the term-returning op
   # layer so the `{diagnostics, _}` term arrives live (no JSON edge). No session
   # pid is needed — diagnostics are workspace-global parse-only analysis — so
-  # `self()` is passed only to satisfy `dispatch/4`'s arity, mirroring
+  # `self()` is passed only to satisfy `request/3`'s arity, mirroring
   # `dispatch_browse/2`. `mode` (BT-2569) selects the parse grammar; a
   # non-empty `source_path` (BT-4583) selects the file's project scope.
   defp dispatch_diagnostics(code, mode, source_path) do
-    request =
+    params =
       case source_path do
-        "" -> %{"op" => "diagnostics", "code" => code, "mode" => mode}
-        path -> %{"op" => "diagnostics", "code" => code, "mode" => mode, "source_path" => path}
+        "" -> %{"code" => code, "mode" => mode}
+        path -> %{"code" => code, "mode" => mode, "source_path" => path}
       end
 
-    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
-      {:ok, msg} ->
-        params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
-        rpc(:beamtalk_repl_ops, :dispatch, ["diagnostics", params, msg, self()])
-
-      other ->
-        other
-    end
+    request_op("diagnostics", params, self(), @rpc_timeout)
   end
 
   @doc """
@@ -1369,7 +1276,7 @@ defmodule BtAttach.Workspace do
 
   Display is a separate concern from the data path: `eval/2` returns the live
   term, and this stringifies it via the workspace's own
-  `beamtalk_repl_json:term_to_json/1` — the exact formatter the browser
+  `beamtalk_repl_ops:render/2` (`term_to_json/1`) — the exact formatter the browser
   WebSocket protocol uses — so values render byte-identically across surfaces. A
   spawned actor renders as the browser's `#Actor<…>` display while the live,
   messageable remote pid remains in the term `eval/2` returned.
@@ -1378,7 +1285,7 @@ defmodule BtAttach.Workspace do
   unreachable, so the pane degrades gracefully rather than crashing.
   """
   def render_term(value) do
-    case rpc(:beamtalk_repl_json, :term_to_json, [value]) do
+    case rpc(:beamtalk_repl_ops, :render, [:value, value]) do
       {:badrpc, _reason} -> inspect(value)
       json -> format_value(json)
     end
@@ -1391,18 +1298,15 @@ defmodule BtAttach.Workspace do
   with many bindings meant N sequential distribution round-trips inside the
   LiveView process.
 
-  The remote side runs `:lists.map/2` over an *external* fun reference
-  (`:erlang.make_fun/3`), which travels as `module:function/arity`
-  and so needs no matching code on the workspace node. If the batch fails
+  The remote side is `beamtalk_repl_ops:render(:values, terms)`, which maps the
+  same formatter over the list. If the batch fails
   (unreachable workspace, or one term the formatter rejects) each term falls
   back to `render_term/1`, so a single bad term still degrades only itself.
   """
   def render_terms([]), do: []
 
   def render_terms(terms) when is_list(terms) do
-    to_json = :erlang.make_fun(:beamtalk_repl_json, :term_to_json, 1)
-
-    case rpc(:lists, :map, [to_json, terms]) do
+    case rpc(:beamtalk_repl_ops, :render, [:values, terms]) do
       jsons when is_list(jsons) and length(jsons) == length(terms) ->
         Enum.map(jsons, &format_value/1)
 
@@ -1455,16 +1359,16 @@ defmodule BtAttach.Workspace do
 
   @doc """
   Render an error *term* (`#beamtalk_error{}`) as a user-facing message,
-  surface-consistent with the browser. Reuses
-  `beamtalk_repl_json:format_error_message/1` so the message text matches what
+  surface-consistent with the browser. Reuses the message half of
+  `beamtalk_repl_ops:render(:error, reason)` so the message text matches what
   the browser shows; falls back to `inspect/1` for non-structured reasons.
   """
   def render_error({:unreachable, :timeout}),
     do: "The workspace did not respond in time. The operation may still be running."
 
   def render_error(reason) do
-    case rpc(:beamtalk_repl_json, :format_error_message, [reason]) do
-      msg when is_binary(msg) -> msg
+    case rpc(:beamtalk_repl_ops, :render, [:error, reason]) do
+      {structured, msg} when is_binary(msg) and structured != :badrpc -> msg
       _ -> inspect(reason)
     end
   end
@@ -1628,8 +1532,8 @@ defmodule BtAttach.Workspace do
   @doc """
   List the current workspace bindings for `session_pid` as `{name, term}` pairs.
 
-  Reads the session's live binding map through the read-surface
-  (`beamtalk_repl_shell:get_bindings/1`, ADR 0085): the values are **live Erlang
+  Reads the session's live binding map through the operation layer's
+  `session_bindings/1` (BT-5202, ADR 0085): the values are **live Erlang
   terms** — a bound `Counter spawn` is a real `{:beamtalk_object, class, module,
   pid}` handle, not a flattened display string — so the Inspector can follow them
   by reference. Display rendering is a separate concern handled by the caller via
@@ -1640,11 +1544,14 @@ defmodule BtAttach.Workspace do
   unexpected shape (the call site renders the error rather than crashing).
   """
   def list_bindings(session_pid) when is_pid(session_pid) do
-    case rpc(:beamtalk_repl_shell, :get_bindings, [session_pid]) do
+    case rpc(:beamtalk_repl_ops, :session_bindings, [session_pid]) do
       {:ok, bindings} when is_map(bindings) ->
         bindings
         |> Enum.map(fn {name, term} -> {to_string(name), term} end)
         |> Enum.sort_by(fn {name, _term} -> name end)
+
+      {:error, reason} ->
+        {:error, reason}
 
       {:badrpc, reason} ->
         {:error, {:unreachable, reason}}
@@ -2411,13 +2318,16 @@ defmodule BtAttach.Workspace do
   defp present_side(side), do: to_string(side)
 
   # Turn a runtime `{error, Reason}` into a structured `#beamtalk_error{}` term so
-  # the LiveView renders an actionable message. `ensure_structured_error/1` is the
-  # workspace's own wrapper — already structured reasons pass through unchanged,
-  # raw reasons get wrapped — so we never flatten an error to an opaque string.
+  # the LiveView renders an actionable message. The structured half of
+  # `beamtalk_repl_ops:render(:error, reason)` is the workspace's own wrapper
+  # (`ensure_structured_error/1`) — already structured reasons pass through
+  # unchanged, raw reasons get wrapped — so we never flatten an error to an
+  # opaque string. The raw-reason path goes away as the direct calls that
+  # produce them migrate to the operation layer (BT-5202..BT-5205).
   defp structure_error(reason) do
-    case rpc(:beamtalk_repl_errors, :ensure_structured_error, [reason]) do
-      {:badrpc, _} -> reason
-      structured -> structured
+    case rpc(:beamtalk_repl_ops, :render, [:error, reason]) do
+      {structured, msg} when is_binary(msg) and structured != :badrpc -> structured
+      _ -> reason
     end
   end
 
@@ -2431,25 +2341,12 @@ defmodule BtAttach.Workspace do
     end
   end
 
-  # Build the `inspect` request as a plain map, decode it on the workspace node
-  # (so we don't depend on the protocol record's `.hrl`), then dispatch through
-  # the term-returning op layer. `dispatch/4` returns the `{:inspect, _}` term
+  # Dispatch `inspect` through the op layer. `request/3` returns the `{:inspect, _}` term
   # directly — JSON encoding (`encode/2`) is never invoked, so the fields stay
   # live terms with their messageable pids intact.
   defp dispatch_inspect(pid_str) do
-    # Flat protocol: `actor` is a top-level key, NOT nested under `"params"`
-    # (see `dispatch_browse/2`).
-    request = %{"op" => "inspect", "actor" => pid_str}
-
-    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
-      {:ok, msg} ->
-        params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
-        # inspect ignores SessionPid; pass self() purely to satisfy dispatch/4.
-        rpc(:beamtalk_repl_ops, :dispatch, ["inspect", params, msg, self()])
-
-      other ->
-        other
-    end
+    # inspect ignores SessionPid; pass self() purely to satisfy request/3.
+    request_op("inspect", %{"actor" => pid_str}, self(), @rpc_timeout)
   end
 
   defp dispatch_pid_stats_result(result) do
@@ -2464,20 +2361,11 @@ defmodule BtAttach.Workspace do
   end
 
   # Build the `pid-stats` request as a flat map (`actor` top-level, mirroring
-  # `dispatch_inspect/1`), decode it on the workspace node, and dispatch through
+  # `dispatch_inspect/1`), and send it with one `request/3` call, which dispatches through
   # the term-returning op layer so the metrics map stays a live term.
   defp dispatch_pid_stats(pid_str) do
-    request = %{"op" => "pid-stats", "actor" => pid_str}
-
-    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
-      {:ok, msg} ->
-        params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
-        # pid-stats ignores SessionPid; pass self() to satisfy dispatch/4.
-        rpc(:beamtalk_repl_ops, :dispatch, ["pid-stats", params, msg, self()])
-
-      other ->
-        other
-    end
+    # pid-stats ignores SessionPid; pass self() to satisfy request/3.
+    request_op("pid-stats", %{"actor" => pid_str}, self(), @rpc_timeout)
   end
 
   # ── internals ─────────────────────────────────────────────────────────────
@@ -2693,11 +2581,23 @@ defmodule BtAttach.Workspace do
     end
   end
 
-  # The workspace decoder accepts a JSON binary; build it with the OTP `:json`
-  # module so we don't pull in a JSON dependency for one small request.
-  defp encode_json(map) do
-    :erlang.iolist_to_binary(:json.encode(map))
+  # The one request entry point (BT-5201): hand the workspace an op name and a
+  # flat params map, get back the `op_result()` term from
+  # `beamtalk_repl_ops:request/3`. The `protocol_msg()` record and the
+  # decode/get_params prelude stay on the workspace node.
+  #
+  # `wire_params/1` first gives the map the shape a decoded WebSocket frame has
+  # (binary keys; atoms, `nil` included, as the strings JSON would carry: `nil` is
+  # the string `"nil"`, so callers omit an absent param rather than pass `nil`), with
+  # the OTP `:json` module, so a handler cannot tell this caller from the
+  # WebSocket. The result is returned verbatim, `{:badrpc, _}` included.
+  defp request_op(op, params, session_pid, timeout)
+       when is_binary(op) and is_map(params) and is_pid(session_pid) do
+    rpc(:beamtalk_repl_ops, :request, [op, wire_params(params), session_pid], timeout)
   end
+
+  defp wire_params(params),
+    do: params |> :json.encode() |> :erlang.iolist_to_binary() |> :json.decode()
 
   defp rpc(mod, fun, args, timeout \\ @rpc_timeout) do
     erpc(mod, fun, args, timeout, true)

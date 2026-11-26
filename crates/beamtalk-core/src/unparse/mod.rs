@@ -83,7 +83,7 @@ pub fn unparse_module(module: &Module) -> String {
 
 /// Unparses a [`MethodDefinition`] to source text.
 ///
-/// Emits leading comments (`//` / `/* */`), doc comment (`///`), the method
+/// Emits leading comments (`//`), doc comment (`///`), the method
 /// signature, and the method body. This is used by `extract_method_source` to
 /// produce `CompiledMethod.source` that includes comments and works for
 /// synthesized methods.

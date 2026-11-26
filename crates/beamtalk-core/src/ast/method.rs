@@ -216,7 +216,7 @@ pub struct MethodDefinition {
     /// `@expect category` directive itself (for stale warnings). The
     /// optional reason string is included in stale warnings for context.
     pub expect: Option<(Vec<ExpectCategory>, Option<EcoString>, Span)>,
-    /// Non-doc comments (`//` and `/* */`) appearing before this method.
+    /// Non-doc comments (`//`) appearing before this method.
     pub comments: CommentAttachment,
     /// Doc comment attached to this method (`///` lines).
     pub doc_comment: Option<String>,

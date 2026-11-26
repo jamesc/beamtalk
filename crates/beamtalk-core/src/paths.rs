@@ -193,6 +193,43 @@ pub fn canonicalize_utf8(path: impl AsRef<Utf8Path>) -> std::io::Result<Utf8Path
     })
 }
 
+/// `canonicalize`, extended to paths that do not exist yet: the longest
+/// existing prefix is canonicalized and the missing tail applied to it one
+/// component at a time, re-resolving every component that exists (a `..` can
+/// lead back into existing directories and their symlinks). Paths come back in
+/// the [`canonicalize`] spelling (no `\\?\` prefix). `None` when no prefix
+/// resolves.
+#[must_use]
+pub fn canonicalize_lenient(path: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let components: Vec<Component<'_>> = path.components().collect();
+    for split in (1..=components.len()).rev() {
+        let prefix: PathBuf = components[..split].iter().collect();
+        let Ok(mut resolved) = canonicalize(&prefix) else {
+            continue;
+        };
+        for component in &components[split..] {
+            match component {
+                Component::Normal(name) => {
+                    resolved.push(name);
+                    // A `..` can lead the tail back into existing directories,
+                    // whose symlinks must be resolved too.
+                    if let Ok(real) = canonicalize(&resolved) {
+                        resolved = real;
+                    }
+                }
+                Component::ParentDir => {
+                    resolved.pop();
+                }
+                Component::CurDir => {}
+                Component::Prefix(_) | Component::RootDir => return None,
+            }
+        }
+        return Some(resolved);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

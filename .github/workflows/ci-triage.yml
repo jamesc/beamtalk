@@ -19,7 +19,8 @@ on:
   workflow_run:
     # "CI (all platforms)" is ci-platforms.yml (BT-4209): the scheduled macOS/Windows/
     # desktop run. Its schedule runs report head_branch main with event `schedule`, so
-    # they pass the guard below; its labelled PR runs have event `pull_request` and do
+    # they pass the guard below, as does its push-to-main cache-warming run
+    # (BT-5273); its labelled PR runs have event `pull_request` and do
     # not. "Nightly Coverage" (coverage.yml) and "Corpus Tier" (corpus.yml) moved out
     # of CI in BT-4609; their main runs pass the same guard. If any of these
     # workflows is renamed, update this list.

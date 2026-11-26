@@ -1,7 +1,7 @@
 # ADR 0039: Syntax Pragmatism vs Smalltalk
 
 ## Status
-Implemented (2026-02-24)
+Implemented (2026-02-24). Amended 2026-11-26: block comments (`/* */`) were removed from decision 1 (BT-5229); see the amendment note under Decision 1.
 
 ## Context
 
@@ -29,7 +29,7 @@ These Smalltalk features are preserved without change:
 
 Beamtalk departs from Smalltalk-80 in the following areas. Each departure follows a consistent principle: **where Smalltalk convention conflicts with universal developer expectations, choose pragmatism.**
 
-### 1. Comments: `"..."` → `//` and `/* */`
+### 1. Comments: `"..."` → `//`
 
 **Smalltalk-80:**
 ```smalltalk
@@ -42,17 +42,17 @@ count := 0.  "inline comment"
 // This is a comment
 count := 0  // inline comment
 
-/*
-  Multi-line comment
-  for longer explanations
-*/
+// For longer explanations,
+// start each line with `//`.
 ```
 
 **Rationale:**
 - `"comment"` is unique to Smalltalk; every other mainstream language uses `//` or `#`
 - Beamtalk uses double-quoted strings (ADR 0023), which would collide with `"..."` comment delimiters — `//` avoids the conflict entirely
 - `//` is universal and matches muscle memory for virtually all developers
-- Block comments (`/* */`) provide multi-line support that Smalltalk lacks
+- A multi-line comment is a run of `//` lines
+
+> **Amendment (2026-11-26, BT-5229): block comments removed.** This decision originally also adopted `/* ... */` block comments. They are gone: no `.bt` file in this repository or the downstream repositories used one, the tutorial already said "There are no multi-line block comments", and they cost more than they gave. They can sit mid-expression and span lines, which makes comment preservation in `beamtalk fmt` hard (BT-5183); an unterminated `/*` swallowed the rest of the file (BT-5182); and the lexer had no nesting depth, so commenting out a region that held a block comment ended early. A `/*` in source is now one diagnostic, "block comments are not supported; use `//` on each line", covering the `/*` to the end of its line. Lexing resumes on the next line, so one stray `/*` does not hide the definitions after it. Doc comments (`///`) and line comments (`//`) are unchanged.
 
 ### 2. Math Precedence: Left-to-Right → Standard (PEMDAS)
 

@@ -3,7 +3,7 @@
 
 //! Lexer and parser recovery and literal edge cases (BT-5182).
 //!
-//! An unterminated string or block comment must not swallow the rest of the
+//! An unterminated string, or a stray `/*`, must not swallow the rest of the
 //! file, top-level recovery must stop at the next definition, and the number,
 //! BOM, CRLF and escape edge cases must lex as one literal (or one named
 //! error). Each test parses whole files the way the compiler and the LSP do,
@@ -208,11 +208,13 @@ fn line_and_column_are_counted_in_the_file_for_multibyte_text() {
 }
 
 // ============================================================================
-// Unterminated block comments
+// Block comments are not supported (BT-5229)
 // ============================================================================
 
+const BLOCK_COMMENT_ERROR: &str = "block comments are not supported; use `//` on each line";
+
 #[test]
-fn unterminated_block_comment_stops_at_next_class_header() {
+fn stray_block_comment_opener_reports_one_diagnostic_and_keeps_later_classes() {
     let source = "Object subclass: A\n  \
                   /* never closed\n  \
                   greet => 1\n\n\
@@ -222,35 +224,48 @@ fn unterminated_block_comment_stops_at_next_class_header() {
     assert_eq!(class_names(&module), ["A", "B"]);
     let errors = errors(&diagnostics);
     assert_eq!(errors.len(), 1, "{errors:?}");
-    assert_eq!(
-        errors[0].message,
-        "unterminated block comment starting at line 2, column 3: add a closing */"
-    );
-    // The error ends before the blank line in front of `B`.
-    let end = source.find("\n\nObject subclass: B").expect("B header");
+    assert_eq!(errors[0].message, BLOCK_COMMENT_ERROR);
+    // The diagnostic covers the `/*` to the end of its own line, no further.
+    let start = source.find("/*").expect("opener");
+    let end = start + "/* never closed".len();
+    assert_eq!(errors[0].span.start() as usize, start);
     assert_eq!(errors[0].span.end() as usize, end);
 }
 
 #[test]
-fn unterminated_block_comment_without_later_header_runs_to_end() {
-    let (_, diagnostics) = parse_file("x := 1\n/* never closed\ny := 2\n");
+fn stray_block_comment_opener_skips_only_its_own_line() {
+    let (module, diagnostics) = parse_file("x := 1\n/* never closed\ny := 2\n");
     let errors = errors(&diagnostics);
     assert_eq!(errors.len(), 1, "{errors:?}");
-    assert!(
-        errors[0]
-            .message
-            .starts_with("unterminated block comment starting at line 2, column 1")
-    );
+    assert_eq!(errors[0].message, BLOCK_COMMENT_ERROR);
+    assert_eq!(module.expressions.len(), 2, "`y := 2` is still parsed");
 }
 
 #[test]
-fn terminated_block_comment_may_contain_a_class_header() {
-    // Commented-out code is not cut short: recovery applies only to a
-    // comment with no `*/`.
+fn closed_block_comment_is_still_a_diagnostic() {
+    let source = "/* note */\nObject subclass: New\n  y => 2\n";
+    let (module, diagnostics) = parse_file(source);
+    let errors = errors(&diagnostics);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert_eq!(errors[0].message, BLOCK_COMMENT_ERROR);
+    assert_eq!(class_names(&module), ["New"]);
+}
+
+#[test]
+fn commented_out_class_in_block_comment_does_not_hide_later_classes() {
     let source = "/*\nObject subclass: Old\n  x => 1\n*/\nObject subclass: New\n  y => 2\n";
     let (module, diagnostics) = parse_file(source);
-    assert!(errors(&diagnostics).is_empty(), "{diagnostics:?}");
-    assert_eq!(class_names(&module), ["New"]);
+    assert!(
+        errors(&diagnostics)
+            .iter()
+            .any(|d| d.message == BLOCK_COMMENT_ERROR),
+        "{diagnostics:?}"
+    );
+    assert!(
+        class_names(&module).contains(&"New"),
+        "{:?}",
+        class_names(&module)
+    );
 }
 
 // ============================================================================
@@ -563,7 +578,8 @@ fn unterminated_string_is_still_incomplete_input() {
     assert!(!is_input_complete("x := \"abc"));
     assert!(!is_input_complete("x := \"abc {y"));
     assert!(!is_input_complete("x := \"abc\\"));
-    assert!(!is_input_complete("x := 1 /* note"));
+    // A stray `/*` is complete but invalid (BT-5229): more input cannot fix it.
+    assert!(is_input_complete("x := 1 /* note"));
     assert!(is_input_complete("x := \"abc\ndef\""));
 }
 

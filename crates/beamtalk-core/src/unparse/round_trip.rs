@@ -172,7 +172,7 @@ fn first_difference(before: &str, after: &str) -> String {
 /// holds still counts.
 ///
 /// Comment text is compared trimmed because the printer normalises the space
-/// after `//` and around a block comment's body; the words themselves must
+/// after `//`; the words themselves must
 /// survive. Line endings are stripped for the same reason (a CRLF file's
 /// comments carry a trailing `\r` in the trivia).
 pub(crate) fn comment_multiset(source: &str) -> Vec<String> {
@@ -182,7 +182,6 @@ pub(crate) fn comment_multiset(source: &str) -> Vec<String> {
             let (marker, text) = match trivia {
                 Trivia::Whitespace(_) => continue,
                 Trivia::LineComment(s) => ("//", s.as_str()),
-                Trivia::BlockComment(s) => ("/*", s.as_str()),
                 Trivia::DocComment(s) => ("///", s.as_str()),
             };
             out.push(normalise_comment(marker, text));
@@ -218,15 +217,10 @@ fn normalise_comment(marker: &str, text: &str) -> String {
     let body = match marker {
         "///" => text.strip_prefix("///").unwrap_or(text),
         "//" => text.strip_prefix("//").unwrap_or(text),
-        _ => {
-            let t = text.strip_prefix("/*").unwrap_or(text);
-            t.strip_suffix("*/").unwrap_or(t)
-        }
+        _ => text,
     };
     let mut out = String::from(marker);
     out.push(' ');
-    // Inner lines of a block comment are compared line by line, trimmed, so
-    // that re-indenting a multi-line block comment is not a change.
     let mut first = true;
     for line in body.trim().lines() {
         if !first {
