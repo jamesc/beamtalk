@@ -2262,7 +2262,7 @@ start_global_actor_child(Name, ChildModule, Args, Retries) ->
                 _ ->
                     Error
             end;
-        {error, #beamtalk_error{kind = timeout}} ->
+        {error, #beamtalk_error{kind = timeout, details = #{name := Name}}} ->
             ?LOG_WARNING(
                 "Supervised #global child ~p (~p) not started: global name registration timed out",
                 [Name, ChildModule],
