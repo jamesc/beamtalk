@@ -234,14 +234,24 @@ connections are not affected. So:
 **macOS and a wildcard interface.** On macOS, an epmd that listens on every
 interface (`RELEASE_DIST_INTERFACE=0.0.0.0` or `::`) does not stop a second,
 loopback-only epmd from starting on the same port; Linux refuses the second
-one. Any non-TLS Erlang node started later on that host (a loopback release,
-a `bin/<name> ping` without the TLS variables, a beamtalk REPL) starts that
-loopback epmd, which then answers every loopback lookup and does not know this
-node. The node keeps running and other hosts still reach it, but the local
-`ping`, `stop`, `rpc` and `remote_console` report it as down until that epmd
-is stopped (`epmd -kill`, with its nodes stopped). On macOS, name a specific
-interface address instead of a wildcard: epmd then holds loopback on that port
-itself, and a second epmd cannot start there.
+one. That second epmd would answer every loopback lookup and not know this
+node, so the local `ping`, `stop`, `rpc` and `remote_console` would report it
+as down (the node keeps running and other hosts still reach it) until it is
+stopped (`epmd -kill`, with its nodes stopped).
+
+The release launcher's own `stop`, `ping`, `rpc` and `remote_console` (both
+`bin/<name>` and `bin/<name>.cmd`) no longer start that second epmd: before
+starting, each asks `epmd -names` whether one already answers on the port
+(`ERL_EPMD_PORT`, default 4369) and, if so, passes `-start_epmd false`. What
+they print does not change: they still report a node that is not running as
+down, whether or not an epmd answers. They start an epmd only when none
+answers, as before. If no `epmd` binary is found beside `erl` or on `PATH`
+they also start one as before.
+
+Anything else that starts a non-TLS Erlang node on that host still can, such as
+a beamtalk REPL or a node you start by hand. On macOS, name a specific
+interface address instead of a wildcard if such nodes run beside this one: epmd
+then holds loopback on that port itself, and a second epmd cannot start there.
 
 ## Docker
 

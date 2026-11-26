@@ -338,6 +338,28 @@ select_distribution() {
     fi
 }
 
+# BT-5264: a client verb (`stop`/`ping`/`rpc`/`remote_console`) must never
+# start an epmd while one already answers on the port. erl starts one with
+# `epmd -daemon` unless told not to, and on macOS (BSD) a second epmd can bind
+# `127.0.0.1` beside a wildcard one on the same port (epmd sets SO_REUSEADDR;
+# Linux refuses with EADDRINUSE). The new loopback epmd then answers every
+# loopback lookup without knowing a node registered with the wildcard epmd, so
+# the client reports the node down until someone runs `epmd -kill`. Prints
+# `-start_epmd false ` when `epmd -names` (which only asks, never starts)
+# reaches one on `ERL_EPMD_PORT`; prints nothing when none answers, or no
+# `epmd` binary is found (then erl starts one, as before). epmd is looked up
+# beside `$ERL` (bundled ERTS, or the installation's own `bin`), then on PATH.
+client_epmd_args() {
+    epmd_bin="$(dirname "$ERL")/epmd"
+    if [ ! -x "$epmd_bin" ]; then
+        epmd_bin=$(command -v epmd 2>/dev/null || true)
+    fi
+    [ -n "$epmd_bin" ] && [ -x "$epmd_bin" ] || return 0
+    if "$epmd_bin" -names >/dev/null 2>&1; then
+        printf -- '-start_epmd false '
+    fi
+}
+
 # The distribution flags of a client node named `$1@RELEASE_HOST` under
 # RELEASE_DISTRIBUTION=tls, single-quoted for `eval`: the same protocol,
 # option file and interface as the node it talks to (BT-5233).
@@ -414,6 +436,7 @@ case "$VERB" in
         else
             DIST_ARGS="-hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}'"
         fi
+        DIST_ARGS="$DIST_ARGS $(client_epmd_args)"
         eval "set -- -noshell $DIST_ARGS $(minimal_boot_args) $(lib_pa_args) \
             -eval \"__RESTORE_HOME_EVAL__.\" \
             -eval \"beamtalk_release_launcher:stop_client_main().\" \
@@ -434,6 +457,7 @@ case "$VERB" in
         else
             DIST_ARGS="-hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}'"
         fi
+        DIST_ARGS="$DIST_ARGS $(client_epmd_args)"
         eval "set -- -noshell $DIST_ARGS $(minimal_boot_args) $(lib_pa_args) \
             -eval \"__RESTORE_HOME_EVAL__.\" \
             -eval \"beamtalk_release_launcher:ping_client_main().\" \
@@ -460,6 +484,7 @@ case "$VERB" in
         else
             DIST_ARGS="-hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}'"
         fi
+        DIST_ARGS="$DIST_ARGS $(client_epmd_args)"
         eval "set -- -noshell $DIST_ARGS $(minimal_boot_args) $(lib_pa_args) \
             -eval \"__RESTORE_HOME_EVAL__, shell:start_interactive({'\$NODE', {shell, start, []}}).\""
         exec "$ERL" "$@"
@@ -513,6 +538,7 @@ case "$VERB" in
         else
             DIST_ARGS="-hidden -sname \"\$SNAME\" -kernel inet_dist_use_interface '{127,0,0,1}'"
         fi
+        DIST_ARGS="$DIST_ARGS $(client_epmd_args)"
         eval "set -- -noshell $DIST_ARGS $(minimal_boot_args) $(lib_pa_args) \
             -eval \"__RESTORE_HOME_EVAL__.\" \
             -eval \"beamtalk_release_launcher:rpc_client_main().\" \
