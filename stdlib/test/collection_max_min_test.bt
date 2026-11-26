@@ -52,3 +52,21 @@ TestCase subclass: CollectionMaxMinTest
     self assert: #("b", "c", "a") min equals: "a"
     self assert: #(#b, #c, #a) max equals: #c
     self assert: #(#b, #c, #a) min equals: #a
+
+  testSymbolsAndNilDoNotShareTheNativePath =>
+    self should: [#(#a, nil) max] raise: #type_error
+    self should: [#(true, false) max] raise: #does_not_understand
+
+  testMoneyFirstMixedWithNumberDispatchesToMoney =>
+    m := self money: 500
+    self should: [(self mixed: m with: 3) max] raise: #does_not_understand
+
+  testFloatsAndTiesKeepFirst =>
+    self assert: #(1.5, 2.5, 0.5) max equals: 2.5
+    self assert: #(1, 1.0) max class equals: Integer
+    self assert: #(1.0, 1) min class equals: Float
+
+  testSingletonAndSetAndInterval =>
+    self assert: #(7) max equals: 7
+    self assert: (((Set new add: 3) add: 9) add: 4) max equals: 9
+    self assert: (1 to: 5) min equals: 1

@@ -118,7 +118,8 @@ Return the smallest element.
 
 Backs `@primitive "min"` on Collection. Raises `empty_collection` on an empty
 collection. Same strategy as `maximum/1`, with a dispatched `<`
-(`Acc < Elem` keeps `Acc`, otherwise `Elem`, as `Number>>min:`).
+(`Acc < Elem` keeps `Acc`, otherwise `Elem`, as `Number>>min:`). On the
+dispatched path a tie takes the later element, as the pairwise fold does.
 """.
 -spec minimum(term()) -> term().
 minimum(Self) ->
@@ -160,9 +161,22 @@ extreme([First | Rest] = List, Op) ->
     end.
 
 -spec native_orderable(term(), list()) -> boolean().
-native_orderable(First, Rest) when is_binary(First) -> lists:all(fun erlang:is_binary/1, Rest);
-native_orderable(First, Rest) when is_atom(First) -> lists:all(fun erlang:is_atom/1, Rest);
-native_orderable(_, _) -> false.
+native_orderable({beamtalk_string, _}, Rest) ->
+    lists:all(fun is_string/1, Rest);
+native_orderable(First, Rest) ->
+    is_symbol(First) andalso lists:all(fun is_symbol/1, Rest).
+
+%% A String is the tagged tuple `{beamtalk_string, Bin}` (BT-4170); a Symbol
+%% is an atom other than the ones that stand for nil and the Booleans.
+-spec is_string(term()) -> boolean().
+is_string({beamtalk_string, _}) -> true;
+is_string(_) -> false.
+
+-spec is_symbol(term()) -> boolean().
+is_symbol(nil) -> false;
+is_symbol(true) -> false;
+is_symbol(false) -> false;
+is_symbol(A) -> is_atom(A).
 
 -spec fold_dispatched(list(), term(), '>' | '<') -> term().
 fold_dispatched([], Acc, _Op) ->
@@ -170,8 +184,23 @@ fold_dispatched([], Acc, _Op) ->
 fold_dispatched([Elem | Rest], Acc, Op) ->
     case beamtalk_message_dispatch:send(Acc, Op, [Elem]) of
         true -> fold_dispatched(Rest, Acc, Op);
-        _ -> fold_dispatched(Rest, Elem, Op)
+        false -> fold_dispatched(Rest, Elem, Op);
+        Other -> raise_not_boolean(Op, Other)
     end.
+
+%% `Number>>max:` uses `ifTrue:ifFalse:`, which rejects a non-Boolean; so does
+%% this fold.
+-spec raise_not_boolean('>' | '<', term()) -> no_return().
+raise_not_boolean(Op, Other) ->
+    Error0 = beamtalk_error:new(type_error, 'Collection'),
+    Error1 = beamtalk_error:with_selector(Error0, Op),
+    Hint = iolist_to_binary([
+        <<"Comparing elements with ">>,
+        atom_to_binary(Op, utf8),
+        <<" must answer a Boolean, got ">>,
+        io_lib:format("~p", [Other])
+    ]),
+    beamtalk_error:raise(beamtalk_error:with_hint(Error1, Hint)).
 
 -doc """
 Return the mean of the elements as a float.
