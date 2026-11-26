@@ -1318,11 +1318,13 @@ defmodule BtAttach.WorkspaceRpcTest do
       mock_rpc(
         decode_asserting(
           fn req -> assert req == %{"op" => "git-diff", "path" => "src/foo.bt"} end,
-          {:value, %{"path" => "src/foo.bt", "worktree" => "w", "staged" => "s"}}
+          {:value,
+           %{"path" => "src/foo.bt", "worktree" => "w", "staged" => "s", "truncated" => true}}
         )
       )
 
-      assert Workspace.git_diff("src/foo.bt") == {:ok, %{worktree: "w", staged: "s"}}
+      assert Workspace.git_diff("src/foo.bt") ==
+               {:ok, %{worktree: "w", staged: "s", truncated: true}}
     end
 
     test "git_diff/1 passes a refused path through, and degrades odd replies" do

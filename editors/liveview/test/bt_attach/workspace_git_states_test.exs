@@ -17,12 +17,15 @@ defmodule BtAttach.WorkspaceGitStatesTest do
   test "every status word beamtalk_git produces is in the closed list" do
     src = File.read!(@git)
 
-    classified = Regex.scan(~r/classify_char\(\$.\) -> (\w+);/, src) |> Enum.map(&Enum.at(&1, 1))
+    # `classify_char($M) -> modified;` clauses, and the fallback clause that ends
+    # in a `.` rather than a `;`.
+    classified =
+      Regex.scan(~r/classify_char\([^)]*\) -> ([a-z]\w*)[;.]/, src) |> Enum.map(&Enum.at(&1, 1))
 
+    # Words assigned straight to a file's `index` / `worktree`. Erlang atoms start
+    # with a lowercase letter, variables (`Index`, `Worktree`) with an uppercase one.
     directly =
-      Regex.scan(~r/(?:index|worktree) => (\w+)/, src)
-      |> Enum.map(&Enum.at(&1, 1))
-      |> Enum.filter(&(&1 in ~w(untracked ignored unmodified)))
+      Regex.scan(~r/(?:index|worktree) => ([a-z]\w*)/, src) |> Enum.map(&Enum.at(&1, 1))
 
     words = Enum.uniq(classified ++ directly)
     assert length(words) >= 8, "the scan found too few status words: #{inspect(words)}"
@@ -45,8 +48,13 @@ defmodule BtAttach.WorkspaceGitStatesTest do
   defp stub_status(file) do
     :meck.new(:erpc, [:unstick, :passthrough])
 
-    :meck.expect(:erpc, :call, fn _n, :beamtalk_repl_ops, :request, _a, _t ->
-      {:value, %{"files" => [file], "branch" => "main", "ahead" => 0, "behind" => 0}}
+    # Only `git-status` is answered; any other call (a stray session reap) passes through.
+    :meck.expect(:erpc, :call, fn
+      _node, :beamtalk_repl_ops, :request, ["git-status" | _], _timeout ->
+        {:value, %{"files" => [file], "branch" => "main", "ahead" => 0, "behind" => 0}}
+
+      node, mod, fun, args, timeout ->
+        :meck.passthrough([node, mod, fun, args, timeout])
     end)
 
     try do

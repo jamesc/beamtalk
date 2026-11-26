@@ -2292,14 +2292,15 @@ defmodule BtAttach.Workspace do
   operation refuses anything else (`{:error, %BeamtalkError{kind:
   :invalid_argument}}`-shaped term). Output is capped at 1 MiB per side.
 
-  Returns `{:ok, %{worktree: binary, staged: binary}}` (diff text passed through
-  verbatim), or `{:error, reason}`.
+  Returns `{:ok, %{worktree: binary, staged: binary, truncated: boolean}}` (diff
+  text passed through verbatim; `truncated` is true when the workspace cut a side
+  at 1 MiB), or `{:error, reason}`.
   """
   def git_diff(path) when is_binary(path) do
     case dispatch_browse("git-diff", %{"path" => path}) do
-      {:value, %{"worktree" => worktree, "staged" => staged}}
+      {:value, %{"worktree" => worktree, "staged" => staged} = diff}
       when is_binary(worktree) and is_binary(staged) ->
-        {:ok, %{worktree: worktree, staged: staged}}
+        {:ok, %{worktree: worktree, staged: staged, truncated: Map.get(diff, "truncated", false)}}
 
       other ->
         git_result_error(other)

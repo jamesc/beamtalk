@@ -27,19 +27,23 @@ A `path` is checked by the shared path policy
 (`beamtalk_repl_paths:check_relative/1`) before git runs: relative, no `..`
 segment, no NUL byte, not the tree root itself (`.`). It is relative to the
 repository root, the form `git-status` reports (the project directory when it
-is the root). `git-stage` and `git-unstage` accept a directory (the Git panel
-stages an untracked directory by the `dir/` path `git-status` reports);
-`git-revert-file` refuses anything but one tracked file, as `git ls-files` answers it
-(a directory in any spelling, deleted or not). It is then passed to git as a literal pathspec, so
-`:(top)`-style magic or a glob in a name cannot reach outside it. A refused
-path is an `invalid_argument` error and git is not started.
+is the root). A refused path is an `invalid_argument` error and git is not
+started.
+
+`git-stage` and `git-unstage` accept a directory (the Git panel stages an
+untracked directory by the `dir/` path `git-status` reports).
+`git-revert-file` refuses anything but one tracked file, as `git ls-files`
+answers it: a directory in any spelling, deleted or not, is refused. Every
+path reaches git as a literal pathspec, so `:(top)`-style magic or a glob in a
+name cannot reach outside it.
 
 The reply is bounded: `git-diff` returns at most 1 MiB per side
 (`truncated` is `true` when it cut), `git-log` at most 500 commits (the
 `limit` it applied is in the reply) and `git-status` at most 5000 files
 (`truncated`). The cap is on the reply, not on what git prints: `beamtalk_git`
-still buffers git's output (bounded in time by its 30 s timeout). Diff text is always valid UTF-8; bytes that are not are read
-as Latin-1. A commit message is at most 64 KiB.
+still buffers git's output (bounded in time by its 30 s timeout). Diff text is
+always valid UTF-8; bytes that are not are read as Latin-1. A commit message
+is at most 64 KiB.
 
 ## Results
 

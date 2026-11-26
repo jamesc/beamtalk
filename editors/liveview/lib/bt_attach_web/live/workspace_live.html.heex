@@ -929,6 +929,9 @@
                     </span>
                   </span>
                 </div>
+                <p :if={@git_status && @git_status[:truncated]} class="muted-note git-truncated">
+                  Showing the first 5000 changed files; the list is cut.
+                </p>
                 <.notice
                   :if={@git_error}
                   variant={:err}
@@ -1017,6 +1020,9 @@
                          mode-only changes. --%>
                     <div :if={@git_diff} class="git-diff-view">
                       <p class="muted-note">{@git_diff_path}</p>
+                      <p :if={@git_diff[:truncated]} class="muted-note git-truncated">
+                        Diff cut at 1 MiB per side; do not act on it as the whole change.
+                      </p>
                       <div :if={@git_diff.staged != ""}>
                         <p class="muted-note">staged</p>
                         <.unified_diff diff={@git_diff.staged} />
