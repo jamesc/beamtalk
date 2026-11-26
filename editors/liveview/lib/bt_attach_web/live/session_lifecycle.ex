@@ -514,7 +514,7 @@ defmodule BtAttachWeb.Live.SessionLifecycle do
         # Drop whichever subscription may have succeeded, then release the
         # session through the registry (which closes it) so we don't leave a
         # dangling subscriber or an orphaned session behind.
-        Workspace.unsubscribe_all(self())
+        ws_client().unsubscribe_all(self())
         force_close(socket.assigns[:token], pid)
 
         assign(socket,
