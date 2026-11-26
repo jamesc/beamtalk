@@ -606,6 +606,23 @@ impl ReplClient {
             .await
     }
 
+    /// Send a `flush` operation: write pending `ChangeLog` entries to disk
+    /// (BT-5204), optionally scoped, optionally applying the destructive tier.
+    ///
+    /// Uses [`send_once`] (no retry): a retry after a dropped connection could
+    /// run a second flush after the first one landed.
+    pub async fn flush(
+        &self,
+        scope: beamtalk_repl_protocol::FlushScope<'_>,
+        confirm_destructive: bool,
+    ) -> Result<ReplResponse, String> {
+        self.send_once_with_timeout(
+            &RequestBuilder::flush(scope, confirm_destructive),
+            eval_io_timeout(),
+        )
+        .await
+    }
+
     /// Send an interrupt operation to cancel a running evaluation.
     ///
     /// The main connection is held by the in-flight eval for its whole

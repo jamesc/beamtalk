@@ -78,10 +78,4 @@ fn repl_protocol_doc_lists_every_op_in_the_table() {
             );
         }
     }
-
-    // The `info` op was documented but never existed on the server.
-    assert!(
-        !table.iter().any(|e| e["op"] == "info"),
-        "`info` is not a server op"
-    );
 }

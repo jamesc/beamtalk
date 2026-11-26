@@ -367,6 +367,7 @@ set. A pending `'remove-class'` entry left out of the applied set because
 -include("beamtalk_workspace_flush.hrl").
 
 -export([
+    is_kind_filter/1,
     flush/0,
     flush/1,
     %% ADR 0113 Phase 2: `flush/2` threads the `confirmDestructive` filter
@@ -682,33 +683,42 @@ do_flush(Filter, ConfirmDestructive) ->
     end.
 
 -spec filter_entries([term()], filter()) -> [term()].
+-doc """
+Whether the symbol `Sel` given to `flush/1,2` selects ChangeEntries by kind
+(`'new-class'`, `'remove-method'`, `'remove-class'`, `'rename-class'`,
+`'rename-method'`) rather than by method selector. The one definition both
+`filter_entries/2` and the `flush` op's `kind` validation use.
+""".
+-spec is_kind_filter(atom()) -> boolean().
+is_kind_filter(Sel) ->
+    lists:member(Sel, [
+        'new-class', 'remove-method', 'remove-class', 'rename-class', 'rename-method'
+    ]).
+
 filter_entries(Entries, any) ->
     Entries;
 filter_entries(Entries, {class, ClassBin}) ->
     [E || E <- Entries, beamtalk_workspace_changelog:entry_class(E) =:= ClassBin];
-filter_entries(Entries, {selector, Sel}) when
-    Sel =:= 'new-class';
-    Sel =:= 'remove-method';
-    Sel =:= 'remove-class';
-    Sel =:= 'rename-class';
-    Sel =:= 'rename-method'
-->
-    %% `'new-class'`/`'remove-class'`/`'rename-class'` entries carry
-    %% selector: null; a `'remove-method'`/`'rename-method'` entry carries
-    %% the real removed/new selector (e.g. #foo), not null. Either way,
-    %% filtering on the bare marker atom is meant to mean "all removals/
-    %% additions/renames of this kind", not a literal selector match —
-    %% matching on entry_selector/1 would return nothing for the
-    %% null-selector kinds and would only ever match a method coincidentally
-    %% named e.g. #'remove-method' for the others, so kind-matching is what
-    %% this filter form is actually for. Unlike `instance`/`class` (also
-    %% valid kind() values, but ambiguous with real getter selectors of the
-    %% same name), none of these five collides with a plausible method
-    %% selector, so redirecting them to kind-matching is unambiguous.
-    [E || E <- Entries, beamtalk_workspace_changelog:entry_kind(E) =:= Sel];
 filter_entries(Entries, {selector, Sel}) ->
-    SelBin = atom_to_binary(Sel, utf8),
-    [E || E <- Entries, beamtalk_workspace_changelog:entry_selector(E) =:= SelBin];
+    case is_kind_filter(Sel) of
+        true ->
+            %% `'new-class'`/`'remove-class'`/`'rename-class'` entries carry
+            %% selector: null; a `'remove-method'`/`'rename-method'` entry carries
+            %% the real removed/new selector (e.g. #foo), not null. Either way,
+            %% filtering on the bare marker atom is meant to mean "all removals/
+            %% additions/renames of this kind", not a literal selector match —
+            %% matching on entry_selector/1 would return nothing for the
+            %% null-selector kinds and would only ever match a method coincidentally
+            %% named e.g. #'remove-method' for the others, so kind-matching is what
+            %% this filter form is actually for. Unlike `instance`/`class` (also
+            %% valid kind() values, but ambiguous with real getter selectors of the
+            %% same name), none of these five collides with a plausible method
+            %% selector, so redirecting them to kind-matching is unambiguous.
+            [E || E <- Entries, beamtalk_workspace_changelog:entry_kind(E) =:= Sel];
+        false ->
+            SelBin = atom_to_binary(Sel, utf8),
+            [E || E <- Entries, beamtalk_workspace_changelog:entry_selector(E) =:= SelBin]
+    end;
 filter_entries(Entries, {file, FileBin}) ->
     [E || E <- Entries, beamtalk_workspace_changelog:entry_source_file(E) =:= FileBin];
 filter_entries(Entries, {kinds, EntryKinds, AuthorKinds}) ->

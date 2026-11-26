@@ -1028,96 +1028,185 @@ defmodule BtAttach.WorkspaceRpcTest do
       assert Workspace.load_source(pid, "x") == {:error, {:unexpected_reply, :odd}}
     end
 
-    test "flush/0 returns the FlushResult summary on success" do
-      mock_rpc(%{{:beamtalk_workspace_flush, :flush} => {:ok, %{flushed: 1}}})
-      assert Workspace.flush() == {:ok, %{flushed: 1}}
+    test "flush/0 dispatches `flush` with no params and returns the summary" do
+      summary = %{"flushed" => 1, "files" => ["src/a.bt"], "skipped" => [], "conflicts" => []}
+
+      mock_rpc(
+        decode_asserting(
+          fn request -> assert request == %{"op" => "flush"} end,
+          {:value, summary}
+        )
+      )
+
+      assert Workspace.flush() == {:ok, summary}
     end
 
-    test "flush/0 structures a raw error" do
-      mock_rpc(%{
-        {:beamtalk_workspace_flush, :flush} => {:error, :disk_full},
-        {:beamtalk_repl_ops, :render} => {{:beamtalk_error, :disk_full}, "structured"}
-      })
+    test "flush/1 sends the scope and the confirmation as the operation's own params" do
+      mock_rpc(
+        decode_asserting(
+          fn request ->
+            assert request == %{
+                     "op" => "flush",
+                     "class" => "Counter",
+                     "confirm_destructive" => true
+                   }
+          end,
+          {:value, %{"flushed" => 0}}
+        )
+      )
 
-      assert Workspace.flush() == {:error, {:beamtalk_error, :disk_full}}
+      assert {:ok, _} = Workspace.flush(class: "Counter", confirm_destructive: true)
+
+      mock_rpc(
+        decode_asserting(
+          fn request -> assert request == %{"op" => "flush", "kind" => "new-class"} end,
+          {:value, %{}}
+        )
+      )
+
+      assert {:ok, _} = Workspace.flush(kind: "new-class")
+
+      mock_rpc(
+        decode_asserting(
+          fn request -> assert request == %{"op" => "flush", "file" => "src/a.bt"} end,
+          {:value, %{}}
+        )
+      )
+
+      assert {:ok, _} = Workspace.flush(file: "src/a.bt")
+    end
+
+    test "flush/0 passes a structured error through" do
+      err = {:beamtalk_error, :disk_full}
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, err}))
+
+      assert Workspace.flush() == {:error, err}
     end
 
     test "flush/0 surfaces a badrpc as unreachable" do
-      mock_rpc(%{{:beamtalk_workspace_flush, :flush} => {:badrpc, :mock_scripted}})
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
       assert Workspace.flush() == {:error, {:unreachable, :mock_scripted}}
     end
 
     test "flush/0 degrades an unrecognised reply to unexpected_reply" do
-      mock_rpc(%{{:beamtalk_workspace_flush, :flush} => :odd})
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
       assert Workspace.flush() == {:error, {:unexpected_reply, :odd}}
     end
   end
 
   describe "change_history/0 and reload_findings/0" do
-    test "change_history/0 reduces raw entries to pending rows" do
+    test "change_history/0 dispatches `changes` and reduces the entries to pending rows" do
       entries = [
         %{
-          className: :Counter,
-          selector: :increment,
-          kind: :instance,
-          intent: :durable,
-          flushable: true,
-          flushed: false,
-          authorKind: :human,
-          active: true,
-          shadowed: false,
-          clean: false,
-          diff: nil,
-          side: :instance
-        }
+          "seq" => 1,
+          "className" => "Counter",
+          "selector" => "increment",
+          "kind" => "instance",
+          "intent" => "durable",
+          "flushable" => true,
+          "flushed" => false,
+          "authorKind" => "human",
+          "active" => true,
+          "shadowed" => false,
+          "clean" => false,
+          "diff" => :null,
+          "side" => "instance",
+          "oldClass" => :null
+        },
+        # Flushed (inactive), shadowed and clean entries stay out of the pane.
+        %{"className" => "Counter", "selector" => "gone", "active" => false},
+        %{"className" => "Counter", "selector" => "old", "active" => true, "shadowed" => true},
+        %{"className" => "Counter", "selector" => "same", "active" => true, "clean" => true}
       ]
 
-      mock_rpc(%{{:beamtalk_workspace_changelog_views, :change_entries} => entries})
-      assert [%{selector: "increment"}] = Workspace.change_history()
+      mock_rpc(
+        decode_asserting(
+          fn request -> assert request == %{"op" => "changes"} end,
+          {:value, %{"entries" => entries}}
+        )
+      )
+
+      assert [row] = Workspace.change_history()
+
+      assert %{
+               class: "Counter",
+               selector: "increment",
+               kind: "instance",
+               side: "instance",
+               diff: nil,
+               flushable: true,
+               author_kind: "human"
+             } = row
+    end
+
+    test "change_history/0 reads a null selector (a new-class entry) as the class placeholder" do
+      entry = %{
+        "className" => "Greeter",
+        "selector" => :null,
+        "kind" => "new-class",
+        "side" => :null,
+        "active" => true
+      }
+
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:value, %{"entries" => [entry]}}))
+
+      assert [%{selector: "(class)", side: nil}] = Workspace.change_history()
     end
 
     test "change_history/0 surfaces a badrpc as unreachable" do
-      mock_rpc(%{
-        {:beamtalk_workspace_changelog_views, :change_entries} => {:badrpc, :mock_scripted}
-      })
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
 
       assert Workspace.change_history() == {:error, {:unreachable, :mock_scripted}}
     end
 
+    test "change_history/0 passes an operation error through" do
+      err = {:beamtalk_error, :no_changelog}
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, err}))
+      assert Workspace.change_history() == {:error, err}
+    end
+
     test "change_history/0 degrades an unrecognised reply to unexpected_reply" do
-      mock_rpc(%{{:beamtalk_workspace_changelog_views, :change_entries} => :odd})
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
       assert Workspace.change_history() == {:error, {:unexpected_reply, :odd}}
     end
 
-    test "reload_findings/0 normalizes each finding + its sites" do
+    test "reload_findings/0 dispatches `reload-findings` and normalizes each finding + its sites" do
       finding = %{
-        owner: :Greeter,
-        changed_class: :Counter,
-        selector: :greet,
-        classification: :breaking,
-        severity: :error,
-        category: :undefined,
-        message: "Counter no longer responds to #foo",
-        note: "see migration guide",
-        sites: [%{method: :greet, line: 12}]
+        "owner" => "Greeter",
+        "changedClass" => "Counter",
+        "selector" => "greet",
+        "classification" => "breaking",
+        "severity" => "error",
+        "category" => :null,
+        "message" => "Counter no longer responds to #foo",
+        "note" => "see migration guide",
+        "sites" => [%{"method" => "greet", "line" => 12}],
+        "start" => 0,
+        "end" => 4
       }
 
-      mock_rpc(%{{:beamtalk_workspace_findings_store, :all} => [finding]})
+      mock_rpc(
+        decode_asserting(
+          fn request -> assert request == %{"op" => "reload-findings"} end,
+          {:value, %{"findings" => [finding]}}
+        )
+      )
 
       assert {:ok, [normalized]} = Workspace.reload_findings()
       assert normalized.owner == "Greeter"
+      assert normalized.changed_class == "Counter"
       assert normalized.category == nil
       assert normalized.note == "see migration guide"
       assert normalized.sites == [%{method: "greet", line: 12}]
     end
 
     test "reload_findings/0 surfaces a badrpc as unreachable" do
-      mock_rpc(%{{:beamtalk_workspace_findings_store, :all} => {:badrpc, :mock_scripted}})
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
       assert Workspace.reload_findings() == {:error, {:unreachable, :mock_scripted}}
     end
 
     test "reload_findings/0 degrades an unrecognised reply to unexpected_reply" do
-      mock_rpc(%{{:beamtalk_workspace_findings_store, :all} => :odd})
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
       assert Workspace.reload_findings() == {:error, {:unexpected_reply, :odd}}
     end
 
@@ -1248,17 +1337,72 @@ defmodule BtAttach.WorkspaceRpcTest do
     end
   end
 
-  describe "autoflush/0 (BT-2590, ADR 0082 Phase 4)" do
-    test "reads the workspace's boolean autoflush setting" do
-      mock_rpc(%{{:beamtalk_workspace_meta, :get_setting} => true})
+  describe "info/0 and autoflush/0 (BT-2590, BT-5204)" do
+    @info %{
+      "version" => %{
+        "runtime_version" => "1.2.3",
+        "protocol_version" => "2.0",
+        "otp_release" => "27",
+        "erts_version" => "15",
+        "future_field" => "kept"
+      },
+      "node" => "workspace@host",
+      "workspace_id" => "ws-1",
+      "settings" => %{"autoflush" => true}
+    }
+
+    test "info/0 dispatches `info` and keeps the version report's atom keys" do
+      mock_rpc(
+        decode_asserting(
+          fn request -> assert request == %{"op" => "info"} end,
+          {:value, @info}
+        )
+      )
+
+      assert {:ok, info} = Workspace.info()
+
+      assert info == %{
+               version: %{
+                 # A key a newer workspace adds is kept, never turned into an atom.
+                 "future_field" => "kept",
+                 runtime_version: "1.2.3",
+                 protocol_version: "2.0",
+                 otp_release: "27",
+                 erts_version: "15"
+               },
+               node: "workspace@host",
+               workspace_id: "ws-1",
+               settings: %{autoflush: true}
+             }
+    end
+
+    test "info/0 surfaces a badrpc, an operation error and an odd reply" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
+      assert Workspace.info() == {:error, {:unreachable, :mock_scripted}}
+
+      err = {:beamtalk_error, :unknown_op}
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, err}))
+      assert Workspace.info() == {:error, err}
+
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
+      assert Workspace.info() == {:error, {:unexpected_reply, :odd}}
+    end
+
+    test "autoflush/0 reads the boolean setting from `info`" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:value, @info}))
       assert Workspace.autoflush() == true
 
-      mock_rpc(%{{:beamtalk_workspace_meta, :get_setting} => false})
+      off = put_in(@info, ["settings", "autoflush"], false)
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:value, off}))
       assert Workspace.autoflush() == false
     end
 
-    test "a non-boolean reply defaults to false rather than crashing" do
-      mock_rpc(%{{:beamtalk_workspace_meta, :get_setting} => :not_a_boolean})
+    test "a non-boolean setting, an error or an unreachable workspace defaults autoflush to false" do
+      odd = put_in(@info, ["settings", "autoflush"], "yes")
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:value, odd}))
+      assert Workspace.autoflush() == false
+
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:badrpc, :mock_scripted}))
       assert Workspace.autoflush() == false
     end
   end

@@ -29,6 +29,20 @@ pub fn next_msg_id() -> String {
 #[derive(Debug)]
 pub struct RequestBuilder;
 
+/// What a `flush` request is scoped to (BT-5204). The operation takes at most
+/// one of `class`, `file` and `kind`; this enum makes sending two impossible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlushScope<'a> {
+    /// Every pending durable change.
+    All,
+    /// One class's changes (`remove-class` entries match by class name).
+    Class(&'a str),
+    /// One source file's changes.
+    File(&'a str),
+    /// One `ChangeEntry` kind, such as `new-class`.
+    Kind(&'a str),
+}
+
 impl RequestBuilder {
     // --- Core operations ---
 
@@ -290,6 +304,45 @@ impl RequestBuilder {
             "source": source,
             "path": path
         })
+    }
+
+    // --- Workspace state operations (BT-5204) ---
+
+    /// Build a `flush` request: write pending `ChangeLog` entries to disk.
+    ///
+    /// `scope` narrows it to one class, source file or `ChangeEntry` kind (at
+    /// most one, by construction). `confirm_destructive` is sent only when
+    /// `true`: it is the explicit confirmation that also applies Tier 2
+    /// (`remove-class`, `rename-class`, `rename-method`) entries, and the
+    /// operation reads anything but a boolean `true` as "withhold them", so
+    /// it is never implied by omission.
+    #[must_use]
+    pub fn flush(scope: FlushScope<'_>, confirm_destructive: bool) -> serde_json::Value {
+        let mut req = Self::no_param("flush");
+        match scope {
+            FlushScope::All => {}
+            FlushScope::Class(class) => req["class"] = class.into(),
+            FlushScope::File(file) => req["file"] = file.into(),
+            FlushScope::Kind(kind) => req["kind"] = kind.into(),
+        }
+        if confirm_destructive {
+            req["confirm_destructive"] = true.into();
+        }
+        req
+    }
+
+    /// Build a `changes` request: every `ChangeLog` entry, with the flags a
+    /// client uses to pick the pending view.
+    #[must_use]
+    pub fn changes() -> serde_json::Value {
+        Self::no_param("changes")
+    }
+
+    /// Build an `info` request: version, node, workspace id and the settings
+    /// a client needs.
+    #[must_use]
+    pub fn info() -> serde_json::Value {
+        Self::no_param("info")
     }
 
     // --- Test operations ---
@@ -786,6 +839,44 @@ mod tests {
     }
 
     #[test]
+    fn flush_unscoped_sends_no_scope_and_no_confirmation() {
+        let req = RequestBuilder::flush(FlushScope::All, false);
+        assert_eq!(req["op"], "flush");
+        for key in ["class", "file", "kind", "confirm_destructive"] {
+            assert!(req.get(key).is_none(), "{key} must be absent: {req}");
+        }
+    }
+
+    #[test]
+    fn flush_sends_exactly_one_scope() {
+        let req = RequestBuilder::flush(FlushScope::Class("Counter"), false);
+        assert_eq!(req["class"], "Counter");
+        assert!(req.get("file").is_none() && req.get("kind").is_none());
+
+        let req = RequestBuilder::flush(FlushScope::File("src/counter.bt"), false);
+        assert_eq!(req["file"], "src/counter.bt");
+        assert!(req.get("class").is_none() && req.get("kind").is_none());
+
+        let req = RequestBuilder::flush(FlushScope::Kind("new-class"), false);
+        assert_eq!(req["kind"], "new-class");
+        assert!(req.get("class").is_none() && req.get("file").is_none());
+    }
+
+    #[test]
+    fn flush_confirmation_is_a_json_boolean_sent_only_when_true() {
+        let req = RequestBuilder::flush(FlushScope::Class("Counter"), true);
+        assert_eq!(req["confirm_destructive"], serde_json::Value::Bool(true));
+        let req = RequestBuilder::flush(FlushScope::All, true);
+        assert_eq!(req["confirm_destructive"], serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn changes_and_info_requests_carry_no_params() {
+        assert_eq!(RequestBuilder::changes()["op"], "changes");
+        assert_eq!(RequestBuilder::info()["op"], "info");
+    }
+
+    #[test]
     fn unload_request_has_correct_shape() {
         let req = RequestBuilder::unload("bt@counter");
         assert_eq!(req["op"], "unload");
@@ -1067,6 +1158,9 @@ mod tests {
             RequestBuilder::unload("m"),
             RequestBuilder::save_method("C", "s", "1"),
             RequestBuilder::save_class("Object subclass: C", "src/c.bt"),
+            RequestBuilder::flush(FlushScope::Class("C"), true),
+            RequestBuilder::changes(),
+            RequestBuilder::info(),
             RequestBuilder::test_class("C"),
             RequestBuilder::test_file("f"),
             RequestBuilder::test_all(),
@@ -1212,10 +1306,10 @@ mod tests {
 
     #[test]
     fn removed_ops_have_no_builder() {
-        // `info` was a builder for an op the server never had; `test` ignores a
-        // `method` filter. Neither builder exists any more (BT-4673).
+        // `test` ignores a `method` filter, so no builder sends one (BT-4673).
+        // (An `info` builder used to be here for an op the server never had;
+        // the op exists since BT-5204.)
         for req in every_builder_request() {
-            assert_ne!(req["op"], "info");
             assert!(req.get("method").is_none());
         }
     }

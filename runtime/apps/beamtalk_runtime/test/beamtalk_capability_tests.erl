@@ -70,6 +70,7 @@ workspace_ops() ->
         <<"save-native-source">>,
         <<"save-section">>,
         <<"revert-method">>,
+        <<"flush">>,
         flush,
         'flush:',
         'flush:confirmDestructive:',

@@ -26,6 +26,7 @@ Op handlers are delegated to domain-specific modules:
 - beamtalk_repl_ops_eval: eval, clear, bindings
 - beamtalk_repl_ops_load: load-source, load-project, unload
 - beamtalk_repl_ops_edit: save-method, save-class, revert-method, reload-file
+- beamtalk_repl_ops_state: flush, changes, info
 - beamtalk_repl_ops_actors: actors, inspect, kill, interrupt
 - beamtalk_repl_ops_session: sessions, close, health, shutdown
 - beamtalk_repl_ops_dev: complete, describe, show-codegen

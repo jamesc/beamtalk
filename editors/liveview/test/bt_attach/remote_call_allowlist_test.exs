@@ -60,13 +60,6 @@ defmodule BtAttach.RemoteCallAllowlistTest do
     {:beamtalk_repl_ops, :session_alive, :operation_layer, :permanent},
     {:beamtalk_repl_ops, :session_count, :operation_layer, :permanent},
 
-    # Workspace state.
-    {:beamtalk_workspace_flush, :flush, :capability, "BT-5204"},
-    {:beamtalk_workspace_changelog_views, :change_entries, :capability, "BT-5204"},
-    {:beamtalk_workspace_findings_store, :all, :capability, "BT-5204"},
-    {:beamtalk_workspace_meta, :get_setting, :capability, "BT-5204"},
-    {:beamtalk_version, :get, :capability, "BT-5204"},
-
     # Git and process navigation.
     {:beamtalk_git, :git_status, :capability, "BT-5205"},
     {:beamtalk_git, :git_diff, :capability, "BT-5205"},

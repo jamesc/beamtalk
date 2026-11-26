@@ -22,7 +22,7 @@ defmodule BtAttach.FacadeTest do
     def kill_actor(term), do: record({:kill, term}) && :ok
     def actors, do: record({:actors}) && {:ok, []}
     def sessions, do: record({:sessions}) && {:ok, [%{id: "s1"}]}
-    def flush, do: record({:flush}) && {:ok, %{}}
+    def flush(opts \\ []), do: record({:flush, opts}) && {:ok, %{}}
     def save_method(c, s, src), do: record({:save, c, s, src}) && {:ok, c}
     def load_source(pid, src), do: record({:load_source, pid, src}) && {:ok, [], []}
 
@@ -158,6 +158,7 @@ defmodule BtAttach.FacadeTest do
 
     # BT-2590: the autoflush flag read returns a bare boolean (not a tuple).
     def autoflush, do: record({:autoflush}) && true
+    def info, do: record({:info}) && {:ok, %{node: "ws@host"}}
   end
 
   setup do
@@ -250,9 +251,11 @@ defmodule BtAttach.FacadeTest do
     end
 
     test "a catalog op with no UI binding is unsupported, not a dist call" do
-      # `info` is in the vocabulary (so RBAC can reason about it) but has no route
-      # yet — it must not silently no-op or hit the client.
-      assert Facade.dispatch(:info, %{}) == {:error, {:unsupported_op, :info}}
+      # `subscribe_actors` is in the vocabulary (so RBAC can reason about it) but
+      # has no route yet — it must not silently no-op or hit the client.
+      assert Facade.dispatch(:subscribe_actors, %{}) ==
+               {:error, {:unsupported_op, :subscribe_actors}}
+
       assert RecordingClient.calls() == []
     end
 
@@ -542,6 +545,23 @@ defmodule BtAttach.FacadeTest do
     test "git_log defaults to 20 commits when count is omitted" do
       assert Facade.dispatch(:git_log, %{}) == {:ok, []}
       assert {:git_log, 20} in RecordingClient.calls()
+    end
+
+    test "flush forwards its scope and confirmation as client opts, and nothing else (BT-5204)" do
+      assert Facade.dispatch(:flush, %{class: "Foo", confirm_destructive: true, junk: 1}) ==
+               {:ok, %{}}
+
+      flushes = fn -> for {:flush, opts} <- RecordingClient.calls(), do: Enum.sort(opts) end
+      assert flushes.() == [[class: "Foo", confirm_destructive: true]]
+
+      assert Facade.dispatch(:flush, %{}) == {:ok, %{}}
+      assert Enum.sort(flushes.()) == [[], [class: "Foo", confirm_destructive: true]]
+    end
+
+    test "info is implemented by dispatch and no longer reserved (BT-5204)" do
+      assert Facade.dispatch(:info, %{}) == {:ok, %{node: "ws@host"}}
+      assert {:info} in RecordingClient.calls()
+      refute :info in Facade.reserved_ops()
     end
 
     test "autoflush routes to the client and returns the bare boolean (BT-2590)" do
