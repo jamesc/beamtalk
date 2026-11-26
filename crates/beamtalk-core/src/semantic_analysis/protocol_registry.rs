@@ -703,9 +703,9 @@ impl ProtocolRegistry {
     /// `extending:` parents) unless the module declares it or the registry
     /// already holds it. `seeded_only` records the names for
     /// [`Self::is_seeded_only`]; a name reached again with `seeded_only`
-    /// false (an `extending:` parent) is no longer seeded-only. In a
-    /// seeded-only chain a name held by a hierarchy class that is not a
-    /// protocol's synthetic entry keeps that class (as in `add_pre_loaded`).
+    /// false (an `extending:` parent) is no longer seeded-only. In either chain a
+    /// name held by a hierarchy class that is not a protocol's synthetic entry
+    /// keeps that class (as in `add_pre_loaded`).
     fn seed_chain(
         &mut self,
         pending: &mut Vec<EcoString>,
@@ -724,10 +724,9 @@ impl ProtocolRegistry {
                 }
                 continue;
             }
-            if seeded_only
-                && hierarchy
-                    .get_class(&parent)
-                    .is_some_and(|ci| ci.superclass.as_deref() != Some("Protocol"))
+            if hierarchy
+                .get_class(&parent)
+                .is_some_and(|ci| ci.superclass.as_deref() != Some("Protocol"))
             {
                 continue;
             }

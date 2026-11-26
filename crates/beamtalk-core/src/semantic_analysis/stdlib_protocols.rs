@@ -21,7 +21,8 @@
 //! `ProtocolRegistry` so bounds and annotations naming them are checked
 //! (BT-5338).
 //!
-//! The provision-bearing ones are the *last* tier of `uses:` resolution: the current module's own
+//! The provision-bearing ones are the *last* tier of `uses:` resolution: the
+//! current module's own
 //! protocols win, then every protocol carried in from elsewhere
 //! (`external_protocols` — another file of the package, a dependency), and
 //! only then the stdlib's. So a package that declares its own `Comparable`

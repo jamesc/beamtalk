@@ -666,8 +666,8 @@ pub(super) fn generate_alias_sources_section(code: &mut String, alias_sources: &
 /// protocols a user package flattens through `uses: Enumerable` /
 /// `uses: Comparable` are exactly the ones in `stdlib/src/` — the generator
 /// only decides *which* files carry them (every file declaring a protocol, so
-/// requirements-only ones like `Printable` are seen by the type checker). `semantic_analysis::stdlib_protocols`
-/// parses them (once) into the definitions and source map every compile path
+/// requirements-only ones like `Printable` are seen by the type checker).
+/// `semantic_analysis::stdlib_protocols` parses them (once) into the definitions and source map every compile path
 /// falls back to after its own carried protocols.
 pub(super) fn generate_protocol_files_section(code: &mut String, file_names: &[String]) {
     code.push_str(
