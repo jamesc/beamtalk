@@ -629,6 +629,13 @@ pub struct TypeChecker {
     /// may run at any later point, so such a local is never treated as a
     /// raw `Binary` — see [`binary_string_compare::block_written_locals`].
     pub(super) block_written_locals: std::collections::HashSet<EcoString>,
+    /// BT-5283: the inferred type of every `^expr` visited while checking the
+    /// current method body — early returns, `^` inside blocks (non-local
+    /// return) and inside match arms alike. Each one answers the method, so
+    /// `check_method_body_inner` checks each distinct type against the
+    /// declared return type on its own. Cleared at method entry (and before
+    /// top-level module expressions, whose `^`s are never read).
+    pub(super) collected_returns: Vec<InferredType>,
     /// BT-4636: set while a send's arguments are being inferred, so a block
     /// argument's writes to outer locals are collected in
     /// [`Self::deferred_block_widenings`] and joined into the environment once
@@ -676,6 +683,7 @@ impl TypeChecker {
             discarded_update_off: false,
             known_remote_spans: HashMap::new(),
             block_written_locals: std::collections::HashSet::new(),
+            collected_returns: Vec::new(),
             defer_block_widening: false,
             self_send_epoch: 0,
             in_value_type_body: false,
@@ -706,6 +714,7 @@ impl TypeChecker {
             discarded_update_off: false,
             known_remote_spans: HashMap::new(),
             block_written_locals: std::collections::HashSet::new(),
+            collected_returns: Vec::new(),
             defer_block_widening: false,
             self_send_epoch: 0,
             in_value_type_body: false,
