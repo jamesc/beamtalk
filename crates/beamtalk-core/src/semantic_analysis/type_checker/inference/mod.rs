@@ -43,6 +43,7 @@ mod cascade;
 mod flow;
 mod generics;
 mod literals;
+mod loop_head;
 mod send;
 
 pub use cascade::cascade_drops_update;
@@ -248,6 +249,7 @@ impl TypeChecker {
         self.block_written_locals =
             super::binary_string_compare::block_written_locals(&module.expressions);
         self.collected_returns.clear();
+        self.clear_loop_head_tables();
         let outer_off = std::mem::replace(
             &mut self.discarded_update_off,
             self.skip_module_expression_lint,
@@ -423,6 +425,7 @@ impl TypeChecker {
         self.block_written_locals =
             super::binary_string_compare::block_written_locals(&method.body);
         self.collected_returns.clear();
+        self.clear_loop_head_tables();
         let body_type = self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
         let collected_returns = std::mem::take(&mut self.collected_returns);
         // BT-4235: on the value-type body path a trailing `self.x := v` answers

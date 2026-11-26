@@ -220,24 +220,11 @@ impl TypeChecker {
             let key = EnvKey::local(name.clone());
             let writes: Vec<&BlockWriteWidening> =
                 deferred.iter().filter(|w| w.name == *name).collect();
-            // ADR 0126 §6: the known-remote fact survives only when the
-            // binding and every arm are known-remote; otherwise a stale fact
-            // would describe a value the local may no longer hold.
-            // `node_hint` names the node the local was spawned on, so it is
-            // kept only when the binding and every arm agree on it; otherwise
-            // the fact stays with no hint and the diagnostic says "there".
-            let remote = env.known_remote(&key).and_then(|binding| {
-                let mut node_hint = binding.node_hint;
-                for w in &writes {
-                    let arm = w.remote.as_ref()?;
-                    if arm.node_hint != node_hint {
-                        node_hint = None;
-                    }
-                }
-                Some(
-                    crate::semantic_analysis::type_checker::known_remote::KnownRemote { node_hint },
-                )
-            });
+            // ADR 0126 §6: see `KnownRemote::join`.
+            let remote = crate::semantic_analysis::type_checker::known_remote::KnownRemote::join(
+                env.known_remote(&key),
+                writes.iter().map(|w| w.remote.as_ref()),
+            );
             let mut arms = vec![before.clone()];
             arms.extend(writes.iter().map(|w| w.ty.clone()));
             if arms.iter().skip(1).all(|ty| *ty == before) {
