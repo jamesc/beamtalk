@@ -15,8 +15,8 @@ the unknown-cast fallback, and `handle_info/2` for own `nodedown`, peer
 `handle_info/2` / `handle_cast/2` directly on a state value, so the
 reconnect and reload orderings they check are exact, not timing-dependent.
 
-Shape-skew connect/reload paths (`check_shape_skew_on_connect/3`,
-`check_one_peer_class/5`, `announce_if_skewed/6`) require a two-node setup
+Shape-skew connect/reload paths (`check_shape_skew_on_connect/4`,
+`check_one_peer_class/5`, `announce_if_skewed/7`) require a two-node setup
 and are exercised by `beamtalk_dist_shape_skew_tests`.
 """.
 
@@ -228,12 +228,12 @@ cast_result(Kind, Peer, ClassName) ->
             {ok, #{gen := G}} -> G;
             error -> make_ref()
         end,
-    Tag =
+    Msg =
         case Kind of
-            detected -> skew_detected;
-            cleared -> skew_cleared
+            detected -> {skew_detected, Peer, Gen, next_stamp(), ClassName, none};
+            cleared -> {skew_cleared, Peer, Gen, next_stamp(), ClassName}
         end,
-    gen_server:cast(beamtalk_node_monitor, {Tag, Peer, Gen, next_stamp(), ClassName}).
+    gen_server:cast(beamtalk_node_monitor, Msg).
 
 next_stamp() ->
     N =
@@ -441,22 +441,24 @@ count(Peer, S) ->
     {reply, N, S} = beamtalk_node_monitor:handle_call({skew_count, Peer}, from, S),
     N.
 
-is_current(Peer, Gen, S) ->
-    {reply, Current, S} = beamtalk_node_monitor:handle_call({is_current, Peer, Gen}, from, S),
-    Current.
-
 gen(Peer, S) ->
     #{gen := Gen} = maps:get(Peer, element(4, S)),
     Gen.
 
+%% A state with `Peer` connected, built without `nodeup` so no real checks
+%% are spawned and no `NodeUp` is announced.
 connected(Peer) ->
-    info({nodeup, Peer, []}, beamtalk_node_monitor:initial_state()).
+    setelement(
+        4,
+        beamtalk_node_monitor:initial_state(),
+        #{Peer => beamtalk_node_monitor:peer_entry(make_ref())}
+    ).
 
 %% The fast-reconnect race: connection #1's check finishes after the peer
 %% has dropped and reconnected. Its cast must not touch connection #2's
 %% tally, whichever order the two connections' casts arrive in.
 previous_connection_cast_never_changes_current_tally_test() ->
-    S1 = connected(?GHOST),
+    S1 = info({nodeup, ?GHOST, []}, beamtalk_node_monitor:initial_state()),
     OldGen = gen(?GHOST, S1),
     S2 = info({nodedown, ?GHOST, [{nodedown_reason, disconnect}]}, S1),
     S3 = info({nodeup, ?GHOST, []}, S2),
@@ -465,14 +467,14 @@ previous_connection_cast_never_changes_current_tally_test() ->
     %% Connection #2's check clears the class, then #1's late detection
     %% lands, even with a larger stamp: dropped.
     S4 = cast({skew_cleared, ?GHOST, NewGen, 10, 'Bt5240Class'}, S3),
-    S5 = cast({skew_detected, ?GHOST, OldGen, 20, 'Bt5240Class'}, S4),
+    S5 = cast({skew_detected, ?GHOST, OldGen, 20, 'Bt5240Class', none}, S4),
     ?assertEqual(S4, S5),
     ?assertEqual(0, count(?GHOST, S5)),
     %% Also for a class connection #2 has not checked yet.
-    S6 = cast({skew_detected, ?GHOST, OldGen, 30, 'Bt5240Other'}, S5),
+    S6 = cast({skew_detected, ?GHOST, OldGen, 30, 'Bt5240Other', none}, S5),
     ?assertEqual(S5, S6),
     %% And a stale clear cannot erase connection #2's detection.
-    S7 = cast({skew_detected, ?GHOST, NewGen, 40, 'Bt5240Class'}, S6),
+    S7 = cast({skew_detected, ?GHOST, NewGen, 40, 'Bt5240Class', none}, S6),
     S8 = cast({skew_cleared, ?GHOST, OldGen, 50, 'Bt5240Class'}, S7),
     ?assertEqual(1, count(?GHOST, S8)).
 
@@ -481,7 +483,7 @@ cast_after_nodedown_leaves_no_entry_test() ->
     S1 = connected(?GHOST),
     Gen = gen(?GHOST, S1),
     S2 = info({nodedown, ?GHOST, [{nodedown_reason, disconnect}]}, S1),
-    S3 = cast({skew_detected, ?GHOST, Gen, 1, 'Bt5240Class'}, S2),
+    S3 = cast({skew_detected, ?GHOST, Gen, 1, 'Bt5240Class', none}, S2),
     ?assertEqual(S2, S3),
     ?assertNot(maps:is_key(?GHOST, element(4, S3))).
 
@@ -490,23 +492,12 @@ cast_after_nodedown_leaves_no_entry_test() ->
 older_stamp_never_overwrites_newer_result_test() ->
     S1 = connected(?GHOST),
     Gen = gen(?GHOST, S1),
-    S2 = cast({skew_detected, ?GHOST, Gen, 2, 'Bt5240Class'}, S1),
+    S2 = cast({skew_detected, ?GHOST, Gen, 2, 'Bt5240Class', none}, S1),
     S3 = cast({skew_cleared, ?GHOST, Gen, 1, 'Bt5240Class'}, S2),
     ?assertEqual(1, count(?GHOST, S3)),
     S4 = cast({skew_cleared, ?GHOST, Gen, 3, 'Bt5240Class'}, S3),
-    S5 = cast({skew_detected, ?GHOST, Gen, 2, 'Bt5240Class'}, S4),
+    S5 = cast({skew_detected, ?GHOST, Gen, 2, 'Bt5240Class', none}, S4),
     ?assertEqual(0, count(?GHOST, S5)).
-
-is_current_tracks_the_connection_generation_test() ->
-    S1 = connected(?GHOST),
-    OldGen = gen(?GHOST, S1),
-    ?assert(is_current(?GHOST, OldGen, S1)),
-    ?assertNot(is_current(?GHOST, make_ref(), S1)),
-    S2 = info({nodeup, ?GHOST, []}, info({nodedown, ?GHOST, []}, S1)),
-    ?assertNot(is_current(?GHOST, OldGen, S2)),
-    ?assert(is_current(?GHOST, gen(?GHOST, S2), S2)),
-    S3 = info({nodedown, ?GHOST, []}, S2),
-    ?assertNot(is_current(?GHOST, gen(?GHOST, S2), S3)).
 
 %% Two reloads of one class on the peer reach this node out of order: the
 %% older one is not checked at all.
@@ -519,7 +510,10 @@ older_peer_reload_is_dropped_test() ->
     ?assertEqual(S2, S3),
     %% A reload from a peer that is not connected is dropped too.
     S4 = cast({peer_class_checked, 'other@nowhere', 'Bt5240Class', Entry, 3}, S3),
-    ?assertEqual(S3, S4).
+    ?assertEqual(S3, S4),
+    %% The unstamped BT-5232 form is still checked, and leaves the stamp alone.
+    S5 = cast({peer_class_checked, ?GHOST, 'Bt5240Class', Entry}, S4),
+    ?assertMatch(#{reload_seq := #{'Bt5240Class' := 2}}, maps:get(?GHOST, element(4, S5))).
 
 %% The full receiving side, on the running monitor: two reloads of one class
 %% arrive in order, but their checks finish in reverse. The newer reload
@@ -558,12 +552,21 @@ out_of_order_peer_reload_results_keep_newer_test_() ->
                 {peer_class_checked, Peer, 'Bt5240Class', shape_entry(1), 2}
             ),
             Newer = receive_reading(),
-            %% The newer check (same version: no skew) finishes first...
-            finish_check(Newer, 1),
-            ?assertEqual(0, beamtalk_node_monitor:skew_count(Peer)),
-            %% ...then the older one (skewed) finishes: dropped.
-            finish_check(Older, 1),
-            ?assertEqual(0, beamtalk_node_monitor:skew_count(Peer))
+            Self = self(),
+            Handler = fun(Event) -> Self ! {got_shape_skew, Event} end,
+            {ok, Sub} = beamtalk_announcements:subscribe('NodeShapeSkew', Self, Handler, false),
+            try
+                %% The newer check (same version: no skew) finishes first...
+                finish_check(Newer, 1),
+                ?assertEqual(0, beamtalk_node_monitor:skew_count(Peer)),
+                %% ...then the older one (skewed) finishes: dropped, and its
+                %% skew is not announced either.
+                finish_check(Older, 1),
+                ?assertEqual(0, beamtalk_node_monitor:skew_count(Peer)),
+                ?assertNoMessage({got_shape_skew, #{className := 'Bt5240Class'}}, 500)
+            after
+                beamtalk_announcements:unsubscribe(Sub)
+            end
         end}.
 
 shape_entry(Version) ->

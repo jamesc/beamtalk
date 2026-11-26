@@ -38,7 +38,7 @@ etc., is Phase 3b/BT-3601's safety net and is untouched here). It never
 gates a connection: refusing on skew would make ADR 0125's rolling-upgrade
 procedure impossible.
 
-Two triggers, both funnelled through `check_shape_skew_on_connect/3` /
+Two triggers, both funnelled through `check_shape_skew_on_connect/4` /
 `check_shape_skew_on_reload/3`:
 
 - **Connect** (`nodeup`, alongside the `NodeUp` announcement above): fetch
@@ -70,7 +70,7 @@ peers at different versions is most likely to hit.
 
 `NodeShapeSkew` above is a push-only announcement — useful for "tell me when
 skew appears", useless for "how much skew is there right now" (the question
-the `nodes` cross-surface op answers). `announce_if_skewed/6` therefore also
+the `nodes` cross-surface op answers). `announce_if_skewed/7` therefore also
 casts this process a `skew_detected` / `skew_cleared` message per class it
 checks, kept in `#state.skew` (per peer, each checked class and whether it
 is currently skewed) and read back via `skew_count/1` (`Node>>shapeSkew`) — the tally is
@@ -84,35 +84,49 @@ and every check is spawned with the generation of the connection it checks
 (BT-5240). A `skew_detected` / `skew_cleared` cast whose generation is not
 the peer's current one is dropped, so a check that finishes after its peer
 has gone, or after the peer has reconnected, never changes the current
-connection's tally. The same test gates the checks' announcements: a
-`NodeShapeSkew` or `NodeVersionSkew` from a stale check is not announced,
-so a version read that outlives a reconnect does not announce twice, and
-nothing is announced for a peer after its `NodeDown`.
+connection's tally.
 
 Within one connection, each check also carries a **stamp**, taken from a
 monotonic counter when the monitor dispatches it. The tally keeps, per
 class, the stamp of the result it holds, and drops an older result that
 arrives late: the checks run in separate processes, so their casts are not
-ordered. A check dispatched later reads both sides no earlier than an older
-one did, so the newest stamp is the freshest answer.
+ordered. Every change on either side is followed by a check dispatched
+after it (a reload here, or a peer's reload notification below), and that
+check reads the changed side after the change, so the result of the last
+check dispatched is the current one. One exception remains: a peer reload
+made before the peer's monitor has handled its own `nodeup` for this node
+sends no notification, so an older read can stay in the tally until the
+next reload (BT-5265).
 
-A peer's reload reaches this node with the peer's own reload stamp (see
-below). The tally keeps the newest one seen per class and ignores an older
-one, so two quick reloads of one class that arrive out of order leave the
-newer result.
+The checks never announce themselves. A check casts its result, with the
+`NodeShapeSkew` or `NodeVersionSkew` it would announce, and the monitor
+announces it in the same callback that applies the generation and stamp
+tests. So nothing from a stale or superseded check is announced: no shape
+skew that a newer check has already found resolved, no version event for
+a peer after its `NodeDown`, and no second version event when a read
+outlives a reconnect.
 
 When the monitor (re)starts, peers that are already connected get a fresh
 entry and a connect-time shape check, so their counts are rebuilt without
-waiting for a reconnect. No `NodeVersionSkew` is re-announced for them: the
-connection is not new.
+waiting for a reconnect. That check only updates the tally: the connection
+is not new, so it announces neither `NodeShapeSkew` nor `NodeVersionSkew`.
 
 A reload-time check updates **both** sides: after comparing its own entry
 with a peer's, the reloading node casts the pair to the peer's monitor
 (`{peer_class_checked, ...}` with the reloader's new entry and reload
-stamp), which re-reads its own entry and runs the same `announce_if_skewed/6`
-against its own tally and bus. The cast is sent with `noconnect`, so a peer
-that dropped in the meantime is not re-dialled. A peer too old to know the
-message ignores it (`handle_cast/2`'s catch-all).
+stamp), which re-reads its own entry and runs the same `announce_if_skewed/7`
+against its own tally and bus. The reloader's own monitor sends that cast,
+and only while the check's generation is still current, so a check from an
+earlier connection does not notify the peer over a later one. (If the link
+drops and comes back before that monitor has handled the `nodedown`, a
+request queued ahead of it can still go out on the new connection:
+BT-5265.) It is sent
+with `noconnect`, so a peer that has dropped is not re-dialled. The peer's
+monitor keeps the newest reload stamp seen per class and ignores an older
+one, so two quick reloads of one class that arrive out of order leave the
+newer result. A peer too old to know the message ignores it
+(`handle_cast/2`'s catch-all); the older form without a stamp is still
+accepted, unordered.
 
 ## Version skew at connect (ADR 0126 Amendment (BT-5193) D3)
 
@@ -159,7 +173,7 @@ is never refused.
     class_loaded_sub :: reference() | undefined,
     %% Queryable per-peer shape-skew tally (ADR 0126 §8, Phase 7 / BT-3605):
     %% each connected peer's set of currently-skewed class names, kept in
-    %% sync by the same fault-isolated `announce_if_skewed/6` check that
+    %% sync by the same fault-isolated `announce_if_skewed/7` check that
     %% fires the `NodeShapeSkew` announcement below — the `nodes` surface op
     %% needs a snapshot to *read*, not just the fire-and-forget event stream
     %% `NodeShapeSkew` already is. An entry exists exactly while the peer is
@@ -223,26 +237,71 @@ init([]) ->
     %% entry and a connect-time shape check (BT-5240), so their counts are
     %% rebuilt now rather than on their next reconnect. Checks still running
     %% from a previous monitor carry that monitor's generations and are
-    %% dropped. No version check: the connection is not new.
-    Skew = maps:from_list([{Peer, open_peer_check(Peer, shape_only)} || Peer <- nodes()]),
+    %% dropped. The connection is not new, so nothing is announced.
+    Skew = maps:from_list([{Peer, open_peer_check(Peer, existing)} || Peer <- nodes()]),
     {ok, #state{own_name = OwnName, class_loaded_sub = ClassLoadedSub, skew = Skew}}.
 
 handle_call({skew_count, Node}, _From, #state{skew = Skew} = State) ->
     {reply, skew_count_of(maps:get(Node, Skew, undefined)), State};
-handle_call({is_current, Node, Gen}, _From, #state{skew = Skew} = State) ->
-    {reply, is_current_gen(Node, Gen, Skew), State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
-handle_cast({skew_detected, Node, Gen, Stamp, ClassName}, State) ->
-    {noreply, record_result(Node, Gen, Stamp, ClassName, true, State)};
+handle_cast({skew_detected, Node, Gen, Stamp, ClassName, Event}, State) ->
+    %% Announced here, in the callback that keeps the result, so a stale or
+    %% superseded check never announces (BT-5240).
+    case record_result(Node, Gen, Stamp, ClassName, true, State) of
+        {kept, NewState} ->
+            announce_shape_skew(Event),
+            {noreply, NewState};
+        {dropped, NewState} ->
+            {noreply, NewState}
+    end;
 handle_cast({skew_cleared, Node, Gen, Stamp, ClassName}, State) ->
-    {noreply, record_result(Node, Gen, Stamp, ClassName, false, State)};
+    {_, NewState} = record_result(Node, Gen, Stamp, ClassName, false, State),
+    {noreply, NewState};
+handle_cast({version_skew, Node, Gen, Fields}, #state{skew = Skew} = State) ->
+    %% Only for the connection the read was made on (BT-5240): not after the
+    %% peer's NodeDown, and not twice when a read outlives a reconnect.
+    case is_current_gen(Node, Gen, Skew) of
+        true -> announce('NodeVersionSkew', Fields);
+        false -> ok
+    end,
+    {noreply, State};
 handle_cast(
-    {peer_class_checked, PeerNode, ClassName, PeerEntry, Seq}, #state{skew = Skew} = State
-) when
+    {send_peer_class_checked, PeerNode, Gen, ClassName, LocalEntry, Seq},
+    #state{skew = Skew} = State
+) ->
+    %% A reload check's notification to the peer (BT-5232), sent from here so
+    %% that it goes out only while the check's connection is current
+    %% (BT-5240). `noconnect`: a peer that has gone is not re-dialled; the
+    %% cast is dropped instead. This is `gen_server:cast/2`'s message shape.
+    case is_current_gen(PeerNode, Gen, Skew) of
+        true ->
+            _ = erlang:send(
+                {?MODULE, PeerNode},
+                {'$gen_cast', {peer_class_checked, node(), ClassName, LocalEntry, Seq}},
+                [noconnect]
+            ),
+            ok;
+        false ->
+            ok
+    end,
+    {noreply, State};
+handle_cast({peer_class_checked, PeerNode, ClassName, PeerEntry}, State) when
+    is_atom(PeerNode), is_atom(ClassName), is_map(PeerEntry)
+->
+    %% The BT-5232 form, without a reload stamp, from a peer on an earlier
+    %% build: checked, but not ordered against other reloads of the class.
+    {noreply, dispatch_peer_reload(PeerNode, ClassName, PeerEntry, unordered, State)};
+handle_cast({peer_class_checked, PeerNode, ClassName, PeerEntry, Seq}, State) when
     is_atom(PeerNode), is_atom(ClassName), is_map(PeerEntry), is_integer(Seq)
 ->
+    {noreply, dispatch_peer_reload(PeerNode, ClassName, PeerEntry, Seq, State)};
+handle_cast(_Msg, State) ->
+    {noreply, State}.
+
+-spec dispatch_peer_reload(node(), atom(), map(), integer() | unordered, #state{}) -> #state{}.
+dispatch_peer_reload(PeerNode, ClassName, PeerEntry, Seq, #state{skew = Skew} = State) ->
     %% `PeerNode` reloaded `ClassName` (BT-5232): compare its new entry with
     %% this node's *current* one, re-read here rather than trusting the copy
     %% the peer saw (this side may have reloaded since). Spawned, like the
@@ -252,19 +311,21 @@ handle_cast(
     case maps:find(PeerNode, Skew) of
         {ok, #{gen := Gen, reload_seq := Seqs} = Entry} ->
             case maps:find(ClassName, Seqs) of
-                {ok, Newer} when Newer >= Seq ->
-                    {noreply, State};
+                {ok, Newer} when is_integer(Seq), Newer >= Seq ->
+                    State;
                 _ ->
                     Stamp = new_stamp(),
                     spawn(fun() -> check_peer_reload(PeerNode, Gen, Stamp, ClassName, PeerEntry) end),
-                    NewEntry = Entry#{reload_seq := Seqs#{ClassName => Seq}},
-                    {noreply, State#state{skew = Skew#{PeerNode := NewEntry}}}
+                    NewSeqs =
+                        case Seq of
+                            unordered -> Seqs;
+                            _ -> Seqs#{ClassName => Seq}
+                        end,
+                    State#state{skew = Skew#{PeerNode := Entry#{reload_seq := NewSeqs}}}
             end;
         error ->
-            {noreply, State}
-    end;
-handle_cast(_Msg, State) ->
-    {noreply, State}.
+            State
+    end.
 
 -doc """
 Keep one check's result for `ClassName` in `Node`'s entry (BT-5240). Dropped
@@ -272,20 +333,25 @@ when `Node` is not connected (BT-5232), when `Gen` is not its current
 connection's generation, or when the entry already holds a result from a
 check with a newer `Stamp`.
 """.
--spec record_result(node(), reference(), integer(), atom(), boolean(), #state{}) -> #state{}.
+-spec record_result(node(), reference(), integer(), atom(), boolean(), #state{}) ->
+    {kept | dropped, #state{}}.
 record_result(Node, Gen, Stamp, ClassName, Skewed, #state{skew = Skew} = State) ->
     case maps:find(Node, Skew) of
         {ok, #{gen := Gen, classes := Classes} = Entry} ->
             case maps:find(ClassName, Classes) of
                 {ok, {Newer, _}} when Newer > Stamp ->
-                    State;
+                    {dropped, State};
                 _ ->
                     NewEntry = Entry#{classes := Classes#{ClassName => {Stamp, Skewed}}},
-                    State#state{skew = Skew#{Node := NewEntry}}
+                    {kept, State#state{skew = Skew#{Node := NewEntry}}}
             end;
         _ ->
-            State
+            {dropped, State}
     end.
+
+-spec announce_shape_skew(map() | none) -> ok.
+announce_shape_skew(none) -> ok;
+announce_shape_skew(Fields) -> announce('NodeShapeSkew', Fields).
 
 -spec skew_count_of(peer_entry() | undefined) -> non_neg_integer().
 skew_count_of(undefined) ->
@@ -320,21 +386,27 @@ initial_state() ->
 -endif.
 
 -doc """
-Open a new connection's tally entry for `Peer` and spawn its connect-time
-checks, tagged with the entry's new generation (BT-5240). Spawned, not
-inline: the checks' erpc round trips must never delay this gen_server's
-delivery of another node's NodeUp/NodeDown. Two processes, so a peer slow
-to answer one read never delays the other.
+Open a tally entry with a new generation for `Peer` and spawn its
+connect-time checks, tagged with it (BT-5240). For a `new` connection both
+checks run and announce. For an `existing` one (already connected when the
+monitor starts) only the shape check runs, and it only updates the tally.
+Spawned, not inline: the checks' erpc round trips must never delay this
+gen_server's delivery of another node's NodeUp/NodeDown. Two processes, so
+a peer slow to answer one read never delays the other.
 """.
--spec open_peer_check(node(), all | shape_only) -> peer_entry().
-open_peer_check(Peer, Which) ->
+-spec open_peer_check(node(), new | existing) -> peer_entry().
+open_peer_check(Peer, Connection) ->
     Gen = make_ref(),
     Stamp = new_stamp(),
-    case Which of
-        all -> spawn(fun() -> check_version_skew_on_connect(Peer, Gen) end);
-        shape_only -> ok
-    end,
-    spawn(fun() -> check_shape_skew_on_connect(Peer, Gen, Stamp) end),
+    Announce =
+        case Connection of
+            new ->
+                spawn(fun() -> check_version_skew_on_connect(Peer, Gen) end),
+                true;
+            existing ->
+                false
+        end,
+    spawn(fun() -> check_shape_skew_on_connect(Peer, Gen, Stamp, Announce) end),
     peer_entry(Gen).
 
 -doc """
@@ -356,7 +428,7 @@ handle_info({nodeup, Node, _Info}, #state{skew = Skew} = State) ->
     announce('NodeUp', #{node => beamtalk_node:from_atom(Node)}),
     %% A new connection gets a new generation (BT-5240): checks still
     %% running for an earlier connection to `Node` can no longer touch it.
-    {noreply, State#state{skew = Skew#{Node => open_peer_check(Node, all)}}};
+    {noreply, State#state{skew = Skew#{Node => open_peer_check(Node, new)}}};
 handle_info({nodedown, Node, _Info}, #state{own_name = Node} = State) ->
     %% Own pending self-nodedown — clear it, not a membership change.
     {noreply, State#state{own_name = undefined}};
@@ -371,13 +443,19 @@ handle_info({nodedown, Node, Info}, #state{skew = Skew} = State) ->
     {noreply, State#state{skew = maps:remove(Node, Skew)}};
 handle_info({'$beamtalk_class_loaded', ClassName}, #state{skew = Skew} = State) ->
     %% Only visible, currently-connected peers participate — the tally's
-    %% entries, matching the `NodeUp`/`NodeDown` hidden-node exclusion above
-    %% — each with its connection's generation (BT-5240). Spawned, not
+    %% entries (matching the `NodeUp`/`NodeDown` hidden-node exclusion
+    %% above), each with its connection's generation (BT-5240), that are
+    %% still in `nodes()`: a peer whose `nodedown` is still queued behind
+    %% this message must not be re-dialled by the check's erpc. Spawned, not
     %% inline — see open_peer_check/2: this one is worse if run
     %% synchronously, since it's N sequential erpc calls (one per connected
     %% peer), not just one. The stamp doubles as the reload stamp the peers
     %% receive in `peer_class_checked`.
-    Peers = [{Peer, Gen} || Peer := #{gen := Gen} <- Skew],
+    Connected = nodes(),
+    Peers = [
+        {Peer, Gen}
+     || Peer := #{gen := Gen} <- Skew, lists:member(Peer, Connected)
+    ],
     Stamp = new_stamp(),
     spawn(fun() -> check_shape_skew_on_reload(ClassName, Peers, Stamp) end),
     {noreply, State};
@@ -460,8 +538,8 @@ not occur since `nodeup` implies an established connection — or any other
 erpc failure) is logged and dropped rather than crashing the monitor or
 blocking the `NodeUp` announcement this runs alongside.
 """.
--spec check_shape_skew_on_connect(node(), reference(), integer()) -> ok.
-check_shape_skew_on_connect(PeerNode, Gen, Stamp) ->
+-spec check_shape_skew_on_connect(node(), reference(), integer(), boolean()) -> ok.
+check_shape_skew_on_connect(PeerNode, Gen, Stamp, Announce) ->
     try
         LocalManifest = beamtalk_release:shape_manifest(),
         case beamtalk_node:remote_shape_manifest(PeerNode) of
@@ -471,7 +549,13 @@ check_shape_skew_on_connect(PeerNode, Gen, Stamp) ->
                         case maps:find(ClassName, RemoteManifest) of
                             {ok, RemoteEntry} ->
                                 announce_if_skewed(
-                                    PeerNode, Gen, Stamp, ClassName, LocalEntry, RemoteEntry
+                                    PeerNode,
+                                    Gen,
+                                    Stamp,
+                                    ClassName,
+                                    LocalEntry,
+                                    RemoteEntry,
+                                    Announce
                                 );
                             error ->
                                 ok
@@ -556,7 +640,7 @@ check_peer_reload(PeerNode, Gen, Stamp, ClassName, PeerEntry) ->
             undefined ->
                 ok;
             OwnEntry ->
-                announce_if_skewed(PeerNode, Gen, Stamp, ClassName, OwnEntry, PeerEntry)
+                announce_if_skewed(PeerNode, Gen, Stamp, ClassName, OwnEntry, PeerEntry, true)
         end
     catch
         Class:Reason:Stacktrace ->
@@ -615,10 +699,8 @@ announce_version_skew(PeerNode, Gen, Remote) ->
         none ->
             ok;
         Fields ->
-            case is_current(PeerNode, Gen) of
-                true -> announce('NodeVersionSkew', Fields);
-                false -> ok
-            end
+            %% The monitor announces it, only if `Gen` is still current.
+            gen_server:cast(?MODULE, {version_skew, PeerNode, Gen, Fields})
     end.
 
 -spec log_failed_version_read(node(), term(), boolean()) -> ok.
@@ -686,7 +768,7 @@ Re-query `PeerNode`'s entry for exactly `ClassName`
 primitive `shape_manifest/0` folds over, run remotely via `erpc`) and
 announce if it now differs from `LocalEntry`. `undefined` (the class is not
 registered on `PeerNode` at all — not shared) is silent, matching
-`check_shape_skew_on_connect/3`'s "non-shared class" handling; an `erpc`
+`check_shape_skew_on_connect/4`'s "non-shared class" handling; an `erpc`
 failure is logged the same way that function logs its own fetch failure,
 so a peer that goes unreachable mid-reload-check doesn't look identical to
 "checked, no skew found" when debugging a missed announcement.
@@ -707,18 +789,14 @@ check_one_peer_class(PeerNode, Gen, Stamp, ClassName, LocalEntry) ->
         {ok, undefined} ->
             ok;
         {ok, RemoteEntry} when is_map(RemoteEntry) ->
-            announce_if_skewed(PeerNode, Gen, Stamp, ClassName, LocalEntry, RemoteEntry),
+            announce_if_skewed(PeerNode, Gen, Stamp, ClassName, LocalEntry, RemoteEntry, true),
             %% Tell the peer, so its tally and bus see the reload too
             %% (BT-5232), with this reload's stamp so it can order two
-            %% reloads of one class (BT-5240). `noconnect`: a peer that has
-            %% gone is not re-dialled; the cast is dropped instead. This is
-            %% `gen_server:cast/2`'s own message shape.
-            _ = erlang:send(
-                {?MODULE, PeerNode},
-                {'$gen_cast', {peer_class_checked, node(), ClassName, LocalEntry, Stamp}},
-                [noconnect]
-            ),
-            ok;
+            %% reloads of one class (BT-5240). Sent by the monitor, and only
+            %% while `Gen` is current.
+            gen_server:cast(
+                ?MODULE, {send_peer_class_checked, PeerNode, Gen, ClassName, LocalEntry, Stamp}
+            );
         {error, Reason} ->
             ?LOG_WARNING("Could not fetch peer class shape entry on reload", #{
                 domain => [beamtalk, runtime],
@@ -730,15 +808,15 @@ check_one_peer_class(PeerNode, Gen, Stamp, ClassName, LocalEntry) ->
     ok.
 
 -doc """
-Announce `NodeShapeSkew` iff `LocalEntry`/`RemoteEntry`'s `version` differ,
-and keep this process's queryable skew tally (`skew_count/1`) in
-sync either way — the `nodes` op's per-peer count is exactly "how many
-classes this function has found skewed for that peer and not yet found
-matching again" (ADR 0126 §8, Phase 7 / BT-3605). Runs in a spawned,
-non-gen_server process (see the moduledoc), so the tally update is a cast,
-not a direct state mutation. The cast carries the check's generation and
-stamp (BT-5240), and the announcement is made only while `Gen` is still
-`PeerNode`'s current connection.
+Report whether `LocalEntry`/`RemoteEntry`'s `version` differ, so that the
+monitor keeps its queryable skew tally (`skew_count/1`) in sync either way —
+the `nodes` op's per-peer count is exactly "how many classes this function
+has found skewed for that peer and not yet found matching again" (ADR 0126
+§8, Phase 7 / BT-3605) — and, when they differ and `Announce` is true,
+announces `NodeShapeSkew`. Runs in a spawned, non-gen_server process (see
+the moduledoc), so the result is a cast, not a direct state mutation. The
+cast carries the check's generation and stamp (BT-5240); the monitor
+announces only if it keeps the result.
 """.
 -spec announce_if_skewed(
     node(),
@@ -746,38 +824,32 @@ stamp (BT-5240), and the announcement is made only while `Gen` is still
     integer(),
     atom(),
     beamtalk_release_shapes:shape_entry(),
-    beamtalk_release_shapes:shape_entry()
+    beamtalk_release_shapes:shape_entry(),
+    boolean()
 ) -> ok.
 announce_if_skewed(
-    PeerNode, Gen, Stamp, ClassName, #{version := LocalVersion}, #{version := RemoteVersion}
+    PeerNode,
+    Gen,
+    Stamp,
+    ClassName,
+    #{version := LocalVersion},
+    #{version := RemoteVersion},
+    Announce
 ) when
     LocalVersion =/= RemoteVersion
 ->
-    gen_server:cast(?MODULE, {skew_detected, PeerNode, Gen, Stamp, ClassName}),
-    case is_current(PeerNode, Gen) of
-        true ->
-            announce('NodeShapeSkew', #{
-                node => beamtalk_node:from_atom(PeerNode),
-                className => ClassName,
-                localVersion => LocalVersion,
-                remoteVersion => RemoteVersion
-            });
-        false ->
-            ok
-    end;
-announce_if_skewed(PeerNode, Gen, Stamp, ClassName, _LocalEntry, _RemoteEntry) ->
-    gen_server:cast(?MODULE, {skew_cleared, PeerNode, Gen, Stamp, ClassName}),
-    ok.
-
--doc """
-Whether `Gen` is still `PeerNode`'s current connection (BT-5240). Asked from
-a spawned check just before it announces. `false` if the monitor cannot be
-asked: an announcement from a check the monitor cannot vouch for is dropped.
-""".
--spec is_current(node(), reference()) -> boolean().
-is_current(PeerNode, Gen) ->
-    try
-        gen_server:call(?MODULE, {is_current, PeerNode, Gen})
-    catch
-        exit:_ -> false
-    end.
+    Event =
+        case Announce of
+            true ->
+                #{
+                    node => beamtalk_node:from_atom(PeerNode),
+                    className => ClassName,
+                    localVersion => LocalVersion,
+                    remoteVersion => RemoteVersion
+                };
+            false ->
+                none
+        end,
+    gen_server:cast(?MODULE, {skew_detected, PeerNode, Gen, Stamp, ClassName, Event});
+announce_if_skewed(PeerNode, Gen, Stamp, ClassName, _LocalEntry, _RemoteEntry, _Announce) ->
+    gen_server:cast(?MODULE, {skew_cleared, PeerNode, Gen, Stamp, ClassName}).
