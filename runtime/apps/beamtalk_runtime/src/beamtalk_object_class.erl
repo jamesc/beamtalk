@@ -440,11 +440,11 @@ Resolves `Selector` through the class-method chain starting at the receiving
 class (`beamtalk_class_dispatch:find_class_method_from_class/2`, the walk the
 class process uses), so a subclass override wins and an inherited method is
 found (BT-4300), then calls DefiningModule:class_<Selector>(Receiver, Args...)
-directly — bypassing the class object's gen_server. The receiver class object is passed as `ClassSelf` and the
-call runs inside `beamtalk_class_vars:with_snapshot/2` (ADR 0130 §5):
-class-variable reads see the snapshot (the ETS mirror as of the last completed
-invocation), writes raise `class_state_read_only`, and when called from inside
-the class's own method mid-invocation the live map is read and written.
+directly — bypassing the class object's gen_server. The receiver class object
+is passed as `ClassSelf`. A class has no state of its own (ADR 0153), so there is
+nothing to snapshot: the call is an ordinary in-caller class send.
+
+Used by the shape-migration runner for `migrateFromVN:` steps (ADR 0123 §3).
 
 Raises beamtalk_error if the receiver is not a class object, or if the
 class does not define the requested method.
@@ -458,9 +458,7 @@ local_call(Receiver = #beamtalk_object{class = Tag}, Selector, Args) when
             FunName = beamtalk_class_dispatch:class_method_fun_name(Selector),
             case local_call_module(Tag, Selector, FunName, length(Args) + 1) of
                 {ok, Module} ->
-                    beamtalk_class_vars:with_snapshot(Receiver, fun() ->
-                        erlang:apply(Module, FunName, [Receiver | Args])
-                    end);
+                    erlang:apply(Module, FunName, [Receiver | Args]);
                 not_found ->
                     ClassName = Receiver#beamtalk_object.class,
                     Error = beamtalk_error:new(
@@ -860,7 +858,6 @@ join_class_registry() ->
     beamtalk_class_registry:ensure_pid_table(),
     beamtalk_class_registry:ensure_loaded_classes_table(),
     beamtalk_class_registry:ensure_backing_module_index_table(),
-    beamtalk_class_registry:ensure_class_state_table(),
     ok = pg:join(beamtalk_classes, self()).
 
 %% The class's `__beamtalk_meta/0` map, preferring the one the compiler baked into
@@ -975,15 +972,10 @@ register_class_indexes(ClassName, Meta) ->
     end.
 
 %% Publish the freshly built state to the readers outside this process: the
-%% (empty) classVars snapshot row, the reflection rows, the xref index, the protocol registry
+%% reflection rows, the xref index, the protocol registry
 %% and the system bus. The order is the init/1 contract.
 -spec publish_init_state(#class_state{}, map(), map()) -> ok.
 publish_init_state(#class_state{name = ClassName} = State, ClassInfo, Meta) ->
-    %% ADR 0153 (BT-5160): a class has no class variables, so its classVars
-    %% snapshot row is always empty. The row is still written before init/1
-    %% returns, so `beamtalk_class_vars:with_snapshot/2` sees a live class
-    %% until BT-5162 removes the snapshot rows together with it.
-    beamtalk_class_registry:record_class_state_snapshot(self(), #{}),
     ok = beamtalk_class_publish:publish_reflection(reflection_view(State)),
     %% ADR 0087 Phase 2: Forward the per-method cross-reference index
     %% to beamtalk_xref synchronously, before init returns. Running inside init/1
@@ -1594,17 +1586,6 @@ terminate(Reason, #class_state{name = ClassName}) ->
         true -> beamtalk_object_class_teardown:remove_class_registration(ClassName);
         false -> ok
     end,
-    %% Drop this class's classVars live-snapshot row, whatever the reason.
-    %% It is keyed by this pid and only read through a live class pid
-    %% (`beamtalk_class_vars`), so a row for a dead/reloaded pid could never
-    %% be read again — pure accumulation for the life of the node across
-    %% hot-reload, a core dev workflow.
-    _ =
-        (try
-            beamtalk_class_registry:forget_class_state_snapshot(self())
-        catch
-            _:_ -> ok
-        end),
     ok.
 
 %% ADR 0032 Phase 1: No flattened tables to rebuild after hot reload.

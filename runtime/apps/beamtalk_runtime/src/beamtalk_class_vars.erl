@@ -18,24 +18,15 @@ builds it (ADR 0153 Phase 2: codegen emits no class-variable access); this
 module and the class-variable home are its only users until Phase 3 deletes
 them. It is keyed by tag so that an access recovers its
 key from `ClassSelf` with one `element/2`, never a tag-to-name derivation. The
-value is either
-
-- the live `#{VarName => Value}` map (a class-method invocation that
-  *installed* it), or
-- the read-only marker `?BT_CLASS_VARS_RO(ClassTag)` installed by
-  `with_snapshot/2` for runtime-owned out-of-process regions; `put/3` and
-  `clear/2` raise `class_state_read_only` under it, and reads resolve the
-  class's ETS mirror **by class name** through the registry (never by pid,
-  so a class-process restart is transparent). A registered class process with
-  no mirror row at all (a restart that has not yet recorded its first
-  snapshot) is told apart from an empty map (`class_state_snapshot_lookup/1`)
-  and raises `class_state_unreachable` instead of reading `#{}`.
+value is the live `#{VarName => Value}` map (a class-method invocation that
+*installed* it). There is no read-only snapshot region any more (ADR 0153
+Phase 3e): out-of-process runtime callers run the class method in the caller
+with no key installed.
 
 `install/2` and `uninstall/1` are the only writers of the `?BT_CLASS_VARS_HOME`
 entry, which records the key of the live invocation; they set and erase it
 together with the class key. The class key itself is also written by `put/3`
-and `clear/2` (the live map), `restore/1` (a snapshot's map) and
-`with_snapshot/2` (the read-only marker, erased again afterwards).
+and `clear/2` (the live map) and `restore/1` (a snapshot's map).
 `snapshot/0`, `restore/1` and `protect/1` act on the class key the home entry
 names.
 
@@ -44,21 +35,20 @@ names.
 `key/1`, `assert_absent/1`, `install/2` and `uninstall/1` are the invocation
 entry points' API and take a class *name* (or the key). The access helpers
 (`get`, `get_late`, `put`, `clear`, `has`, `field_at`, `field_at_put`,
-`capture`, `with_snapshot`) take the `ClassSelf` class object (`#beamtalk_object{}` whose class tag is
+`capture`) take the `ClassSelf` class object (`#beamtalk_object{}` whose class tag is
 `'Name class'`) and derive the key from its tag; a `nil` or non-class-object
 receiver is an internal error. On the success path the receiver check is only
 the record match (`class_tag/1`): the class name, which costs a tag-to-name
-derivation, is derived only when an error is raised, a read-only mirror is
-read, or a read misses and checks the declared set (BT-3766). An instance tag
+derivation, is derived only when an error is raised or a read misses and checks the declared set (BT-3766). An instance tag
 never has a key installed, so it reaches one of those paths and raises the
 same internal error there; the one exception is a capture fallback form
 (`get/3`, `get_late/3`, `has/3`) given a capture map, which answers from that
-map without deriving the name. `capture/2` and `with_snapshot/2` validate the
-tag fully (once per block-literal creation or region, not a hot path).
+map without deriving the name. `capture/2` validates the
+tag fully (once per block-literal creation, not a hot path).
 
 ## Semantics
 
-- **Key presence is the "at home" test.** A read with no key and no marker
+- **Key presence is the "at home" test.** A read with no key
   raises `class_state_unreachable`; the 3-arity forms fall back to the
   creation-time capture (`capture/2`), raising only when the capture is `none`.
   (ADR 0153 Phase 3a removed the per-chain class-variable fact that let a
@@ -123,8 +113,7 @@ come from `beamtalk_class_metadata:class_var_kinds/1` (own-only), the error valu
     capture/2,
     snapshot/0,
     restore/1,
-    protect/1,
-    with_snapshot/2
+    protect/1
 ]).
 
 -export_type([key/0, snapshot/0, class_self/0]).
@@ -205,7 +194,7 @@ uninstall(?BT_CLASS_VARS_KEY(_) = Key) ->
 %% Access helpers (ClassSelf receivers)
 %%====================================================================
 
--doc "Read a class variable (live map, or the read-only mirror).".
+-doc "Read a class variable from the live map.".
 -spec get(class_self(), atom()) -> term().
 get(ClassSelf, Name) ->
     Tag = class_tag(ClassSelf),
@@ -256,8 +245,6 @@ store(Tag, Name, Value, Declared) ->
             end,
             erlang:put(Key, Map#{Name => Value}),
             Value;
-        ?BT_CLASS_VARS_RO(_) ->
-            beamtalk_class_var_errors:raise_read_only(tag_to_name(Tag), Name);
         undefined ->
             %% No home: the caller has no state to hold the write
             %% (`no_home_map/3`, as for a read or `clear/2`).
@@ -292,15 +279,13 @@ field_at(ClassSelf, Name, _Captured) ->
 
 -doc """
 `self fieldAt: Name put: Value` in a class method (BT-4421): `put/3` (the
-write `self.x := v` makes, so the read-only and unreachable rules are the
-same) after the `Cls fieldAt: #x put: v` declared-set check (`check_write/3`):
+write `self.x := v` makes, so the unreachable rule is the same) after the `Cls fieldAt: #x put: v` declared-set check (`check_write/3`):
 a name not already in the map must be declared, and a class with no
 `classState:` at all cannot have one created on it. Answers `Value`.
 
 The declared-set check runs before the home check (BT-4428): an undeclared
 name raises `undeclared_class_variable` wherever the write runs, even with no
-home (where a declared name raises `class_state_unreachable`) or under the
-read-only marker (`class_state_read_only`). An undeclared name so fails the
+home (where a declared name raises `class_state_unreachable`). An undeclared name so fails the
 same way as through the outside `Cls fieldAt: #x put: v` send, and the error
 names what the source got wrong. A declared name then goes
 through `put/3`'s rules without a second declared-set check.
@@ -392,8 +377,6 @@ clear(ClassSelf, Name) ->
         Map when is_map(Map) ->
             erlang:put(Key, maps:remove(Name, Map)),
             ClassSelf;
-        ?BT_CLASS_VARS_RO(_) ->
-            beamtalk_class_var_errors:raise_read_only(tag_to_name(Tag), Name);
         undefined ->
             no_home_map(Tag, Name, write)
     end.
@@ -411,19 +394,17 @@ has(ClassSelf, Name, Captured) ->
     has_value(map_or_captured(Tag, Name, Captured), Name).
 
 -doc """
-Capture for a block literal: the live map when the key is present (the
-resolved mirror under a read-only marker), else `Outer` (the enclosing
+Capture for a block literal: the live map when the key is present, else `Outer` (the enclosing
 block's capture, or `none` at method level).
 """.
 -spec capture(class_self(), map() | none) -> map() | none.
 capture(ClassSelf, Outer) ->
     Tag = class_tag(ClassSelf),
     %% Once per block-literal creation, not a hot path: keep the full receiver
-    %% check (an instance tag raises here) as `with_snapshot/2` does.
+    %% check (an instance tag raises here).
     _ = tag_to_name(Tag),
     case erlang:get(?BT_CLASS_VARS_KEY(Tag)) of
         Map when is_map(Map) -> Map;
-        ?BT_CLASS_VARS_RO(_) -> mirror(Tag, undefined);
         undefined -> Outer
     end.
 
@@ -469,36 +450,6 @@ protect(Fun) ->
             erlang:raise(Class, Reason, Stack)
     end.
 
--doc """
-Run `Fun` with the class's variables readable from the ETS mirror (resolved
-by class name) when its key is absent: installs the key plus
-`?BT_CLASS_VARS_RO(ClassTag)`, erases exactly that in an `after`. When the
-key is already present (a live map or an outer snapshot) `Fun` just runs.
-Never touches the home entry. Liveness is checked lazily, on the first mirror
-read (`mirror/2`): a region that never reads a class variable succeeds even
-while the class process is unregistered, and a read with no live class raises
-`class_state_unreachable`.
-""".
--spec with_snapshot(class_self(), fun(() -> T)) -> T when T :: term().
-with_snapshot(ClassSelf, Fun) ->
-    Tag = class_tag(ClassSelf),
-    %% Unlike the access helpers, validate the tag fully before planting the
-    %% marker (an instance tag raises here, not on the first mirror read): this
-    %% is a once-per-region call, not a hot path.
-    _ = tag_to_name(Tag),
-    Key = ?BT_CLASS_VARS_KEY(Tag),
-    case erlang:get(Key) of
-        undefined ->
-            erlang:put(Key, ?BT_CLASS_VARS_RO(Tag)),
-            try
-                Fun()
-            after
-                erlang:erase(Key)
-            end;
-        _ ->
-            Fun()
-    end.
-
 %%====================================================================
 %% Internal
 %%====================================================================
@@ -506,7 +457,7 @@ with_snapshot(ClassSelf, Fun) ->
 %% The metaclass tag of a ClassSelf: the cheap receiver check every access
 %% helper runs on its success path (BT-3766). A `nil` or non-object receiver
 %% raises here. The class name is derived (`tag_to_name/1`) only where it is
-%% needed: an error, a read-only mirror read, or the declared-set check of a
+%% needed: an error or the declared-set check of a
 %% read that misses. An instance tag (no ` class` suffix) or an unknown base
 %% atom therefore raises the same internal error at that point instead: no
 %% access ever installs a key for such a tag, so it takes the "no key" path.
@@ -538,7 +489,6 @@ tag_to_name(Tag) ->
 current_map(Tag, Name) ->
     case erlang:get(?BT_CLASS_VARS_KEY(Tag)) of
         Map when is_map(Map) -> Map;
-        ?BT_CLASS_VARS_RO(_) -> mirror(Tag, Name);
         undefined -> no_home_map(Tag, Name)
     end.
 
@@ -558,31 +508,8 @@ no_home_map(Tag, Name, Access) ->
 map_or_captured(Tag, Name, Captured) ->
     case erlang:get(?BT_CLASS_VARS_KEY(Tag)) of
         Map when is_map(Map) -> Map;
-        ?BT_CLASS_VARS_RO(_) -> mirror(Tag, Name);
         undefined when is_map(Captured) -> Captured;
         undefined -> no_home_map(Tag, Name)
-    end.
-
-%% Resolve the ETS mirror by class *name* on every read, so a restarted class
-%% process is picked up transparently.
--spec mirror(atom(), atom() | undefined) -> map().
-mirror(Tag, Name) ->
-    Class = tag_to_name(Tag),
-    case beamtalk_class_registry:class_state_snapshot_lookup(live_class_pid(Class)) of
-        {ok, Map} -> Map;
-        %% Registered but no snapshot row yet (a restarted class process that has
-        %% not recorded its first snapshot): not an empty map.
-        not_found -> beamtalk_class_var_errors:raise_no_snapshot(Class, Name)
-    end.
-
-%% No registered class process is a class-level condition, not a variable-level
-%% one, so it uses the name-less message and hint (the block-oriented hint of the
-%% named variant does not fit supervisor-init or `local_call/3` callers).
--spec live_class_pid(atom()) -> pid().
-live_class_pid(Class) ->
-    case beamtalk_class_registry:whereis_class(Class) of
-        undefined -> beamtalk_class_var_errors:raise_unreachable(Class, undefined, read);
-        Pid -> Pid
     end.
 
 %% A name absent from the map is `nil` when declared (or when the declared

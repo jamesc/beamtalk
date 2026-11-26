@@ -2806,3 +2806,20 @@ bt4758_class_object_tag_memoised_test() ->
         Expected,
         persistent_term:get({beamtalk_class_registry, class_object_tag, Name})
     ).
+
+%% ADR 0153 Phase 3e: the class-state snapshot rows are gone. A class has no
+%% state of its own, so the registry exports no snapshot API and no
+%% `beamtalk_class_state_snapshot` table exists after the runtime boots.
+snapshot_rows_removed_test() ->
+    Exports = beamtalk_class_registry:module_info(exports),
+    [
+        ?assertEqual(false, lists:keymember(F, 1, Exports))
+     || F <- [
+            ensure_class_state_table,
+            record_class_state_snapshot,
+            record_class_state_snapshot_if_changed,
+            class_state_snapshot_lookup,
+            forget_class_state_snapshot
+        ]
+    ],
+    ?assertEqual(undefined, ets:info(beamtalk_class_state_snapshot)).

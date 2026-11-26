@@ -2102,8 +2102,8 @@ start_child_via_class_method(ClassName, Module, Selector, Args) ->
     put(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY, true),
     try
         ClassSelf = beamtalk_supervisor_class_call:make_init_class_self(ClassName, Module),
-        %% See static_init/3: the factory runs in a read-only snapshot region,
-        %% so a class-variable write raises instead of being discarded.
+        %% See static_init/3: the factory runs in the caller with no class-variable
+        %% key installed, so a class-variable write raises.
         Result = beamtalk_supervisor_class_call:call_class_method_direct(
             ClassName, Module, Selector, ClassSelf, Args
         ),
