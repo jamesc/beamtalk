@@ -104,11 +104,13 @@ maximum(Self) ->
     case to_list(Self) of
         [] ->
             raise_empty('max');
-        [First | Rest] = List ->
-            case native_orderable(List) of
-                true -> lists:max(List);
-                false -> fold_dispatched(Rest, First, '>')
-            end
+        [First | Rest] = List when is_number(First) ->
+            case num_max(Rest, First) of
+                {ok, Max} -> Max;
+                not_numbers -> extreme(List, '>')
+            end;
+        List ->
+            extreme(List, '>')
     end.
 
 -doc """
@@ -123,26 +125,44 @@ minimum(Self) ->
     case to_list(Self) of
         [] ->
             raise_empty('min');
-        [First | Rest] = List ->
-            case native_orderable(List) of
-                true -> lists:min(List);
-                false -> fold_dispatched(Rest, First, '<')
-            end
+        [First | Rest] = List when is_number(First) ->
+            case num_min(Rest, First) of
+                {ok, Min} -> Min;
+                not_numbers -> extreme(List, '<')
+            end;
+        List ->
+            extreme(List, '<')
     end.
 
-%% True when native term order is the right answer: all numbers, all
-%% Strings (binaries) or all Symbols (atoms). One pass, stops at the first
-%% element of a different kind.
--spec native_orderable([term(), ...]) -> boolean().
-native_orderable([First | Rest]) ->
-    Kind =
-        if
-            is_number(First) -> fun erlang:is_number/1;
-            is_binary(First) -> fun erlang:is_binary/1;
-            is_atom(First) -> fun erlang:is_atom/1;
-            true -> undefined
-        end,
-    Kind =/= undefined andalso lists:all(Kind, Rest).
+%% All-number fast path: one pass that tracks the extreme and gives up at the
+%% first non-number. Same tie behaviour as `lists:max/1` / `lists:min/1`
+%% (first of equal elements wins), so all-number answers are unchanged.
+-spec num_max(list(), number()) -> {ok, number()} | not_numbers.
+num_max([], Acc) -> {ok, Acc};
+num_max([H | T], Acc) when is_number(H), H > Acc -> num_max(T, H);
+num_max([H | T], Acc) when is_number(H) -> num_max(T, Acc);
+num_max(_, _) -> not_numbers.
+
+-spec num_min(list(), number()) -> {ok, number()} | not_numbers.
+num_min([], Acc) -> {ok, Acc};
+num_min([H | T], Acc) when is_number(H), H < Acc -> num_min(T, H);
+num_min([H | T], Acc) when is_number(H) -> num_min(T, Acc);
+num_min(_, _) -> not_numbers.
+
+%% Strings (all binaries) and Symbols (all atoms) keep native term order;
+%% any other mix is folded pairwise with the dispatched operator.
+-spec extreme([term(), ...], '>' | '<') -> term().
+extreme([First | Rest] = List, Op) ->
+    case native_orderable(First, Rest) of
+        true when Op =:= '>' -> lists:max(List);
+        true -> lists:min(List);
+        false -> fold_dispatched(Rest, First, Op)
+    end.
+
+-spec native_orderable(term(), list()) -> boolean().
+native_orderable(First, Rest) when is_binary(First) -> lists:all(fun erlang:is_binary/1, Rest);
+native_orderable(First, Rest) when is_atom(First) -> lists:all(fun erlang:is_atom/1, Rest);
+native_orderable(_, _) -> false.
 
 -spec fold_dispatched(list(), term(), '>' | '<') -> term().
 fold_dispatched([], Acc, _Op) ->
