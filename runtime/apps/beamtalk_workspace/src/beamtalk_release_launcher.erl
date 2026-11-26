@@ -348,6 +348,7 @@ tls_preflight_main() ->
             erlang:halt(2)
     end.
 
+-spec tls_preflight_main(#{atom() => [string()]}) -> no_return().
 tls_preflight_main(VmArgs) ->
     Words = fun(Flag) -> init_words(Flag) ++ maps:get(Flag, VmArgs) end,
     Args = #{
