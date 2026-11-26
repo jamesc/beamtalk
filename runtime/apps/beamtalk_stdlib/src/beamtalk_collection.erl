@@ -183,8 +183,10 @@ fold_dispatched([], Acc, _Op) ->
     Acc;
 fold_dispatched([Elem | Rest], Acc, Op) ->
     case beamtalk_message_dispatch:send(Acc, Op, [Elem]) of
-        true -> fold_dispatched(Rest, Acc, Op);
-        false -> fold_dispatched(Rest, Elem, Op);
+        true ->
+            fold_dispatched(Rest, Acc, Op);
+        false ->
+            fold_dispatched(Rest, Elem, Op);
         Other ->
             %% `Number>>max:` is `(self > other) ifTrue: [self] ifFalse: [other]`,
             %% so a non-Boolean answer is *sent* `ifTrue:ifFalse:` (DNU unless
