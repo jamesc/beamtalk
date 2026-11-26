@@ -2022,16 +2022,19 @@ Uses registered-name tricks to avoid a hard DDD dep from beamtalk_runtime →
 beamtalk_workspace (same pattern as stop_class_actors/1 and classReload/1).
 
   - beamtalk_workspace_meta has a known registered name — cast directly.
-  - beamtalk_repl_shells pg group — broadcast to all active REPL sessions.
+  - beamtalk_repl_shells pg group — broadcast to this node's REPL sessions.
+    Local members only (BT-5192): the group's default `pg` scope is synced
+    across connected nodes, and a class removed here is still loaded on a peer,
+    so a peer's shells must not drop it from their trackers.
 """.
 -spec publish_class_removed(atom(), atom()) -> ok.
 publish_class_removed(ClassName, Module) ->
     %% Workspace metadata cleanup.
     gen_server:cast(beamtalk_workspace_meta, {unregister_module, Module}),
-    %% REPL session tracker cleanup — broadcast to all joined session shells.
+    %% REPL session tracker cleanup — broadcast to this node's session shells.
     Shells =
         try
-            pg:get_members(beamtalk_repl_shells)
+            pg:get_local_members(beamtalk_repl_shells)
         catch
             _:_ -> []
         end,

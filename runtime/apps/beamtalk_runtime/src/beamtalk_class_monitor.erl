@@ -157,7 +157,7 @@ init(Opts) ->
         try
             [
                 {Name, Pid}
-             || Pid <- pg:get_members(beamtalk_classes),
+             || Pid <- pg:get_local_members(beamtalk_classes),
                 {ok, Name} <- [beamtalk_class_registry:class_name_for_pid(Pid)]
             ]
         catch

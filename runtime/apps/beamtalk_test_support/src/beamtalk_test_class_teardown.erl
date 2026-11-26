@@ -51,7 +51,8 @@ stop_classes_without_app() ->
     end.
 
 -doc """
-Stop every live class process: the members of the `beamtalk_classes` pg group,
+Stop every live class process: this node's members of the `beamtalk_classes` pg group
+(never a connected peer's, BT-5192),
 and every registered class gen_server not in it. An earlier suite that restarted
 `pg` leaves live class processes (still registered under their
 `beamtalk_class_<Name>` name) that the group no longer lists; left running, they
@@ -61,7 +62,7 @@ shadow the classes a later bootstrap registers (BT-4934).
 stop_pg_class_processes() ->
     Members =
         try
-            pg:get_members(beamtalk_classes)
+            pg:get_local_members(beamtalk_classes)
         catch
             _:_ -> []
         end,
