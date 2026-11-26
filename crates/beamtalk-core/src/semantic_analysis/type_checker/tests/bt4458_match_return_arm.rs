@@ -206,3 +206,49 @@ fn early_return_of_declared_type_is_clean() {
     );
     assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 }
+
+#[test]
+fn dynamic_early_return_does_not_hide_tail_mismatch() {
+    let diags = type_messages(
+        r#"typed Object subclass: ZzEarly
+  class early: n :: Integer -> Integer =>
+    n < 1 ifTrue: [^self foo]
+    "oops"
+"#,
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|m| m.contains("declares return type Integer")),
+        "a Dynamic early `^` must not hide the String tail: {diags:?}"
+    );
+}
+
+#[test]
+fn nil_return_in_handler_of_integer_method_warns() {
+    let diags = type_messages(
+        r"typed Object subclass: ZzEarly
+  class run -> Integer =>
+    [1 + 1] on: Error do: [:e | ^nil]
+    2
+",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|m| m.contains("declares return type Integer")),
+        "`^nil` from an `-> Integer` method must warn: {diags:?}"
+    );
+}
+
+#[test]
+fn early_return_in_undeclared_method_is_not_checked() {
+    let diags = type_messages(
+        r"typed Object subclass: ZzEarly
+  class early: n :: Integer =>
+    n < 1 ifTrue: [^#more]
+    {#ok, n}
+",
+    );
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}

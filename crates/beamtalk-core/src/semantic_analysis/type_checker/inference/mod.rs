@@ -244,6 +244,7 @@ impl TypeChecker {
         // Check top-level expressions last — method return types are now available.
         self.block_written_locals =
             super::binary_string_compare::block_written_locals(&module.expressions);
+        self.collected_returns.clear();
         let outer_off = std::mem::replace(
             &mut self.discarded_update_off,
             self.skip_module_expression_lint,
@@ -436,8 +437,19 @@ impl TypeChecker {
             let mut returned = self.tail_match_return_types(&method.body);
             // BT-5283: only a declared return type is checked against these;
             // an undeclared method's inferred (cached) type is unchanged.
+            // Only fully-`Known` return types join the union: a `Dynamic` or
+            // Negation/Intersection member would collapse or skip the whole
+            // union check and hide a real mismatch on the tail.
             if method.return_type.is_some() {
-                returned.extend(collected_returns);
+                returned.extend(collected_returns.into_iter().filter(|t| {
+                    match t {
+                        InferredType::Known { .. } => true,
+                        InferredType::Union { members, .. } => members
+                            .iter()
+                            .all(|m| matches!(m, InferredType::Known { .. })),
+                        _ => false,
+                    }
+                }));
             }
             if returned.is_empty() {
                 body_type
