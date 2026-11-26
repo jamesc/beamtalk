@@ -1,0 +1,37 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5289: a `match:` scrutinee holding a local assignment, in a value-type
+// instance method and a class method (no actor `State`): in a conditional arm
+// and in a loop body, the local keeps the value the scrutinee assigned. Used
+// by stdlib/test/bt5289match_sent_scrutinee_test.bt.
+
+Value subclass: Bt5289LocalScrutineeValue
+
+  class localScrutinee: x =>
+    t := 0
+    r := 0
+    x isNil
+      ifTrue: [nil]
+      ifFalse: [
+        r := (t := t + x) match: [
+          1 -> 10;
+          _ -> 20
+        ]
+      ]
+    1 to: 2 do: [:i | (t := t + 1) match: [_ -> nil]]
+    {t, r}
+
+  localScrutinee: x =>
+    t := 0
+    r := 0
+    x isNil
+      ifTrue: [nil]
+      ifFalse: [
+        r := (t := t + x) match: [
+          1 -> 10;
+          _ -> 20
+        ]
+      ]
+    1 to: 2 do: [:i | (t := t + 1) match: [_ -> nil]]
+    {t, r}

@@ -223,6 +223,7 @@ const LOCAL_FRAMES: &[&str] = &[
 fn local_assignment_scrutinee_corpus_compiles() {
     let actor = "Actor subclass: Ctr\n  state: f = 0\n\n  bump => 1\n\n  run =>\n";
     let mut rows = Vec::new();
+    let mut skipped = Vec::new();
     for header in std::iter::once(&actor).chain(INLINE_HEADERS) {
         for scrutinee in LOCAL_ASSIGNMENT_SCRUTINEES {
             for shape in VALUE_MATCHES {
@@ -235,6 +236,7 @@ fn local_assignment_scrutinee_corpus_compiles() {
                         );
                         assert_parses(&src);
                         if phase0_rejects(&src) {
+                            skipped.push(format!("frame {frame:?} in {header:?}"));
                             continue;
                         }
                         rows.push((src.clone(), codegen(&src)));
@@ -243,7 +245,13 @@ fn local_assignment_scrutinee_corpus_compiles() {
             }
         }
     }
-    assert!(rows.len() >= 200, "only {} rows", rows.len());
+    assert!(
+        rows.len() >= 200,
+        "only {} rows; Phase 0 rejected {}:\n{}",
+        rows.len(),
+        skipped.len(),
+        skipped.join("\n")
+    );
     assert_all_compile_through_erlc(&rows);
 }
 

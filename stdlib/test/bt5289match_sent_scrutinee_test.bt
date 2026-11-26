@@ -31,3 +31,11 @@ TestCase subclass: Bt5289MatchSentScrutineeTest
     self assert: (a localScrutinee: 1) equals: {3, 10}
     self assert: (a localScrutinee: 5) equals: {7, 20}
     self assert: (a localScrutinee: nil) equals: {2, 0}
+
+  testLocalAssignmentScrutineeInValueAndClassMethods =>
+    o := Bt5289LocalScrutineeValue new
+    self assert: (o localScrutinee: 1) equals: {3, 10}
+    self assert: (o localScrutinee: 5) equals: {7, 20}
+    self assert: (o localScrutinee: nil) equals: {2, 0}
+    self assert: (Bt5289LocalScrutineeValue localScrutinee: 1) equals: {3, 10}
+    self assert: (Bt5289LocalScrutineeValue localScrutinee: nil) equals: {2, 0}
