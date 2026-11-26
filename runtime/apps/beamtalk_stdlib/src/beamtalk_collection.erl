@@ -104,13 +104,15 @@ maximum(Self) ->
     case to_list(Self) of
         [] ->
             raise_empty('max');
-        List ->
+        [First | _] = List when is_number(First) ->
             %% Every non-number sorts above every number in term order, so a
             %% number answer proves the whole list is numbers (BT-5266).
             case lists:max(List) of
                 Max when is_number(Max) -> Max;
                 _ -> extreme(List, '>')
-            end
+            end;
+        List ->
+            extreme(List, '>')
     end.
 
 -doc """

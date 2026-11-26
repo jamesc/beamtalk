@@ -1129,7 +1129,7 @@ This holds however the receiver is typed: an untyped local or parameter, an `:: 
 | `n > x`  | `x greaterThanFromNumber: n`    | `n > x`  |
 | `n >= x` | `x greaterOrEqualFromNumber: n` | `n >= x` |
 
-This covers every send: an inlined `5 < x`, `perform:`, and the methods built on the four operators (`max:`, `min:`, `between:and:`), and Collection `max` / `min` (all numbers, all Strings or all Symbols compare natively; any other mix is folded pairwise with the dispatched `>` / `<`, so `#(3, nil) max` raises as `3 max: nil` does). An argument whose class has no hook raises `does_not_understand` for the hook, with a hint naming the operator typed, instead of answering by the BEAM's term order (`3 <= nil` used to be `true`, `3 max: nil` used to be `nil`):
+This covers every send: an inlined `5 < x`, `perform:`, and the methods built on the four operators (`max:`, `min:`, `between:and:`). An argument whose class has no hook raises `does_not_understand` for the hook, with a hint naming the operator typed, instead of answering by the BEAM's term order (`3 <= nil` used to be `true`, `3 max: nil` used to be `nil`):
 
 ```beamtalk
 3 <= nil
@@ -1142,7 +1142,9 @@ aMoney := (Money new) withCents: 500   // Money as defined below
 nil < 3          // => ERROR: UndefinedObject does not understand '<'
 ```
 
-`nil < 3` and `3 < nil` now fail the same way, so one `on: RuntimeError do:` handler covers both (and `3 + nil`). A value type that should compare with numbers implements the hooks:
+`nil < 3` and `3 < nil` now fail the same way, so one `on: RuntimeError do:` handler covers both (and `3 + nil`).
+
+Collection `max` / `min` follow the same rule: all numbers, all Strings or all Symbols compare natively, and any other mix is folded pairwise with the dispatched `>` / `<`, so `#(3, nil) max` raises as `3 max: nil` does. A value type that should compare with numbers implements the hooks:
 
 ```beamtalk
 Value subclass: Money

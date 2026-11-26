@@ -1801,7 +1801,7 @@ duplicate Epic)
   - BT-5213 — follow-up: `String`/`Symbol` wrong-kind ordering raises `type_error`
   - BT-5214 — Collection `max`/`min` honour the comparison hooks (done; BT-5266 restored the all-number timings)
 
-**Status:** Complete for the arithmetic design — all issues Done (BT-3262–BT-3266 closed 2026-08-25, BT-2712 closed 2026-08-25; addendum issues closed 2026-10-18). The 2026-11-25 comparison addendum is implemented at run time (Phases 0–2, BT-5207–BT-5211); the type-checker phase (BT-5212) is open.
+**Status:** Complete for the arithmetic design — all issues Done (BT-3262–BT-3266 closed 2026-08-25, BT-2712 closed 2026-08-25; addendum issues closed 2026-10-18). The 2026-11-25 comparison addendum is implemented at run time (Phases 0–2, BT-5207–BT-5211) and in Collection `max`/`min` (BT-5214, BT-5266); the type-checker phase (BT-5212) is open.
 
 ## References
 - Related issues: BT-2712 (this ADR), BT-2708 (epic), BT-2709 (Phase 1,
