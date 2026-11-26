@@ -51,13 +51,14 @@ defmodule BtAttach.RemoteCallAllowlistTest do
     {:beamtalk_repl_subscriptions, :subscribe_object, :subscription, :permanent},
     {:beamtalk_repl_subscriptions, :unsubscribe_object, :subscription, :permanent},
 
-    # Sessions and eval control.
-    {:beamtalk_session_sup, :start_session, :session, "BT-5202"},
-    {:beamtalk_repl_shell, :attach, :session, "BT-5202"},
-    {:beamtalk_repl_shell, :interrupt, :session, "BT-5202"},
-    {:beamtalk_repl_shell, :get_bindings, :session, "BT-5202"},
-    {:supervisor, :count_children, :session, "BT-5202"},
-    {:erlang, :is_process_alive, :session, "BT-5202"},
+    # Starting a session, attaching its owner, reading its live bindings and
+    # probing it are not wire ops (the session does not exist yet; BT-2369 removed
+    # `bindings`). `beamtalk_repl_ops` is the one implementation both transports call.
+    {:beamtalk_repl_ops, :start_session, :operation_layer, :permanent},
+    {:beamtalk_repl_ops, :attach_session, :operation_layer, :permanent},
+    {:beamtalk_repl_ops, :session_bindings, :operation_layer, :permanent},
+    {:beamtalk_repl_ops, :session_alive, :operation_layer, :permanent},
+    {:beamtalk_repl_ops, :session_count, :operation_layer, :permanent},
 
     # Code editing.
     {:beamtalk_repl_eval, :compile_method, :capability, "BT-5203"},

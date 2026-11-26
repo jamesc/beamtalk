@@ -929,6 +929,9 @@ distribution-attached caller never calls it and never sees JSON.
 |----------|-----|
 | `beamtalk_repl_ops:request(Op, Params, SessionPid)` | **The entry point for a distribution-attached caller.** Builds the request and dispatches it; returns an `op_result()`. |
 | `beamtalk_repl_ops:dispatch(Op, Params, Msg, SessionPid)` | What `request/3` calls, and what the WebSocket handlers call with the `protocol_msg()` they decoded from a frame. Not for a remote caller: it needs the `protocol_msg()` record. |
+| `beamtalk_repl_ops:start_session(SessionId, Meta)` | **Start a session** (BT-5202): the one implementation behind a WebSocket auth and a LiveView mount. Starts the shell under `beamtalk_session_sup` and registers the id; returns `{ok, SessionPid}` or `{error, #beamtalk_error{}}`. A session is not an op: it exists before any op can run in it. |
+| `beamtalk_repl_ops:attach_session(SessionPid, OwnerPid)` | **Attach an owner** (BT-5202): the shell monitors `OwnerPid` and never idles out while one is attached. Returns `ok`, `gone` (the shell stopped first) or `timeout` (a busy shell did not answer in 5 s; it is alive, keep it). |
+| `beamtalk_repl_ops:session_bindings(SessionPid)` | **Read the live bindings** (BT-5202): `{ok, #{atom() => term()}}` or `{error, #beamtalk_error{}}`. A term-only API, not a wire op (BT-2369 removed the `bindings` op; other surfaces read them with `eval`). |
 | `beamtalk_repl_ops:render(Kind, Term)` | The one rendering function: display text for a live term or an error (see below). |
 | `beamtalk_repl_subscriptions:*` | Push streams (see Push Messages). |
 
@@ -968,7 +971,7 @@ contract; the table gives the shape per operation family.
 | Evaluation | `eval` | `{ok, Value, Output, Warnings}` · `{trace, Steps, Output, Warnings}` · `{script_exit, Code, Output, Warnings}` |
 | Evaluation (other) | `unload`, tracing read ops | `{ok, Value, Output, Warnings}` |
 | Actors | `actors`, `inspect`, `kill`, `interrupt`, `pid-stats` | `{actors, [ActorMeta]}` · `{inspect, FieldMap \| binary()}` · `{status, ok}` · `{value, StatsMap}` |
-| Sessions | `sessions`, `close`, `health`, `shutdown` | `{sessions, [SessionMeta]}` · `{status, ok}` · `{health, WorkspaceId, Nonce}` |
+| Sessions | `sessions`, `close`, `health`, `shutdown` | `{sessions, [SessionMeta]}` (`#{id, pid}`; the wire carries `id`) · `{status, ok}` · `{health, WorkspaceId, Nonce}` |
 | Loading | `load-source`, `load-project`, `save-section`, `save-native-source` | `{loaded, Classes, Warnings}` · `{load_project, Classes, Errors, Summary, Warnings}` · `{value, Map}` |
 | Developer reads | `complete`, `erlang-complete`, `hover`, `erlang-help`, `diagnostics`, `describe`, `methods`, `inherited-methods`, `list-classes`, `show-codegen`, `test`, `test-all`, `list-tests`, `load-tests` | `{completions, [binary()]}` · `{docs, binary()}` · `{diagnostics, [map()]}` · `{describe, Ops, Versions}` · `{methods, Methods, StateVars}` · `{inherited_methods, Methods}` · `{class_list, [ClassInfo]}` · `{codegen, CoreErlang, Warnings}` · `{test_results, map()}` · `{value, JsonValue}` |
 | Browse and navigation | `browse-*`, `nav-query`, `nav-symbols`, `reload-findings`, `export-traces` | `{value, JsonValue}` |
