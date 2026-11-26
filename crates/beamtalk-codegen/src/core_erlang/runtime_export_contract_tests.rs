@@ -538,7 +538,7 @@ fn resolve_open_heads(
             problems.push(format!(
                 "{}: the function called on {} is chosen at render time, and nothing \
                  enumerates it. Give its emitter a typed set of values with an `ALL` \
-                 list (like `ALL` lists elsewhere) and add it to `dynamic_calls`.",
+                 list and add it to `dynamic_calls`.",
                 head.origin, head.module
             ));
         }

@@ -195,8 +195,9 @@ abi_mismatch_error(ClassName, Module, Found) ->
     beamtalk_error:with_hint(
         Error2,
         <<
-            "Recompile the package with the current beamtalk compiler. Class variables were "
-            "removed (ADR 0153), so a module compiled by an older compiler cannot be loaded."
+            "Recompile the package with the compiler that matches this runtime. A module's "
+            "module_abi must equal the runtime's; modules built before ADR 0153 (class variables "
+            "removed) declare none. If the module is newer than the runtime, update the runtime."
         >>
     ).
 

@@ -206,7 +206,6 @@ Self
             'classMethodSignatures' => ~{}~,
             'methodXref' => [~{'class_side' => 'false', 'selector' => 'tagWithoutFoo', 'line' => 1, 'sends' => [], 'references' => [~{'class' => 'Symbol', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'describe:', 'line' => 1, 'sends' => [~{'selector' => 'asString', 'line' => 1, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~], 'references' => [~{'class' => 'Integer', 'line' => 1}~, ~{'class' => 'Printable', 'line' => 1}~, ~{'class' => 'String', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'classify:', 'line' => 1, 'sends' => [], 'references' => [~{'class' => 'String', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'bt2746DoubleBackslashTypo', 'line' => 1, 'sends' => [], 'references' => [~{'class' => 'Symbol', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'bt2746MixedOperators', 'line' => 1, 'sends' => [], 'references' => [~{'class' => 'Printable', 'line' => 1}~, ~{'class' => 'Comparable', 'line' => 1}~], 'source_status' => 'indexed'}~],
             'stateVarXref' => [],
-            'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
             'classMethodDocs' => ~{}~,
@@ -229,7 +228,7 @@ Self
       'initialize_assigns' => [],
       'method_info' => ~{'tagWithoutFoo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Symbol \\ #foo', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'describe:' => ~{'arity' => 1, 'param_types' => ['Integer & Printable'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'classify:' => ~{'arity' => 1, 'param_types' => [{'union', [{'singleton', 'north'}, {'singleton', 'south'}, {'singleton', 'east'}, {'singleton', 'west'}]}], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bt2746DoubleBackslashTypo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Symbol \\ #foo', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bt2746MixedOperators' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Printable & Comparable & #foo', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
       'defines_user_class_new0' => 'false'
@@ -266,7 +265,7 @@ Self
       'initialize_assigns' => [],
       'method_info' => ~{'tagWithoutFoo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Symbol \\ #foo', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'describe:' => ~{'arity' => 1, 'param_types' => ['Integer & Printable'], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'classify:' => ~{'arity' => 1, 'param_types' => [{'union', [{'singleton', 'north'}, {'singleton', 'south'}, {'singleton', 'east'}, {'singleton', 'west'}]}], 'return_type' => 'String', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bt2746DoubleBackslashTypo' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Symbol \\ #foo', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'bt2746MixedOperators' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Printable & Comparable & #foo', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
       'defines_user_class_new0' => 'false'

@@ -49,9 +49,9 @@ struct ShapeEntry {
     version: u32,
     fields: BTreeMap<String, Option<String>>,
     migrations: BTreeMap<String, String>,
-    /// `module_abi` of the class's module (ADR 0153; ADR 0130 before it). `None` when absent or
-    /// `null`: a `shapes.json` written before this field existed, or a module
-    /// compiled before ADR 0130.
+    /// `module_abi` of the class's module (ADR 0153). `None` when absent or
+    /// `null`: a `shapes.json` written before ADR 0153 (it carried the
+    /// since-renamed older key, which is ignored) or a module built before it.
     #[serde(default)]
     module_abi: Option<u32>,
 }
@@ -510,7 +510,7 @@ fn render_report(
     }
 
     if !abi_findings.is_empty() {
-        out.push_str("\n  Class-variable ABI changed (ADR 0130)\n");
+        out.push_str("\n  Module ABI changed (ADR 0153)\n");
         for f in &abi_findings {
             let _ = writeln!(
                 out,
@@ -706,7 +706,7 @@ mod tests {
         let mut new = doc(&[("Widget", 1, &[], &[])]);
         new.shapes.get_mut("Widget").unwrap().module_abi = Some(2);
         let report = render_report("orders", "1.3.0", "1.4.0", &prev, &new, None, None);
-        assert!(report.text.contains("Class-variable ABI changed"));
+        assert!(report.text.contains("Module ABI changed"));
         assert!(report.text.contains("module_abi 1 → 2   warning"));
         assert!(report.text.contains("0 errors, 1 warning."));
         assert!(!report.has_error);
