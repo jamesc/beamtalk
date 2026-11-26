@@ -102,6 +102,76 @@ class BT-3083 fixed on the CLI (where an unrecognised `:cmd` fell through to
 never added to this file's guard list in the first place (they hit the same
 `{:unknown, cmd}` catch-all today), so this surface never had BT-3083's bug.
 
+### LiveView direct runtime calls (BT-5201, epic BT-5200)
+
+`BtAttach.Workspace` (`editors/liveview/lib/bt_attach/workspace.ex`) reaches the
+workspace node over Erlang distribution. The epic (BT-5200) routes every call
+through the operation layer (`beamtalk_repl_ops:request/3`, the term contract in
+[`docs/repl-protocol.md`](../repl-protocol.md#operation-layer-term-contract)) or
+the subscription facade, so VS Code, MCP and LiveView share one implementation
+per capability. Until then, this table is the inventory of every remote target
+the module calls, and `BtAttach.RemoteCallAllowlistTest` enforces it: a call to a
+`module:function` not listed here fails CI, an entry nothing calls fails CI, and
+the test fails when this table and its allowlist disagree. The migrating issue
+deletes the row and the allowlist entry.
+
+Class: **operation layer** and **subscription** are where calls end up;
+**session lifecycle** creates, owns or probes sessions; **capability** is a
+runtime function with no operation behind it yet; **encoding helper** builds
+requests or renders results. "Covered by" says whether an operation in
+`beamtalk_repl_op_table.erl` already does the job. Migrating issues: BT-5202
+sessions and eval control, BT-5203 code editing, BT-5204 workspace state,
+BT-5205 git and process navigation. BT-5206 locks the allowlist down to the
+`permanent` rows.
+
+| Target | Class | What it does | Covered by | Migrating issue |
+|--------|-------|--------------|------------|-----------------|
+| `beamtalk_repl_ops:request` | operation layer | Build the request and dispatch an op; the one request entry point (`eval`, `complete`, `hover`, `diagnostics`, `inspect`, `pid-stats`, the browse/nav ops, `close`, `kill`, `actors`, `sessions`, the test ops). | itself | permanent |
+| `beamtalk_repl_ops:render` | encoding helper | The one rendering function: display text for a term, a term list, or an error (`{Structured, Message}`). | itself | permanent |
+| `beamtalk_repl_subscriptions:subscribe` | subscription | Subscribe the LiveView pid to the `transcript`, `bindings`, `classes` or `reload_check` push stream. | the facade (not an op) | permanent |
+| `beamtalk_repl_subscriptions:unsubscribe` | subscription | Unsubscribe the LiveView pid from one of those streams. | the facade (not an op) | permanent |
+| `beamtalk_repl_subscriptions:subscribe_object` | subscription | Track one object's changes for the live Inspector (ADR 0095). | the facade (not an op) | permanent |
+| `beamtalk_repl_subscriptions:unsubscribe_object` | subscription | Stop tracking that object. | the facade (not an op) | permanent |
+| `beamtalk_session_sup:start_session` | session lifecycle | Start a workspace-supervised REPL session for a LiveView mount. | none: the WebSocket handler creates its session implicitly at auth | BT-5202 |
+| `beamtalk_repl_shell:attach` | session lifecycle | Make the LiveView pid the session's owner/client. | none: tied to the socket process on the WebSocket | BT-5202 |
+| `beamtalk_repl_shell:interrupt` | session lifecycle | Stop the eval running in the session (the dock's Stop control). | `interrupt` | BT-5202 |
+| `beamtalk_repl_shell:get_bindings` | session lifecycle | Read the session's live bindings (values, not printed strings). | none (no `bindings` op) | BT-5202 |
+| `supervisor:count_children` | session lifecycle | Count active sessions (`session_count/0`, used by the teardown tests). | `sessions` | BT-5202 |
+| `erlang:is_process_alive` | session lifecycle | Probe whether a session pid is still alive. | `sessions` | BT-5202 |
+| `beamtalk_repl_eval:compile_method` | capability | Compile and install one method patch from the System Browser. | none (MCP `save_method` has its own entry) | BT-5203 |
+| `beamtalk_repl_eval:reload_file` | capability | Reload a source file by path. | none (`load-source` takes source text, not a path) | BT-5203 |
+| `beamtalk_repl_loader_newclass:new_class` | capability | Create a new class from source at a target path. | none | BT-5203 |
+| `beamtalk_workspace_interface_primitives:revert_method` | capability | Revert one pending in-memory method patch (`Workspace changes revert:`). Not named in BT-5203's list; it is a code-editing call, so it goes there. | none | BT-5203 |
+| `beamtalk_workspace_flush:flush` | capability | Write pending ChangeLog edits to disk. | none | BT-5204 |
+| `beamtalk_workspace_changelog_views:change_entries` | capability | Read the ChangeLog entries behind the Changes pane. | none | BT-5204 |
+| `beamtalk_workspace_findings_store:all` | capability | Read the reload-induced findings snapshot. | `reload-findings` | BT-5204 |
+| `beamtalk_workspace_meta:get_setting` | capability | Read the `autoflush` workspace setting. | none | BT-5204 |
+| `beamtalk_version:get` | capability | Read the workspace's version report (the readiness handshake). | partial: `describe` carries the versions | BT-5204 |
+| `beamtalk_git:git_status` | capability | Git status of the working tree (Changes dock). | none | BT-5205 |
+| `beamtalk_git:git_diff` | capability | Git diff of one path. | none | BT-5205 |
+| `beamtalk_git:git_log` | capability | Recent commits. | none | BT-5205 |
+| `beamtalk_git:git_stage` | capability | Stage a path. Mutating; BT-5205 lists the read ops only, so it takes these four too (proposed). | none | BT-5205 |
+| `beamtalk_git:git_unstage` | capability | Unstage a path (mutating; see `git_stage`). | none | BT-5205 |
+| `beamtalk_git:git_commit` | capability | Commit the staged changes (mutating; see `git_stage`). | none | BT-5205 |
+| `beamtalk_git:git_revert_file` | capability | Discard a working-tree change for a path (mutating; see `git_stage`). | none | BT-5205 |
+| `beamtalk_process_navigation:child_handles` | capability | List a supervisor's children as live handles for the Inspector. | none (`inspect` does not list children) | BT-5205 |
+| `erlang:process_info` | capability | Read status, queue length, memory and reductions of a bare pid for the Inspector. | partial: `pid-stats` (actors) | BT-5205 |
+| `erlang:pid_to_list` | encoding helper | Format a remote pid as its node-local text for `kill`, `inspect`, `pid-stats` and the actor list. Goes away when those ops take the pid or a stable id the operation layer mints (BT-5205 covers the actor list and process navigation). | n/a | BT-5205 |
+| `lists:map` | encoding helper | `pid_to_list` over the actor list in one round-trip (`actors/0`). Goes with `pid_to_list`. | n/a | BT-5205 |
+
+The encoding helpers LiveView used to call remotely to build a request and render
+a result (`beamtalk_repl_protocol:decode`, `get_params`,
+`beamtalk_repl_json:term_to_json`, `format_error_message`,
+`beamtalk_repl_errors:ensure_structured_error`) are gone: building a request is
+one `beamtalk_repl_ops:request/3` call, and rendering is the one function
+`beamtalk_repl_ops:render/2`.
+
+`BtAttach.Facade` declares four ops with no implementation, kept visible in
+`BtAttach.Facade.reserved_ops/0` and pinned by `facade_parity_test.exs` so the
+list can only shrink: `load_source` (BT-5203), `info` (BT-5204),
+`subscribe_actors` (BT-5205) and `rotate_cookie` (decided in BT-5206).
+
+
 ### Desktop attach client (native shell over the LiveView IDE, ADR 0097)
 
 The desktop app (`desktop/`, BT-2982 epic) is **not a new surface for this
