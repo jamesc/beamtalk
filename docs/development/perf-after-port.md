@@ -1,5 +1,12 @@
 # Compilation Latency — After Port Migration
 
+> **Historical (2026-02).** These measurements compare the Port backend with the
+> daemon backend that existed at the time. Both the daemon and the later legacy
+> `escript` backend are gone: `BEAMTALK_COMPILER` is no longer read (setting it
+> prints a "no longer supported" warning, BT-5198) and the port is the only
+> backend. The `BEAMTALK_COMPILER=...` lines under *Reproduction* no longer select
+> anything; use `scripts/bench-compilation.sh` directly for current numbers.
+
 Post-migration performance measurements after completing the OTP Port migration
 (ADR 0022, BT-543). Compares the Port backend against the legacy daemon backend
 and the pre-migration baseline from BT-544.

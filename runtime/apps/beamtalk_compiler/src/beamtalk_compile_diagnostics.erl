@@ -31,12 +31,9 @@ render as `"<file>: unbound variable 'State' in foo/1"' for the same
 input).
 
 Used by both `beamtalk_build_worker' and `beamtalk_compiler_server' (the
-in-memory Port backend, ADR 0022 Phase 3) so the two never drift. The
-escript fallback backend (`compile.escript') cannot depend on this
-module — escripts run standalone with no project code path, only OTP's
-own applications — so it carries its own small `print_messages/2' that
-calls the same `sys_messages:format_messages/4' directly; see that
-function's doc for why `report_errors'/`report_warnings' (the more
+in-memory Port backend, ADR 0022 Phase 3) so the two never drift. (The
+former standalone `compile.escript' backend, which carried its own copy of
+this logic, was removed in BT-5198.) Note that `report_errors'/`report_warnings' (the more
 obvious option) turned out to be actively wrong here, not just an
 unshared duplicate of this formatting: they print through the compiling
 process's default group leader, which lands on stdout, not stderr — the
@@ -118,8 +115,7 @@ demangle_class_methods(Text) ->
 Turn a `compile:forms/2' `Warnings' list (from `return_warnings') into a
 single human-readable binary, one line per underlying warning, prefixed
 `"Warning: "' — matching the wording `report_warnings' would have
-printed, and what `compile.escript''s `print_messages/2' already prints
-for the escript backend. Demangled the same way `format_errors/1' is (see
+printed. Demangled the same way `format_errors/1' is (see
 `format_messages/2'), for surface parity between the two: a warning about
 a class-side method reads `class method '<selector>'' regardless of which
 backend/call path produced it.
