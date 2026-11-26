@@ -152,6 +152,7 @@ pub fn run(dry_run: bool) -> Result<()> {
         version,
         &origin_url,
         &tag,
+        manifest.package.min_beamtalk.as_deref(),
         existing_entry.as_ref(),
         &entry_path,
     )?;
@@ -547,6 +548,7 @@ fn render_index_entry_content(
     version: &str,
     git_url: &str,
     tag: &str,
+    min_beamtalk: Option<&str>,
     existing_entry: Option<&RegistryEntry>,
     entry_path: &Utf8Path,
 ) -> Result<String> {
@@ -554,9 +556,17 @@ fn render_index_entry_content(
         let existing_content = std::fs::read_to_string(entry_path)
             .into_diagnostic()
             .wrap_err_with(|| format!("Failed to read existing index entry '{entry_path}'"))?;
-        append_version_block(&existing_content, version, git_url, tag)
+        append_version_block(&existing_content, version, git_url, tag, min_beamtalk)
     } else {
-        render_new_index_entry_with_licenses(name, description, licenses, version, git_url, tag)
+        render_new_index_entry_with_licenses(
+            name,
+            description,
+            licenses,
+            version,
+            git_url,
+            tag,
+            min_beamtalk,
+        )
     };
 
     // Validate it round-trips through the same parser dependency resolution
@@ -576,7 +586,7 @@ fn render_new_index_entry(
     git_url: &str,
     tag: &str,
 ) -> String {
-    render_new_index_entry_with_licenses(name, description, &[], version, git_url, tag)
+    render_new_index_entry_with_licenses(name, description, &[], version, git_url, tag, None)
 }
 
 fn render_new_index_entry_with_licenses(
@@ -586,6 +596,7 @@ fn render_new_index_entry_with_licenses(
     version: &str,
     git_url: &str,
     tag: &str,
+    min_beamtalk: Option<&str>,
 ) -> String {
     use std::fmt::Write as _;
 
@@ -601,24 +612,41 @@ fn render_new_index_entry_with_licenses(
         let _ = writeln!(out, "licenses = [{}]", items.join(", "));
     }
     out.push('\n');
-    out.push_str(&render_version_block(version, git_url, tag));
+    out.push_str(&render_version_block(version, git_url, tag, min_beamtalk));
     out
 }
 
-fn append_version_block(existing_content: &str, version: &str, git_url: &str, tag: &str) -> String {
+fn append_version_block(
+    existing_content: &str,
+    version: &str,
+    git_url: &str,
+    tag: &str,
+    min_beamtalk: Option<&str>,
+) -> String {
     let mut out = existing_content.trim_end().to_string();
     out.push_str("\n\n");
-    out.push_str(&render_version_block(version, git_url, tag));
+    out.push_str(&render_version_block(version, git_url, tag, min_beamtalk));
     out
 }
 
-fn render_version_block(version: &str, git_url: &str, tag: &str) -> String {
-    format!(
+fn render_version_block(
+    version: &str,
+    git_url: &str,
+    tag: &str,
+    min_beamtalk: Option<&str>,
+) -> String {
+    use std::fmt::Write as _;
+
+    let mut block = format!(
         "[[versions]]\nversion = \"{}\"\ngit = \"{}\"\ntag = \"{}\"\n",
         escape_toml_string(version),
         escape_toml_string(git_url),
         escape_toml_string(tag)
-    )
+    );
+    if let Some(min) = min_beamtalk {
+        let _ = writeln!(block, "min-beamtalk = \"{}\"", escape_toml_string(min));
+    }
+    block
 }
 
 fn write_index_entry(entry_path: &Utf8Path, content: &str) -> Result<()> {
@@ -1079,6 +1107,7 @@ mod tests {
             "0.1.0",
             "https://example.test/yaml",
             "v0.1.0",
+            None,
         );
         let parsed: toml::Value = toml::from_str(&content).unwrap();
         assert_eq!(parsed["licenses"].as_array().unwrap().len(), 2, "{content}");
@@ -1115,8 +1144,13 @@ mod tests {
     #[test]
     fn test_append_version_block_preserves_existing_content() {
         let existing = "name = \"yaml\"\ndescription = \"YAML parsing\"\n\n[[versions]]\nversion = \"0.1.0\"\ngit = \"https://example.test/yaml\"\ntag = \"v0.1.0\"\n";
-        let updated =
-            append_version_block(existing, "0.2.0", "https://example.test/yaml", "v0.2.0");
+        let updated = append_version_block(
+            existing,
+            "0.2.0",
+            "https://example.test/yaml",
+            "v0.2.0",
+            None,
+        );
 
         assert!(updated.contains("description = \"YAML parsing\""));
         assert!(updated.contains("version = \"0.1.0\""));
@@ -1192,6 +1226,87 @@ mod tests {
             .output()
             .unwrap();
         assert!(String::from_utf8_lossy(&log.stdout).contains("Publish yaml v0.1.0"));
+    }
+
+    /// Rewrite the fixture's manifest with `extra` appended to `[package]`,
+    /// and commit it so the working tree stays clean for `run()`.
+    fn add_package_key(fixture: &TestFixture, extra: &str) {
+        let path = fixture.library.path().join("beamtalk.toml");
+        let manifest = std::fs::read_to_string(&path).unwrap();
+        let manifest = manifest.replacen("\n[registry]", &format!("{extra}\n\n[registry]"), 1);
+        std::fs::write(&path, manifest).unwrap();
+        run_git(fixture.library.path(), &["commit", "-am", "declare key"]);
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_publish_writes_min_beamtalk_to_git_registry_entry() {
+        let fixture = setup("yaml", "0.1.0", None);
+        add_package_key(&fixture, "min-beamtalk = \"0.7.0\"");
+
+        with_cwd(utf8(&fixture.library), || run(false)).unwrap();
+
+        let content =
+            std::fs::read_to_string(fixture.index_dir().join("packages/yaml.toml")).unwrap();
+        assert!(content.contains("min-beamtalk = \"0.7.0\""), "{content}");
+        let entry = registry::parse_index_entry("yaml", &content).unwrap();
+        assert_eq!(
+            entry.find_version("0.1.0").unwrap().min_beamtalk.as_deref(),
+            Some("0.7.0")
+        );
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_publish_writes_min_beamtalk_to_local_dir_registry() {
+        let fixture = setup("yaml", "0.1.0", None);
+        let local_registry = TempDir::new().unwrap();
+        std::fs::create_dir_all(local_registry.path().join("packages")).unwrap();
+        // Point the manifest at a plain-directory registry instead of the
+        // git index, and declare the minimum toolchain.
+        let path = fixture.library.path().join("beamtalk.toml");
+        let manifest = format!(
+            "[package]\nname = \"yaml\"\nversion = \"0.1.0\"\nmin-beamtalk = \"0.7.0\"\n\n\
+             [registry]\nurl = \"{}\"\n",
+            to_forward_slash(local_registry.path().to_str().unwrap())
+        );
+        std::fs::write(&path, manifest).unwrap();
+        run_git(fixture.library.path(), &["commit", "-am", "local registry"]);
+
+        with_cwd(utf8(&fixture.library), || run(false)).unwrap();
+
+        let content =
+            std::fs::read_to_string(local_registry.path().join("packages/yaml.toml")).unwrap();
+        assert!(content.contains("min-beamtalk = \"0.7.0\""), "{content}");
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_publish_without_min_beamtalk_omits_key() {
+        let fixture = setup("yaml", "0.1.0", None);
+        with_cwd(utf8(&fixture.library), || run(false)).unwrap();
+        let content =
+            std::fs::read_to_string(fixture.index_dir().join("packages/yaml.toml")).unwrap();
+        assert!(!content.contains("min-beamtalk"), "{content}");
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_publish_rejects_malformed_min_beamtalk_before_tagging() {
+        let fixture = setup("yaml", "0.1.0", None);
+        add_package_key(&fixture, "min-beamtalk = \">=0.7\"");
+
+        let err = with_cwd(utf8(&fixture.library), || run(false)).unwrap_err();
+        let msg = flat_err(&err);
+        assert!(msg.contains("min-beamtalk"), "{msg}");
+        assert!(msg.contains(">=0.7"), "{msg}");
+
+        let tags = Command::new("git")
+            .args(["tag", "--list"])
+            .current_dir(fixture.library.path())
+            .output()
+            .unwrap();
+        assert!(String::from_utf8_lossy(&tags.stdout).trim().is_empty());
     }
 
     #[test]

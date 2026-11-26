@@ -366,7 +366,7 @@ pub fn parse_release_config(
 /// Package metadata from `beamtalk.toml`.
 ///
 /// Required fields: `name`, `version`.
-/// Optional fields: `description`, `licenses`.
+/// Optional fields: `description`, `licenses`, `strict-deps`, `min-beamtalk`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PackageManifest {
@@ -386,6 +386,11 @@ pub struct PackageManifest {
     /// Defaults to `false` (warning only).
     #[serde(default, rename = "strict-deps")]
     pub strict_deps: bool,
+    /// Optional minimum `beamtalk` toolchain this package release supports,
+    /// exactly `major.minor.patch` (ADR 0154 § 10). `beamtalk publish` copies
+    /// it into the registry index entry; the resolver does not enforce it yet.
+    #[serde(default, rename = "min-beamtalk")]
+    pub min_beamtalk: Option<String>,
 }
 
 // ADR 0100 Rule 3: `DiagnosticSeverityOverride` and
@@ -455,6 +460,14 @@ fn validate_package_identity(package: &PackageManifest) -> Result<()> {
     }
     if let Err(msg) = validate_package_version(&package.version) {
         miette::bail!("Invalid [package] version: {msg}");
+    }
+    if let Some(min) = &package.min_beamtalk
+        && let Err(reason) = validate_exact_version(min)
+    {
+        miette::bail!(
+            "Invalid [package] min-beamtalk '{min}': {reason}.\n\n  \
+             Use the minimum toolchain version as major.minor.patch, e.g.: min-beamtalk = \"0.7.0\""
+        );
     }
     Ok(())
 }
