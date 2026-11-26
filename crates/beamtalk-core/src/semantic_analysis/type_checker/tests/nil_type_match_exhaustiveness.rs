@@ -14,6 +14,7 @@ use super::common::*;
 
 use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::Severity;
+use crate::test_helpers::test_support::wildcard_arm;
 
 // ── Fixtures ────────────────────────────────────────────────────────────
 
@@ -53,11 +54,6 @@ fn guarded_type_arm(binding: &str, class: &str, guard: Expression, body: Express
         body,
         span(),
     )
-}
-
-/// An unguarded `_ -> body` wildcard arm — full coverage.
-fn wildcard_arm(body: Expression) -> MatchArm {
-    MatchArm::new(Pattern::Wildcard(span()), body, span())
 }
 
 fn match_expr(exhaustive: bool, value: Expression, arms: Vec<MatchArm>) -> Expression {
