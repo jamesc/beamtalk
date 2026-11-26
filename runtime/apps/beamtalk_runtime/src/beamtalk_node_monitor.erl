@@ -515,7 +515,12 @@ the manifests yet), a class's first result is taken as the state the
 connection was already in, from whichever check it comes, and is not
 announced. A later change is. A reload in that window is not told apart
 from skew that was already there, so its first result is not announced
-either; it is still counted.
+either; it is still counted. If no connect check on the connection ever
+reads the peer (a 0.6.0 peer, which never answers the `hello`, whose one
+read failed, say), the baseline stays `pending` until the peer reconnects:
+classes that first skew in that time are counted but not announced. That
+is accepted: announcements are best-effort, and taking the baseline from
+any other check would announce skew the connection already had.
 """.
 -spec should_announce(pending | done, check_result() | none, check_result()) -> boolean().
 should_announce(pending, none, _Result) -> false;
