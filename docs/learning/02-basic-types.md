@@ -22,6 +22,14 @@ Integers are arbitrary-precision whole numbers (backed by Erlang's bignum).
 1000000000000000000   // => 1000000000000000000
 ```
 
+Write an integer in another base as `<radix>r<digits>`, with a radix from 2 to 36:
+
+```beamtalk
+16rFF     // => 255
+2r1010    // => 10
+-16rFF    // => -255
+```
+
 Useful messages:
 
 ```beamtalk
@@ -50,7 +58,13 @@ Floats are 64-bit IEEE 754 doubles. Division of integers always returns a Float.
 ```beamtalk
 3.14   // => 3.14
 -2.5   // => -2.5
+2.5e3 == 2500.0 // => true
+1e-3 == 0.001   // => true
 ```
+
+A number with an exponent (`e` or `E`, then digits) is always a Float, even without a
+decimal point: `1e3 class` is `Float`. See
+[Number Literals](../beamtalk-language-features.md#number-literals) for the details.
 
 Division produces a float:
 

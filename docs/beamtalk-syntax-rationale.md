@@ -439,10 +439,14 @@ self store: (st withWebsock: websock
 | Pipeline | `\|>` | `p withX: 5 \|> withY: 10` |
 | Block (no args) | `[body]` | `[self doIt]` |
 | Block (with args) | `[:args \| body]` | `[:x :y \| x + y]` |
+| Radix integer | `<radix>r<digits>` | `16rFF`, `2r1010` |
+| Exponent float | `<n>e<exp>` | `2.5e10`, `1e-3` |
 | String | `"..."` | `"hello"`, `"Hello, {name}!"` |
 | Symbol | `#name` | `#ok`, `#error` |
 | Tuple | `{a, b, c}` | `{1, "two", 3}` |
 | List | `#(a, b, c)` | `#(1, 2, 3)` |
+| List cons | `#(head \| tail)` | `#(0 \| #(1, 2))` |
+| Package-qualified superclass | `pkg@Class subclass: Name` | `json@Parser subclass: Lenient` |
 | Statement separator | newline or `.` | implicit |
 
 ---
