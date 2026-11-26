@@ -482,6 +482,61 @@ fn map_literal_long_breaks() {
     );
 }
 
+// --- BT-5299: map destructuring pattern wraps like the literal ---
+
+const LONG_MAP_PATTERN: &str = "Object subclass: Probe\n\n  class a: m :: Dictionary -> Object =>\n    #{\n      #access_token => accessToken,\n      #token_type => tokenType,\n      #expires_in => expiresIn,\n      #refresh_token => refreshToken,\n      #scope => scope\n    } := m\n";
+
+#[test]
+fn map_pattern_long_breaks_one_entry_per_line() {
+    let formatted = format_source(LONG_MAP_PATTERN).expect("source must parse");
+    assert!(
+        formatted.contains("#{\n      #access_token => accessToken,\n"),
+        "long map pattern should wrap one entry per line: {formatted}"
+    );
+    assert!(
+        formatted.lines().all(|l| l.len() <= 100),
+        "no line should exceed the width: {formatted}"
+    );
+    assert_identity(LONG_MAP_PATTERN);
+}
+
+#[test]
+fn map_pattern_short_stays_inline() {
+    let source = "Object subclass: Probe\n  class a: m :: Dictionary -> Object =>\n    #{#x => x, #y => y} := m\n";
+    let formatted = format_source(source).expect("source must parse");
+    assert!(
+        formatted.contains("#{#x => x, #y => y} := m"),
+        "short map pattern should stay inline: {formatted}"
+    );
+}
+
+#[test]
+fn map_pattern_long_in_match_arm_and_nested_round_trips() {
+    let long = "#{#access_token => accessToken, #token_type => tokenType, #expires_in => expiresIn, #refresh_token => refreshToken}";
+    for source in [
+        format!("Object subclass: Probe\n\n  a: m => m match: [{long} -> 1; _ -> 2]\n"),
+        format!(
+            "Object subclass: Probe\n\n  a: m => m match: [{long} when: [true] -> 1; _ -> 2]\n"
+        ),
+        format!("Object subclass: Probe\n\n  a: r =>\n    {{#ok, {long}}} := r\n"),
+    ] {
+        let once = format_source(&source).expect("source must parse");
+        let twice = format_source(&once).expect("formatted output must re-parse");
+        assert_eq!(once, twice, "not idempotent:\n{once}");
+    }
+}
+
+#[test]
+fn map_pattern_comment_between_entries_is_rejected_not_dropped() {
+    let source = "Object subclass: Probe\n\n  a: m =>\n    #{\n      #a => a, // note\n      #b => b\n    } := m\n";
+    // Map patterns carry no comment slots; the fidelity check must refuse
+    // the source rather than silently drop the comment.
+    match format_source(source) {
+        Err(_) => {}
+        Ok(out) => assert!(out.contains("// note"), "comment dropped:\n{out}"),
+    }
+}
+
 // --- BT-5024: package-qualified superclass keeps its `package@` prefix ---
 
 #[test]
