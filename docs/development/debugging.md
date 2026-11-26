@@ -195,8 +195,6 @@ shows (below), then applies these rules:
   every frame of the trace is printed, hidden ones included, each as its
   display name followed by the raw `module:function/arity` in brackets
   (`Counter>>increment (counter.bt:12)  [bt@counter:increment/1]`).
-  `--full-traces` is a deprecated hidden alias: it behaves the same and prints
-  a one-line deprecation notice.
 - **The default output names the switch.** When the default trace left frames
   out (hidden by visibility, or dropped by the cap), the failure ends with
   `(N frames hidden; --raw-mfa shows all)`. It does not start with `  at `, so

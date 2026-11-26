@@ -331,8 +331,7 @@ pub(crate) fn diagnostics_are_errors(
                 && (!matches!(
                     d.category,
                     Some(
-                        beamtalk_core::source_analysis::DiagnosticCategory::Deprecation
-                            | beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass
+                        beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass
                             | beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedFfi
                             | beamtalk_core::source_analysis::DiagnosticCategory::ArityMismatch
                     )

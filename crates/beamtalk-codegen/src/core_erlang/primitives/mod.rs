@@ -145,8 +145,6 @@ pub(in crate::core_erlang) const REGISTRY: &[(&str, PrimitiveLowerFn)] = &[
     ("Pid", actor_types::generate_pid_bif),
     ("Port", actor_types::generate_port_bif),
     ("Reference", actor_types::generate_reference_bif),
-    ("Future", actor_types::generate_future_bif),
-    ("FileHandle", actor_types::generate_file_handle_bif),
 ];
 
 /// Quoted `@primitive "selector"` / `@intrinsic "selector"`
