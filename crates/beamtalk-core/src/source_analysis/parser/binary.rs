@@ -776,6 +776,21 @@ impl Parser {
                     ));
                 }
             }
+            // A bignum beyond `f64` (about 309 digits) has no float to
+            // stand for it: a pattern arm never matches, a construction
+            // fails at run time.
+            if let Some((Literal::BigInteger(digits), value_span)) = literal
+                && !digits.parse::<f64>().is_ok_and(f64::is_finite)
+            {
+                self.diagnostics.push(Diagnostic::warning(
+                    format!(
+                        "{} because '{}' is too large to be a float",
+                        direction.cannot_succeed(),
+                        abbreviate_digits(digits)
+                    ),
+                    value_span,
+                ));
+            }
             return;
         }
         let Some((lit, value_span)) = literal else {

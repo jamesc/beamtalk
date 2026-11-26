@@ -905,3 +905,18 @@ fn negative_bignum_unit_is_out_of_range_not_too_large() {
         &format!("binary segment unit must be between 1 and 256, got -{BIG}"),
     );
 }
+
+#[test]
+fn bignum_too_large_for_a_float_segment_warns() {
+    let digits = "9".repeat(400);
+    let diagnostics = diagnostics_of(&format!("<<{digits}/float>>"));
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].0, Severity::Warning);
+    assert!(
+        diagnostics[0].1.contains("is too large to be a float"),
+        "{}",
+        diagnostics[0].1
+    );
+    // A bignum that an f64 holds is clean.
+    assert!(diagnostics_of(&format!("<<{BIG}/float>>")).is_empty());
+}

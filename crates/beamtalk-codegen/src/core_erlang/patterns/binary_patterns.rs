@@ -589,17 +589,19 @@ impl CoreErlangGenerator {
         // `#<1.0e0>(64,1,'float',…)`, while an integer value there is a
         // clause that can never match.
         let seg_type = seg.segment_type.unwrap_or(BinarySegmentType::Integer);
-        let value_doc = match (&seg.value, seg_type) {
-            (Pattern::Literal(Literal::String(s), _), _) => binary_string_folded_value(s),
+        let float = match (&seg.value, seg_type) {
             (
                 Pattern::Literal(
                     lit @ (Literal::Integer(_) | Literal::BigInteger(_) | Literal::Character(_)),
                     _,
                 ),
                 BinarySegmentType::Float,
-            ) if float_segment_value(lit).is_some() => {
-                leaf::float_lit(float_segment_value(lit).unwrap_or_default())
-            }
+            ) => float_segment_value(lit),
+            _ => None,
+        };
+        let value_doc = match (&seg.value, float) {
+            (Pattern::Literal(Literal::String(s), _), _) => binary_string_folded_value(s),
+            (_, Some(f)) => leaf::float_lit(f),
             _ => self.generate_pattern(&seg.value)?,
         };
 
