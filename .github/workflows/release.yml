@@ -590,8 +590,10 @@ jobs:
   interim-publish-vscode:
     needs: [prepare, vscode-extension]
     if: ${{ github.event_name == 'push' && vars.RELEASE_PUBLISH_MODE != 'promote' }}
+    # write, not read: GitHub checks a called workflow's job permissions
+    # statically, including its (skipped here) attach job.
     permissions:
-      contents: read
+      contents: write
     uses: ./.github/workflows/release-vscode.yml
     with:
       publish: true
@@ -614,8 +616,10 @@ jobs:
   interim-publish-liveview-ide:
     needs: [prepare, liveview-ide]
     if: ${{ github.event_name == 'push' && vars.RELEASE_PUBLISH_MODE != 'promote' }}
+    # write, not read: GitHub checks a called workflow's job permissions
+    # statically, including its (skipped here) attach job.
     permissions:
-      contents: read
+      contents: write
     uses: ./.github/workflows/liveview-release.yml
     with:
       publish: true
@@ -624,8 +628,10 @@ jobs:
   interim-publish-desktop:
     needs: [prepare, desktop-app]
     if: ${{ github.event_name == 'push' && vars.RELEASE_PUBLISH_MODE != 'promote' }}
+    # write, not read: GitHub checks a called workflow's job permissions
+    # statically, including its (skipped here) attach job.
     permissions:
-      contents: read
+      contents: write
     uses: ./.github/workflows/desktop-release.yml
     with:
       publish: true
