@@ -245,11 +245,9 @@ impl Parser {
             &TokenKind::Assign,
             "Expected ':=' after destructuring pattern",
         );
-        if let Err(error) = self.enter_nesting(start) {
-            return error;
-        }
-        let value = Box::new(self.parse_assignment());
-        self.leave_nesting();
+        let value = Box::new(self.parse_after_gap(GapSlot::BeforeValue, |p| {
+            p.with_expression_nesting(start, Self::parse_assignment)
+        }));
         let span = start.merge(value.span());
         Expression::DestructureAssignment {
             pattern,
