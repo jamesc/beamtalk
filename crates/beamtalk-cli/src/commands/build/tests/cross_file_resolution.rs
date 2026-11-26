@@ -467,6 +467,7 @@ fn package_identity_names_stdlib_for_manifest_less_stdlib_mode() {
         description: None,
         licenses: None,
         strict_deps: false,
+        min_beamtalk: None,
     };
 
     // A manifest always wins — `--stdlib-mode` never renames a real package.

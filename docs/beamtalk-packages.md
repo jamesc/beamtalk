@@ -31,6 +31,7 @@ licenses = ["Apache-2.0"]
 | `version` | Yes | Semantic version (`major.minor.patch`). |
 | `description` | No | Short human-readable description. |
 | `licenses` | No | SPDX license identifiers (e.g. `["Apache-2.0"]`). |
+| `min-beamtalk` | No | Minimum `beamtalk` toolchain this release supports, exactly `major.minor.patch` (e.g. `"0.7.0"`). `beamtalk publish` writes it into the release's registry index entry as `min-beamtalk`. A malformed value is a diagnostic. **The resolver does not enforce it yet** — an older toolchain still resolves and builds the release; whether to refuse is a separate, follow-up decision ([ADR 0154](ADR/0154-uat-external-acceptance-gate-for-full-environments.md) § 10). The J9 downstream canaries read it to skip a tag newer than the toolchain under test. |
 | `strict-deps` | No | When `true`, using a class from a transitive dependency is a compile error instead of a warning. Defaults to `false`. Recommended for libraries. |
 
 **Reserved names:** `beamtalk`, `stdlib`, `kernel`, `runtime`, `workspace`, `compiler`, and Erlang standard application names (`crypto`, `ssl`, `inets`, `mnesia`, `observer`, etc.) cannot be used as package names.
@@ -289,6 +290,18 @@ version = "0.2.1"
 git = "https://github.com/jamesc/beamtalk-yaml"
 tag = "v0.2.1"
 ```
+
+A release may declare the minimum toolchain it supports with an optional per-version `min-beamtalk` key (`major.minor.patch`). `beamtalk publish` writes it from `[package] min-beamtalk` in `beamtalk.toml` when present:
+
+```toml
+[[versions]]
+version = "0.3.0"
+git = "https://github.com/jamesc/beamtalk-mint"
+tag = "v0.3.0"
+min-beamtalk = "0.7.0"   # optional — this release needs toolchain >= 0.7.0
+```
+
+Entries without the key remain valid, and older `beamtalk` binaries ignore it. **The resolver does not enforce `min-beamtalk` yet** (a follow-up decision, ADR 0154 § 10); `beamtalk registry site` shows it, and the J9 canaries use it to skip a tag newer than the candidate toolchain.
 
 Unknown top-level or per-version keys are accepted (not rejected) — the index is a separately versioned artifact served to clients this binary doesn't control, so a future index format can add fields like `yanked` or `licenses` without breaking older `beamtalk` binaries reading it.
 

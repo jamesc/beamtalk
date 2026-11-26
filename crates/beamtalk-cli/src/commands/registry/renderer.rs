@@ -136,12 +136,16 @@ pub(super) fn write_detail_page(output_dir: &Utf8Path, entry: &RegistryEntry) ->
         html.push_str("<h2>Published versions</h2>\n");
         html.push_str(
             "<table>\n<thead>\n<tr><th>Version</th><th>Git repository</th><th>Tag</th>\
-             <th>Dependency snippet</th></tr>\n</thead>\n<tbody>\n",
+             <th>Min beamtalk</th><th>Dependency snippet</th></tr>\n</thead>\n<tbody>\n",
         );
         for release in &versions {
             let version = html_escape(&release.version);
             let git = html_escape(&release.git);
             let tag = html_escape(&release.tag);
+            let min_beamtalk = release
+                .min_beamtalk
+                .as_deref()
+                .map_or_else(|| "—".to_string(), html_escape);
             let snippet = dependency_snippet(&entry.name, &release.version);
             // release.git is untrusted third-party data (parsed from a TOML index
             // entry, not necessarily written by `beamtalk publish`). html_escape
@@ -158,6 +162,7 @@ pub(super) fn write_detail_page(output_dir: &Utf8Path, entry: &RegistryEntry) ->
                 "<tr><td class=\"version-cell\">{version}</td>\
                  <td>{git_href}</td>\
                  <td>{tag}</td>\
+                 <td>{min_beamtalk}</td>\
                  <td class=\"snippet-cell\"><code>{snippet}</code></td></tr>"
             );
         }
@@ -246,6 +251,26 @@ tag = "release-0.2.1"
         let pos_latest = html.find("0.2.1").unwrap();
         let pos_older = html.find("0.1.0").unwrap();
         assert!(pos_latest < pos_older, "expected 0.2.1 listed before 0.1.0");
+    }
+
+    #[test]
+    fn test_write_detail_page_shows_min_beamtalk_when_present() {
+        let dir = TempDir::new().unwrap();
+        let out = camino::Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        let e = entry(
+            "name = \"mint\"\n\n[[versions]]\nversion = \"0.3.0\"\ngit = \"https://example.test/mint\"\n\
+             min-beamtalk = \"0.7.0\"\n",
+            "mint",
+        );
+        write_detail_page(&out, &e).unwrap();
+        let html = fs::read_to_string(out.join("mint.html")).unwrap();
+        assert!(html.contains("<td>0.7.0</td>"), "{html}");
+
+        // An entry without the key renders a placeholder, not a missing cell.
+        let e = entry(YAML_TOML, "yaml");
+        write_detail_page(&out, &e).unwrap();
+        let html = fs::read_to_string(out.join("yaml.html")).unwrap();
+        assert!(html.contains("<td>—</td>"), "{html}");
     }
 
     #[test]

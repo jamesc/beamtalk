@@ -23,6 +23,7 @@
 //! version = "0.2.1"
 //! git = "https://github.com/jamesc/beamtalk-yaml"
 //! tag = "v0.2.1"   # optional — defaults to "v{version}"
+//! min-beamtalk = "0.7.0"   # optional — minimum toolchain (not enforced)
 //! ```
 //!
 //! ## Index location
@@ -117,6 +118,10 @@ pub struct RegistryRelease {
     pub git: String,
     /// The git tag for this release (defaults to `v{version}` in the index).
     pub tag: String,
+    /// Minimum `beamtalk` toolchain this release declares (`min-beamtalk`,
+    /// ADR 0154 § 10), if any. Informational: the resolver does not enforce
+    /// it yet; the J9 canaries read it to skip a tag newer than the candidate.
+    pub min_beamtalk: Option<String>,
 }
 
 /// A parsed index entry — one package and all of its published releases.
@@ -174,6 +179,8 @@ struct TomlIndexRelease {
     git: String,
     #[serde(default)]
     tag: Option<String>,
+    #[serde(default, rename = "min-beamtalk")]
+    min_beamtalk: Option<String>,
 }
 
 /// Parse an index entry from TOML text.
@@ -207,6 +214,7 @@ pub fn parse_index_entry(expected_name: &str, content: &str) -> Result<RegistryE
             tag: r.tag.unwrap_or_else(|| format!("v{}", r.version)),
             version: r.version,
             git: r.git,
+            min_beamtalk: r.min_beamtalk,
         })
         .collect();
 
@@ -1157,6 +1165,68 @@ git = "https://evil.test/yaml"
 "#;
         let err = parse_index_entry("yaml", content).unwrap_err();
         assert!(flat_err(&err).contains("more than once"), "{err:?}");
+    }
+
+    #[test]
+    fn test_parse_index_entry_reads_min_beamtalk() {
+        let content = r#"
+name = "mint"
+
+[[versions]]
+version = "0.2.0"
+git = "https://example.test/mint"
+
+[[versions]]
+version = "0.3.0"
+git = "https://example.test/mint"
+min-beamtalk = "0.7.0"
+"#;
+        let entry = parse_index_entry("mint", content).unwrap();
+        // An entry without the key still parses, with no minimum.
+        assert_eq!(entry.find_version("0.2.0").unwrap().min_beamtalk, None);
+        assert_eq!(
+            entry.find_version("0.3.0").unwrap().min_beamtalk.as_deref(),
+            Some("0.7.0")
+        );
+    }
+
+    /// An "old reader" is any parser that predates the key. The index format
+    /// tolerates unknown keys (see the comment above `TomlIndexEntry`), so
+    /// mirror that reader strictly: it only knows `version`/`git`/`tag`, yet
+    /// must still accept an entry carrying `min-beamtalk`.
+    #[test]
+    fn test_old_reader_tolerates_min_beamtalk() {
+        #[derive(Deserialize)]
+        struct OldRelease {
+            version: String,
+            git: String,
+            tag: Option<String>,
+        }
+        #[derive(Deserialize)]
+        struct OldEntry {
+            name: String,
+            versions: Vec<OldRelease>,
+        }
+        let content = r#"
+name = "mint"
+
+[[versions]]
+version = "0.3.0"
+git = "https://example.test/mint"
+tag = "v0.3.0"
+min-beamtalk = "0.7.0"
+"#;
+        // The real parser must keep ignoring keys it does not know alongside
+        // `min-beamtalk` (guards against `deny_unknown_fields` creeping in).
+        let future = format!("{content}future-key = 1\n");
+        let parsed = parse_index_entry("mint", &future).unwrap();
+        assert_eq!(parsed.versions.len(), 1);
+
+        let old: OldEntry = toml::from_str(content).unwrap();
+        assert_eq!(old.name, "mint");
+        assert_eq!(old.versions[0].version, "0.3.0");
+        assert_eq!(old.versions[0].git, "https://example.test/mint");
+        assert_eq!(old.versions[0].tag.as_deref(), Some("v0.3.0"));
     }
 
     #[test]
