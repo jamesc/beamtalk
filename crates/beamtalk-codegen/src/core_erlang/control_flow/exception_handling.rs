@@ -403,8 +403,8 @@ impl CoreErlangGenerator {
     }
 
     /// Mints the Core Erlang variables of one compiled `on:do:`'s catch clause.
-    /// `ex_class_var` is the variable holding the exception class.
-    pub(super) fn fresh_on_do_catch_vars(&mut self, ex_class_var: String) -> OnDoCatchVars {
+    /// `ex_class_term` is the variable holding the exception class.
+    pub(super) fn fresh_on_do_catch_vars(&mut self, ex_class_term: String) -> OnDoCatchVars {
         OnDoCatchVars {
             type_var: self.fresh_temp_var("Type"),
             error_var: self.fresh_temp_var("Error"),
@@ -425,8 +425,8 @@ impl CoreErlangGenerator {
             // Derived from the (already unique) exception-class variable, not
             // minted from the module counter, so it renumbers none of the
             // module's other temporaries.
-            filter_fallback_var: [ex_class_var.as_str(), "NoMatch"].concat(),
-            ex_class_var,
+            filter_fallback_var: [ex_class_term.as_str(), "NoMatch"].concat(),
+            ex_class_term,
         }
     }
 
@@ -458,7 +458,7 @@ impl CoreErlangGenerator {
         span: beamtalk_core::source_analysis::Span,
         handler: Document<'static>,
     ) -> Document<'static> {
-        let cell = self.on_do_cell_boundary(&vars.ex_class_var, pre_region_state, span);
+        let cell = self.on_do_cell_boundary(&vars.ex_class_term, pre_region_state, span);
         // ADR 0137 §5: the cell's half, restored first, before the exception
         // is wrapped.
         let mut steps: Vec<CatchStep> = cell
@@ -585,10 +585,10 @@ impl CoreErlangGenerator {
 
         // Simple case: no mutations, use closure-based approach
         let block_var = self.fresh_temp_var("BlockFun");
-        let ex_class_var = self.fresh_temp_var("ExClass");
+        let ex_class_term = self.fresh_temp_var("ExClass");
         let handler_var = self.fresh_temp_var("HandlerFun");
         let result_var = self.fresh_temp_var("Result");
-        let catch_vars = self.fresh_on_do_catch_vars(ex_class_var.clone());
+        let catch_vars = self.fresh_on_do_catch_vars(ex_class_term.clone());
         let ex_obj_var = catch_vars.ex_obj_var.clone();
 
         // Capture expression outputs (ADR 0018 bridge pattern). BT-4524: the
@@ -634,7 +634,7 @@ impl CoreErlangGenerator {
 
         Ok(docvec![
             form::let_prefix(leaf::var(block_var.clone()), receiver_code),
-            form::let_prefix(leaf::var(ex_class_var.clone()), ex_class_code),
+            form::let_prefix(leaf::var(ex_class_term.clone()), ex_class_code),
             form::let_prefix(leaf::var(handler_var), handler_code),
             catch_boundary
         ])
@@ -967,9 +967,9 @@ impl CoreErlangGenerator {
         // `BranchArm` frames whose threads are the seeded set below.
         let arm = self.exception_arm_frame(&[receiver_block, handler_block], producer);
 
-        let ex_class_var = self.fresh_temp_var("ExClass");
+        let ex_class_term = self.fresh_temp_var("ExClass");
         let state_after_try = self.fresh_temp_var("StateAfterTry");
-        let catch_vars = self.fresh_on_do_catch_vars(ex_class_var.clone());
+        let catch_vars = self.fresh_on_do_catch_vars(ex_class_term.clone());
         let ex_obj_var = catch_vars.ex_obj_var.clone();
 
         // Bind exception class
@@ -1010,7 +1010,7 @@ impl CoreErlangGenerator {
             .map_or(0, |prefix| self.family_version(prefix));
 
         let mut docs: Vec<Document<'static>> = vec![docvec![
-            form::let_prefix(leaf::var(ex_class_var.clone()), ex_class_code),
+            form::let_prefix(leaf::var(ex_class_term.clone()), ex_class_code),
             seed_doc,
             form::let_prefix(leaf::var("StateAcc"), leaf::var(base_state)),
         ]];

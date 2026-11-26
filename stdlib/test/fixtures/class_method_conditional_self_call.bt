@@ -10,8 +10,8 @@ Object subclass: ClassMethodConditionalSelfCall
   class helper => nil
 
   // Minimal repro: conditional self-call + subsequent expression.
-  // The self-call inside ifTrue: increments class_var_version inside the block,
-  // which leaked to the outer scope causing unbound ClassVars{N}.
+  // The self-call inside ifTrue: increments a version counter inside the block,
+  // which leaked to the outer scope causing an unbound threaded variable.
   class trigger: x =>
     x > 0 ifTrue: [self helper]
     x

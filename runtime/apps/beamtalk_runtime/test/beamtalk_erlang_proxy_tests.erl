@@ -2540,7 +2540,7 @@ ffi_call_raised_ignores_legacy_snapshot_slot_test() ->
                 )
             end)
         )
-     || Snap <- [none, {{'$bt_class_vars', 'Legacy class'}, #{n => 1}}]
+     || Snap <- [none, {legacy_snapshot_key, #{n => 1}}]
     ],
     ?assertEqual(
         Expected,

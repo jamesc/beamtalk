@@ -21,7 +21,7 @@ fn vars() -> OnDoCatchVars {
         built_stack_var: v("Built1"),
         ex_obj_var: v("ExObj1"),
         match_var: v("Match1"),
-        ex_class_var: v("ExClass1"),
+        ex_class_term: v("ExClass1"),
         filter_fallback_var: v("ExClass1NoMatch"),
     }
 }
@@ -153,7 +153,6 @@ fn render_orders_both_nlr_arms_before_the_filter() {
          catch <Type1, Error1, Stack1> -> case {Type1, Error1} of "
     ));
     assert!(text.ends_with(" end end"));
-    assert!(!text.contains("beamtalk_class_vars"), "{text}");
 }
 
 /// BT-3718: the class filter's `case` must be closed by its `'false'` re-raise

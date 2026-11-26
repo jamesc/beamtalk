@@ -67,8 +67,6 @@ Tests cover:
     'class_create:value:'/3,
     class_returnInvalid/1,
     class_returnSupervisor/1,
-    class_writeVar/1,
-    class_keyProbeThenActor/1,
     start_link_fake_child/0,
     start_link_fake_child/1,
     start_link_fake_child/2
@@ -1345,21 +1343,6 @@ static_init_two_argument_form_rejects_pre_adr_0135_module_test() ->
     #beamtalk_error{hint = Hint} = Reason,
     ?assertNotEqual(nomatch, binary:match(element(2, Hint), <<"recompile">>)).
 
-static_init_config_class_var_write_raises_unreachable_test() ->
-    %% ADR 0153 Phase 3e: configuration runs in the caller with no class-variable
-    %% key (no snapshot region); a class-variable write fails the start.
-    Config = bt3963_static_config(#{
-        childSpecs => fun(_Self) ->
-            ClassSelf =
-                {beamtalk_object, 'BT3963Sup class', beamtalk_bt3963_sup_fixture,
-                    beamtalk_class_registry:whereis_class('BT3963Sup')},
-            beamtalk_class_vars:put(ClassSelf, n, 1)
-        end
-    }),
-    with_bt3963_class('BT3963Sup', Config, fun() ->
-        ?assertMatch(#beamtalk_error{kind = class_state_unreachable}, start_failing(nil))
-    end).
-
 %% A fake class object for a supervisor child class.
 bt3963_supervisor_child_class(Name) ->
     fake_supervisor_class(Name, bt3963_child_mod).
@@ -1544,17 +1527,6 @@ last_fake_child_args() ->
 class_returnInvalid(_ClassSelf) ->
     <<"not an actor tuple">>.
 
-%% ADR 0153 Phase 3e: a runtime-owned class-method call runs in the caller with
-%% no class-variable key, so a write has nowhere to go.
-class_writeVar(ClassSelf) ->
-    beamtalk_class_vars:put(ClassSelf, n, 1).
-
-%% Asserts no class-variable key is installed in the caller, then returns an actor.
-class_keyProbeThenActor(#beamtalk_object{class = Tag}) ->
-    undefined = get(beamtalk_class_vars:key_for_tag(Tag)),
-    {ok, Pid} = start_link_fake_child(),
-    {beamtalk_object, 'FakeChild', ?MODULE, Pid}.
-
 %% Fake class method that returns a supervisor tuple instead of an actor.
 class_returnSupervisor(_ClassSelf) ->
     {ok, Pid} = start_link_fake_child(),
@@ -1663,39 +1635,6 @@ start_child_via_class_method_invalid_return_test() ->
         ?assertBtErrorTuple(_, _, _, Result)
     after
         cleanup_fake_class('BT1875Invalid', FakeClassPid)
-    end.
-
-%% ADR 0153 Phase 3e: the withClassMethod: factory runs in the caller with no
-%% class-variable key installed (there is no read-only snapshot region), and a
-%% class variable write from it raises `class_state_unreachable`.
-start_child_via_class_method_installs_no_class_var_key_test() ->
-    FakeClassPid = setup_fake_class('BT3708Read'),
-    try
-        ?assertMatch(
-            {ok, Pid} when is_pid(Pid),
-            beamtalk_supervisor:start_child_via_class_method(
-                'BT3708Read', ?MODULE, class_keyProbeThenActor, []
-            )
-        ),
-        ?assertEqual(undefined, get(beamtalk_class_vars:key('BT3708Read')))
-    after
-        cleanup_fake_class('BT3708Read', FakeClassPid)
-    end.
-
-start_child_via_class_method_write_raises_test() ->
-    FakeClassPid = setup_fake_class('BT3708Write'),
-    try
-        ?assertMatch(
-            #beamtalk_error{kind = class_state_unreachable},
-            raised_beamtalk_error(fun() ->
-                beamtalk_supervisor:start_child_via_class_method(
-                    'BT3708Write', ?MODULE, class_writeVar, []
-                )
-            end)
-        ),
-        ?assertEqual(undefined, get(beamtalk_class_vars:key('BT3708Write')))
-    after
-        cleanup_fake_class('BT3708Write', FakeClassPid)
     end.
 
 raised_beamtalk_error(Fun) ->

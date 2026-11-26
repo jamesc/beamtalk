@@ -33,7 +33,6 @@ Read by shipped binaries and the runtime. Unset means the default behaviour.
 | `BEAMTALK_MCP_EVAL_TIMEOUT` | MCP server: timeout for `eval`, in seconds; default 30. The `evaluate` tool's `timeout_secs` overrides it per call. |
 | `BEAMTALK_MCP_TEST_TIMEOUT` | MCP server: timeout for test operations, in seconds; default 120. |
 | `BEAMTALK_REPL_STARTUP_TIMEOUT_MS` | MCP client: how long to wait for a shared REPL to start, in milliseconds. |
-| `BEAMTALK_COMPILER` | `escript` selects the legacy compiler backend; any other value falls back to the port backend with a warning (`crates/beamtalk-cli/src/beam_compiler.rs`). |
 | `BEAMTALK_COMPILER_PORT_BIN` | Path of the compiler port binary. |
 | `BEAMTALK_EXEC_PORT_BIN` | Path of the exec port binary; checked before the build directories and `PATH` (`beamtalk_exec_port.erl`). |
 | `BEAMTALK_RUNTIME_DIR` | Explicit runtime directory; an invalid directory is a hard error (`crates/beamtalk-core/src/ffi_type_specs.rs`). |

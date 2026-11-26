@@ -1325,7 +1325,7 @@ pub fn stage_compiler_port_binary(release_dir: &Utf8Path) -> Result<Utf8PathBuf>
 /// Returns an error if `erl` cannot be spawned or the extractor reports a
 /// failure (`beamtalk_stdlib` — and so `beamtalk_runtime` — could not be
 /// started; nothing can be extracted without it), or a project module was
-/// compiled for a different `class_var_abi` than the runtime being staged
+/// compiled for a different `module_abi` than the runtime being staged
 /// (ADR 0130: the extractor prints each refused module, naming it and saying
 /// to recompile, and the release build fails).
 pub fn write_shapes_json(

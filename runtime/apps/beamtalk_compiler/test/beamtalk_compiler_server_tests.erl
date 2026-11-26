@@ -507,8 +507,7 @@ api_compile_protocol_registry_suppresses_false_protocol_mismatch() ->
             cancel => #{arity => 0, param_types => [], return_type => 'Boolean'},
             isActive => #{arity => 0, param_types => [], return_type => 'Boolean'}
         },
-        class_method_info => #{},
-        class_variables => []
+        class_method_info => #{}
     }),
     beamtalk_compiler_server:register_class('TimeoutToken', #{
         is_sealed => true, is_abstract => true
@@ -561,8 +560,7 @@ api_compile_method_protocol_registry_suppresses_false_protocol_mismatch() ->
             cancel => #{arity => 0, param_types => [], return_type => 'Boolean'},
             isActive => #{arity => 0, param_types => [], return_type => 'Boolean'}
         },
-        class_method_info => #{},
-        class_variables => []
+        class_method_info => #{}
     }),
     beamtalk_compiler_server:register_class('TimeoutToken', #{
         is_sealed => true, is_abstract => true

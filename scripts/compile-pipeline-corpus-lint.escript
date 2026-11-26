@@ -4,8 +4,8 @@
 %%%
 %%% BT-3124 — corpus-through-BEAM Erlang half: batch-compile the `.core`
 %%% files `crates/beamtalk-core/examples/compile_pipeline_corpus.rs` wrote,
-%%% via the same `compile:file/2` options `beamtalk_build_worker.erl` and
-%%% `compile.escript` use in production (`from_core`, `return_errors`,
+%%% via the same `compile:file/2` options `beamtalk_build_worker.erl`
+%%% uses in production (`from_core`, `return_errors`,
 %%% `return_warnings`, `clint` — `core_lint` already runs unconditionally on
 %%% the `from_core` pipeline regardless of `clint`, see
 %%% `beamtalk_compile_diagnostics` moduledoc).

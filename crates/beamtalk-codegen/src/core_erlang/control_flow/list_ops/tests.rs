@@ -1130,7 +1130,7 @@ fn test_actor_non_literal_callable_uses_the_plain_list_op() {
 fn test_class_method_do_non_literal_callable_does_not_fold() {
     // A class method forwarding a non-literal callable to `do:` uses the
     // plain-value wrapper, like every other context.
-    let src = "Object subclass: Srv\n  classState: runs = 0\n\n  class run: items with: block =>\n    items do: block\n";
+    let src = "Object subclass: Srv\n  class run: items with: block =>\n    items do: block\n";
     let code = codegen(src);
     assert_has(
         "Non-literal callable do: in a class method should use lists:foreach (no fold)",
@@ -1347,7 +1347,7 @@ fn test_class_method_collect_non_literal_callable_does_not_fold() {
     // ADR 0128 fold rewrite — class methods have no `State`/`StateAcc` parameter.
     // Mirrors `test_class_method_do_non_literal_callable_does_not_fold` for the
     // "map" operation path.
-    let src = "Object subclass: Srv\n  classState: runs = 0\n\n  class run: items with: block =>\n    items collect: block\n";
+    let src = "Object subclass: Srv\n  class run: items with: block =>\n    items collect: block\n";
     let code = codegen(src);
     assert_has(
         "Non-literal callable collect: in a class method should use lists:map (no fold)",

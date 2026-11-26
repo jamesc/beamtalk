@@ -655,12 +655,6 @@ impl CoreErlangGenerator {
             }
             let class_method_source_doc = Document::Vec(class_method_source_docs);
 
-            // Class variable initial values. ADR 0153: `classState:` is rejected
-            // at parse time, so this map is always empty until the key itself is
-            // deleted (BT-5153..5163).
-            let class_vars: Vec<&beamtalk_core::ast::StateDeclaration> = Vec::new();
-            let class_vars_doc = self.class_var_map_doc(&class_vars)?;
-
             // Class-level doc comment
             let class_doc_value: Document<'static> = if let Some(ref doc) = class.doc_comment {
                 leaf::binary_lit(doc)
@@ -733,10 +727,6 @@ impl CoreErlangGenerator {
                         // wrapped only by build_method_xref_list.
                         "'methodXref' => ",
                         method_xref_doc,
-                        ",",
-                        line(),
-                        "'classState' => ",
-                        class_vars_doc,
                         ",",
                         line(),
                         "'classDoc' => ",

@@ -431,8 +431,8 @@ mod tests {
 
         // Class level (1)
         scope.push();
-        scope.define("class_var", test_span(), BindingKind::ClassField);
-        assert_eq!(scope.lookup("class_var").unwrap().depth, 1);
+        scope.define("class_field", test_span(), BindingKind::ClassField);
+        assert_eq!(scope.lookup("class_field").unwrap().depth, 1);
 
         // Method level (2)
         scope.push();
@@ -446,13 +446,13 @@ mod tests {
 
         // All variables are visible from innermost scope
         assert!(scope.lookup("module_var").is_some());
-        assert!(scope.lookup("class_var").is_some());
+        assert!(scope.lookup("class_field").is_some());
         assert!(scope.lookup("method_var").is_some());
         assert!(scope.lookup("block_var").is_some());
 
         // Captured variable checks
         assert!(scope.is_captured("module_var"));
-        assert!(scope.is_captured("class_var"));
+        assert!(scope.is_captured("class_field"));
         assert!(scope.is_captured("method_var"));
         assert!(!scope.is_captured("block_var")); // Local to current scope
     }

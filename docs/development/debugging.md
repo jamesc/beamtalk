@@ -385,20 +385,16 @@ this check was always on; what changed in BT-3115 was making the failure
 readable everywhere it can surface:
 
 - **Port backend** (`beamtalk_build_worker`/`beamtalk_compiler_server`, the
-  default): formats `compile:forms`' raw error term via
+  only backend): formats `compile:forms`' raw error term via
   `beamtalk_compile_diagnostics:format_errors/1`, which calls the same
   `sys_messages:format_messages/4` OTP itself uses internally.
-- **Escript backend** (`BEAMTALK_COMPILER=escript`, `compile.escript`):
-  formats the same way and prints to this process's actual stderr — a prior
-  version relied on `compile:file`'s `report_errors`/`report_warnings`
-  options, which print via the compiling process's default group leader;
-  that lands on **stdout**, not stderr, so the Rust CLI's stdout parser
-  (which only recognises the `beamtalk-compile-*` protocol markers) silently
-  dropped the message rather than showing it.
 
 If you see a bare `internal error` or a build failure with no readable cause,
-run with `BEAMTALK_COMPILER=escript` and compare — the two backends are
-expected to produce the same wording for the same malformed input.
+call `beamtalk_build_worker`'s compile path on the `.core` file from an
+`erl -pa runtime/_build/default/lib/beamtalk_compiler/ebin` shell, or run
+`escript scripts/compile-pipeline-corpus-lint.escript <core_dir>`, to see the
+raw `compile:forms` error term (the legacy `escript` backend that used to offer
+a second opinion was removed in BT-5198; `BEAMTALK_COMPILER` is no longer read).
 
 ### ThreadedIr verifier (ADR 0111, BT-3129-BT-3165, BT-3164, BT-3166-BT-3170, BT-3447)
 
@@ -676,7 +672,7 @@ class method's body is still lowered to a real `Vec<ThreadedStmt>` and
 verified in one method-level `verify()` call together with its `NlrCatch`,
 but class variables no longer appear in it: ADR 0130 deleted the `ClassVars`
 family, the shadow-write flag on `Bind`, `ShadowWriteMissing`, the
-`class_var_result` unwrap helpers and the isolated shadow-write check, so a
+result-unwrap helpers and the isolated shadow-write check, so a
 class-variable access needed no `Bind`. Since ADR 0153 Phase 2 codegen emits
 no class-variable code at all; the `on:do:` catch boundary
 (`ThreadedStmt::OnDoCatch`, see `CatchNlrNotPassedThrough` above) is a plain

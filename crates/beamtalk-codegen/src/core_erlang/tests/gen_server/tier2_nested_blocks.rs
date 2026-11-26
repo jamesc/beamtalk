@@ -13,12 +13,10 @@ fn test_nested_letrec_self_send_buried_in_conditional_compiles() {
     // A same-class self-send buried inside an
     // `ifTrue:` conditional (NOT a bare top-level statement) within an
     // inner `whileTrue:` that's itself nested inside an outer `whileTrue:`
-    // must NOT be rejected. `Letrec`'s own real `threads_class_vars` gate
-    // (`loop_body_threads_class_vars`) is narrowly top-level-only by
+    // must NOT be rejected. The loop state gate is narrowly top-level-only by
     // design — recursing into a conditional buried inside a `Letrec` body
-    // is the shape `class_var_sub_expr_test.bt`'s
-    // `testTickInLoopConditionalCompilesAndRuns` pins at a single loop
-    // level. A class-method self-send threads nothing (ADR 0130 §3), so
+    // is the shape `testTickInLoopConditionalCompilesAndRuns` pins at a
+    // single loop level. A class-method self-send threads nothing (ADR 0130 §3), so
     // there is nothing for the outer loop to fail to recover — this
     // nested-loop variant of the same shape compiles too. Mirrors
     // `tickInLoopConditional` one loop level deeper.
