@@ -160,9 +160,9 @@ impl TypeChecker {
                         | WellKnownSelector::IfNotNilIfNil
                 )
             )
-            || matches!(
+            || selector.name().as_str() == "ifFalse:ifTrue:"
+            || crate::state_threading_selectors::is_result_exclusive_arms_selector(
                 selector.name().as_str(),
-                "ifFalse:ifTrue:" | "ifOk:ifError:"
             )
         {
             return;

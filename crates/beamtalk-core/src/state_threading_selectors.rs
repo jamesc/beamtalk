@@ -580,6 +580,68 @@ pub fn is_try_do_selector(sel: &str) -> bool {
     sel == "tryDo:"
 }
 
+/// One `Result` branch selector (`ifOk:`, `ifError:`, `ifOk:ifError:`): the
+/// facts the type checker's sites (BT-5298 run-once, BT-5290 error-variant
+/// narrowing) read about it. BT-5329: the one table, so a new branch selector
+/// is added in one place.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResultBranchShape {
+    /// The full keyword selector.
+    pub selector: &'static str,
+    /// 0-based index of the block that runs only for the error variant, or
+    /// `None` when the selector has no error block (`ifOk:`).
+    pub error_block_index: Option<usize>,
+    /// Whether the selector has two arms of which exactly one runs
+    /// (`ifOk:ifError:`).
+    pub exclusive_arms: bool,
+}
+
+/// Every `Result` branch selector. Each runs its block arguments at most once.
+pub const RESULT_BRANCH_SHAPES: &[ResultBranchShape] = &[
+    ResultBranchShape {
+        selector: "ifOk:",
+        error_block_index: None,
+        exclusive_arms: false,
+    },
+    ResultBranchShape {
+        selector: "ifError:",
+        error_block_index: Some(0),
+        exclusive_arms: false,
+    },
+    ResultBranchShape {
+        selector: "ifOk:ifError:",
+        error_block_index: Some(1),
+        exclusive_arms: true,
+    },
+];
+
+/// The [`RESULT_BRANCH_SHAPES`] row of `sel`, or `None` for any other selector.
+#[must_use]
+pub fn result_branch_shape(sel: &str) -> Option<&'static ResultBranchShape> {
+    RESULT_BRANCH_SHAPES.iter().find(|row| row.selector == sel)
+}
+
+/// Whether `sel` is a `Result` branch selector ([`RESULT_BRANCH_SHAPES`]).
+#[must_use]
+pub fn is_result_branch_selector(sel: &str) -> bool {
+    result_branch_shape(sel).is_some()
+}
+
+/// The index of the error block among the arguments of the `Result` branch
+/// selector `sel` (`ifError:` → 0, `ifOk:ifError:` → 1), or `None` for a
+/// selector without one.
+#[must_use]
+pub fn result_error_block_index(sel: &str) -> Option<usize> {
+    result_branch_shape(sel).and_then(|row| row.error_block_index)
+}
+
+/// Whether `sel` is a `Result` branch selector with two exclusive arms
+/// (`ifOk:ifError:`): exactly one of its blocks runs.
+#[must_use]
+pub fn is_result_exclusive_arms_selector(sel: &str) -> bool {
+    result_branch_shape(sel).is_some_and(|row| row.exclusive_arms)
+}
+
 // ─── ADR 0137 (BT-4020): which sends may run user code ──────────────────────
 
 /// ADR 0137 §1–2: whether a send, as a *call*, may run one of this actor's
@@ -1386,6 +1448,40 @@ mod tests {
         ] {
             assert_eq!(classify(src), SendUserCode::MayRun, "{src}");
         }
+    }
+
+    /// BT-5329: the `Result` branch table is well-formed, and the helpers
+    /// the type checker's three sites call read every row of it.
+    #[test]
+    fn result_branch_table_is_consistent() {
+        let mut seen = std::collections::HashSet::new();
+        for row in RESULT_BRANCH_SHAPES {
+            assert!(seen.insert(row.selector), "duplicate row {}", row.selector);
+            let arity = row.selector.matches(':').count();
+            if let Some(i) = row.error_block_index {
+                assert!(
+                    i < arity,
+                    "{}: error index {i} >= arity {arity}",
+                    row.selector
+                );
+            }
+            assert!(!row.exclusive_arms || arity == 2, "{}", row.selector);
+            assert!(is_result_branch_selector(row.selector));
+            assert_eq!(
+                result_error_block_index(row.selector),
+                row.error_block_index
+            );
+            assert_eq!(
+                is_result_exclusive_arms_selector(row.selector),
+                row.exclusive_arms
+            );
+        }
+        assert_eq!(result_error_block_index("ifOk:"), None);
+        assert_eq!(result_error_block_index("ifError:"), Some(0));
+        assert_eq!(result_error_block_index("ifOk:ifError:"), Some(1));
+        assert!(!is_result_branch_selector("ifTrue:"));
+        assert!(!is_result_branch_selector("ifTrue:ifFalse:"));
+        assert!(!is_result_exclusive_arms_selector("ifError:"));
     }
 
     #[test]
