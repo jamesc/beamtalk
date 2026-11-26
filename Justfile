@@ -1058,9 +1058,11 @@ test-cache-keys:
 # test_merge_queue (BT-5247): ci.yml and claude-review-queue.yml report the required
 # checks on the merge queue's `merge_group` commit, and every other PR workflow is
 # listed as one that cannot be required.
+# test_dependabot_auto (BT-5254): dependabot-auto.yml runs no PR code with its write token
+# and only approves and auto-merges patch/minor dependabot PRs.
 test-ci-ok:
     @python3 scripts/ci/ci_ok.py check
-    @cd scripts/ci && python3 -m unittest -q test_ci_ok test_ci_code_filter test_merge_queue
+    @cd scripts/ci && python3 -m unittest -q test_ci_ok test_ci_code_filter test_merge_queue test_dependabot_auto
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
