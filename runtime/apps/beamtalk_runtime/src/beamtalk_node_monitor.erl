@@ -126,7 +126,9 @@ monitor keeps the newest reload stamp seen per class and ignores an older
 one, so two quick reloads of one class that arrive out of order leave the
 newer result. A peer too old to know the message ignores it
 (`handle_cast/2`'s catch-all); the older form without a stamp is still
-accepted, unordered.
+accepted, unordered. The other way round does not work: this node sends
+only the stamped form, so a peer built after BT-5232 but before BT-5240
+(nightly builds only) drops this node's reload notifications.
 
 ## Version skew at connect (ADR 0126 Amendment (BT-5193) D3)
 
@@ -172,7 +174,8 @@ is never refused.
     %% `monitor_nodes(false, ...)` below.
     class_loaded_sub :: reference() | undefined,
     %% Queryable per-peer shape-skew tally (ADR 0126 §8, Phase 7 / BT-3605):
-    %% each connected peer's set of currently-skewed class names, kept in
+    %% each connected peer's `peer_entry()` (connection generation, the
+    %% latest kept result per checked class, peer reload stamps), kept in
     %% sync by the same fault-isolated `announce_if_skewed/7` check that
     %% fires the `NodeShapeSkew` announcement below — the `nodes` surface op
     %% needs a snapshot to *read*, not just the fire-and-forget event stream
