@@ -608,7 +608,7 @@ pub(crate) fn extract_protocol_registry(
 }
 
 /// Merge a method into a method list, replacing any existing method with the
-/// same selector and kind, else appending it.
+/// same selector, else appending it.
 ///
 /// This is the REPL's *explicit redefinition* (`compile_method`: the user
 /// re-typed a method on a live class), where replace is the point. It is not

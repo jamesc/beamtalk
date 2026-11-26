@@ -111,7 +111,7 @@ impl ConstantValue {
 
 /// Modifier flags for a method definition.
 ///
-/// All flags default to `false` and kind defaults to `Primary`,
+/// All flags default to `false`,
 /// so callers can use struct update syntax:
 /// ```ignore
 /// MethodModifiers { is_sealed: true, ..Default::default() }
