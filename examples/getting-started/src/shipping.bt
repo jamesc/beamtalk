@@ -38,6 +38,7 @@ Value subclass: Shipping
 
   /// True if `speed` is one of the `ShippingSpeed` symbols. Tuples come
   /// from outside the type checker's view, so `quote:` checks them here.
+  /// Keep this list in step with `type ShippingSpeed` at the top of the file.
   class isSpeed: speed => #(#standard, #express, #overnight) includes: speed
 
   /// Quote a `{#parcel, speed, grams}` order as a `Result`.
