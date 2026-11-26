@@ -773,3 +773,40 @@ fn dependency_checker_scope_reads_the_manifest_leniently() {
     assert_eq!(scope.package_name.as_deref(), Some("dep"));
     assert!(scope.known_packages.is_some());
 }
+
+#[test]
+fn manifest_min_beamtalk_is_optional_and_parsed() {
+    let temp = TempDir::new().unwrap();
+    let path = write_manifest(
+        &temp,
+        "[package]\nname = \"p\"\nversion = \"1.0.0\"\nmin-beamtalk = \"0.7.0\"\n",
+    );
+    let pkg = parse_manifest(&path.join("beamtalk.toml")).unwrap();
+    assert_eq!(pkg.min_beamtalk.as_deref(), Some("0.7.0"));
+
+    let path = write_manifest(&temp, "[package]\nname = \"p\"\nversion = \"1.0.0\"\n");
+    let pkg = parse_manifest(&path.join("beamtalk.toml")).unwrap();
+    assert_eq!(pkg.min_beamtalk, None);
+}
+
+#[test]
+fn manifest_with_malformed_min_beamtalk_is_a_diagnostic_not_a_panic() {
+    for bad in ["", ">=0.7.0", "0.7", "0.7.0-rc1", "latest", "0.7.x"] {
+        let content =
+            format!("[package]\nname = \"p\"\nversion = \"1.0.0\"\nmin-beamtalk = \"{bad}\"\n");
+        let err = parse_err(&content);
+        assert!(err.contains("min-beamtalk"), "{bad}: {err}");
+    }
+}
+
+#[test]
+fn dependency_manifest_with_malformed_min_beamtalk_still_parses() {
+    // The key is informational and unenforced: a dependency's malformed
+    // value must not break its consumers' builds (lenient dependency read).
+    let temp = TempDir::new().unwrap();
+    let path = write_manifest(
+        &temp,
+        "[package]\nname = \"p\"\nversion = \"1.0.0\"\nmin-beamtalk = \">=0.7\"\n",
+    );
+    assert!(parse_dependency_manifest_full(&path.join("beamtalk.toml")).is_ok());
+}

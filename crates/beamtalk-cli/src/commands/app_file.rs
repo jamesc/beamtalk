@@ -364,6 +364,7 @@ mod tests {
             description: description.map(String::from),
             licenses: None,
             strict_deps: false,
+            min_beamtalk: None,
         }
     }
 
