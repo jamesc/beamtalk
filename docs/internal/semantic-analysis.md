@@ -133,8 +133,7 @@ crates/beamtalk-core/src/semantic_analysis/
 │   └── builtins.rs        # ✅ Built-in classes and protocols
 ├── primitive_validator.rs # ✅ Primitive constraint validation
 ├── method_validators.rs   # ✅ Selector-specific argument validation
-├── type_checker.rs        # ⏳ Stub for future gradual typing (Phase 3)
-└── error.rs               # ✅ Semantic error types
+└── type_checker.rs        # ⏳ Stub for future gradual typing (Phase 3)
 ```
 
 ## Key Types
