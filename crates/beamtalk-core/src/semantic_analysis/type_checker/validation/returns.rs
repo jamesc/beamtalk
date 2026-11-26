@@ -31,6 +31,13 @@ impl ReturnSite {
         }
     }
 
+    fn hint(self, expected: &str, actual: &str) -> String {
+        match self {
+            Self::Tail => format!("Declared -> {expected}, inferred body type is {actual}"),
+            Self::Early(_) => format!("Declared -> {expected}, but this `^` returns {actual}"),
+        }
+    }
+
     fn message(
         self,
         selector: &str,
@@ -246,7 +253,7 @@ impl TypeChecker {
                             site.span(method),
                         )
                         .with_category(DiagnosticCategory::Type)
-                        .with_hint(format!("Declared -> {expected_display}, inferred body type is {actual_display}")),
+                        .with_hint(site.hint(&expected_display, &actual_display.to_string())),
                     );
                 }
             }
@@ -278,7 +285,7 @@ impl TypeChecker {
                             site.span(method),
                         )
                         .with_category(DiagnosticCategory::Type)
-                        .with_hint(format!("Declared -> {union_display}, inferred body type is {actual_display}")),
+                        .with_hint(site.hint(&union_display, &actual_display)),
                     );
                 }
             }
@@ -397,7 +404,7 @@ impl TypeChecker {
                 &expected_display,
                 &class_object.to_string(),
             ),
-            format!("Declared -> {expected_display}, inferred body type is {class_object}"),
+            site.hint(&expected_display, &class_object.to_string()),
             site.span(method),
         );
         self.diagnostics.push(diag);
@@ -567,9 +574,7 @@ impl TypeChecker {
                             &expected_display,
                             &class_object.to_string(),
                         ),
-                        format!(
-                            "Declared -> {expected_display}, inferred body type is {class_object}"
-                        ),
+                        site.hint(&expected_display, &class_object.to_string()),
                     )
                 },
             ) {
@@ -651,6 +656,8 @@ impl TypeChecker {
         if !hierarchy.is_typed(class_name) {
             return;
         }
+        // Only the tail reaches here: an early `^` of a `Dynamic` value is
+        // skipped by the caller, so this hint stays anchored on the method.
         let description = reason
             .description()
             .expect("AmbiguousControlFlow/UnannotatedReturn always have a description");

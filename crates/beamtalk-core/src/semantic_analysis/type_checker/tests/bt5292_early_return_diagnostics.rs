@@ -75,3 +75,37 @@ fn tail_diagnostic_keeps_method_span_and_body_wording() {
         "{diags:?}"
     );
 }
+
+#[test]
+fn early_return_of_a_type_outside_the_union_tail_is_still_reported() {
+    let source = r#"typed Object subclass: ZzOutside
+  class foo: c :: Boolean -> Integer =>
+    c ifTrue: [^#sym]
+    c ifTrue: [1] ifFalse: ["x"]
+"#;
+    let diags = return_diags(source);
+    assert_eq!(diags.len(), 2, "tail union + the `^#sym`: {diags:?}");
+    assert!(
+        diags.iter().any(|d| text(source, d) == "^#sym"),
+        "{diags:?}"
+    );
+}
+
+#[test]
+fn early_return_inside_a_block_is_reported_once_at_the_caret() {
+    let source = r"typed Object subclass: ZzBlock
+  class pick: n :: Integer -> Tuple =>
+    #(1, 2) do: [:x | x > n ifTrue: [^#more]]
+    {#ok, n}
+";
+    let diags = return_diags(source);
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(text(source, &diags[0]), "^#more");
+    assert!(
+        diags[0]
+            .hint
+            .as_deref()
+            .is_some_and(|h| h.contains("this `^` returns")),
+        "{diags:?}"
+    );
+}

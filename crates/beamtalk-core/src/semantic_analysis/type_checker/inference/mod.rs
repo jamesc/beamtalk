@@ -461,14 +461,20 @@ impl TypeChecker {
             let mut seen: Vec<InferredType> = tail_returned;
             // A body that ends in `^expr` is already checked as the body type.
             seen.push(body_type.clone());
-            // BT-5292: when the union tail check already reported, its members
-            // were judged there; an early `^` of one of those types must not
-            // be reported a second time. (A silent tail check — untyped class
+            // BT-5292: when the union tail check already reported, its
+            // diagnostic names every member of the union, so an early `^` of
+            // one of those types is not reported a second time. (A silent tail check — untyped class
             // — leaves them to the early-`^` check.)
             if let (true, InferredType::Union { members, .. }) = (tail_reported, &body_type) {
                 seen.extend(members.iter().cloned());
             }
+            let mut seen_spans = Vec::new();
             for returned in collected_returns {
+                // The same `^` can be inferred more than once (re-inferred
+                // block bodies); report it once, at its own span.
+                if seen_spans.contains(&returned.span) {
+                    continue;
+                }
                 let ty = match returned.kind {
                     CollectedReturnKind::Value(ty) => ty,
                     // BT-5290: report an error-variant `^x` with the declared
@@ -489,6 +495,7 @@ impl TypeChecker {
                     hierarchy,
                     ReturnSite::Early(returned.span),
                 );
+                seen_spans.push(returned.span);
             }
         }
         if check_override {
