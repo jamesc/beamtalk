@@ -20,6 +20,10 @@ layer into two halves:
   directly over Erlang distribution, where JSON is both overhead and *lossy*
   (a live `{beamtalk_object, Class, Module, Pid}` carries a real remote pid
   that JSON would flatten to a dead display string).
+* `request/3` — the entry point for a dist-attached caller: builds the
+  request from an op name and a flat params map, then calls `dispatch/4`.
+* `render/2` — the one rendering function for such a caller (display text for
+  a term, a term list or an error).
 * `encode/2` — encodes an `op_result()` to the protocol JSON binary at the
   **WebSocket transport edge only**. The browser wire format is unchanged.
 
@@ -88,7 +92,7 @@ dist-attached clients consume the live terms directly without any JSON step.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
--export([dispatch/4, encode/2]).
+-export([dispatch/4, request/3, render/2, encode/2]).
 
 -export_type([op_result/0]).
 
@@ -124,6 +128,66 @@ tagged terms; `encode/2` is the only thing that turns them into JSON.
     | {error, #beamtalk_error{}}
     | {error, #beamtalk_error{}, Output :: binary(),
         Warnings :: [beamtalk_repl_protocol:warning()]}.
+
+-doc """
+Build a protocol request from an op name and a flat params map, then dispatch it.
+
+The single request-building entry point for dist-attached clients (BT-5201):
+the client passes the op name, the op's params as a map with binary keys, and
+the `SessionPid` `dispatch/4` expects, and gets back the `op_result()` term.
+The `protocol_msg()` record, and the `decode/1` + `get_params/1` prelude that
+used to build it, stay on the workspace node. It is `dispatch/4` over a
+request with no correlation `id` and no `session` field.
+
+`Params` is *flat*, exactly like the WebSocket frame minus its envelope: each
+op param is a top-level key (`#{<<"code">> => <<"1 + 1">>}`), never nested
+under a `<<"params">>` key. Values are the wire-shaped JSON values a decoded
+frame carries (binaries, numbers, booleans, `null`, lists, maps with binary
+keys), so a handler cannot tell this entry point from the WebSocket. The
+envelope keys `op`, `id` and `session` are not params and are dropped.
+""".
+-spec request(binary(), map(), pid()) -> op_result().
+request(Op, Params, SessionPid) when is_binary(Op), is_map(Params), is_pid(SessionPid) ->
+    case beamtalk_repl_protocol:decode_map(Params#{<<"op">> => Op}) of
+        {ok, Msg} ->
+            dispatch(Op, beamtalk_repl_protocol:get_params(Msg), Msg, SessionPid);
+        {error, _Reason} ->
+            %% Unreachable while `op` is always set; keeps the "return, never
+            %% raise" contract if decode_map/1 ever validates more.
+            unknown_op(Op)
+    end.
+
+-doc """
+The one rendering function for dist-attached clients (BT-5201).
+
+A dist-attached client keeps live terms and renders them for display on its
+own side; where it wants the workspace's own text it asks here, so the text is
+byte-identical to what the WebSocket surfaces show.
+
+* `render(value, Term)` — the display value for one term (the JSON-ready value
+  the WebSocket sends: `term_to_json/1`).
+* `render(values, Terms)` — `render(value, T)` for each term, in order, in one
+  round-trip.
+* `render(error, Reason)` — `{Structured, Message}`: the `#beamtalk_error{}` for
+  any error reason (`beamtalk_repl_errors:ensure_structured_error/1`; a
+  structured reason passes through) and the user-facing message text
+  (`beamtalk_repl_json:format_error_message/1`).
+
+Rendering never feeds back into `dispatch/4`: it is display only.
+""".
+-spec render
+    (value, term()) -> term();
+    (values, [term()]) -> [term()];
+    (error, term()) -> {#beamtalk_error{}, binary()}.
+render(value, Term) ->
+    beamtalk_repl_json:term_to_json(Term);
+render(values, Terms) when is_list(Terms) ->
+    [beamtalk_repl_json:term_to_json(T) || T <- Terms];
+render(error, Reason) ->
+    {
+        beamtalk_repl_errors:ensure_structured_error(Reason),
+        beamtalk_repl_json:format_error_message(Reason)
+    }.
 
 %%% Dispatch — op name → term result
 
