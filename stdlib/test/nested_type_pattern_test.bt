@@ -103,6 +103,17 @@ TestCase subclass: NestedTypePatternTest
     self assert: (f value: #[3, 3]) equals: #same
     self assert: (f value: #[3, 4]) equals: #different
 
+  testArrayRepeatedNameTypeOnSecondOccurrence =>
+    f := [:v |
+      v match: [
+        #[x, x :: Integer] -> #same;
+        _ -> #different
+      ]
+    ]
+    self assert: (f value: #[3, 3]) equals: #same
+    self assert: (f value: #[3, 4]) equals: #different
+    self assert: (f value: #["a", "a"]) equals: #different
+
   testDestructureWildcardType =>
     {_, n :: Integer} := {1, 2}
     self assert: n equals: 2
