@@ -78,7 +78,8 @@ peer, so the local connect-time check sees a mismatch or a failed read.
     resume_monitor/0,
     stop_monitor/0,
     start_monitor/0,
-    restart_monitor/0
+    restart_monitor/0,
+    ensure_shape_version_stub/4
 ]).
 
 %%====================================================================
@@ -581,10 +582,16 @@ once.
 """.
 peer_without_hello_announced_once(Peer, PeerNode) ->
     flush_events(),
-    %% Skewed since `skew_announced_once_on_connect/2`: 1 here, 2 on the peer.
+    %% Skewed: the real module (1) here, a version-2 stub on the peer.
     Class = 'ShapeSkewCart',
     force_disconnect(PeerNode),
+    %% Stopped first: a `ClassLoaded` re-check on the peer could otherwise
+    %% re-dial this node before the scenario's own reconnect.
     ok = peer_call(Peer, stop_monitor, []),
+    ok = peer_call(Peer, ensure_shape_version_stub, [
+        Class, shape_skew_cart, shape_skew_cart_v2_stub, 2
+    ]),
+    ok = load_fixture_settled(shape_skew_cart, Class),
     Sub = subscribe_self('NodeShapeSkew'),
     try
         reconnect(PeerNode),
@@ -646,6 +653,26 @@ await_local_checks_done() ->
     beamtalk_test_wait:until(fun() -> not connect_checks_running() end, 10000),
     _ = sys:get_state(beamtalk_node_monitor),
     ok.
+
+-doc """
+Make `ClassName` run on the `StubBasename` stub reporting `ShapeVersion`:
+register the `Basename` fixture first if the class is not registered, and
+install the stub unless it is already in place. Registering the fixture
+over an earlier stub, or a stub over itself, is never done. Runs on the
+peer via `peer_call/3`.
+""".
+-spec ensure_shape_version_stub(atom(), atom(), atom(), pos_integer()) -> ok.
+ensure_shape_version_stub(ClassName, Basename, StubBasename, ShapeVersion) ->
+    StubMod = list_to_atom("bt@" ++ atom_to_list(StubBasename)),
+    case beamtalk_class_metadata:lookup_methods(ClassName) of
+        {ok, StubMod, _} ->
+            ok;
+        {ok, _RealMod, _} ->
+            install_shape_version_stub(ClassName, StubBasename, ShapeVersion);
+        _NotRegistered ->
+            ok = load_fixture(Basename, ClassName),
+            install_shape_version_stub(ClassName, StubBasename, ShapeVersion)
+    end.
 
 %% Run on the peer via `peer_call/3`.
 suspend_monitor() -> sys:suspend(beamtalk_node_monitor).

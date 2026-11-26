@@ -57,7 +57,8 @@ Two triggers, both funnelled through `check_shape_skew_on_connect/4` /
   differs.
 
 Both paths announce a `NodeShapeSkew` when a (peer, class) pair becomes
-skewed, or its versions change, and not again for the same skew (BT-5265);
+skewed, or its versions change, and not again for the same skew on the
+same connection (BT-5265);
 they are best-effort (a fault-isolated `try`/`catch`, matching `announce/2`
 below — a skew check must never crash the monitor or block `NodeUp`/`NodeDown`),
 and only ever consider *visible* peers, matching this module's existing
@@ -111,7 +112,12 @@ When a monitor opens an entry for a peer, it casts the peer's monitor
 stores it in its own entry for this node as `peer_gen`. OTP delivers
 `nodeup` before any message over the new connection, and `nodedown` after
 the last one, so a `hello` always lands in the entry for the connection it
-came over. On a `hello` the receiver also runs a connect-time shape check:
+came over. The generation it carries can still be an earlier connection's:
+if the link flaps before the sender has handled the `nodedown`, the
+`hello` goes out on the new connection. So the sender pairs each
+generation with the stamp of its last `hello` (`hello_at`), and notifies
+the peer only for checks dispatched after it: those read both sides after
+that connection was up. On a `hello` the receiver also runs a connect-time shape check:
 the sender has handled its `nodeup` by then, so anything it reloaded first
 is in place.
 
@@ -125,9 +131,10 @@ first.
 When the monitor (re)starts, peers that are already connected get a fresh
 entry, a connect-time shape check and a `hello` asking for one back
 (`WantReply`), so their counts are rebuilt and their reload notifications
-accepted without waiting for a reconnect. These checks only update the
-tally: the connection is not new, so they announce neither
-`NodeShapeSkew` nor `NodeVersionSkew`.
+accepted without waiting for a reconnect. The connection is not new, so
+these checks do not announce the state they find, and `NodeVersionSkew`
+is not read at all; a later change on the connection is announced
+(`baseline`, see `should_announce/3`).
 
 A reload-time check updates **both** sides: after comparing its own entry
 with a peer's, the reloading node casts the pair to the peer's monitor
@@ -213,13 +220,15 @@ is never refused.
 %% generation; `connection` says whether the connection was `new` or
 %% already `existing` when this monitor started; `peer_gen` is the peer
 %% monitor's generation for it, from its `hello` (BT-5265), `undefined`
-%% until one arrives; `classes` holds, per checked class, the stamp of the
+%% until one arrives; `hello_at` is the stamp of the last `hello` this
+%% monitor sent the peer with `gen`; `classes` holds, per checked class, the stamp of the
 %% check whose result is kept and that result; `reload_seq` holds the newest
 %% reload stamp the peer has sent per class (`peer_class_checked`).
 -type peer_entry() :: #{
     gen := reference(),
     connection := new | existing,
     peer_gen := reference() | undefined,
+    hello_at := integer(),
     classes := #{atom() => {integer(), check_result()}},
     reload_seq := #{atom() => integer()}
 }.
@@ -229,7 +238,7 @@ is never refused.
 -type check_result() :: clear | {skewed, term(), term()}.
 
 %% When a kept skew result is announced; see `should_announce/3`.
--type announce_mode() :: changed | never.
+-type announce_mode() :: changed | baseline.
 
 %%% ============================================================================
 %%% Public API
@@ -328,11 +337,17 @@ handle_cast(
     %% A reload check's notification to the peer (BT-5232), sent from here so
     %% that it goes out only while the check's connection is current
     %% (BT-5240). It carries this monitor's generation for the connection,
-    %% which the peer matches against our `hello` (BT-5265).
-    case is_current_gen(PeerNode, Gen, Skew) of
-        true ->
+    %% which the peer matches against our `hello` (BT-5265), and goes out
+    %% only for a check dispatched after the last `hello` this monitor sent
+    %% with it (`hello_at`). A `hello` can go out on a later connection than
+    %% the one its generation was made for, if the link flaps first; a
+    %% check dispatched after it read both sides after that connection was
+    %% up. An earlier check's notification is dropped: the peer's `hello`
+    %% check reads this node after the `hello`, which covers it.
+    case maps:find(PeerNode, Skew) of
+        {ok, #{gen := Gen, hello_at := HelloAt}} when Seq > HelloAt ->
             send_to_peer(PeerNode, {peer_class_checked, node(), Gen, ClassName, LocalEntry, Seq});
-        false ->
+        _ ->
             ok
     end,
     {noreply, State};
@@ -404,25 +419,30 @@ generation, so `peer_class_checked` from this monitor is accepted, and run
 a connect-time shape check now: the peer has handled its `nodeup` for this
 node, so anything it reloaded before that is already in place, and any
 reload notification of its that this node dropped before the `hello` is
-covered. The check announces only a result that differs from the one kept
-(`changed`), so the `nodeup` check and this one never announce the same
-skew twice; on a connection that is not new to this monitor it never
-announces. `WantReply` comes from a monitor that has just restarted and
-needs this monitor's generation in return.
+covered. The check announces as `should_announce/3` says, so the `nodeup`
+check and this one never announce the same skew twice.
+
+`WantReply` comes from a monitor that has just restarted and needs this
+monitor's generation in return. The reply moves this entry's `hello_at`
+on, so that only checks dispatched after the reply notify the peer (see
+`send_peer_class_checked`).
 """.
 -spec handle_hello(node(), reference(), boolean(), #state{}) -> #state{}.
 handle_hello(PeerNode, PeerGen, WantReply, #state{skew = Skew} = State) ->
     case maps:find(PeerNode, Skew) of
         {ok, #{gen := Gen, connection := Connection} = Entry} ->
-            _ = WantReply andalso send_hello(PeerNode, Gen, false),
-            Announce =
-                case Connection of
-                    new -> changed;
-                    existing -> never
-                end,
             Stamp = new_stamp(),
+            Entry1 =
+                case WantReply of
+                    true ->
+                        send_hello(PeerNode, Gen, false),
+                        Entry#{hello_at := Stamp};
+                    false ->
+                        Entry
+                end,
+            Announce = announce_mode(Connection),
             spawn(fun() -> check_shape_skew_on_connect(PeerNode, Gen, Stamp, Announce) end),
-            State#state{skew = Skew#{PeerNode := Entry#{peer_gen := PeerGen}}};
+            State#state{skew = Skew#{PeerNode := Entry1#{peer_gen := PeerGen}}};
         error ->
             %% Not a visible, connected peer of this monitor.
             State
@@ -475,16 +495,25 @@ record_result(Node, Gen, Stamp, ClassName, Result, #state{skew = Skew} = State) 
     end.
 
 -doc """
-Whether a kept skewed `Result` is announced as `NodeShapeSkew` (BT-5265).
-`never` on a connection that is not new to this monitor. Otherwise
-(`changed`) only when it differs from the result it replaced: the class has
-just become skewed, or its versions moved. One skew can be found by
-several checks — the `nodeup` and `hello` checks of a connection, or a
-`hello` check and a peer's reload notification — and is announced once.
+Whether a kept skewed `Result` is announced as `NodeShapeSkew` (BT-5265):
+only when it differs from the result it replaced (the class has just
+become skewed, or its versions moved). One skew can be found by several
+checks — the `nodeup` and `hello` checks of a connection, or a `hello`
+check and a peer's reload notification — and is announced once. A new
+connection's tally starts empty, so a reconnect announces its skew again.
+
+`baseline` is for connect-time checks on a connection that is not new to
+this monitor (it restarted): the first result for a class is the state the
+connection was already in and is not announced; a later change is.
 """.
 -spec should_announce(announce_mode(), check_result() | none, check_result()) -> boolean().
-should_announce(never, _Previous, _Result) -> false;
-should_announce(changed, Previous, Result) -> Previous =/= Result.
+should_announce(baseline, none, _Result) -> false;
+should_announce(_Mode, Previous, Result) -> Previous =/= Result.
+
+-doc "How connect-time shape checks on a `new` or `existing` connection announce.".
+-spec announce_mode(new | existing) -> announce_mode().
+announce_mode(new) -> changed;
+announce_mode(existing) -> baseline.
 
 -spec skew_count_of(peer_entry() | undefined) -> non_neg_integer().
 skew_count_of(undefined) ->
@@ -508,14 +537,16 @@ is_current_gen(Node, Gen, Skew) ->
 
 -doc """
 An empty tally entry with generation `Gen`, for a connection that is `new`
-or that already `existing` when this monitor started.
+or that already `existing` when this monitor started, whose `hello` was
+sent at stamp `HelloAt`.
 """.
--spec peer_entry(reference(), new | existing) -> peer_entry().
-peer_entry(Gen, Connection) ->
+-spec peer_entry(reference(), new | existing, integer()) -> peer_entry().
+peer_entry(Gen, Connection, HelloAt) ->
     #{
         gen => Gen,
         connection => Connection,
         peer_gen => undefined,
+        hello_at => HelloAt,
         classes => #{},
         reload_seq => #{}
     }.
@@ -525,6 +556,11 @@ peer_entry(Gen, Connection) ->
 -spec peer_entry(reference()) -> peer_entry().
 peer_entry(Gen) ->
     peer_entry(Gen, new).
+
+-doc "As `peer_entry/1`, for a `new` or `existing` connection.".
+-spec peer_entry(reference(), new | existing) -> peer_entry().
+peer_entry(Gen, Connection) ->
+    peer_entry(Gen, Connection, new_stamp()).
 
 -doc "A fresh, empty monitor state, for tests that drive the callbacks directly.".
 -spec initial_state() -> #state{}.
@@ -537,8 +573,8 @@ Open a tally entry with a new generation for `Peer`, spawn its connect-time
 checks, tagged with it (BT-5240), and say `hello` to the peer's monitor
 with it (BT-5265). For a `new` connection both checks run and announce. For
 an `existing` one (already connected when the monitor starts) only the
-shape check runs, and it only updates the tally; its `hello` asks for one
-back, since the peer's monitor said its own to the monitor that was here
+shape check runs, and it does not announce the state it finds
+(`baseline`); its `hello` asks for one back, since the peer's monitor said its own to the monitor that was here
 before. Spawned, not inline: the checks' erpc round trips must never delay
 this gen_server's delivery of another node's NodeUp/NodeDown. Two
 processes, so a peer slow to answer one read never delays the other.
@@ -551,17 +587,16 @@ changed result, like the `hello` check, so one skew is announced once.
 open_peer_check(Peer, Connection) ->
     Gen = make_ref(),
     Stamp = new_stamp(),
-    Announce =
-        case Connection of
-            new ->
-                spawn(fun() -> check_version_skew_on_connect(Peer, Gen) end),
-                changed;
-            existing ->
-                never
-        end,
+    case Connection of
+        new -> spawn(fun() -> check_version_skew_on_connect(Peer, Gen) end);
+        existing -> ok
+    end,
+    Announce = announce_mode(Connection),
     spawn(fun() -> check_shape_skew_on_connect(Peer, Gen, Stamp, Announce) end),
+    %% Reload checks dispatched from here on carry larger stamps than
+    %% `Stamp`, so they may notify the peer (`hello_at`).
     send_hello(Peer, Gen, Connection =:= existing),
-    peer_entry(Gen, Connection).
+    peer_entry(Gen, Connection, Stamp).
 
 -doc """
 A check's stamp: strictly increasing in dispatch order on this node, and

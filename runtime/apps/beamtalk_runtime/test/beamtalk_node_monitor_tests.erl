@@ -637,6 +637,65 @@ hello_from_unknown_peer_is_ignored_test() ->
     S = beamtalk_node_monitor:initial_state(),
     ?assertEqual(S, cast({hello, ?GHOST, make_ref(), true}, S)).
 
+%% A notification goes out only for a check dispatched after the last
+%% `hello` this monitor sent with the generation. A restarted peer asks for
+%% our `hello`; the reply moves `hello_at` on, so a check dispatched before
+%% it (whose reads may predate a link flap the reply went out after) no
+%% longer notifies. The peer is this node, so the sends can be traced.
+notification_only_after_last_hello_test() ->
+    Peer = node(),
+    S0 = setelement(
+        4,
+        beamtalk_node_monitor:initial_state(),
+        #{Peer => beamtalk_node_monitor:peer_entry(make_ref())}
+    ),
+    Gen = gen(Peer, S0),
+    HelloAt0 = hello_at(Peer, S0),
+    Request = fun(Seq) -> {send_peer_class_checked, Peer, Gen, ?CLASS, shape_entry(1), Seq} end,
+    ?assertMatch({[], _}, sends(Request(HelloAt0 - 1), S0)),
+    ?assertMatch(
+        {[{peer_class_checked, Peer, Gen, ?CLASS, _, _}], _}, sends(Request(HelloAt0 + 1), S0)
+    ),
+    {Reply, S1} = sends({hello, Peer, make_ref(), true}, S0),
+    ?assertMatch([{hello, Peer, Gen, false}], Reply),
+    ?assert(hello_at(Peer, S1) >= HelloAt0 + 1),
+    ?assertMatch({[], _}, sends(Request(HelloAt0 + 1), S1)),
+    ?assertMatch({[_], _}, sends(Request(hello_at(Peer, S1) + 1), S1)).
+
+hello_at(Peer, S) ->
+    #{hello_at := HelloAt} = maps:get(Peer, element(4, S)),
+    HelloAt.
+
+%% Run one `handle_cast/2` step in a traced process and answer the casts it
+%% sent to a peer monitor, with the new state.
+sends(Msg, S) ->
+    Test = self(),
+    Pid = spawn(fun() ->
+        receive
+            go -> Test ! {stepped, self(), beamtalk_node_monitor:handle_cast(Msg, S)}
+        end
+    end),
+    1 = erlang:trace(Pid, true, [send]),
+    Pid ! go,
+    {noreply, S1} =
+        receive
+            {stepped, Pid, Result} -> Result
+        end,
+    Ref = erlang:trace_delivered(Pid),
+    receive
+        {trace_delivered, Pid, Ref} -> ok
+    end,
+    {collect_peer_casts(Pid), S1}.
+
+collect_peer_casts(Pid) ->
+    receive
+        {trace, Pid, send, {'$gen_cast', Cast}, {beamtalk_node_monitor, _Node}} ->
+            [Cast | collect_peer_casts(Pid)];
+        {trace, Pid, send, _Other, _To} ->
+            collect_peer_casts(Pid)
+    after 0 -> []
+    end.
+
 should_announce_test_() ->
     Skewed = {skewed, 1, 2},
     [
@@ -644,7 +703,9 @@ should_announce_test_() ->
         ?_assert(beamtalk_node_monitor:should_announce(changed, clear, Skewed)),
         ?_assert(beamtalk_node_monitor:should_announce(changed, {skewed, 1, 3}, Skewed)),
         ?_assertNot(beamtalk_node_monitor:should_announce(changed, Skewed, Skewed)),
-        ?_assertNot(beamtalk_node_monitor:should_announce(never, none, Skewed))
+        ?_assertNot(beamtalk_node_monitor:should_announce(baseline, none, Skewed)),
+        ?_assertNot(beamtalk_node_monitor:should_announce(baseline, Skewed, Skewed)),
+        ?_assert(beamtalk_node_monitor:should_announce(baseline, clear, Skewed))
     ].
 
 %%--------------------------------------------------------------------
@@ -707,16 +768,22 @@ connect_checks_test_() ->
                 ?assertEqual(1, beamtalk_node_monitor:skew_count(?PEER5265)),
                 ?assertEqual([{1, 2}], shape_skews_announced())
             end},
-            {"a hello on a connection this monitor did not see open announces nothing", fun() ->
-                sys:replace_state(beamtalk_node_monitor, fun(S) ->
-                    Entry = beamtalk_node_monitor:peer_entry(make_ref(), existing),
-                    setelement(4, S, maps:put(?PEER5265, Entry, element(4, S)))
-                end),
-                Hello = say_hello(true),
-                finish_check(Hello, 2),
-                ?assertEqual(1, beamtalk_node_monitor:skew_count(?PEER5265)),
-                ?assertEqual([], shape_skews_announced())
-            end}
+            {"after a restart, the skew a connection already had is not announced; a change is",
+                fun() ->
+                    sys:replace_state(beamtalk_node_monitor, fun(S) ->
+                        Entry = beamtalk_node_monitor:peer_entry(make_ref(), existing),
+                        setelement(4, S, maps:put(?PEER5265, Entry, element(4, S)))
+                    end),
+                    First = say_hello(true),
+                    finish_check(First, 2),
+                    ?assertEqual(1, beamtalk_node_monitor:skew_count(?PEER5265)),
+                    ?assertEqual([], shape_skews_announced()),
+                    %% The peer reloaded, and its notification was dropped
+                    %% before its `hello`: the next `hello` check finds it.
+                    Second = say_hello(false),
+                    finish_check(Second, 3),
+                    ?assertEqual([{1, 3}], shape_skews_announced())
+                end}
         ]}.
 
 %% Deliver `nodeup` for the fake peer and answer the pid of the connect
