@@ -104,8 +104,8 @@ children_of_a_worker_is_empty_test() ->
         )
     end).
 
-%% A process that is not a supervisor is never sent `which_children`: a
-%% gen_server with no catch-all `handle_call` would crash on it.
+%% A process that is not a supervisor has no children and is left alone: a
+%% gen_server with no catch-all `handle_call` would crash on `which_children`.
 children_never_calls_a_non_supervisor_test() ->
     {ok, Server} = gen_server:start(?MODULE, crash_on_call, []),
     try

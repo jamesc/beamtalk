@@ -1081,18 +1081,11 @@ best-effort per ADR 0092 §4; the difference is display-only.)
 child_handles(SupPidStr) ->
     case parse_pid(SupPidStr) of
         {ok, SupPid} ->
-            %% A pid of another node is not ours to ask (`is_process_alive/1`
-            %% raises `badarg` for it); a process that is not a supervisor has no
-            %% children, and is never sent `which_children`, which would crash a
-            %% gen_server without a catch-all `handle_call` (BT-5205).
+            %% A pid of another node is not ours to ask: `is_process_alive/1`
+            %% raises `badarg` for it (BT-5205).
             case node(SupPid) =:= node() andalso erlang:is_process_alive(SupPid) of
-                true ->
-                    case looks_like_supervisor(SupPid) of
-                        true -> {ok, child_handle_rows(SupPid)};
-                        false -> {ok, []}
-                    end;
-                false ->
-                    {error, child_handles_dead_error(SupPidStr)}
+                true -> {ok, child_handle_rows(SupPid)};
+                false -> {error, child_handles_dead_error(SupPidStr)}
             end;
         error ->
             {error, child_handles_bad_pid_error(SupPidStr)}

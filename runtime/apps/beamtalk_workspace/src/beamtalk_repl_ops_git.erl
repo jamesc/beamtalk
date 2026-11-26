@@ -27,8 +27,9 @@ A `path` is checked by the shared path policy
 (`beamtalk_repl_paths:check_relative/1`) before git runs: relative, no `..`
 segment, no NUL byte, not the tree root itself (`.`). It is relative to the
 repository root, the form `git-status` reports (the project directory when it
-is the root). The writes also refuse a path ending in a separator, which names
-a directory. It is then passed to git as a literal pathspec, so
+is the root). `git-stage` and `git-unstage` accept a directory (the Git panel
+stages an untracked directory by the `dir/` path `git-status` reports);
+`git-revert-file` refuses one, checked on disk by `beamtalk_git`. It is then passed to git as a literal pathspec, so
 `:(top)`-style magic or a glob in a name cannot reach outside it. A refused
 path is an `invalid_argument` error and git is not started.
 
@@ -157,22 +158,11 @@ with_path(Op, Params, Fun) ->
     beamtalk_repl_ops:op_result().
 mutate_path(Op, Params, Git) ->
     with_path(Op, Params, fun(Path) ->
-        case names_directory(Path) of
-            true ->
-                {error, refused_path(Op, whole_tree)};
-            false ->
-                case Git(Path) of
-                    {ok, _} -> {value, #{<<"path">> => Path}};
-                    {error, Reason} -> {error, structured(Reason)}
-                end
+        case Git(Path) of
+            {ok, _} -> {value, #{<<"path">> => Path}};
+            {error, Reason} -> {error, structured(Reason)}
         end
     end).
-
-%% A write names a file: a trailing separator names a directory, which git
-%% would read as every file under it.
--spec names_directory(binary()) -> boolean().
-names_directory(Path) ->
-    binary:last(Path) =:= $/ orelse binary:last(Path) =:= $\\.
 
 %% `count` is absent (the default) or a positive integer, clamped to the cap;
 %% anything else is refused rather than read as the default.

@@ -213,14 +213,43 @@ git_commit(_Message) ->
 
 -doc """
 Discard a working-tree change for a single path (`git restore -- <path>`).
+A path that names a directory is refused: one call must not discard every
+change under it.
 
 The human counterpart to the agent ChangeLog `revert:`. Returns `{ok, nil}`.
 """.
 -spec git_revert_file(binary()) -> {ok, nil} | {error, #beamtalk_error{}}.
 git_revert_file(Path) when is_binary(Path) ->
-    mutate(git_revert_file, [<<"restore">>, <<"--">>, Path], <<"git restore failed">>);
+    %% `git restore -- <dir>` discards every change under the directory; this op
+    %% reverts one file (BT-5205).
+    case names_directory(git_revert_file, Path) of
+        {ok, false} ->
+            mutate(git_revert_file, [<<"restore">>, <<"--">>, Path], <<"git restore failed">>);
+        {ok, true} ->
+            {error,
+                arg_error(
+                    git_revert_file, <<"path names a directory; revert one file at a time">>
+                )};
+        {error, _} = Err ->
+            Err
+    end;
 git_revert_file(_Path) ->
     {error, arg_error(git_revert_file, <<"path must be a String">>)}.
+
+%% Whether `Path`, resolved from the repository toplevel (where every git
+%% command runs), is a directory on disk. A text check cannot tell: `src`,
+%% `src/.` and `./src` all name one.
+-spec names_directory(atom(), binary()) -> {ok, boolean()} | {error, #beamtalk_error{}}.
+names_directory(Selector, Path) ->
+    case project_dir() of
+        {ok, Dir} ->
+            case cached_repo_toplevel(Selector, Dir) of
+                {ok, Toplevel} -> {ok, filelib:is_dir(filename:join(Toplevel, Path))};
+                {error, _} = Err -> Err
+            end;
+        {error, _} = Err ->
+            Err
+    end.
 
 %%% ============================================================================
 %%% Mutating helper

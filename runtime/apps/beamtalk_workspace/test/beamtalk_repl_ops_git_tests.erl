@@ -39,6 +39,16 @@ git_ops_test_() ->
             end}
         end,
         fun(Ctx) ->
+            {"git-revert-file refuses every spelling of a directory", fun() ->
+                revert_refuses_directories(Ctx)
+            end}
+        end,
+        fun(Ctx) ->
+            {"git-stage takes the untracked directory the panel shows", fun() ->
+                stage_accepts_an_untracked_directory(Ctx)
+            end}
+        end,
+        fun(Ctx) ->
             {"a glob or pathspec magic names a file, never a set", fun() ->
                 paths_are_literal(Ctx)
             end}
@@ -267,24 +277,40 @@ refuses_bad_paths(#{top := Top}) ->
         end,
         Ops
     ),
-    %% A write refuses a directory spelling; `git-revert-file` of `src/` would
-    %% discard every change under it.
-    lists:foreach(
-        fun(Op) ->
-            ?assertMatch(
-                {error, #beamtalk_error{kind = invalid_argument}},
-                request(Op, #{<<"path">> => <<"src/">>})
-            ),
-            ?assertEqual(<<"modified\n">>, read(Top))
-        end,
-        [<<"git-stage">>, <<"git-unstage">>, <<"git-revert-file">>]
-    ),
     %% A missing path is the same refusal.
     lists:foreach(
         fun(Op) ->
             ?assertMatch({error, #beamtalk_error{kind = invalid_argument}}, request(Op, #{}))
         end,
         Ops
+    ).
+
+%% `git-revert-file` of a directory would discard every change under it, so it
+%% refuses every spelling of one; the stage ops accept a directory, which is
+%% how the Git panel stages the `dir/` row `git-status` reports for an
+%% untracked directory.
+revert_refuses_directories(#{top := Top}) ->
+    modify(Top),
+    lists:foreach(
+        fun(Path) ->
+            ?assertMatch(
+                {error, #beamtalk_error{}}, request(<<"git-revert-file">>, #{<<"path">> => Path})
+            ),
+            ?assertEqual(<<"modified\n">>, read(Top), Path)
+        end,
+        [<<"src">>, <<"src/">>, <<"src/.">>, <<"./src">>, <<"src//">>]
+    ).
+
+stage_accepts_an_untracked_directory(#{top := Top}) ->
+    ok = filelib:ensure_dir(filename:join(Top, "newdir/x")),
+    ok = file:write_file(filename:join(Top, "newdir/Foo.bt"), <<"new\n">>),
+    ?assertMatch([#{<<"path">> := <<"newdir/">>}], status_files()),
+    ?assertEqual(
+        {value, #{<<"path">> => <<"newdir/">>}},
+        request(<<"git-stage">>, #{<<"path">> => <<"newdir/">>})
+    ),
+    ?assertMatch(
+        [#{<<"path">> := <<"newdir/Foo.bt">>, <<"index">> := <<"added">>}], status_files()
     ).
 
 paths_are_literal(#{top := Top}) ->

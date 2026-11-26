@@ -30,7 +30,8 @@ loader) to resolve what is inside it.
 -doc """
 `ok` for a project-relative path, else why it is refused: `not_a_string`,
 `empty`, `nul` (a NUL byte), `absolute` (a root, a UNC path or a drive such as `C:\\`;
-a name like `a:b.bt` is an ordinary relative file name) or `parent_segment` (a `..` segment) or `whole_tree` (a path that names the root itself,
+a name like `a:b.bt` is an ordinary relative file name on a POSIX node; a Windows
+node reads it as drive-relative and refuses it) or `parent_segment` (a `..` segment) or `whole_tree` (a path that names the root itself,
 such as `.` or `./`, which a git write would read as "every file").
 """.
 -spec check_relative(term()) -> ok | {error, refusal()}.
@@ -63,8 +64,8 @@ check_segments(Path) ->
     end.
 
 %% Absolute on any platform: a leading separator (POSIX root, UNC) or a drive
-%% letter, whatever the node's own OS says, since the client's text is judged
-%% the same everywhere.
+%% (`C:`, `C:\\`), whatever the node's own OS says. The OS's own `pathtype` then
+%% adds what only it knows (a Windows node also refuses drive-relative `a:b`).
 -spec is_absolute(binary()) -> boolean().
 is_absolute(<<C, _/binary>>) when C =:= $/; C =:= $\\ -> true;
 is_absolute(<<L, $:>>) when ?IS_LETTER(L) -> true;
