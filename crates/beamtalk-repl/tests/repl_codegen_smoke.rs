@@ -776,7 +776,6 @@ sealed Object subclass: Facade
 fn repl_code_with_facade_hierarchy(expr_source: &str) -> String {
     let (hierarchy, _diags) =
         beamtalk_core::semantic_analysis::ClassHierarchy::build(&parse_ok(FACADE_SOURCE));
-    let hierarchy = hierarchy.expect("hierarchy should build");
     let module = parse_ok(expr_source);
     let exprs: Vec<Expression> = module
         .expressions

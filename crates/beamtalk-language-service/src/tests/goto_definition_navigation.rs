@@ -52,7 +52,7 @@ fn goto_definition_stdlib_class() {
         Utf8PathBuf::from("stdlib/src/Counter.bt"),
         "Object subclass: Counter\n  increment => 1".to_string(),
     )];
-    let index = ProjectIndex::with_stdlib(&stdlib).0.unwrap();
+    let index = ProjectIndex::with_stdlib(&stdlib).0;
     let mut service = SimpleLanguageService::with_project_index(index);
 
     // Add the stdlib file as an open file too so cross-file lookup can find it

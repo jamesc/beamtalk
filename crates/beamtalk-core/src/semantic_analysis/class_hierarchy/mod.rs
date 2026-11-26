@@ -12,7 +12,6 @@
 //!
 //! The hierarchy uses simple depth-first MRO (no multiple inheritance).
 use crate::ast::{ClassDefinition, MethodKind, Module};
-use crate::semantic_analysis::SemanticError;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
@@ -163,11 +162,10 @@ impl ClassHierarchy {
     }
     /// Build a class hierarchy from built-in definitions and a parsed module.
     ///
-    /// Returns `(Ok(hierarchy), diagnostics)` where diagnostics may include
-    /// errors (e.g., sealed class violations). The `Result` is always `Ok`
-    /// since hierarchy construction is infallible; the `Result` wrapper follows
-    /// the project convention for user-facing operations.
-    pub fn build(module: &Module) -> (Result<Self, SemanticError>, Vec<Diagnostic>) {
+    /// Returns `(hierarchy, diagnostics)` where diagnostics may include
+    /// errors (e.g., sealed class violations). Hierarchy construction is
+    /// infallible: problems are reported as diagnostics, never as a failure.
+    pub fn build(module: &Module) -> (Self, Vec<Diagnostic>) {
         Self::build_with_options(module, false)
     }
     /// Build a class hierarchy with explicit stdlib compilation mode.
@@ -177,12 +175,8 @@ impl ClassHierarchy {
     /// based on class name alone — only when the compiler knows it is compiling
     /// stdlib sources.
     ///
-    /// Returns `(Ok(hierarchy), diagnostics)` per the project convention for
-    /// user-facing operations that produce both a result and diagnostics.
-    pub fn build_with_options(
-        module: &Module,
-        stdlib_mode: bool,
-    ) -> (Result<Self, SemanticError>, Vec<Diagnostic>) {
+    /// Returns `(hierarchy, diagnostics)`; construction is infallible.
+    pub fn build_with_options(module: &Module, stdlib_mode: bool) -> (Self, Vec<Diagnostic>) {
         // Test-only instrumentation — see `BUILD_CALL_COUNT`'s doc.
         #[cfg(any(test, feature = "test"))]
         BUILD_CALL_COUNT.with(|c| c.set(c.get() + 1));
@@ -190,7 +184,7 @@ impl ClassHierarchy {
         let mut hierarchy = Self::with_builtins();
         let diagnostics = hierarchy.add_module_classes(module, stdlib_mode);
         hierarchy.rebuild_all_indexes();
-        (Ok(hierarchy), diagnostics)
+        (hierarchy, diagnostics)
     }
     /// Register protocol definitions as synthetic class entries.
     ///

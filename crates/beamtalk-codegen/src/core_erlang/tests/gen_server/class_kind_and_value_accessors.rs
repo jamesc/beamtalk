@@ -18,9 +18,7 @@ fn test_is_actor_class_direct_actor_subclass() {
         ..empty_module()
     };
     let hierarchy =
-        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
-            .0
-            .unwrap();
+        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
     assert!(CoreErlangGenerator::is_actor_class(&module, &hierarchy));
 }
 
@@ -34,9 +32,7 @@ fn test_is_actor_class_object_subclass_is_value_type() {
         ..empty_module()
     };
     let hierarchy =
-        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
-            .0
-            .unwrap();
+        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
     assert!(!CoreErlangGenerator::is_actor_class(&module, &hierarchy));
 }
 
@@ -55,9 +51,7 @@ fn test_is_actor_class_multi_level_inheritance() {
         ..empty_module()
     };
     let hierarchy =
-        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
-            .0
-            .unwrap();
+        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
 
     // Test with LoggingCounter as the first class
     let module_lc = Module {
@@ -74,9 +68,7 @@ fn test_is_actor_class_multi_level_inheritance() {
 fn test_is_actor_class_no_classes_defaults_to_actor() {
     let module = Module::new(Vec::new(), Span::new(0, 0));
     let hierarchy =
-        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
-            .0
-            .unwrap();
+        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
     assert!(CoreErlangGenerator::is_actor_class(&module, &hierarchy));
 }
 
@@ -92,9 +84,7 @@ fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
         ..empty_module()
     };
     let hierarchy =
-        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
-            .0
-            .unwrap();
+        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
     assert!(CoreErlangGenerator::is_actor_class(&module, &hierarchy));
 }
 
@@ -109,9 +99,7 @@ fn test_is_actor_class_collection_subclass_is_value_type() {
         ..empty_module()
     };
     let hierarchy =
-        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
-            .0
-            .unwrap();
+        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
     assert!(
         !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
         "Collection subclass should be value type (chain reaches Value)"
@@ -130,9 +118,7 @@ fn test_is_actor_class_integer_subclass_is_value_type() {
         ..empty_module()
     };
     let hierarchy =
-        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
-            .0
-            .unwrap();
+        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
     assert!(
         !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
         "Integer subclass should be value type (chain reaches Object)"
@@ -153,9 +139,7 @@ fn test_is_actor_class_root_class_is_value_type() {
         ..empty_module()
     };
     let hierarchy =
-        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
-            .0
-            .unwrap();
+        beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
     assert!(
         !CoreErlangGenerator::is_actor_class(&module, &hierarchy),
         "Root class (nil superclass) should be value type"
@@ -180,9 +164,7 @@ fn test_actor_value_classification_consistent_regardless_of_exception_grandchild
         let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
         let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
         let hierarchy =
-            beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
-                .0
-                .unwrap();
+            beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
 
         // Analysis: both classes resolve to Object — Exception's hierarchy is neither
         // Actor nor Value.

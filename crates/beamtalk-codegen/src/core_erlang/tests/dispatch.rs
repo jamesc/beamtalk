@@ -4947,8 +4947,7 @@ fn test_new1_verdict_agrees_across_files_with_sibling_parent() {
             let codegen_in_caller = !published_bound(&code);
             // A sibling caller's view: its own module, plus the same injection.
             let caller = parse("Object subclass: Caller\n");
-            let (h, _) = ClassHierarchy::build(&caller);
-            let mut h = h.expect("hierarchy");
+            let (mut h, _) = ClassHierarchy::build(&caller);
             let mut infos = ClassHierarchy::extract_class_infos(&fwd);
             if use_infos {
                 infos.extend(ClassHierarchy::extract_class_infos(&base));
@@ -5000,7 +4999,7 @@ fn test_stub_ancestor_new1_is_process_bound_and_verdicts_agree() {
     // Analysis side, as `generate_module` builds it: register `Kid`, inject
     // the index stub, then ask about `Kid`.
     let (built, _) = ClassHierarchy::build(&module);
-    let mut hierarchy = built.expect("hierarchy builds");
+    let mut hierarchy = built;
     let _ = hierarchy.add_external_superclasses(&index);
     // An ordinary class method of the stub runs in the caller (ADR 0153).
     assert!(hierarchy.runs_class_method_in_caller("Sibling", "foo"));

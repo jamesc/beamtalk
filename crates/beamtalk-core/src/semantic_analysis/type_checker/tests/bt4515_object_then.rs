@@ -98,9 +98,7 @@ fn a_nilable_receiver_is_not_narrowed() {
     let source = "Object subclass: Probe\n  field: name :: String | Nil = nil\n  run => self.name then: [:s | s]\n";
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, _) = crate::source_analysis::parse(tokens);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
     // The block body's `s`: the last `s` in the source.
     let at = u32::try_from(source.rfind("s]").unwrap()).unwrap();

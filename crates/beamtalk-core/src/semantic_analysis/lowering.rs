@@ -190,14 +190,14 @@ mod tests {
     use crate::test_helpers::test_support::parse_bt;
 
     fn build_hierarchy(module: &Module) -> ClassHierarchy {
-        let (result, diagnostics) = ClassHierarchy::build(module);
+        let (hierarchy, diagnostics) = ClassHierarchy::build(module);
         assert!(
             diagnostics
                 .iter()
                 .all(|d| d.severity != crate::source_analysis::Severity::Error),
             "Hierarchy build produced errors: {diagnostics:?}"
         );
-        result.expect("ClassHierarchy::build failed for test fixture")
+        hierarchy
     }
 
     /// A single call applies all three writeback passes: inferred return

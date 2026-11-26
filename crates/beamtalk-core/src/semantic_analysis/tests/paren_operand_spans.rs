@@ -52,7 +52,7 @@ fn raw_module_entries_read_the_normalised_tree() {
         let wrapper = first_parenthesised_operand(&raw).expect("a parenthesised operand");
         let mut peeled = raw.clone();
         peel_operand_parens(&mut peeled);
-        let hierarchy = ClassHierarchy::build(&raw).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&raw).0;
 
         let sorted = |module: &crate::ast::Module| {
             let map = infer_types(module, &hierarchy, None);
