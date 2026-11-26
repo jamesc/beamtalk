@@ -536,3 +536,50 @@ fn exclusive_arm_write_keeps_narrowing() {
         "only one arm runs: {diags:?}"
     );
 }
+
+/// The receiver block of `whileTrue:` re-runs after the body rebinds the
+/// local (Claude review on #5869).
+#[test]
+fn while_true_body_rebinding_drops_narrowing_in_condition() {
+    let diags = type_messages(
+        r"typed Object subclass: ZzMint
+  readLine: ms :: Integer -> Result(Binary, Object) => Result ok: <<>>
+  readHead: ms :: Integer -> Result(Tuple, Object) =>
+    line := self readLine: ms
+    n := ms
+    line isError ifTrue: [
+      [n > 0 ifTrue: [^line]. n := n - 1. n > 5] whileTrue: [line := self readLine: ms]
+    ]
+    Result ok: {#head}
+",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|m| m.contains("declares return type Result(Tuple, Object)")),
+        "the condition re-runs after the body rebinds `line`: {diags:?}"
+    );
+}
+
+/// An `on:do:` handler that rebinds the local and retries the protected
+/// block (Claude review on #5869).
+#[test]
+fn on_do_retry_rebinding_drops_narrowing() {
+    let diags = type_messages(
+        r"typed Object subclass: ZzMint
+  readLine: ms :: Integer -> Result(Binary, Object) => Result ok: <<>>
+  readHead: ms :: Integer -> Result(Tuple, Object) =>
+    line := self readLine: ms
+    line isError ifTrue: [
+      [^line] on: Error do: [:e | line := self readLine: ms. e retry]
+    ]
+    Result ok: {#head}
+",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|m| m.contains("declares return type Result(Tuple, Object)")),
+        "a retry may return the rebound `line`: {diags:?}"
+    );
+}

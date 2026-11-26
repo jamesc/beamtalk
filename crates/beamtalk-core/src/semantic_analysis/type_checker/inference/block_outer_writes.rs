@@ -131,20 +131,22 @@ impl TypeChecker {
         }
     }
 
-    /// BT-5290: before a send's arguments are inferred, forget the `Result`
-    /// error-variant fact of every local any of its block arguments may write.
-    /// Those writes are joined into `env` only after every argument is
-    /// inferred (BT-4636), but a sibling block can run between runs of
-    /// another (`do:separatedBy:`, an `on:do:` handler that retries), so a
-    /// `^x` in one may return a value the other rebound. The two-armed
-    /// conditionals run exactly one arm, so their arms keep the fact.
-    pub(super) fn forget_error_variants_written_by_send_blocks(
+    /// BT-5290: before a send's receiver and arguments are inferred, forget
+    /// the `Result` error-variant fact of every local any of its block
+    /// literals — the receiver or an argument — may write, when it has two
+    /// or more. One block can run between runs of another
+    /// (`do:separatedBy:`, `[...] whileTrue: [...]`, an `on:do:` handler
+    /// that retries), and argument-block writes are joined into `env` only
+    /// after every argument is inferred (BT-4636), so a `^x` in one may
+    /// return a value the other rebound. The two-armed conditionals run
+    /// exactly one arm, so their arms keep the fact.
+    pub(in crate::semantic_analysis::type_checker) fn forget_error_variants_written_by_send_blocks(
+        receiver: &Expression,
         selector: &crate::ast::MessageSelector,
         arguments: &[Expression],
         env: &mut TypeEnv,
     ) {
         if !env.has_result_error_variants()
-            || arguments.len() < 2
             || matches!(
                 selector.well_known(),
                 Some(
@@ -153,15 +155,25 @@ impl TypeChecker {
                         | WellKnownSelector::IfNotNilIfNil
                 )
             )
-            || selector.name() == "ifFalse:ifTrue:"
-            || selector.name() == "ifOk:ifError:"
+            || matches!(
+                selector.name().as_str(),
+                "ifFalse:ifTrue:" | "ifOk:ifError:"
+            )
         {
             return;
         }
-        for arg in arguments {
-            if let Expression::Block(block) = arg {
-                Self::forget_error_variants_written_by(block, env);
-            }
+        let blocks: Vec<&crate::ast::Block> = std::iter::once(receiver)
+            .chain(arguments)
+            .filter_map(|e| match e {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            })
+            .collect();
+        if blocks.len() < 2 {
+            return;
+        }
+        for block in blocks {
+            Self::forget_error_variants_written_by(block, env);
         }
     }
 

@@ -31,6 +31,7 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> InferredType {
+        Self::forget_error_variants_written_by_send_blocks(receiver, selector, arguments, env);
         let receiver_ty = self.infer_send_receiver(receiver, hierarchy, env, in_abstract_method);
         self.infer_message_send_with_receiver_ty(
             receiver,
