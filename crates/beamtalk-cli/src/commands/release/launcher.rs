@@ -758,6 +758,15 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&erl, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // A fake `epmd` beside it, so no test asks the host's real one
+        // (`launcher.sh` probes with `epmd -names`; BT-5264).
+        let epmd = fake.join("epmd");
+        std::fs::write(
+            &epmd,
+            "#!/bin/sh\n[ \"$1\" = -names ] || exit 3\nexit \"${FAKE_EPMD_RC:-1}\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&epmd, std::fs::Permissions::from_mode(0o755)).unwrap();
         format!("{}:{}", fake.display(), std::env::var("PATH").unwrap())
     }
 
@@ -852,18 +861,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn launcher_sh_client_verbs_do_not_start_epmd_when_one_answers() {
-        use std::os::unix::fs::PermissionsExt;
         let temp = TempDir::new().unwrap();
         let base = Utf8PathBuf::from_path_buf(temp.path().join("rel")).unwrap();
         write_launcher_scripts(&base, "orders", "1.0.0", "14.0", false).unwrap();
         let path = fake_tls_erl(temp.path());
-        let epmd = temp.path().join("fakebin/epmd");
-        std::fs::write(
-            &epmd,
-            "#!/bin/sh\n[ \"$1\" = -names ] || exit 3\nexit \"${FAKE_EPMD_RC:-0}\"\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&epmd, std::fs::Permissions::from_mode(0o755)).unwrap();
         let run = |verb: &str, epmd_rc: &str| {
             let out = std::process::Command::new("sh")
                 .arg(base.join("bin/orders").as_std_path())
@@ -905,7 +906,14 @@ mod tests {
     fn launcher_cmd_client_verbs_do_not_start_epmd_when_one_answers() {
         let (root, _temp) = write_scripts(true);
         let cmd = std::fs::read_to_string(root.join("bin/orders.cmd").as_std_path()).unwrap();
-        assert_eq!(cmd.matches("call :client_epmd_args").count(), 4, "{cmd}");
+        let sh = std::fs::read_to_string(root.join("bin/orders").as_std_path()).unwrap();
+        let sh_verbs = sh.matches("$(client_epmd_args)").count();
+        assert_eq!(sh_verbs, 4, "{sh}");
+        assert_eq!(
+            cmd.matches("call :client_epmd_args").count(),
+            sh_verbs,
+            "launcher.cmd must guard the same verbs as launcher.sh: {cmd}"
+        );
         assert_eq!(
             cmd.matches("set \"DIST_ARGS=!DIST_ARGS!!EPMD_ARGS!\"")
                 .count(),

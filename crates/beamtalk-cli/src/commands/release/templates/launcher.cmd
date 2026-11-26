@@ -378,20 +378,6 @@ rem `minimal_boot_args` comment: with no `-boot`, erl.exe falls back to
 rem `%ROOT%\bin\start.boot`, which does not exist; `copy_erts` stages a
 rem plain kernel+stdlib `start_clean.boot` next to the bundled ERTS for
 rem exactly this. A host ERTS already has its own default boot file.
-:client_epmd_args
-rem BT-5264: a client verb (stop, ping, rpc, remote_console) must not start an
-rem epmd while one already answers on the port; see launcher.sh's
-rem `client_epmd_args` for why (a second epmd shadows the first on macOS).
-rem Sets EPMD_ARGS to " -start_epmd false" when `epmd -names`, which only asks
-rem and never starts one, reaches an epmd on ERL_EPMD_PORT; otherwise empty
-rem (no epmd.exe beside erl.exe: erl starts one, as before).
-set "EPMD_ARGS="
-for %%I in ("%ERL%") do set "EPMD_EXE=%%~dpIepmd.exe"
-if not exist "!EPMD_EXE!" exit /b 0
-"!EPMD_EXE!" -names >nul 2>&1
-if not errorlevel 1 set "EPMD_ARGS= -start_epmd false"
-exit /b 0
-
 :minimal_boot_args
 set "BOOT_ARGS="
 if /I "%INCLUDE_ERTS%"=="true" if exist "%ROOT%\erts-%ERTS_VSN%\bin\start_clean.boot" (
@@ -399,6 +385,22 @@ if /I "%INCLUDE_ERTS%"=="true" if exist "%ROOT%\erts-%ERTS_VSN%\bin\start_clean.
     rem a close-paren in it would end this block.
     set "BOOT_ARGS=-boot "!ROOT!\erts-%ERTS_VSN%\bin\start_clean""
 )
+exit /b 0
+
+:client_epmd_args
+rem BT-5264: a client verb (stop, ping, rpc, remote_console) must not start an
+rem epmd while one already answers on the port; see launcher.sh's
+rem `client_epmd_args` for why (a second epmd shadows the first on macOS).
+rem Sets EPMD_ARGS to " -start_epmd false" when `epmd -names`, which only asks
+rem and never starts one, reaches an epmd on ERL_EPMD_PORT; otherwise empty
+rem (no epmd.exe beside erl.exe or on PATH: erl starts one, as before).
+set "EPMD_ARGS="
+for %%I in ("%ERL%") do set "EPMD_EXE=%%~dpIepmd.exe"
+if not exist "!EPMD_EXE!" for %%E in (epmd.exe) do set "EPMD_EXE=%%~$PATH:E"
+if not defined EPMD_EXE exit /b 0
+if not exist "!EPMD_EXE!" exit /b 0
+"!EPMD_EXE!" -names >nul 2>&1
+if not errorlevel 1 set "EPMD_ARGS= -start_epmd false"
 exit /b 0
 
 :foreground
