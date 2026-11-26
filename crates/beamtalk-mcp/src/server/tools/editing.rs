@@ -5,11 +5,12 @@
 //! `save_class`, `remove_method`, `remove_class`, `rename_class`,
 //! `rename_method`, and `precheck_method`.
 //!
-//! Per ADR 0082 there are no dedicated workspace-side REPL ops for these —
-//! each tool is a typed front-end that compiles to a plain Beamtalk
-//! expression (`aClass compile: #selector source: body`, `aClass
-//! removeSelector: #selector`, …) and runs it through the same `evaluate`
-//! pathway every other tool uses. Most of these tools mutate memory only
+//! `save_method` and `save_class` send the `save-method` / `save-class`
+//! operations with structured params (BT-5203), the same operations the
+//! LiveView editor dispatches. The other tools are typed front-ends that
+//! compile to a plain Beamtalk expression (`aClass removeSelector: #selector`,
+//! …) and run it through the `evaluate` pathway every other tool uses.
+//! Most of these tools mutate memory only
 //! and log a `ChangeLog` entry; writing to disk is a separate, explicit
 //! `server::tools::flush` call.
 
@@ -77,7 +78,7 @@ impl BeamtalkMcp {
 
     /// Durably install a method on a Beamtalk class (ADR 0082 Phase 3).
     ///
-    /// Compiles to `aClass compile: #selector source: body`. The patch installs
+    /// Sends the `save-method` operation. The patch installs
     /// in memory and appends a durable `ChangeLog` entry that can be written to
     /// disk by a subsequent `flush`.
     #[tool(

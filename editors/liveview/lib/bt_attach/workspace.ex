@@ -1959,7 +1959,10 @@ defmodule BtAttach.Workspace do
   # The runtime accepts `:instance` / `:class` as well as the wire binaries.
   defp side_param(side) when is_nil(side), do: nil
   defp side_param(side) when is_atom(side), do: Atom.to_string(side)
-  defp side_param(side), do: side
+  defp side_param(side) when is_binary(side), do: side
+  # Anything else is sent as text, so the operation refuses it with a structured
+  # `invalid_argument` rather than this process raising.
+  defp side_param(side), do: inspect(side)
 
   # An editing operation's non-success reply. Its `{:error, reason}` is already a
   # structured `#beamtalk_error{}` (the operation structures it), or

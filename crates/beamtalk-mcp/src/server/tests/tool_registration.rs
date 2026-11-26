@@ -144,7 +144,7 @@ fn try_method_expr_compiles_ephemeral_patch() {
     );
 }
 
-// `save_class_expr`, `precheck_method_expr`, `remove_method_expr`,
+// `precheck_method_expr`, `remove_method_expr`,
 // `remove_method_if_absent_expr`, and `flush_expr`/`FlushFilter` are
 // defined in `beamtalk_core::tool_expr` and golden-tested
 // there — that suite is the single source of truth both this crate and
