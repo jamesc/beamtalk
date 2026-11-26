@@ -60,7 +60,8 @@ env:
 jobs:
   # ─── Skip if no recent commits ──────────────────────────────────────
   check-activity:
-    runs-on: ubuntu-latest
+    # Pinned, not floating: uat tests each target on the image that built it (ADR 0154 § 3).
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       has_commits: ${{ steps.check.outputs.has_commits }}
@@ -97,7 +98,8 @@ jobs:
   macos:
     needs: check-activity
     if: needs.check-activity.outputs.has_commits == 'true'
-    runs-on: macos-latest
+    # Pinned, not floating: uat tests each target on the image that built it (ADR 0154 § 3).
+    runs-on: macos-15
     # Full test suite + dist build. Observed ~52-55min (tests alone reach
     # ~40min since the bench smoke step, BT-3886); 75 leaves ~20min headroom.
     timeout-minutes: 75
@@ -335,7 +337,8 @@ jobs:
   linux:
     needs: check-activity
     if: needs.check-activity.outputs.has_commits == 'true'
-    runs-on: ubuntu-latest
+    # Pinned, not floating: uat tests each target on the image that built it (ADR 0154 § 3).
+    runs-on: ubuntu-24.04
     # Dist build + smoke test. Observed ~17min; 35 leaves ~18min headroom.
     timeout-minutes: 35
     steps:
@@ -400,7 +403,8 @@ jobs:
   eunit-isolation:
     needs: check-activity
     if: needs.check-activity.outputs.has_commits == 'true'
-    runs-on: ubuntu-latest
+    # Pinned, not floating: uat tests each target on the image that built it (ADR 0154 § 3).
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -443,7 +447,8 @@ jobs:
   vs-elixir-bench:
     needs: check-activity
     if: needs.check-activity.outputs.has_commits == 'true' || inputs.bench_only
-    runs-on: ubuntu-latest
+    # Pinned, not floating: uat tests each target on the image that built it (ADR 0154 § 3).
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -539,7 +544,8 @@ jobs:
   vs-elixir-confirm:
     needs: vs-elixir-bench
     if: needs.vs-elixir-bench.outputs.over == 'true'
-    runs-on: ubuntu-latest
+    # Pinned, not floating: uat tests each target on the image that built it (ADR 0154 § 3).
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -601,7 +607,8 @@ jobs:
     # A workflow_dispatch on a branch (e.g. to time a CI change) builds and
     # tests but must not replace the `nightly` release, which says it is from main.
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    # Pinned, not floating: uat tests each target on the image that built it (ADR 0154 § 3).
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     # The only job that writes the `nightly` release (BT-5137).
     permissions:
@@ -662,3 +669,37 @@ jobs:
           scripts/ci/publish-rolling-release.sh nightly "${GITHUB_SHA}" \
             "Nightly Build (${NIGHTLY_DATE}, ${NIGHTLY_SHA})" nightly-notes.md \
             dist-artifacts/*
+
+  # ─── uat dispatch (ADR 0154 § 3, BT-5306) ───────────────────────────
+  # Hands uat the exact published bytes: every asset's sha256 plus the OTP window.
+  # A separate job so a failed dispatch can be re-run on its own, without
+  # rebuilding or re-publishing the release.
+  notify-uat:
+    needs: [publish-nightly]
+    if: github.ref == 'refs/heads/main'
+    # Pinned, not floating: ADR 0154 § 3.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build uat dispatch payload
+        id: uat
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          payload="$(scripts/ci/uat-dispatch-payload.sh nightly \
+            "$(cat VERSION)-nightly+${SHORT_SHA}" nightly "${GITHUB_SHA}")"
+          echo "payload=${payload}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch beamtalk-artifact to uat
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
+        with:
+          token: ${{ secrets.UAT_DISPATCH_TOKEN }}
+          repository: jamesc/beamtalk-uat
+          event-type: beamtalk-artifact
+          client-payload: ${{ steps.uat.outputs.payload }}
