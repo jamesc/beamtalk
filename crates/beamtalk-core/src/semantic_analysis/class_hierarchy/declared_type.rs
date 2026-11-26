@@ -981,7 +981,7 @@ mod tests {
     }
 
     #[test]
-    fn display_parity_false_or() {
+    fn display_parity_union_with_false() {
         assert_display_parity("Object subclass: Foo\n  bar -> Integer | False => 1\n");
     }
 

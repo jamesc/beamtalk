@@ -126,8 +126,6 @@ impl StateEffects {
 /// Turns O(n) method scans in codegen into O(1) hash-map lookups.
 #[derive(Debug, Clone, Default)]
 pub struct ClassFacts {
-    /// Whether the class has any primary instance method.
-    pub has_primary_method: bool,
     /// Whether the class has any selector-based `@primitive` instance method.
     ///
     /// A method is "primitive" when its body is a single quoted `@primitive` expression
@@ -373,7 +371,6 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
         for (i, method) in class.methods.iter().enumerate() {
             cf.instance_methods_by_selector
                 .insert(method.selector.name().to_string(), i);
-            cf.has_primary_method = true;
             if method.body.len() == 1
                 && matches!(
                     &method.body[0].expression,

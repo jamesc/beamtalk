@@ -760,8 +760,8 @@ fn slot_kind_to_rust_expr(kind: beamtalk_core::ast::SlotKind) -> &'static str {
 /// `Display` and re-parsing on read. Mirrors every `DeclaredType` variant:
 /// `Simple`/`Singleton`/`Generic`/`Union` go through
 /// the compact constructors added for this purpose
-/// ([`DeclaredType::simple`], etc.); the remaining variants (
-/// `Difference`, `Intersection`, `SelfType`, `SelfClass`, `ClassOf`) are rare
+/// ([`DeclaredType::simple`], etc.); the remaining variants
+/// (`Difference`, `Intersection`, `SelfType`, `SelfClass`, `ClassOf`) are rare
 /// in stdlib signatures but still emitted structurally rather than silently
 /// dropped, so a stdlib author who *does* write one of them gets a correct
 /// generated artifact rather than a degraded one.

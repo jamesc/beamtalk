@@ -2707,8 +2707,6 @@ fn parse_class_with_mixed_content() {
 
     assert_eq!(class.state.len(), 2);
     assert_eq!(class.methods.len(), 2);
-
-    // Check method kinds
 }
 
 #[test]

@@ -1534,9 +1534,9 @@ impl TypeAnnotation {
     /// Block parameter annotations are read with
     /// `parse_single_type_annotation`, which stops at a top-level `|` (the
     /// block's own parameter separator) and does not consume the `&`/`\`
-    /// tier — so a top-level [`Self::Union`],
-    /// [`Self::Difference`], or [`Self::Intersection`] (only reachable via
-    /// explicit grouping parens in the source) keeps its parens:
+    /// tier — so a top-level [`Self::Union`], [`Self::Difference`] or
+    /// [`Self::Intersection`] (only reachable via explicit grouping parens
+    /// in the source) keeps its parens:
     /// `:x :: (Integer | String)`. Grouping parens re-parse transparently,
     /// so the round-tripped AST is identical.
     ///
