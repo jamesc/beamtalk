@@ -6,7 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 
 use crate::core_erlang::binary_segments::{
-    SegmentDirection, expand_utf_string_literals, int_to_f64, segment_spec_tail,
+    SegmentDirection, expand_utf_string_literals, float_segment_value, segment_spec_tail,
 };
 use crate::core_erlang::util::index_lit;
 use crate::core_erlang::{CodeGenError, CoreErlangGenerator, Result};
@@ -589,14 +589,19 @@ impl CoreErlangGenerator {
         // `#<1.0e0>(64,1,'float',…)`, while an integer value there is a
         // clause that can never match.
         let seg_type = seg.segment_type.unwrap_or(BinarySegmentType::Integer);
-        let value_doc = match (&seg.value, seg_type) {
+        let float = match (&seg.value, seg_type) {
+            (
+                Pattern::Literal(
+                    lit @ (Literal::Integer(_) | Literal::BigInteger(_) | Literal::Character(_)),
+                    _,
+                ),
+                BinarySegmentType::Float,
+            ) => float_segment_value(lit),
+            _ => None,
+        };
+        let value_doc = match (&seg.value, float) {
             (Pattern::Literal(Literal::String(s), _), _) => binary_string_folded_value(s),
-            (Pattern::Literal(Literal::Integer(v), _), BinarySegmentType::Float) => {
-                leaf::float_lit(int_to_f64(*v))
-            }
-            (Pattern::Literal(Literal::Character(c), _), BinarySegmentType::Float) => {
-                leaf::float_lit(f64::from(u32::from(*c)))
-            }
+            (_, Some(f)) => leaf::float_lit(f),
             _ => self.generate_pattern(&seg.value)?,
         };
 

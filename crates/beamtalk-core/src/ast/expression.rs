@@ -687,6 +687,20 @@ impl Literal {
         )
     }
 
+    /// The `f64` that equals an integer literal's decimal `digits` exactly,
+    /// or `None` when there is none (more than 53 significant bits, or a
+    /// bignum of about 309 digits or more). Only an exact value is folded
+    /// into a `float` binary segment: the BEAM's `float/1` on a bignum may
+    /// round differently from Rust's parse for an inexact one (BT-5239), so
+    /// that is left to the runtime. The one rule the parser's warning and
+    /// codegen share.
+    #[must_use]
+    pub fn bignum_as_f64(digits: &str) -> Option<f64> {
+        let f = digits.parse::<f64>().ok().filter(|f| f.is_finite())?;
+        // `{:.0}` prints the float's exact integer value.
+        (format!("{f:.0}") == digits).then_some(f)
+    }
+
     /// The literal with its sign flipped, for a `-` written before a numeric
     /// literal (negative patterns). An integer that overflows `i64` on
     /// negation (`- -9223372036854775808`) becomes a [`Literal::BigInteger`];

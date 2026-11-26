@@ -1233,20 +1233,39 @@ fn parse_binary_pattern_min_int_value() {
 }
 
 #[test]
-fn parse_binary_pattern_double_negated_min_int_is_clean_error() {
-    // Review finding 2: <<- -9223372036854775808:64/signed>> exceeds
-    // i64::MAX — a clean diagnostic, never a panic (or release wrap).
+fn parse_binary_pattern_double_negated_min_int_is_a_bignum() {
+    // BT-5239 (was review finding 2): `- -9223372036854775808` is 2^63, a
+    // bignum — no longer an error. It does not fit a signed 64-bit segment,
+    // so the only diagnostic is the "can never match" warning.
+    use crate::ast::Pattern;
     use crate::source_analysis::Severity;
     let diagnostics = parse_err("x match: [<<- -9223372036854775808:64/signed>> -> 1]");
-    let errors: Vec<_> = diagnostics
-        .iter()
-        .filter(|d| d.severity == Severity::Error)
-        .collect();
-    assert_eq!(errors.len(), 1, "expected one error, got: {errors:?}");
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|d| (d.severity, d.message.to_string()))
+            .collect::<Vec<_>>(),
+        vec![(
+            Severity::Warning,
+            "this arm can never match because the value 9223372036854775808 will not fit in an 'signed' binary segment of size 64".to_string()
+        )]
+    );
+    let (module, _) = parse(lex_with_eof(
+        "x match: [<<- -9223372036854775808:64/signed>> -> 1]",
+    ));
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!("expected Expression::Match");
+    };
+    let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+        panic!("expected Pattern::Binary");
+    };
     assert!(
-        errors[0].message.contains("out of range"),
-        "expected out-of-range error, got: {}",
-        errors[0].message
+        matches!(
+            &segments[0].value,
+            Pattern::Literal(Literal::BigInteger(d), _) if d.as_str() == "9223372036854775808"
+        ),
+        "expected a bignum literal, got: {:?}",
+        segments[0].value
     );
 }
 

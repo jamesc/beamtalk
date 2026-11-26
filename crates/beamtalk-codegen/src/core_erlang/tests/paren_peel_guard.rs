@@ -171,6 +171,10 @@ const CEILINGS: &[(&str, usize)] = &[
     // Expression` and `binary_literal_size` read a literal through the
     // parentheses the segment grammar requires (`<<(-1):4>>`, `<<v:(8)>>`).
     ("beamtalk-core/src/ast/pattern.rs", 2),
+    // A binary segment size (ADR 0143, BT-5239): the parser rejects a bignum
+    // size through the parentheses the grammar allows (`<<v:(100…)>>`),
+    // before `ast::normalize` runs.
+    ("beamtalk-core/src/source_analysis/parser/binary.rs", 1),
     // A cascade shared receiver: `erlang_module_of_receiver` is handed
     // `(Erlang lists)` as the shared receiver of `(Erlang lists); f: x`.
     ("beamtalk-core/src/ffi_receiver.rs", 1),

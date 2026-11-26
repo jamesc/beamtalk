@@ -15,7 +15,7 @@ use crate::ast::{
 use crate::source_analysis::{Span, Token, TokenKind};
 use ecow::EcoString;
 
-use super::expressions::parse_integer;
+use super::expressions::parse_integer_literal;
 use super::{Diagnostic, Parser};
 
 /// Converts a literal binary segment value parsed by the match side's
@@ -91,6 +91,14 @@ fn truncated_binary_literal(value: i64, size_bits: i64, signed: bool) -> Option<
     })
 }
 
+/// [`truncated_binary_literal`] for an `i64` value; `None` for a bignum.
+fn small_truncation(v: BinaryInt<'_>, size_bits: i64, signed: bool) -> Option<i128> {
+    match v {
+        BinaryInt::Small(v) => truncated_binary_literal(v, size_bits, signed),
+        BinaryInt::Big(_) => None,
+    }
+}
+
 /// The `unit:` multiplier as an `i64`: `1` when no unit is given (BT-4143).
 /// `parse_unit_specifier` pins units to `1..=256`, so the conversion is
 /// always exact.
@@ -124,11 +132,29 @@ fn implied_segment_unit(type_name: &str) -> Option<usize> {
 /// Whether integer `value` fits in `size_bits` bits (review finding 3).
 ///
 /// `size_bits` is non-negative (negative sizes are rejected separately).
-/// Sizes of 64+ hold any `i64` magnitude; unsigned still rejects negatives.
-fn binary_literal_fits(value: i64, size_bits: i64, signed: bool) -> bool {
+/// An `i64` fits any size of 64+; unsigned still rejects negatives. A bignum
+/// needs its bit length (BT-5239).
+fn binary_literal_fits(value: BinaryInt<'_>, size_bits: i64, signed: bool) -> bool {
     if size_bits < 0 {
         return false;
     }
+    let big = match value {
+        BinaryInt::Small(v) => return small_literal_fits(v, size_bits, signed),
+        BinaryInt::Big(digits) => digits,
+    };
+    let (bits, power_of_two) = decimal_magnitude_bits(big);
+    let size = size_bits.unsigned_abs();
+    if !signed {
+        return !value.is_negative() && bits <= size;
+    }
+    if size == 0 {
+        return false;
+    }
+    // Signed: `-2^(n-1)..2^(n-1)`; the magnitude 2^(n-1) fits only negated.
+    bits < size || (bits == size && value.is_negative() && power_of_two)
+}
+
+fn small_literal_fits(value: i64, size_bits: i64, signed: bool) -> bool {
     if size_bits == 0 {
         return value == 0;
     }
@@ -146,6 +172,72 @@ fn binary_literal_fits(value: i64, size_bits: i64, signed: bool) -> bool {
         (0..(1i64 << size_bits)).contains(&value)
     }
 }
+
+/// An integer segment value: one that fits `i64`, or a bignum's canonical
+/// decimal digits (BT-5239).
+#[derive(Debug, Clone, Copy)]
+enum BinaryInt<'a> {
+    Small(i64),
+    Big(&'a str),
+}
+
+impl BinaryInt<'_> {
+    fn is_negative(self) -> bool {
+        match self {
+            Self::Small(v) => v < 0,
+            Self::Big(d) => d.starts_with('-'),
+        }
+    }
+
+    /// The value as written in a diagnostic: a very long bignum is elided.
+    fn display(self) -> String {
+        match self {
+            Self::Small(v) => v.to_string(),
+            Self::Big(d) => abbreviate_digits(d),
+        }
+    }
+}
+
+/// `digits` for a diagnostic: kept whole up to 40 characters, else its
+/// first 20 and last 10 around the number of digits dropped.
+fn abbreviate_digits(digits: &str) -> String {
+    const MAX: usize = 40;
+    if digits.len() <= MAX {
+        return digits.to_string();
+    }
+    let (head, tail) = (&digits[..20], &digits[digits.len() - 10..]);
+    let count = digits.strip_prefix('-').unwrap_or(digits).len();
+    format!("{head}...{tail} ({count} digits)")
+}
+
+/// The bit length of the magnitude of a decimal integer's `digits` (leading
+/// `-` allowed) and whether that magnitude is a power of two. Zero has bit
+/// length 0.
+fn decimal_magnitude_bits(digits: &str) -> (u64, bool) {
+    let digits = digits.strip_prefix('-').unwrap_or(digits);
+    // Little-endian base-2^32 limbs: multiply by 10, add each digit.
+    let mut limbs: Vec<u32> = Vec::new();
+    for digit in digits.chars().filter_map(|c| c.to_digit(10)).map(u64::from) {
+        let mut carry = digit;
+        for limb in &mut limbs {
+            let value = u64::from(*limb) * 10 + carry;
+            *limb = u32::try_from(value & 0xFFFF_FFFF).unwrap_or(0);
+            carry = value >> 32;
+        }
+        if carry > 0 {
+            // `value < 2^36`, so `carry < 2^4`.
+            limbs.push(u32::try_from(carry).unwrap_or(u32::MAX));
+        }
+    }
+    let Some(top) = limbs.last() else {
+        return (0, false);
+    };
+    let bits = (u64::try_from(limbs.len()).unwrap_or(u64::MAX) - 1) * 32
+        + u64::from(32 - top.leading_zeros());
+    let ones: u32 = limbs.iter().map(|l| l.count_ones()).sum();
+    (bits, ones == 1)
+}
+
 impl Parser {
     /// Parses a binary pattern: `<<seg, seg, ...>>`
     ///
@@ -280,6 +372,31 @@ impl Parser {
         match self.current_kind() {
             TokenKind::Integer(_) | TokenKind::Identifier(_) | TokenKind::LeftParen => {
                 let expr = self.parse_primary();
+                // A size is `i64` at most; a bignum (`<<v:(10000…)>>` too)
+                // is far past any binary (BT-5239).
+                if let Expression::Literal(Literal::BigInteger(digits), span) = expr.unwrap_parens()
+                {
+                    let message = if digits.starts_with('-') {
+                        format!(
+                            "binary segment sizes must be non-negative, got {}",
+                            abbreviate_digits(digits)
+                        )
+                    } else {
+                        format!(
+                            "binary segment size {} is too large",
+                            abbreviate_digits(digits)
+                        )
+                    };
+                    let span = *span;
+                    self.diagnostics
+                        .push(Diagnostic::error(message.clone(), span));
+                    // Keep a size in the tree, so the value is not checked
+                    // against the default 8 bits as well.
+                    return Some(Box::new(Expression::Error {
+                        message: message.into(),
+                        span,
+                    }));
+                }
                 match &expr {
                     Expression::Literal(Literal::Integer(_), _)
                     | Expression::Identifier(_)
@@ -654,19 +771,7 @@ impl Parser {
             return;
         }
         if seg_type == BinarySegmentType::Float {
-            if let Some((n, span)) = size_lit {
-                // `erlc` validates size × unit (`<<X:4/unit:8-float>>` is a
-                // clean 32-bit float; `<<X:16/unit:8-float>>` warns).
-                let effective = n.saturating_mul(unit_multiplier(unit));
-                if effective != 16 && effective != 32 && effective != 64 {
-                    self.diagnostics.push(Diagnostic::warning(
-                        format!(
-                            "bad float bit size: float segments must be 16, 32, or 64 bits, got {effective}"
-                        ),
-                        span,
-                    ));
-                }
-            }
+            self.check_binary_float_shape(size_lit, unit, literal, direction);
             return;
         }
         let Some((lit, value_span)) = literal else {
@@ -675,8 +780,9 @@ impl Parser {
         // Integer-valued literals: integers and characters (`$A` is its
         // codepoint, exactly like `erlc`).
         let int_value = match lit {
-            Literal::Integer(v) => Some(*v),
-            Literal::Character(c) => Some(i64::from(*c as u32)),
+            Literal::Integer(v) => Some(BinaryInt::Small(*v)),
+            Literal::BigInteger(digits) => Some(BinaryInt::Big(digits)),
+            Literal::Character(c) => Some(BinaryInt::Small(i64::from(*c as u32))),
             _ => None,
         };
         if let Some(v) = int_value {
@@ -690,6 +796,7 @@ impl Parser {
                 value_span,
                 seg_type,
                 size_lit,
+                size.is_some(),
                 seg.signedness,
                 unit,
                 direction,
@@ -716,6 +823,62 @@ impl Parser {
                 value_span,
             ));
         }
+    }
+
+    /// The checks on a `float` segment: its bit size (size × unit) and a
+    /// bignum value that no `f64` equals exactly.
+    fn check_binary_float_shape(
+        &mut self,
+        size_lit: Option<(i64, Span)>,
+        unit: Option<usize>,
+        literal: Option<(&Literal, Span)>,
+        direction: BinaryDirection,
+    ) {
+        if let Some((n, span)) = size_lit {
+            // `erlc` validates size × unit (`<<X:4/unit:8-float>>` is a
+            // clean 32-bit float; `<<X:16/unit:8-float>>` warns).
+            let effective = n.saturating_mul(unit_multiplier(unit));
+            if effective != 16 && effective != 32 && effective != 64 {
+                self.diagnostics.push(Diagnostic::warning(
+                    format!(
+                        "bad float bit size: float segments must be 16, 32, or 64 bits, got {effective}"
+                    ),
+                    span,
+                ));
+            }
+        }
+        // A bignum no `f64` equals exactly is not folded: the integer stays
+        // in the segment (BT-5239). A pattern arm then never matches. A
+        // construction converts it at run time with the BEAM's `float/1`
+        // (which need not round to nearest), and fails only when it is
+        // beyond `f64` (about 309 digits).
+        let Some((Literal::BigInteger(digits), value_span)) = literal else {
+            return;
+        };
+        if Literal::bignum_as_f64(digits).is_some() {
+            return;
+        }
+        // Only a value beyond `f64` fails in a construction; one just past
+        // `f64::MAX` may parse as `f64::MAX` here yet still fail at run time,
+        // a window under one ulp wide.
+        let finite = digits.parse::<f64>().is_ok_and(f64::is_finite);
+        if direction == BinaryDirection::Construction && finite {
+            return;
+        }
+        let shown = abbreviate_digits(digits);
+        let message = if direction == BinaryDirection::Pattern {
+            format!(
+                "{} because '{shown}' cannot be represented exactly as a float",
+                direction.cannot_succeed()
+            )
+        } else {
+            format!(
+                "{} because '{shown}' is too large to be a float",
+                direction.cannot_succeed()
+            )
+        };
+        self.diagnostics
+            .push(Diagnostic::warning(message, value_span));
     }
 
     /// String literal values take no size or unit, and no type other than
@@ -826,10 +989,11 @@ impl Parser {
     #[allow(clippy::too_many_arguments)] // one call site; the segment's fields, unpacked
     fn check_binary_int_literal_shape(
         &mut self,
-        v: i64,
+        v: BinaryInt<'_>,
         value_span: crate::source_analysis::Span,
         seg_type: BinarySegmentType,
         size_lit: Option<(i64, crate::source_analysis::Span)>,
+        has_size: bool,
         signedness: Option<BinarySignedness>,
         unit: Option<usize>,
         direction: BinaryDirection,
@@ -843,8 +1007,9 @@ impl Parser {
                 };
                 self.diagnostics.push(Diagnostic::warning(
                     format!(
-                        "{} because '{v}' is not of the expected type '{name}'",
-                        direction.cannot_succeed()
+                        "{} because '{}' is not of the expected type '{name}'",
+                        direction.cannot_succeed(),
+                        v.display()
                     ),
                     value_span,
                 ));
@@ -853,27 +1018,30 @@ impl Parser {
                 // Default integer size is 8 bits (same as codegen); with a
                 // unit the effective size is size × unit (`<<4660:2/unit:8>>`
                 // is a clean 16-bit match).
+                // A variable size (`<<1000:n>>`) is checked at run time.
                 let size_bits = match size_lit {
                     Some((n, _)) => n.saturating_mul(unit_multiplier(unit)),
+                    None if has_size => return,
                     None => 8,
                 };
                 let signed = signedness == Some(BinarySignedness::Signed);
                 if !binary_literal_fits(v, size_bits, signed) {
                     let sign = if signed { "signed" } else { "unsigned" };
+                    let shown = v.display();
                     let message = match direction {
-                        BinaryDirection::Pattern if !signed && v < 0 => format!(
-                            "this arm can never match because the negative value {v} will never match the value of an 'unsigned' binary segment"
+                        BinaryDirection::Pattern if !signed && v.is_negative() => format!(
+                            "this arm can never match because the negative value {shown} will never match the value of an 'unsigned' binary segment"
                         ),
                         BinaryDirection::Pattern => format!(
-                            "this arm can never match because the value {v} will not fit in an '{sign}' binary segment of size {size_bits}"
+                            "this arm can never match because the value {shown} will not fit in an '{sign}' binary segment of size {size_bits}"
                         ),
                         BinaryDirection::Construction => {
-                            match truncated_binary_literal(v, size_bits, signed) {
+                            match small_truncation(v, size_bits, signed) {
                                 Some(t) => format!(
-                                    "the value {v} does not fit in an '{sign}' binary segment of size {size_bits} and is truncated to {t}"
+                                    "the value {shown} does not fit in an '{sign}' binary segment of size {size_bits} and is truncated to {t}"
                                 ),
                                 None => format!(
-                                    "the value {v} does not fit in an '{sign}' binary segment of size {size_bits} and is truncated to its low {size_bits} bits"
+                                    "the value {shown} does not fit in an '{sign}' binary segment of size {size_bits} and is truncated to its low {size_bits} bits"
                                 ),
                             }
                         }
@@ -901,20 +1069,13 @@ impl Parser {
         };
         // The lexer emits signed `Integer("-…")` tokens when `-` directly
         // precedes digits, so `raw` may itself be negative (e.g. the second
-        // `-` in `<<- -5:8>>` double-negates). Negation must not overflow:
-        // `- -9223372036854775808` exceeds `i64::MAX` (review finding 2).
-        if parse_integer(&raw).is_ok() {
-            self.number_spellings.push((span, raw.clone()));
-        }
-        let value = match parse_integer(&raw) {
-            Ok(val) if !negated => Pattern::Literal(Literal::Integer(val), span),
-            Ok(val) => {
-                if let Some(neg) = val.checked_neg() {
-                    Pattern::Literal(Literal::Integer(neg), span)
-                } else {
-                    self.error("integer literal out of range in binary segment");
-                    Pattern::Wildcard(span)
-                }
+        // `-` in `<<- -5:8>>` double-negates); `Literal::negated` widens
+        // `- -9223372036854775808` to a bignum instead of overflowing.
+        let value = match parse_integer_literal(&raw) {
+            Ok(lit) => {
+                self.number_spellings.push((span, raw.clone()));
+                let lit = if negated { lit.negated() } else { lit };
+                Pattern::Literal(lit, span)
             }
             Err(e) => {
                 self.diagnostics.push(Diagnostic::error(e, span));
@@ -1235,17 +1396,37 @@ impl Parser {
         };
         let raw = raw.clone();
         let span = self.advance().span();
-        match parse_integer(&raw) {
+        match parse_integer_literal(&raw) {
             // The guard pins `n` to `1..=256`, so the conversion is exact.
-            Ok(n) if (1..=256).contains(&n) => {
+            Ok(Literal::Integer(n)) if (1..=256).contains(&n) => {
                 self.number_spellings.push((span, raw));
                 usize::try_from(n).ok()
             }
-            Ok(n) => {
+            Ok(Literal::Integer(n)) => {
                 self.diagnostics.push(Diagnostic::error(
                     format!("binary segment unit must be between 1 and 256, got {n}"),
                     span,
                 ));
+                None
+            }
+            Ok(Literal::BigInteger(digits)) => {
+                let message = if digits.starts_with('-') {
+                    format!(
+                        "binary segment unit must be between 1 and 256, got {}",
+                        abbreviate_digits(&digits)
+                    )
+                } else {
+                    format!(
+                        "binary segment unit {} is too large; it must be between 1 and 256",
+                        abbreviate_digits(&digits)
+                    )
+                };
+                self.diagnostics.push(Diagnostic::error(message, span));
+                None
+            }
+            Ok(_) => {
+                self.diagnostics
+                    .push(Diagnostic::error("Expected an integer unit", span));
                 None
             }
             Err(e) => {
