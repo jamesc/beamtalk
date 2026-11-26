@@ -15,8 +15,8 @@ the unknown-cast fallback, and `handle_info/2` for own `nodedown`, peer
 `handle_info/2` / `handle_cast/2` directly on a state value, so the
 reconnect and reload orderings they check are exact, not timing-dependent.
 
-Shape-skew connect/reload paths (`check_shape_skew_on_connect/4`,
-`check_one_peer_class/5`, `announce_if_skewed/7`) require a two-node setup
+Shape-skew connect/reload paths (`check_shape_skew_on_connect/3`,
+`check_one_peer_class/5`, `announce_if_skewed/6`) require a two-node setup
 and are exercised by `beamtalk_dist_shape_skew_tests`.
 """.
 
@@ -72,7 +72,7 @@ unknown_call_returns_error_test_() ->
     ]}.
 
 %%====================================================================
-%% handle_cast — {skew_detected, Node, Gen, Stamp, ClassName}
+%% handle_cast — {skew_detected, Node, Gen, Stamp, ClassName, Versions}
 %%====================================================================
 
 skew_detected_increments_count_test_() ->
@@ -230,10 +230,14 @@ cast_result(Kind, Peer, ClassName) ->
         end,
     Msg =
         case Kind of
-            detected -> {skew_detected, Peer, Gen, next_stamp(), ClassName, none};
+            detected -> detected(Peer, Gen, next_stamp(), ClassName);
             cleared -> {skew_cleared, Peer, Gen, next_stamp(), ClassName}
         end,
     gen_server:cast(beamtalk_node_monitor, Msg).
+
+%% A `skew_detected` cast: version 1 here, 2 on the peer.
+detected(Peer, Gen, Stamp, ClassName) ->
+    {skew_detected, Peer, Gen, Stamp, ClassName, {1, 2}}.
 
 next_stamp() ->
     N =
@@ -393,7 +397,7 @@ own_nodeup_sets_own_name_test_() ->
 %%====================================================================
 
 %% Covers handle_info lines 183-188: a peer-nodeup fires announce/2 and
-%% spawns check_shape_skew_on_connect/1. The erpc call in that spawn fails
+%% spawns check_shape_skew_on_connect/3. The erpc call in that spawn fails
 %% for a non-existent node, is caught and logged, and must not crash the
 %% gen_server.
 peer_nodeup_server_survives_test_() ->
@@ -467,14 +471,14 @@ previous_connection_cast_never_changes_current_tally_test() ->
     %% Connection #2's check clears the class, then #1's late detection
     %% lands, even with a larger stamp: dropped.
     S4 = cast({skew_cleared, ?GHOST, NewGen, 10, 'Bt5240Class'}, S3),
-    S5 = cast({skew_detected, ?GHOST, OldGen, 20, 'Bt5240Class', none}, S4),
+    S5 = cast(detected(?GHOST, OldGen, 20, 'Bt5240Class'), S4),
     ?assertEqual(S4, S5),
     ?assertEqual(0, count(?GHOST, S5)),
     %% Also for a class connection #2 has not checked yet.
-    S6 = cast({skew_detected, ?GHOST, OldGen, 30, 'Bt5240Other', none}, S5),
+    S6 = cast(detected(?GHOST, OldGen, 30, 'Bt5240Other'), S5),
     ?assertEqual(S5, S6),
     %% And a stale clear cannot erase connection #2's detection.
-    S7 = cast({skew_detected, ?GHOST, NewGen, 40, 'Bt5240Class', none}, S6),
+    S7 = cast(detected(?GHOST, NewGen, 40, 'Bt5240Class'), S6),
     S8 = cast({skew_cleared, ?GHOST, OldGen, 50, 'Bt5240Class'}, S7),
     ?assertEqual(1, count(?GHOST, S8)).
 
@@ -483,7 +487,7 @@ cast_after_nodedown_leaves_no_entry_test() ->
     S1 = connected(?GHOST),
     Gen = gen(?GHOST, S1),
     S2 = info({nodedown, ?GHOST, [{nodedown_reason, disconnect}]}, S1),
-    S3 = cast({skew_detected, ?GHOST, Gen, 1, 'Bt5240Class', none}, S2),
+    S3 = cast(detected(?GHOST, Gen, 1, 'Bt5240Class'), S2),
     ?assertEqual(S2, S3),
     ?assertNot(maps:is_key(?GHOST, element(4, S3))).
 
@@ -492,11 +496,11 @@ cast_after_nodedown_leaves_no_entry_test() ->
 older_stamp_never_overwrites_newer_result_test() ->
     S1 = connected(?GHOST),
     Gen = gen(?GHOST, S1),
-    S2 = cast({skew_detected, ?GHOST, Gen, 2, 'Bt5240Class', none}, S1),
+    S2 = cast(detected(?GHOST, Gen, 2, 'Bt5240Class'), S1),
     S3 = cast({skew_cleared, ?GHOST, Gen, 1, 'Bt5240Class'}, S2),
     ?assertEqual(1, count(?GHOST, S3)),
     S4 = cast({skew_cleared, ?GHOST, Gen, 3, 'Bt5240Class'}, S3),
-    S5 = cast({skew_detected, ?GHOST, Gen, 2, 'Bt5240Class', none}, S4),
+    S5 = cast(detected(?GHOST, Gen, 2, 'Bt5240Class'), S4),
     ?assertEqual(0, count(?GHOST, S5)).
 
 %% Two reloads of one class on the peer reach this node out of order: the
@@ -585,6 +589,262 @@ finish_check(Pid, OwnVersion) ->
     ?awaitMessage({'DOWN', Ref, process, Pid, _}, 5000),
     _ = sys:get_state(beamtalk_node_monitor),
     ok.
+
+%%====================================================================
+%% BT-5265 — `hello`: reload notifications are accepted only from the
+%% peer monitor generation that said `hello` on this connection
+%%====================================================================
+
+-define(CLASS, 'Bt5265Class').
+
+%% A `peer_class_checked` from the peer monitor generation `PeerGen`.
+peer_checked(PeerGen, Seq) ->
+    {peer_class_checked, ?GHOST, PeerGen, ?CLASS, shape_entry(1), Seq}.
+
+reload_seq(Peer, S) ->
+    #{reload_seq := Seqs} = maps:get(Peer, element(4, S)),
+    Seqs.
+
+%% The sender reconnect window: a notification the peer's monitor sent for
+%% its earlier connection goes out on the new one, before that monitor's
+%% new `hello`. It never reaches this connection's entry, whatever order
+%% the messages around it take.
+earlier_connection_notification_is_dropped_test() ->
+    S1 = connected(?GHOST),
+    %% Before any `hello` on this connection: dropped.
+    PeerGen1 = make_ref(),
+    ?assertEqual(S1, cast(peer_checked(PeerGen1, 1), S1)),
+    S2 = cast({hello, ?GHOST, PeerGen1, false}, S1),
+    ?assertMatch(#{peer_gen := PeerGen1}, maps:get(?GHOST, element(4, S2))),
+    S3 = cast(peer_checked(PeerGen1, 2), S2),
+    ?assertEqual(#{?CLASS => 2}, reload_seq(?GHOST, S3)),
+    %% The link drops and comes back.
+    S4 = info({nodedown, ?GHOST, [{nodedown_reason, disconnect}]}, S3),
+    S5 = info({nodeup, ?GHOST, []}, S4),
+    %% The peer's earlier generation, before its new `hello`: dropped.
+    ?assertEqual(S5, cast(peer_checked(PeerGen1, 3), S5)),
+    PeerGen2 = make_ref(),
+    S6 = cast({hello, ?GHOST, PeerGen2, false}, S5),
+    %% ...and after it: still dropped.
+    ?assertEqual(S6, cast(peer_checked(PeerGen1, 4), S6)),
+    S7 = cast(peer_checked(PeerGen2, 5), S6),
+    ?assertEqual(#{?CLASS => 5}, reload_seq(?GHOST, S7)).
+
+%% A `hello` from a node this monitor has no entry for (not connected, or
+%% hidden) changes nothing.
+hello_from_unknown_peer_is_ignored_test() ->
+    S = beamtalk_node_monitor:initial_state(),
+    ?assertEqual(S, cast({hello, ?GHOST, make_ref(), true}, S)).
+
+%% A notification goes out only for a check dispatched after the last
+%% `hello` this monitor sent with the generation. A restarted peer asks for
+%% our `hello`; the reply moves `hello_at` on, so a check dispatched before
+%% it (whose reads may predate a link flap the reply went out after) no
+%% longer notifies. The peer is this node, so the sends can be traced.
+notification_only_after_last_hello_test() ->
+    Peer = node(),
+    S0 = setelement(
+        4,
+        beamtalk_node_monitor:initial_state(),
+        #{Peer => beamtalk_node_monitor:peer_entry(make_ref())}
+    ),
+    Gen = gen(Peer, S0),
+    HelloAt0 = hello_at(Peer, S0),
+    Request = fun(Seq) -> {send_peer_class_checked, Peer, Gen, ?CLASS, shape_entry(1), Seq} end,
+    ?assertMatch({[], _}, sends(Request(HelloAt0 - 1), S0)),
+    ?assertMatch(
+        {[{peer_class_checked, Peer, Gen, ?CLASS, _, _}], _}, sends(Request(HelloAt0 + 1), S0)
+    ),
+    {Reply, S1} = sends({hello, Peer, make_ref(), true}, S0),
+    ?assertMatch([{hello, Peer, Gen, false}], Reply),
+    ?assert(hello_at(Peer, S1) >= HelloAt0 + 1),
+    ?assertMatch({[], _}, sends(Request(HelloAt0 + 1), S1)),
+    ?assertMatch({[_], _}, sends(Request(hello_at(Peer, S1) + 1), S1)).
+
+hello_at(Peer, S) ->
+    #{hello_at := HelloAt} = maps:get(Peer, element(4, S)),
+    HelloAt.
+
+%% Run one `handle_cast/2` step in a traced process and answer the casts it
+%% sent to a peer monitor, with the new state.
+sends(Msg, S) ->
+    Test = self(),
+    Pid = spawn(fun() ->
+        receive
+            go -> Test ! {stepped, self(), beamtalk_node_monitor:handle_cast(Msg, S)}
+        end
+    end),
+    1 = erlang:trace(Pid, true, [send]),
+    Pid ! go,
+    {noreply, S1} =
+        receive
+            {stepped, Pid, Result} -> Result
+        end,
+    Ref = erlang:trace_delivered(Pid),
+    receive
+        {trace_delivered, Pid, Ref} -> ok
+    end,
+    {collect_peer_casts(Pid), S1}.
+
+collect_peer_casts(Pid) ->
+    receive
+        {trace, Pid, send, {'$gen_cast', Cast}, {beamtalk_node_monitor, _Node}} ->
+            [Cast | collect_peer_casts(Pid)];
+        {trace, Pid, send, _Other, _To} ->
+            collect_peer_casts(Pid)
+    after 0 -> []
+    end.
+
+should_announce_test_() ->
+    Skewed = {skewed, 1, 2},
+    [
+        ?_assert(beamtalk_node_monitor:should_announce(done, none, Skewed)),
+        ?_assert(beamtalk_node_monitor:should_announce(done, clear, Skewed)),
+        ?_assert(beamtalk_node_monitor:should_announce(done, {skewed, 1, 3}, Skewed)),
+        ?_assertNot(beamtalk_node_monitor:should_announce(done, Skewed, Skewed)),
+        ?_assertNot(beamtalk_node_monitor:should_announce(pending, none, Skewed)),
+        ?_assertNot(beamtalk_node_monitor:should_announce(pending, Skewed, Skewed)),
+        ?_assert(beamtalk_node_monitor:should_announce(pending, clear, Skewed))
+    ].
+
+%%--------------------------------------------------------------------
+%% The connect-time checks on the running monitor: one at `nodeup`, one
+%% at the peer's `hello`. Each check's read of the peer's manifest blocks
+%% until the test releases it, so the order the checks finish in is set
+%% by the test.
+%%--------------------------------------------------------------------
+
+-define(PEER5265, 'bt5265_ghost@nowhere').
+
+connect_checks_test_() ->
+    {foreach,
+        fun() ->
+            setup(),
+            ok = meck:new(beamtalk_node, [passthrough, no_link]),
+            ok = meck:new(beamtalk_release, [passthrough, no_link]),
+            ok = meck:expect(beamtalk_release, shape_manifest, fun() ->
+                #{?CLASS => shape_entry(1)}
+            end),
+            ok = meck:new(beamtalk_announcements, [passthrough, no_link])
+        end,
+        fun(X) ->
+            beamtalk_node_monitor ! {nodedown, ?PEER5265, [{nodedown_reason, disconnect}]},
+            _ = sys:get_state(beamtalk_node_monitor),
+            meck:unload([beamtalk_announcements, beamtalk_release, beamtalk_node]),
+            teardown(X)
+        end,
+        [
+            {"a peer without hello (0.6.0): the nodeup check detects and announces once", fun() ->
+                Nodeup = connect_new(),
+                finish_check(Nodeup, 2),
+                ?assertEqual(1, beamtalk_node_monitor:skew_count(?PEER5265)),
+                ?assertEqual([{1, 2}], shape_skews_announced())
+            end},
+            {"nodeup check first, then the hello check: one announcement", fun() ->
+                Nodeup = connect_new(),
+                Hello = say_hello(false),
+                finish_check(Nodeup, 2),
+                finish_check(Hello, 2),
+                ?assertEqual(1, beamtalk_node_monitor:skew_count(?PEER5265)),
+                ?assertEqual([{1, 2}], shape_skews_announced())
+            end},
+            {"hello check first, then the nodeup check: one announcement", fun() ->
+                Nodeup = connect_new(),
+                Hello = say_hello(false),
+                finish_check(Hello, 2),
+                finish_check(Nodeup, 2),
+                ?assertEqual(1, beamtalk_node_monitor:skew_count(?PEER5265)),
+                ?assertEqual([{1, 2}], shape_skews_announced())
+            end},
+            {"a peer reload made before the peer handled our nodeup is counted", fun() ->
+                %% The nodeup check read the peer's entry before the reload;
+                %% the hello check, after it.
+                Nodeup = connect_new(),
+                finish_check(Nodeup, 1),
+                ?assertEqual(0, beamtalk_node_monitor:skew_count(?PEER5265)),
+                Hello = say_hello(false),
+                finish_check(Hello, 2),
+                ?assertEqual(1, beamtalk_node_monitor:skew_count(?PEER5265)),
+                ?assertEqual([{1, 2}], shape_skews_announced())
+            end},
+            {"after a restart, the skew a connection already had is not announced; a change is",
+                fun() ->
+                    Gen = make_ref(),
+                    sys:replace_state(beamtalk_node_monitor, fun(S) ->
+                        Entry = beamtalk_node_monitor:peer_entry(Gen, existing),
+                        setelement(4, S, maps:put(?PEER5265, Entry, element(4, S)))
+                    end),
+                    %% A connect check that cannot read the peer leaves the
+                    %% baseline pending...
+                    Failed = say_hello(true),
+                    finish_check(Failed, unreachable),
+                    %% ...so a reload check landing now: its class's first
+                    %% result is not announced either.
+                    gen_server:cast(
+                        beamtalk_node_monitor,
+                        {skew_detected, ?PEER5265, Gen, 1, 'Bt5265Reloaded', {1, 2}}
+                    ),
+                    First = say_hello(false),
+                    finish_check(First, 2),
+                    ?assertEqual(2, beamtalk_node_monitor:skew_count(?PEER5265)),
+                    ?assertEqual([], shape_skews_announced()),
+                    %% The baseline is in: a class seen for the first time
+                    %% now is announced...
+                    gen_server:cast(
+                        beamtalk_node_monitor,
+                        {skew_detected, ?PEER5265, Gen, 2, 'Bt5265New', {1, 2}}
+                    ),
+                    _ = sys:get_state(beamtalk_node_monitor),
+                    ?assertEqual([{1, 2}], shape_skews_announced()),
+                    %% ...and so is a change the next `hello` check finds (the
+                    %% peer's notification of it was dropped before its
+                    %% `hello`).
+                    Second = say_hello(false),
+                    finish_check(Second, 3),
+                    ?assertEqual([{1, 2}, {1, 3}], shape_skews_announced())
+                end}
+        ]}.
+
+%% Deliver `nodeup` for the fake peer and answer the pid of the connect
+%% check it starts, blocked on its read.
+connect_new() ->
+    block_reads(),
+    beamtalk_node_monitor ! {nodeup, ?PEER5265, []},
+    receive_reading().
+
+%% Make each read of the fake peer's manifest report to this process and
+%% wait for the peer's version of the class. Set from the test body, since
+%% `foreach` runs setup in another process.
+block_reads() ->
+    Test = self(),
+    ok = meck:expect(beamtalk_node, remote_shape_manifest, fun
+        (?PEER5265) ->
+            Test ! {reading, self()},
+            receive
+                {go, unreachable} -> {error, timeout};
+                {go, Version} -> {ok, #{?CLASS => shape_entry(Version)}}
+            end;
+        (Other) ->
+            meck:passthrough([Other])
+    end).
+
+%% Deliver the fake peer's `hello` and answer the pid of the check it starts.
+say_hello(WantReply) ->
+    block_reads(),
+    gen_server:cast(beamtalk_node_monitor, {hello, ?PEER5265, make_ref(), WantReply}),
+    receive_reading().
+
+%% The `{localVersion, remoteVersion}` of each `NodeShapeSkew` the monitor
+%% has announced about the fake peer, in order.
+shape_skews_announced() ->
+    PeerValue = beamtalk_node:from_atom(?PEER5265),
+    [
+        {L, R}
+     || {_Pid, {beamtalk_announcements, system_announce, ['NodeShapeSkew', Fields]}, _} <-
+            meck:history(beamtalk_announcements),
+        #{node := Node, localVersion := L, remoteVersion := R} <- [Fields],
+        Node =:= PeerValue
+    ].
 
 %%====================================================================
 %% BT-5240 — NodeVersionSkew: a timeout is logged, not announced; a stale

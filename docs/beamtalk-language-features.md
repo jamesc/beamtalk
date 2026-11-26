@@ -7827,14 +7827,16 @@ SystemAnnouncer current when: NodeVersionSkew do: [:e |
   guard: when a node connects, and again whenever a class reloads while
   peers stay connected, this node compares its own `Beamtalk shapeManifest`
   against each connected peer's and announces one event per class whose
-  version differs. It **never refuses the connection** — doing so would make
+  version differs. A skew is announced once per connection: again only if
+  the class matches and then skews again, its versions change, or the peer
+  reconnects. It **never refuses the connection** — doing so would make
   ADR 0125's rolling-upgrade procedure impossible — it only makes skew
   visible before the first send actually fails on it (the per-message check
   above is the real safety net). `aNode shapeSkew` (below) surfaces the same
   information as a point-in-time, queryable snapshot rather than only a
   live event stream. The count is kept on both sides: when one node reloads
-  a class, both it and the peer announce `NodeShapeSkew` and update their
-  counts. A peer that disconnects drops out of the count.
+  a class, both it and the peer update their counts, and each announces
+  `NodeShapeSkew` if the class's skew is new to it. A peer that disconnects drops out of the count.
 - **`NodeVersionSkew`** is announced once per connect (best-effort) when
   the peer runs a different wire-format version (`localWireVersion` /
   `remoteWireVersion`) or Beamtalk version (`localBeamtalkVersion` /
