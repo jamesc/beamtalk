@@ -137,7 +137,7 @@ same scope as `build`.
 
 - `beamtalk build` / `beamtalk test` fail on `Error` diagnostics, and with
   `--warnings-as-errors` also on `Warning`/`Hint` (except the documented
-  `Deprecation`/`UnresolvedClass`/`UnresolvedFfi`/`ArityMismatch` exclusions,
+  `UnresolvedClass`/`UnresolvedFfi`/`ArityMismatch` exclusions,
   which an explicit `[diagnostics]` entry can opt back in).
 - `beamtalk lint` is the lint-severity gate by default. With
   `--warnings-as-errors` it additionally fails on the live-recheck set — the
@@ -1143,7 +1143,6 @@ beamtalk test              # Auto parallelism (default)
 beamtalk test --jobs 4     # Up to 4 classes concurrently
 beamtalk test -j 1         # Sequential (backward-compatible)
 beamtalk test --raw-mfa    # Every stack frame per failure (hidden ones too), raw module:function/arity beside each name
-# `--full-traces` still works but is deprecated: it is a hidden alias of `--raw-mfa`
 ```
 
 From code: `TestRunner runAll: 0` (auto), `TestRunner runAll: 4` (bounded), `TestRunner runAll` (sequential).

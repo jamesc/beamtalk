@@ -592,12 +592,6 @@ pub enum DiagnosticCategory {
     Lint,
     /// Dead assignment in block closure.
     DeadAssignment,
-    /// Duplicate extension method conflict.
-    ExtensionConflict,
-    /// Deprecation warning — wrong keyword/class-kind combination.
-    ///
-    /// Excluded from `--warnings-as-errors` to allow gradual migration.
-    Deprecation,
     /// Actor-new error — using `new`/`new:` on an Actor subclass.
     ActorNew,
     /// Visibility error/warning (ADR 0071) — cross-package access to internal methods.
@@ -608,8 +602,6 @@ pub enum DiagnosticCategory {
     UnresolvedFfi,
     /// Arity mismatch — wrong argument count for known Erlang function.
     ArityMismatch,
-    /// Workspace binding shadows class — REPL binding hides a class name.
-    ShadowedClass,
     /// Missing type annotation in typed class.
     ///
     /// Separate from `Type` so that `@expect type_annotation` suppresses

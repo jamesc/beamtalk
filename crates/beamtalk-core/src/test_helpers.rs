@@ -50,7 +50,8 @@ pub mod evaluated_block_grid;
 pub mod test_support {
     use crate::ast::{
         Block, BlockParameter, ClassDefinition, ClassModifiers, Expression, ExpressionStatement,
-        Identifier, KeywordPart, Literal, MessageSelector, MethodDefinition, Module,
+        Identifier, KeywordPart, Literal, MatchArm, MessageSelector, MethodDefinition, Module,
+        Pattern,
     };
     use crate::semantic_analysis::class_hierarchy::DeclaredType;
     use crate::source_analysis::{Severity, Span, lex_with_eof, parse};
@@ -243,6 +244,13 @@ pub mod test_support {
             is_cast: false,
             span,
         }
+    }
+
+    /// Builds an unguarded wildcard `_ -> body` [`MatchArm`] (full coverage)
+    /// with [`test_span`] spans.
+    #[must_use]
+    pub fn wildcard_arm(body: Expression) -> MatchArm {
+        MatchArm::new(Pattern::Wildcard(test_span()), body, test_span())
     }
 
     /// Wraps an [`Expression`] in a bare [`ExpressionStatement`].
