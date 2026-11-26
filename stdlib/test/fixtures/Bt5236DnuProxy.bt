@@ -6,6 +6,6 @@
 // the override. An inlined writing fold or counted loop would raise
 // `does_not_understand` instead, so it raises `stateful_block_dispatch`.
 
-Value subclass: Bt5236DnuProxy
+Actor subclass: Bt5236DnuProxy
 
   doesNotUnderstand: _selector args: _arguments => #forwarded

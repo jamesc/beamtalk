@@ -33,20 +33,28 @@ TestCase subclass: WritingFoldDnuOverrideTest
     n
 
   testPureSendReachesOverride =>
-    self assert: (Bt5236DnuProxy new collect: [:e | e]) equals: #forwarded
-    self assert: (Bt5236DnuProxy new to: 3 do: [:i | i]) equals: #forwarded
+    self assert: (Bt5236DnuProxy spawn collect: [:e | e]) equals: #forwarded
+    self assert: (Bt5236DnuProxy spawn to: 3 do: [:i | i]) equals: #forwarded
 
   testWritingCollectRefuses =>
-    self should: [self writingCollect: Bt5236DnuProxy new] raise: #stateful_block_dispatch
+    self should: [
+      self writingCollect: Bt5236DnuProxy spawn
+    ] raise: #stateful_block_dispatch
 
   testWritingInjectRefuses =>
-    self should: [self writingInject: Bt5236DnuProxy new] raise: #stateful_block_dispatch
+    self should: [
+      self writingInject: Bt5236DnuProxy spawn
+    ] raise: #stateful_block_dispatch
 
   testWritingToDoRefuses =>
-    self should: [self writingToDo: Bt5236DnuProxy new] raise: #stateful_block_dispatch
+    self should: [
+      self writingToDo: Bt5236DnuProxy spawn
+    ] raise: #stateful_block_dispatch
 
   testWritingToByDoRefuses =>
-    self should: [self writingToByDo: Bt5236DnuProxy new] raise: #stateful_block_dispatch
+    self should: [
+      self writingToByDo: Bt5236DnuProxy spawn
+    ] raise: #stateful_block_dispatch
 
   testNoOverrideStillDoesNotUnderstand =>
     self should: [self writingCollect: #sym] raise: #does_not_understand
@@ -56,9 +64,12 @@ TestCase subclass: WritingFoldDnuOverrideTest
   // while Integer is the one stdlib class defining these. If this fails, the
   // loop must stand in for the new method (see BT-5235).
   testOnlyIntegerDefinesCountedLoopSelectors =>
-    definers := Object allSubclasses select: [:c |
-      c sourceFile isNil and: [
-        (c includesSelector: #to:do:) or: [c includesSelector: #to:by:do:]
+    definers := Object allSubclasses
+      select: [:c |
+        c sourceFile isNil and: [
+          (c includesSelector: #to:do:) or: [c includesSelector: #to:by:do:]
+        ]
       ]
-    ]
-    self assert: (definers reject: [:c | c == Integer or: [c inheritsFrom: Integer]]) isEmpty
+    self assert: (definers reject: [:c |
+      c == Integer or: [c inheritsFrom: Integer]
+    ]) isEmpty

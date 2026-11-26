@@ -643,7 +643,21 @@ selector_provider(Recv, Selector) ->
             end;
         false ->
             Class = beamtalk_primitive:class_of(Recv),
-            {Class, beamtalk_behaviour_intrinsics:selectorProviderFromName(Class, Selector)}
+            case beamtalk_behaviour_intrinsics:selectorProviderFromName(Class, Selector) of
+                none -> {Class, dnu_provider(Class)};
+                Provider -> {Class, Provider}
+            end
+    end.
+
+%% BT-5236: nothing answers the selector, but a class with its own
+%% `doesNotUnderstand:args:` (a forwarding proxy) would run it on the pure send,
+%% which the guard cannot stand in for: report `user` so it refuses with
+%% `stateful_block_dispatch`. A stdlib definition keeps `none`.
+-spec dnu_provider(atom()) -> user | none.
+dnu_provider(Class) ->
+    case beamtalk_behaviour_intrinsics:selectorProviderFromName(Class, 'doesNotUnderstand:args:') of
+        user -> user;
+        _ -> none
     end.
 
 %% Drain the elements posted by the iteration block, oldest first.
