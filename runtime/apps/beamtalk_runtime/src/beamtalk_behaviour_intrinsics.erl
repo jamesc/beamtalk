@@ -514,8 +514,19 @@ A stdlib class that defines the selector natively and is neither, a `Stream`,
 answers something the fold cannot: a lazy `Stream` from `select:`, a
 short-circuit from `detect:`. Forcing it through `do:` never ends on an
 infinite stream and answers a List.
+BT-5263: `Stream inject:into:` is the exception. It is eager (it consumes the
+stream to answer one value), so the in-place fold answers what the pure send does
+on a finite stream. The fold drains the stream before the block runs, so an early
+`^` exit or a raise partway, or an infinite stream, differs from the pure send
+(which stops pulling); only `Stream` is exempt, as the one stdlib class known to
+be eager here.
+The allowlist's limit: it is checked only for a map-backed object (a `Collection`
+or a class instance); a receiver that is a raw List, tuple or other primitive
+never gets here (`guard_species_rebuild/3` passes it).
 """.
 -spec foldsOverDoFromName(atom(), atom()) -> boolean().
+foldsOverDoFromName('Stream', 'inject:into:') ->
+    true;
 foldsOverDoFromName(ClassName, Selector) ->
     beamtalk_class_registry:inherits_from(ClassName, 'Collection') orelse
         walk_hierarchy(

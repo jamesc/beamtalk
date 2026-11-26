@@ -1430,9 +1430,12 @@ method with a declared signature, and nothing is looked up through
   `aMoney > 5` does not imply `5 < aMoney`.
 - **Default sort order.** `List sort`, `Dictionary` and `Set` ordering use
   Erlang term order directly, never `<`.
-- **Collection `max` / `min`.** These call `lists:max` / `lists:min`
-  (`beamtalk_collection.erl`), so `#(3, nil) max` still answers `nil` and
-  ignores hooks, while `3 max: nil` raises. Follow-up.
+- **Collection `max` / `min`.** Done in BT-5214. All-number, all-String and
+  all-Symbol collections keep native order; any other mix folds pairwise
+  with a dispatched `>` / `<`, so `#(3, nil) max` raises as `3 max: nil`
+  does and user types use their own operators. An element type with no `<`
+  / `>` (for example `Time`, `List`) now raises `does_not_understand` there
+  instead of answering by term order.
 - **The start of an inlined `to:do:`.** The inlined loop number-checks its
   limit, not its start (`counted_loops.rs`). Pre-existing; not changed
   here.
@@ -1796,7 +1799,7 @@ duplicate Epic)
   - BT-5211 — Phase 2c: right-operand test on the primitive path (`perform:`), CHANGELOG and language docs
   - BT-5212 — Phase 3: type-checker hook lookup (open)
   - BT-5213 — follow-up: `String`/`Symbol` wrong-kind ordering raises `type_error`
-  - BT-5214 — follow-up: Collection `max`/`min` (open)
+  - BT-5214 — Collection `max`/`min` (this PR)
 
 **Status:** Complete for the arithmetic design — all issues Done (BT-3262–BT-3266 closed 2026-08-25, BT-2712 closed 2026-08-25; addendum issues closed 2026-10-18). The 2026-11-25 comparison addendum is implemented at run time (Phases 0–2, BT-5207–BT-5211); the type-checker phase (BT-5212) is open.
 
