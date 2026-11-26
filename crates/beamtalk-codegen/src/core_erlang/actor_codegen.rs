@@ -468,7 +468,7 @@ impl CoreErlangGenerator {
             return Document::Nil;
         };
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(class.class_methods.len());
-        for m in class.class_methods.iter() {
+        for m in &class.class_methods {
             // Class method takes ClassSelf + user params (ADR 0130 §3)
             parts.push(docvec![
                 ", ",

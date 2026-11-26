@@ -691,7 +691,7 @@ impl CoreErlangGenerator {
             .semantic_facts
             .class_facts(&class_name)
             .and_then(|cf| cf.class_method_index("new"))
-            .and_then(|i| Some(&class.class_methods[i]))
+            .map(|i| &class.class_methods[i])
             .ok_or_else(|| {
                 CodeGenError::Internal("Expected class method 'new' not found".to_string())
             })?;

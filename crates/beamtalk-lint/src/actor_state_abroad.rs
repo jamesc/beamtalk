@@ -128,7 +128,7 @@ fn check_module(module: &Module, hierarchy: &ClassHierarchy, diagnostics: &mut V
             actor_fields: actor_typed_fields(module, hierarchy, class_name),
             hierarchy,
         };
-        for method in class.methods.iter() {
+        for method in &class.methods {
             check_method_body(&method.body, &method.parameters, &ctx, diagnostics);
         }
     }

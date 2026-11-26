@@ -179,7 +179,7 @@ pub(crate) fn check_class_method_ffi(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for class in &module.classes {
-        for method in class.class_methods.iter() {
+        for method in &class.class_methods {
             check_method(class.name.name.as_str(), method, hierarchy, diagnostics);
         }
     }
