@@ -57,6 +57,16 @@ TestCase subclass: CollectionMaxMinTest
     self should: [#(#a, nil) max] raise: #type_error
     self should: [#(true, false) max] raise: #does_not_understand
 
+  /// BT-5266: the all-number `max` fast path relies on every non-number
+  /// sorting above every number in term order. Pin that for each kind.
+  testNumberFirstMixedWithEachNonNumberDispatches =>
+    self should: [#(3, nil) max] raise: #does_not_understand
+    self should: [#(3, true) max] raise: #does_not_understand
+    self should: [#(3, #a) max] raise: #does_not_understand
+    self should: [#(3, "a") max] raise: #does_not_understand
+    self should: [#(3, nil) min] raise: #does_not_understand
+    self should: [#(nil, 3) min] raise: #does_not_understand
+
   testMoneyFirstMixedWithNumberDispatchesToMoney =>
     m := self money: 500
     self should: [(self mixed: m with: 3) max] raise: #does_not_understand
