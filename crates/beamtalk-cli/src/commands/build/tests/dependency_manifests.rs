@@ -8,44 +8,9 @@
 use super::*;
 use beamtalk_core::build_layout::BuildLayout;
 
-/// Register the unknown-key `tracing::warn!` callsite exactly once, under a
-/// subscriber that enables it, before any test here can race its first
-/// registration (BT-5272).
-///
-/// `warn!` skips its callsite entirely while the process-wide max level is
-/// `OFF` (no subscriber anywhere), so the callsite is registered by whichever
-/// thread first reaches it while *some* test's scoped subscriber has raised
-/// that level. If that thread is the sibling test's, which has no subscriber
-/// of its own, `tracing` computes the callsite's cached `Interest` from that
-/// thread's dispatcher (none) and stores `never` for every thread: the test
-/// that installed the subscriber silently receives nothing. The two tests in
-/// this module both reach the callsite and run in parallel, so the captured
-/// log was occasionally empty. Registering it here, on one thread, inside a
-/// scoped subscriber that enables `WARN`, gives it a correct interest first;
-/// `Once::call_once` blocks every other caller until that is done. Call this
-/// first in every test that reads a dependency manifest with unknown keys.
-fn register_unknown_key_callsite() {
-    static REGISTERED: std::sync::Once = std::sync::Once::new();
-    REGISTERED.call_once(|| {
-        let temp = TempDir::new().unwrap();
-        let path = Utf8PathBuf::from_path_buf(temp.path().join("beamtalk.toml")).unwrap();
-        write_test_file(
-            &path,
-            "[package]\nname = \"prime\"\nversion = \"0.1.0\"\nprime_only_key = 1\n",
-        );
-        let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::WARN)
-            .with_writer(std::io::sink)
-            .finish();
-        tracing::subscriber::with_default(subscriber, || {
-            beamtalk_package::manifest::parse_dependency_manifest_full(&path).unwrap();
-        });
-    });
-}
-
 #[test]
 fn build_succeeds_with_a_path_dependency_that_has_unknown_manifest_keys() {
-    register_unknown_key_callsite();
+    crate::commands::test_support::register_unknown_key_callsite();
     let temp = TempDir::new().unwrap();
     let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
 
@@ -111,7 +76,7 @@ fn unknown_key_warning_is_emitted_once_per_dependency_per_build() {
         }
     }
 
-    register_unknown_key_callsite();
+    crate::commands::test_support::register_unknown_key_callsite();
 
     let temp = TempDir::new().unwrap();
     let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
