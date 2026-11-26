@@ -34,8 +34,11 @@
 //!   write and every one queued behind it are dropped, and later
 //!   `write_stdin`s get an `error` (BT-5269). `Reason` is a binary.
 //!
-//!   Every queued write gets exactly one of these two, in queue order, and
-//!   always after its `stdin_queued`. Neither is sent after `exit`.
+//!   A queued write gets at most one of these two, in queue order, and
+//!   always after its `stdin_queued`. Neither is sent after `exit`. Before
+//!   `exit` the port waits up to [`DRAIN_GRACE`] for every queued write to be
+//!   reported; one still unreported then (its pipe is full and held open by
+//!   a process that does not read it) gets none: `exit` ends it.
 //! - `{exit, ChildId, ExitCode}` — the last event for a child. A failed
 //!   `spawn` gets `{exit, ChildId, -1}` (unless the id belongs to a live child).
 //! - `{error, ChildId, Command, Reason}` — the `Command` (`spawn`,
@@ -77,7 +80,7 @@ mod watchdog;
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -220,6 +223,13 @@ struct EventGate {
     /// it is told exactly once (Unix).
     #[cfg_attr(windows, allow(dead_code))]
     forgotten: AtomicBool,
+    /// The child's stdin queue state, shared by the command thread and the
+    /// writer thread. Its lock orders this child's stdin answers: it is held
+    /// while a write is queued and acknowledged (`stdin_queued`) and while
+    /// the writer thread reports one (`stdin_written`/`stdin_failed`).
+    stdin: Mutex<StdinState>,
+    /// Signalled whenever the writer thread has reported a write.
+    stdin_settled: std::sync::Condvar,
 }
 
 impl EventGate {
@@ -253,6 +263,24 @@ impl EventGate {
 
     fn exit_sent(&self) -> bool {
         self.exit_sent.lock().is_ok_and(|g| *g)
+    }
+
+    fn stdin_state(&self) -> std::sync::MutexGuard<'_, StdinState> {
+        self.stdin
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Wait, at most `max`, until every queued stdin write has been reported
+    /// (BT-5269). Called before `exit`, which closes the gate: a write the
+    /// child took just before exiting is then reported written rather than
+    /// lost. A write can stay unreported only while the pipe is full and
+    /// still open (a grandchild holds it without reading).
+    fn await_stdin_reports(&self, max: Duration) {
+        let state = self.stdin_state();
+        let _ = self
+            .stdin_settled
+            .wait_timeout_while(state, max, |s| s.pending > 0 && !s.failed);
     }
 }
 
@@ -609,6 +637,7 @@ fn reap(
     });
     #[cfg(not(unix))]
     drain_readers(&reader_rx, &mut open_pipes, port.drain, DRAIN_MAX, || {});
+    gate.await_stdin_reports(port.drain);
     gate.send_exit(&port.writer, child_id, exit_code);
     // Keep the entry, so whatever the child left behind stays killable
     // (and dies with the port), for as long as there is anything left.
@@ -674,20 +703,16 @@ fn drain_readers(
 }
 
 /// A child's stdin queue: writes in, a writer thread out, bounded by the
-/// number of bytes waiting.
+/// number of bytes waiting. Clones share one queue; only the command thread
+/// pushes.
+#[derive(Clone)]
 struct StdinQueue {
     tx: mpsc::Sender<Vec<u8>>,
-    /// Bytes accepted but not yet written to the pipe.
-    pending: Arc<AtomicUsize>,
     /// Set once a write has been dropped: the child's input stream has a
     /// hole in it, so no later write may reach it either.
-    broken: bool,
-    /// Orders this child's stdin answers: held while a write is queued and
-    /// acknowledged (`stdin_queued`) and while the writer thread reports one
-    /// (`stdin_written`/`stdin_failed`), so a write's report never precedes
-    /// its acknowledgement. `true` once the writer thread has failed: no
-    /// write is queued after its `stdin_failed`.
-    writer_failed: Arc<Mutex<bool>>,
+    broken: Arc<AtomicBool>,
+    /// The child's gate, which holds the state shared with the writer thread.
+    gate: Arc<EventGate>,
     /// Where `stdin_queued` goes.
     events: SharedWriter,
 }
@@ -702,40 +727,51 @@ impl StdinQueue {
     /// the child catches up: otherwise it would read a stream with a line
     /// missing from the middle.
     ///
-    /// An accepted write is acknowledged here with `stdin_queued`.
-    fn push(&mut self, child_id: u32, data: Vec<u8>) -> Result<(), String> {
-        if self.broken {
+    /// An accepted write is acknowledged here with `stdin_queued`, under the
+    /// stdin lock, so the writer thread's report on it cannot come first.
+    fn push(&self, child_id: u32, data: Vec<u8>) -> Result<(), String> {
+        if self.broken.load(Ordering::Acquire) {
             return Err(format!(
                 "stdin input for child {child_id} was dropped earlier; \
                  refusing later writes"
             ));
         }
+        let mut stdin = self.gate.stdin_state();
+        if stdin.failed {
+            return Err(format!(
+                "stdin closed for child {child_id}: the child no longer reads its input"
+            ));
+        }
         let len = data.len();
-        let pending = self.pending.load(Ordering::Acquire);
+        let pending = stdin.pending;
         if pending > 0 && pending.saturating_add(len) > STDIN_QUEUE_BYTES {
-            self.broken = true;
+            self.broken.store(true, Ordering::Release);
             return Err(format!(
                 "stdin queue full for child {child_id}: {pending} bytes pending, \
                  the child is not reading its input"
             ));
         }
-        let closed =
-            || format!("stdin closed for child {child_id}: the child no longer reads its input");
-        let writer_failed = self
-            .writer_failed
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if *writer_failed {
-            return Err(closed());
-        }
-        self.pending.fetch_add(len, Ordering::AcqRel);
         if self.tx.send(data).is_err() {
-            self.pending.fetch_sub(len, Ordering::AcqRel);
-            return Err(closed());
+            // Unreachable while `failed` is clear: the writer thread only
+            // ends on a failed write, or once every sender is gone.
+            return Err(format!(
+                "stdin closed for child {child_id}: the child no longer reads its input"
+            ));
         }
+        stdin.pending += len;
         send_event(&self.events, &stdin_queued_event(child_id));
         Ok(())
     }
+}
+
+/// What a child's stdin queue and its writer thread share (in [`EventGate`]).
+#[derive(Default)]
+struct StdinState {
+    /// Bytes accepted (`stdin_queued`) but not yet reported written.
+    pending: usize,
+    /// Set once the writer thread has failed: no write is queued after its
+    /// `stdin_failed`.
+    failed: bool,
 }
 
 /// Start the thread that owns `stdin` and feeds it from a [`StdinQueue`].
@@ -747,7 +783,8 @@ impl StdinQueue {
 /// queued (BT-5269). Dropping the queue (`close_stdin`, or the entry going
 /// away) lets the thread finish the queued writes and then close the pipe:
 /// EOF for the child. Reports go through the child's [`EventGate`], so none
-/// follows `exit`.
+/// follows `exit`; the reaper waits a bounded time for them before `exit`
+/// (see [`EventGate::await_stdin_reports`]).
 fn spawn_stdin_writer(
     child_id: u32,
     stdin: impl Write + Send + 'static,
@@ -755,39 +792,41 @@ fn spawn_stdin_writer(
     gate: &Arc<EventGate>,
 ) -> StdinQueue {
     let (tx, rx) = mpsc::channel::<Vec<u8>>();
-    let pending = Arc::new(AtomicUsize::new(0));
-    let written = Arc::clone(&pending);
-    let writer_failed = Arc::new(Mutex::new(false));
-    let failed = Arc::clone(&writer_failed);
     let report_to = Arc::clone(events);
-    let gate = Arc::clone(gate);
+    let writer_gate = Arc::clone(gate);
     thread::spawn(move || {
+        let gate = writer_gate;
         let mut stdin = stdin;
         for data in rx {
             let result = stdin.write_all(&data).and_then(|()| stdin.flush());
-            written.fetch_sub(data.len(), Ordering::AcqRel);
-            let mut failed = failed
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut state = gate.stdin_state();
             match result {
-                Ok(()) => gate.send(&report_to, &stdin_written_event(child_id)),
+                Ok(()) => {
+                    gate.send(&report_to, &stdin_written_event(child_id));
+                    state.pending = state.pending.saturating_sub(data.len());
+                }
                 Err(e) => {
                     debug!("stdin write failed for child {child_id}: {e}");
-                    *failed = true;
                     let reason = format!(
                         "stdin closed for child {child_id}: the child no longer reads its input ({e})"
                     );
                     gate.send(&report_to, &stdin_failed_event(child_id, &reason));
-                    return;
+                    // Every write still queued is covered by this report.
+                    state.failed = true;
+                    state.pending = 0;
                 }
+            }
+            drop(state);
+            gate.stdin_settled.notify_all();
+            if gate.stdin_state().failed {
+                return;
             }
         }
     });
     StdinQueue {
         tx,
-        pending,
-        broken: false,
-        writer_failed,
+        broken: Arc::new(AtomicBool::new(false)),
+        gate: Arc::clone(gate),
         events: Arc::clone(events),
     }
 }
@@ -981,19 +1020,22 @@ fn handle_write_stdin(request: &Map, port: &Port) -> Result<(), String> {
         .and_then(term_to_bytes)
         .ok_or("missing or invalid data")?;
 
-    let mut map = port
-        .children
-        .lock()
-        .map_err(|e| format!("children lock poisoned: {e}"))?;
-    let entry = map
-        .get_mut(&child_id)
-        .ok_or_else(|| format!("child {child_id} not found"))?;
-    let queue = entry
-        .stdin
-        .as_mut()
-        .ok_or("stdin already closed for this child")?;
-    // Never blocks: the writer thread does the (possibly blocking) I/O.
-    // Answers `stdin_queued` itself, so the writer's report cannot precede it.
+    let queue = {
+        let map = port
+            .children
+            .lock()
+            .map_err(|e| format!("children lock poisoned: {e}"))?;
+        let entry = map
+            .get(&child_id)
+            .ok_or_else(|| format!("child {child_id} not found"))?;
+        entry
+            .stdin
+            .clone()
+            .ok_or("stdin already closed for this child")?
+    };
+    // Never blocks on the child: the writer thread does the (possibly
+    // blocking) I/O. Answers `stdin_queued` itself, so the writer's report
+    // cannot precede it; the children lock is not held while it does.
     queue.push(child_id, data)
 }
 
@@ -1849,7 +1891,7 @@ mod tests {
         let (release, gate) = mpsc::channel();
         let (port, _capture) = test_port();
         let events = Arc::new(EventGate::default());
-        let mut queue = spawn_stdin_writer(1, GatedWriter(gate), &port.writer, &events);
+        let queue = spawn_stdin_writer(1, GatedWriter(gate), &port.writer, &events);
         queue
             .push(1, vec![b'A'; STDIN_QUEUE_BYTES])
             .expect("A fits");
@@ -1858,7 +1900,7 @@ mod tests {
         // The child catches up: A is written and nothing is pending.
         release.send(()).unwrap();
         let deadline = Instant::now() + HANG_GUARD;
-        while queue.pending.load(Ordering::Acquire) > 0 {
+        while events.stdin_state().pending > 0 {
             assert!(Instant::now() < deadline, "A never written");
             thread::sleep(Duration::from_millis(1)); // sleep: poll for the writer thread
         }
@@ -1897,7 +1939,7 @@ mod tests {
     fn a_queued_write_the_child_never_takes_is_reported_as_failed() {
         let (port, capture) = test_port();
         let gate = Arc::new(EventGate::default());
-        let mut queue = spawn_stdin_writer(7, BrokenPipe, &port.writer, &gate);
+        let queue = spawn_stdin_writer(7, BrokenPipe, &port.writer, &gate);
         queue.push(7, b"lost\n".to_vec()).expect("queued");
         let events = capture.wait_for("stdin_failed", |e| is_event(e, "stdin_failed", 7));
         assert_eq!(tags_for(&events, 7), ["stdin_queued", "stdin_failed"]);
@@ -1921,7 +1963,7 @@ mod tests {
         let (port, capture) = test_port();
         let gate = Arc::new(EventGate::default());
         let pipe = Capture::default();
-        let mut queue = spawn_stdin_writer(8, pipe.clone(), &port.writer, &gate);
+        let queue = spawn_stdin_writer(8, pipe.clone(), &port.writer, &gate);
         for line in [&b"a\n"[..], b"b\n", b"c\n"] {
             queue.push(8, line.to_vec()).expect("queued");
         }
@@ -1951,6 +1993,33 @@ mod tests {
             );
         }
         assert_eq!(*pipe.0.lock().unwrap(), b"a\nb\nc\n");
+    }
+
+    /// BT-5269: `exit` waits for the report on a write still in progress,
+    /// so a write the child took just before exiting is reported written
+    /// rather than dropped by the closed gate.
+    #[test]
+    fn exit_waits_for_the_report_on_a_write_in_progress() {
+        let (release, pipe) = mpsc::channel();
+        let (port, capture) = test_port();
+        let gate = Arc::new(EventGate::default());
+        let queue = spawn_stdin_writer(5, GatedWriter(pipe), &port.writer, &gate);
+        queue.push(5, b"last\n".to_vec()).expect("queued");
+        let reaper = {
+            let (gate, writer) = (Arc::clone(&gate), Arc::clone(&port.writer));
+            thread::spawn(move || {
+                gate.await_stdin_reports(HANG_GUARD);
+                gate.send_exit(&writer, 5, 0);
+            })
+        };
+        // The write completes only now, while the reaper waits (or before it
+        // starts to): either way its report comes before `exit`.
+        release.send(()).unwrap();
+        reaper.join().unwrap();
+        assert_eq!(
+            tags_for(&capture.events(), 5),
+            ["stdin_queued", "stdin_written", "exit"]
+        );
     }
 
     /// A large write reaches a child that reads, and `close_stdin` delivers
@@ -2132,6 +2201,7 @@ mod tests {
                     exit_sent: Mutex::new(true),
                     reaped: AtomicBool::new(true),
                     forgotten: AtomicBool::new(false),
+                    ..EventGate::default()
                 }),
                 pgid: 1,
             },

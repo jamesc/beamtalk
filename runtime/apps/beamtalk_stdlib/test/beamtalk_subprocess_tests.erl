@@ -145,8 +145,8 @@ writeLine_raises_for_the_line_the_port_drops_test_() ->
         }),
         %% 1 MiB less the newline writeLine: appends: each line is exactly 1 MiB.
         Chunk = binary:copy(<<"x">>, (1 bsl 20) - 1),
-        start_writers(Pid, Chunk, 10),
-        Refused = [await_write_reply() || _ <- [1, 2]],
+        beamtalk_subprocess_test_helpers:start_writers(Pid, Chunk, 10),
+        Refused = [beamtalk_subprocess_test_helpers:await_write_reply() || _ <- [1, 2]],
         lists:foreach(
             fun(R) ->
                 ?assertMatch(
@@ -167,29 +167,13 @@ writeLine_raises_for_the_line_the_port_drops_test_() ->
         %% Sticky: the next write raises too.
         ?assertMatch({error, #beamtalk_error{}}, gen_server:call(Pid, {'writeLine:', [<<"x">>]})),
         ?assertEqual(nil, gen_server:call(Pid, {close, []})),
-        Queued = [await_write_reply() || _ <- lists:seq(1, 8)],
+        Queued = [beamtalk_subprocess_test_helpers:await_write_reply() || _ <- lists:seq(1, 8)],
         ?assertEqual(
             lists:duplicate(8, port_closed),
             [K || {error, #beamtalk_error{kind = K}} <- Queued]
         ),
         gen_server:stop(Pid)
     end}.
-
-%% Start N callers that each write Chunk once and send this process the reply.
-start_writers(Pid, Chunk, N) ->
-    Self = self(),
-    [
-        spawn(fun() ->
-            Self ! {write_reply, gen_server:call(Pid, {'writeLine:', [Chunk]}, 30000)}
-        end)
-     || _ <- lists:seq(1, N)
-    ].
-
-await_write_reply() ->
-    receive
-        {write_reply, Reply} -> Reply
-    after 20000 -> error(no_write_reply)
-    end.
 
 %%% BT-5259: a write to an exec port that has already died must answer a
 %%% structured error and leave the gen_server running (it used to crash on
@@ -253,7 +237,8 @@ writeLine_raises_when_the_child_closed_stdin_test_() ->
     end.
 
 writeLine_raises_when_the_child_closed_stdin() ->
-    {ok, Pid} = beamtalk_subprocess:start(closed_stdin_config()),
+    {Exe, Args} = beamtalk_subprocess_test_helpers:closed_stdin_cmd(),
+    {ok, Pid} = beamtalk_subprocess:start(#{executable => Exe, args => Args}),
     %% The child prints once its stdin is closed.
     ?assertEqual({beamtalk_string, <<"closed">>}, gen_server:call(Pid, {readLine, []}, 5000)),
     {error, Err} = gen_server:call(Pid, {'writeLine:', [<<"lost">>]}),
@@ -269,13 +254,6 @@ writeLine_raises_when_the_child_closed_stdin() ->
     ),
     ?assertEqual(nil, gen_server:call(Pid, {close, []})),
     gen_server:stop(Pid).
-
-%% A child that closes its stdin, says so, and stays up until killed.
-closed_stdin_config() ->
-    #{
-        executable => <<"/bin/sh">>,
-        args => [<<"-c">>, <<"exec 0<&-; echo closed; exec sleep 60">>]
-    }.
 
 %%% ============================================================================
 %%% readLine — blocks until data arrives

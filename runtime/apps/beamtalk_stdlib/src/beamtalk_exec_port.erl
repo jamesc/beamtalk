@@ -51,12 +51,15 @@ well-formed `write_stdin` (one naming a `child_id`) gets exactly one answer,
 `stdin_queued` or `error`, in command order, so the caller can tell which
 write was dropped.
 
-Each queued write is then reported once more, in queue order and after its
-`stdin_queued`: `stdin_written` when it is in the child's stdin pipe, or
-`stdin_failed` when the child exited or closed its stdin first. One
+Each queued write is then reported at most once more, in queue order and
+after its `stdin_queued`: `stdin_written` when it is in the child's stdin
+pipe, or `stdin_failed` when the child exited or closed its stdin first. One
 `stdin_failed` covers that write and every write queued behind it, and later
-writes get an `error`. Neither is sent after `exit`. "Written" means the
-bytes reached the pipe, not that the child read them.
+writes get an `error`. Neither is sent after `exit`; the binary waits up to
+2 s before `exit` for outstanding reports, so a write gets none only if its
+pipe is full and held open by a process that does not read it. `exit` ends
+any write still unreported. "Written" means the bytes reached the pipe, not
+that the child read them.
 
 `error` reports that `Command` (`spawn`, `write_stdin`, …) for `ChildId`
 failed: malformed `args` or

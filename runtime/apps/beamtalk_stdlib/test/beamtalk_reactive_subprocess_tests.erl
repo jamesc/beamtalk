@@ -353,8 +353,8 @@ writeLine_raises_for_the_line_the_port_drops_test_() ->
         }),
         %% 1 MiB less the newline writeLine: appends: each line is exactly 1 MiB.
         Chunk = binary:copy(<<"x">>, (1 bsl 20) - 1),
-        start_writers(Pid, Chunk, 10),
-        Refused = [await_write_reply() || _ <- [1, 2]],
+        beamtalk_subprocess_test_helpers:start_writers(Pid, Chunk, 10),
+        Refused = [beamtalk_subprocess_test_helpers:await_write_reply() || _ <- [1, 2]],
         lists:foreach(
             fun(R) ->
                 ?assertMatch(
@@ -375,7 +375,7 @@ writeLine_raises_for_the_line_the_port_drops_test_() ->
         %% Sticky: the next write raises too.
         ?assertMatch({error, #beamtalk_error{}}, gen_server:call(Pid, {'writeLine:', [<<"x">>]})),
         ?assertEqual(nil, gen_server:call(Pid, {close, []})),
-        Queued = [await_write_reply() || _ <- lists:seq(1, 8)],
+        Queued = [beamtalk_subprocess_test_helpers:await_write_reply() || _ <- lists:seq(1, 8)],
         ?assertEqual(
             lists:duplicate(8, port_closed),
             [K || {error, #beamtalk_error{kind = K}} <- Queued]
@@ -383,22 +383,6 @@ writeLine_raises_for_the_line_the_port_drops_test_() ->
         Collector ! stop,
         gen_server:stop(Pid)
     end}.
-
-%% Start N callers that each write Chunk once and send this process the reply.
-start_writers(Pid, Chunk, N) ->
-    Self = self(),
-    [
-        spawn(fun() ->
-            Self ! {write_reply, gen_server:call(Pid, {'writeLine:', [Chunk]}, 30000)}
-        end)
-     || _ <- lists:seq(1, N)
-    ].
-
-await_write_reply() ->
-    receive
-        {write_reply, Reply} -> Reply
-    after 20000 -> error(no_write_reply)
-    end.
 
 %%% BT-5269: a writeLine: whose child closed its stdin before taking the line
 %%% raises (it used to return nil: the line was queued, then lost silently).
@@ -412,10 +396,9 @@ writeLine_raises_when_the_child_closed_stdin_test_() ->
 
 writeLine_raises_when_the_child_closed_stdin() ->
     {Notify, Collector} = make_collector(),
+    {Exe, Args} = beamtalk_subprocess_test_helpers:closed_stdin_cmd(),
     {ok, Pid} = beamtalk_reactive_subprocess:start(#{
-        executable => <<"/bin/sh">>,
-        args => [<<"-c">>, <<"exec 0<&-; echo closed; exec sleep 60">>],
-        notify => Notify
+        executable => Exe, args => Args, notify => Notify
     }),
     %% The child prints once its stdin is closed.
     wait_for_line(Collector, {beamtalk_string, <<"closed">>}),
