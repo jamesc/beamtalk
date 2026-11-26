@@ -35,9 +35,25 @@
 //! [`match_scrutinee_frame_corpus_reports_the_pre_fix_lowering`] shows the
 //! verifier catches the pre-fix lowering ([`Fault::ReceiverPreludeInTuple`])
 //! over the same rows.
+//!
+//! BT-5291: a `^` out of a conditional nested in such an arm
+//! (`self bump match: [k -> k > 2 ifTrue: [^ k * 10]]`) was an
+//! `UnbracketedNlrClosure`, and a real miscompile: a field written before the
+//! `match:` was lost when the `^` committed. The conditional's bracket class
+//! (`classify_inlined`) was first decided by the statement classifier before
+//! the arm bound `k`, read `k` as a possible field read, and was cached under
+//! the span alone, so the window in the arm bracketed nothing while the
+//! lowering ran the `^` block as a closure. **Invariant:** a send's cached
+//! class is the one its own scope decides; the key holds the scope's view of
+//! the send's names (`InlinedClassScope`).
+//! [`match_arm_nested_return_corpus_compiles`] proves it over scrutinee x
+//! shape x return arm x position x frame x actor context (any scrutinee: the
+//! class never depended on it), and
+//! [`match_arm_nested_return_corpus_reports_the_pre_fix_lowering`] shows the
+//! verifier catches the pre-fix cache ([`Fault::InlinedClassScopeBlind`]).
 
 use super::loop_body_conditional_receiver_corpus::{
-    ARMS, HELPERS, LOOPS, PRELUDES, RECEIVERS, passes, phase0_rejects,
+    ARMS, HELPERS, LOOPS, RECEIVERS, assert_rows_pass, phase0_rejects,
 };
 use super::match_scrutinee_state_corpus::INLINE_HEADERS;
 use super::while_condition_binding_corpus::repl_report;
@@ -127,30 +143,7 @@ fn match_scrutinee_frame_corpus_compiles() {
         "only {} rows; the corpus has thinned out",
         rows.len()
     );
-    for (_, body) in &rows {
-        assert_parses(&source(&method("", 0, body)));
-    }
-    let mut failures = Vec::new();
-    for (ctx, prelude) in PRELUDES {
-        let methods: Vec<String> = rows
-            .iter()
-            .enumerate()
-            .map(|(i, (_, body))| method(prelude, i, body))
-            .collect();
-        if passes(&source(&methods.concat())) {
-            continue;
-        }
-        failures.extend(rows.iter().zip(&methods).filter_map(|((name, _), method)| {
-            let single = source(method);
-            (!passes(&single)).then(|| format!("{ctx} / {name}:\n{single}"))
-        }));
-    }
-    assert!(
-        failures.is_empty(),
-        "{} match-scrutinee row(s) fail verified codegen:\n\n{}",
-        failures.len(),
-        failures.join("\n\n")
-    );
+    assert_rows_pass("match-scrutinee", &rows, method, source);
 }
 
 /// BT-5289: with the scrutinee prelude rendered into the `match:`'s tuple
@@ -277,5 +270,116 @@ fn repl_local_assignment_scrutinee_matches_verify() {
         "{} REPL local-assignment scrutinee row(s) fail:\n{}",
         failures.len(),
         failures.join("\n")
+    );
+}
+
+/// BT-5291: arm bodies `{B}` that return from the method out of a nested
+/// conditional reading the arm's own pattern variable `k`. Each `^` block
+/// holds a guarded operator (`k * 10`), so the conditional is never inlined
+/// pure: it runs its `^` block as a closure behind a bracket, the shape the
+/// stale class left unbracketed.
+const RETURN_ARMS: &[&str] = &[
+    "k > 0 ifTrue: [^ k * 10]",
+    "(k > 0) ifTrue: [^ k * 10] ifFalse: [nil]",
+    "(k > 0) ifFalse: [^ k * 10]",
+    "(k > 0) and: [^ k * 10]",
+    "k ifNotNil: [:v | v > 0 ifTrue: [^ v * 10]]",
+];
+
+/// BT-5291: the `match:` shapes binding `k` for a [`RETURN_ARMS`] body `{B}`
+/// over a scrutinee `{R}`: a lone variable arm, and a type arm before a
+/// wildcard (a chain-lowered `match:`).
+const RETURN_MATCHES: &[&str] = &[
+    "{R} match: [k -> {B}]",
+    "{R} match: [k :: Integer -> {B}; _ -> nil]",
+];
+
+/// BT-5291: scrutinees for [`RETURN_ARMS`]: a keyword and a binary
+/// self-send (BT-4000's receivers), the issue's sent parameter, and a local
+/// that advances nothing (the stale class did not depend on the scrutinee).
+const RETURN_SCRUTINEES: &[&str] = &["(self isAlive: n)", "(self + n)", "xs first", "n"];
+
+/// BT-5291: every `(name, method body)` row of a `match:` whose arm returns
+/// from a nested conditional, as a statement, an assigned local and a field
+/// write's right-hand side, in every frame of [`LOOPS`].
+fn return_rows() -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for (l, lp) in LOOPS.iter().enumerate() {
+        for (r, scrutinee) in RETURN_SCRUTINEES.iter().enumerate() {
+            for (m, shape) in RETURN_MATCHES.iter().enumerate() {
+                for (a, arm) in RETURN_ARMS.iter().enumerate() {
+                    let matched = shape.replace("{R}", scrutinee).replace("{B}", arm);
+                    for (p, position) in POSITIONS[..3].iter().enumerate() {
+                        let body = lp.replace("{S}", &position.replace("{M}", &matched));
+                        if phase0_rejects(&source(&method("", 0, &body))) {
+                            continue;
+                        }
+                        out.push((format!("loop{l} scrut{r} match{m} ret{a} pos{p}"), body));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// BT-5291: a `^` out of a nested conditional in a `match:` arm, over every
+/// scrutinee x shape x return arm x position x frame x actor context: every
+/// row passes the debug verifier and compiles through `erlc`. Before the fix
+/// the conditional's class was decided while the arm's `k` was unbound and
+/// cached, so the bracket window never opened around the dynamic send that
+/// ran the `^` block (`UnbracketedNlrClosure`).
+#[test]
+fn match_arm_nested_return_corpus_compiles() {
+    let rows = return_rows();
+    assert!(
+        rows.len() >= 1000,
+        "only {} rows; the corpus has thinned out",
+        rows.len()
+    );
+    assert_rows_pass("match-arm nested-return", &rows, method, source);
+}
+
+/// BT-5291: with the class cached under the span alone again
+/// ([`Fault::InlinedClassScopeBlind`]), the verifier reports
+/// `UnbracketedNlrClosure` for the rows whose `^` conditional reads the arm's
+/// `k` directly: the conditional's class is first decided by the statement
+/// classifier, before the arm binds `k`.
+#[cfg(debug_assertions)]
+#[test]
+fn match_arm_nested_return_corpus_reports_the_pre_fix_lowering() {
+    let mut missed = Vec::new();
+    let mut checked = 0;
+    // The rows of the method root, whose statement classifier is the probe,
+    // over the `k`-reading return arms (not `ifNotNil:`'s `v`).
+    let root = LOOPS
+        .iter()
+        .position(|l| *l == "{S}")
+        .expect("a method-root frame");
+    let not_nil = RETURN_ARMS
+        .iter()
+        .position(|a| a.contains("ifNotNil:"))
+        .expect("an ifNotNil: arm");
+    let (root, not_nil) = (format!("loop{root} "), format!(" ret{not_nil} "));
+    for (name, body) in return_rows()
+        .into_iter()
+        .filter(|(name, _)| name.starts_with(&root) && !name.contains(&not_nil))
+    {
+        checked += 1;
+        let src = source(&method("", 0, &body));
+        let report = super::verifier_report(&src, Some(Fault::InlinedClassScopeBlind));
+        if !report
+            .as_deref()
+            .is_some_and(|r| r.contains("UnbracketedNlrClosure"))
+        {
+            missed.push(format!("{name}: {report:?}\n{body}"));
+        }
+    }
+    assert!(checked >= 50, "only {checked} faulted rows checked");
+    assert!(
+        missed.is_empty(),
+        "{} row(s) where the verifier missed the pre-fix lowering:\n{}",
+        missed.len(),
+        missed.join("\n")
     );
 }

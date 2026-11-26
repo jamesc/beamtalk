@@ -139,15 +139,20 @@ pub(in crate::core_erlang) struct SyncedCallState {
     /// like [`Self::inlined_classes`] so a checkout can pop it while
     /// holding `&mut self`.
     pub(in crate::core_erlang) guarded_op_loops: std::cell::RefCell<Vec<GuardedOpLoopMarker>>,
-    /// The class of a conditional with a `super` send in a branch
-    /// ([`CoreErlangGenerator::classify_inlined`]), decided once per send.
+    /// The class of a conditional with a `super` send or (BT-4524) a `^` in a
+    /// branch ([`CoreErlangGenerator::classify_inlined`]), decided once per
+    /// send and (BT-5291) per scope it is asked in ([`InlinedClassScope`]).
     pub(in crate::core_erlang) inlined_classes:
-        std::cell::RefCell<std::collections::HashMap<Span, UserCodeCall>>,
+        std::cell::RefCell<std::collections::HashMap<(Span, InlinedClassScope), UserCodeCall>>,
     /// BT-4269: names the loop being planned will bind (its block parameters
     /// and the temps its body assigns that are not fields), seen as locals by
     /// [`CoreErlangGenerator::analysis_touches_actor_state`] while
     /// [`CoreErlangGenerator::loop_holds_bracketed_call`] probes the loop
-    /// before those names are in scope. Empty outside a probe.
+    /// before those names are in scope. BT-5291: also the names a
+    /// conditional's own receiver binds, while
+    /// [`CoreErlangGenerator::classify_inlined`] classifies it (the window
+    /// and the lowering included), pushed on top of any probe's and popped
+    /// after. Empty otherwise.
     pub(in crate::core_erlang) probe_locals: std::cell::RefCell<Vec<String>>,
     /// How many [`CoreErlangGenerator::expr_holds_bracketed_call`] probes
     /// are open. Only the outermost restores [`Self::inlined_classes`]: a
@@ -670,26 +675,102 @@ impl CoreErlangGenerator {
         if !sends_to_super && !returns {
             return UserCodeCall::No;
         }
-        // Decided once per send: whether the conditional threads can change as
-        // its receiver is sequenced ahead, and the window, the gap note and the
-        // lowering must agree.
-        let key = blocks[0].span;
-        if let Some(class) = self.synced.inlined_classes.borrow().get(&key) {
-            return *class;
+        // Decided once per send and scope: whether the conditional threads can
+        // change as its receiver is sequenced ahead, and the window, the gap
+        // note and the lowering must agree. BT-5291: the class is decided in
+        // the scope the blocks run in, which the receiver has already run in,
+        // and is keyed by that scope ([`InlinedClassScope`]).
+        let receiver_binds = Self::inlined_class_receiver_binds(receiver);
+        self.with_extra_probe_locals(receiver_binds, || {
+            let key = (blocks[0].span, self.inlined_class_scope(receiver, &blocks));
+            if let Some(class) = self.synced.inlined_classes.borrow().get(&key) {
+                return *class;
+            }
+            let class = if self.conditional_blocks_need_threading(&blocks) {
+                UserCodeCall::No
+            } else if sends_to_super
+                || self
+                    .pure_boolean_shape(receiver, selector, arguments)
+                    .is_none()
+            {
+                UserCodeCall::Yes
+            } else {
+                UserCodeCall::No
+            };
+            self.synced.inlined_classes.borrow_mut().insert(key, class);
+            class
+        })
+    }
+
+    /// BT-5291: the names a conditional's `receiver` binds itself (a
+    /// value-position local assignment, `(y := x) > 0 ifTrue: [^ y * 10]`).
+    /// The receiver runs before either block, so in the scope the blocks run
+    /// in, and in the scope the lowering decides the conditional's shape in
+    /// (after the receiver is sequenced ahead), these names are bound.
+    /// [`Self::classify_inlined`] classifies with them bound, so its answer is
+    /// the same before the receiver is compiled (the window) as after it (the
+    /// gap note, the lowering). Read off the one walker of "the names a
+    /// statement binds outside its nested blocks".
+    fn inlined_class_receiver_binds(receiver: &Expression) -> Vec<String> {
+        if fault!(InlinedClassScopeBlind) {
+            return Vec::new();
         }
-        let class = if self.conditional_blocks_need_threading(&blocks) {
-            UserCodeCall::No
-        } else if sends_to_super
-            || self
-                .pure_boolean_shape(receiver, selector, arguments)
-                .is_none()
-        {
-            UserCodeCall::Yes
-        } else {
-            UserCodeCall::No
-        };
-        self.synced.inlined_classes.borrow_mut().insert(key, class);
-        class
+        beamtalk_core::semantic_analysis::block_facts::names_assigned_outside_nested_blocks(
+            receiver,
+        )
+        .into_iter()
+        .map(|name| name.to_string())
+        .collect()
+    }
+
+    /// BT-5291: runs `f` with `names` seen as bound by
+    /// [`Self::name_is_unbound_here`], on top of any probe locals already in
+    /// effect ([`SyncedCallState::probe_locals`]).
+    fn with_extra_probe_locals<T>(&self, names: Vec<String>, f: impl FnOnce() -> T) -> T {
+        if names.is_empty() {
+            return f();
+        }
+        let depth = self.synced.probe_locals.borrow().len();
+        self.synced.probe_locals.borrow_mut().extend(names);
+        let out = f();
+        self.synced.probe_locals.borrow_mut().truncate(depth);
+        out
+    }
+
+    /// BT-5291: the scope half of [`Self::classify_inlined`]'s cache key, read
+    /// under the receiver's own bindings ([`Self::inlined_class_receiver_binds`]).
+    /// The names are those the blocks read from outside themselves (their
+    /// analysis's captured reads) and those the receiver reads (the receiver
+    /// threading half of [`Self::pure_boolean_shape`] reads its operands'
+    /// blocks too).
+    fn inlined_class_scope(
+        &self,
+        receiver: &Expression,
+        blocks: &[&beamtalk_core::ast::Block],
+    ) -> InlinedClassScope {
+        if fault!(InlinedClassScopeBlind) {
+            return InlinedClassScope::default();
+        }
+        let mut unbound: Vec<String> = blocks
+            .iter()
+            .flat_map(|block| self.block_profile_or_analyze(block).captured_reads)
+            .filter(|name| self.name_is_unbound_here(name))
+            .collect();
+        beamtalk_core::ast_walker::walk_expression(receiver, &mut |e| {
+            if let Expression::Identifier(id) = e
+                && self.name_is_unbound_here(id.name.as_str())
+            {
+                unbound.push(id.name.to_string());
+            }
+        });
+        unbound.sort_unstable();
+        unbound.dedup();
+        InlinedClassScope {
+            unbound,
+            in_loop_body: self.in_loop_body,
+            synced_calls_active: self.synced_calls_active(),
+            decline_pure_boolean_inline: self.decline_pure_boolean_inline,
+        }
     }
 
     /// The class of a loop with literal blocks ([`SendUserCode::LoopOrClosureCall`]).
@@ -1478,6 +1559,40 @@ impl CoreErlangGenerator {
         super::threaded_ir::take_cell_store_emitted();
         doc
     }
+}
+
+/// BT-5291: what [`CoreErlangGenerator::classify_inlined`]'s class reads from
+/// the scope it is asked in, beside the send itself: the second half of the
+/// [`SyncedCallState::inlined_classes`] key.
+///
+/// The class is cached so the bracket window, the gap note and the lowering
+/// of one send agree while its receiver is sequenced ahead. Keyed by the span
+/// alone it also outlived a probe run in another scope: the statement
+/// classifier asks about a `match:` arm's body before the arm binds its
+/// pattern variables, and about a loop body's statements before the loop
+/// binds its block parameter. Such a probe reads the unbound name as a
+/// possible field read ([`CoreErlangGenerator::analysis_touches_actor_state`])
+/// and classes the conditional as threading `State` (no bracket). In the arm,
+/// where the name is bound, the blocks thread nothing and the lowering runs
+/// the `^` block as a closure, but the window read the probe's class and
+/// stored nothing first (`UnbracketedNlrClosure`; a field written ahead of the
+/// `^` was lost). The key holds every input of the class that differs between
+/// scopes, so a class is reused only where it was decided.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub(in crate::core_erlang) struct InlinedClassScope {
+    /// The names the conditional's receiver and blocks read that are bound
+    /// by nothing in scope ([`CoreErlangGenerator::name_is_unbound_here`]), sorted.
+    unbound: Vec<String>,
+    /// A loop body, where a block's local write makes the conditional thread
+    /// ([`CoreErlangGenerator::conditional_blocks_need_threading`]).
+    in_loop_body: bool,
+    /// Whether calls here are bracketed: not in a cell closure, which also
+    /// decides the eligible families
+    /// ([`CoreErlangGenerator::synced_calls_active`]).
+    synced_calls_active: bool,
+    /// Inside a pure-inline conditional's fallback closures, where
+    /// [`CoreErlangGenerator::pure_boolean_shape`] declines.
+    decline_pure_boolean_inline: bool,
 }
 
 /// Proof that a bracket window was opened for an expression
