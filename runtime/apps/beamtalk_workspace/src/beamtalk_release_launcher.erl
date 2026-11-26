@@ -390,11 +390,16 @@ file order. Every other flag, including `-name`, `-sname`, `-detached`, `-s`,
 `-run` and `-eval`, is ignored: the check VM never loads the file, so none of
 them can run, start distribution or silence its output there. Reads erl's
 arg-file syntax: whitespace-separated words, `#` comments to the end of the
-line, and single or double quoted words; `-extra` ends the flags. A `+`
+line, `\\` escapes the next character, and single or double quoted words; `-extra` ends the flags. A `+`
 emulator flag ends the words of the flag before it.
 """.
 -spec vm_args_dist_flags(string() | binary()) ->
-    #{ssl_dist_opt := [string()], ssl_dist_optfile := [string()], proto_dist := [string()]}.
+    #{
+        ssl_dist_opt := [string()],
+        ssl_dist_optfile := [string()],
+        proto_dist := [string()],
+        args_file := [string()]
+    }.
 vm_args_dist_flags(Text) ->
     Chars =
         case unicode:characters_to_list(Text) of
@@ -403,7 +408,7 @@ vm_args_dist_flags(Text) ->
             _ -> binary_to_list(iolist_to_binary(Text))
         end,
     Words = vm_args_words(Chars, [], []),
-    Empty = #{ssl_dist_opt => [], ssl_dist_optfile => [], proto_dist => []},
+    Empty = #{ssl_dist_opt => [], ssl_dist_optfile => [], proto_dist => [], args_file => []},
     vm_args_collect(Words, none, Empty).
 
 vm_args_collect([], _Current, Acc) ->
@@ -414,6 +419,8 @@ vm_args_collect(["-ssl_dist_opt" | T], _, Acc) ->
     vm_args_collect(T, ssl_dist_opt, Acc);
 vm_args_collect(["-ssl_dist_optfile" | T], _, Acc) ->
     vm_args_collect(T, ssl_dist_optfile, Acc);
+vm_args_collect(["-args_file" | T], _, Acc) ->
+    vm_args_collect(T, args_file, Acc);
 vm_args_collect(["-proto_dist" | T], _, Acc) ->
     vm_args_collect(T, proto_dist, Acc);
 vm_args_collect([[Lead | _] | T], _, Acc) when Lead =:= $-; Lead =:= $+ ->
@@ -424,16 +431,19 @@ vm_args_collect([_ | T], none, Acc) ->
 vm_args_collect([Word | T], Flag, Acc) ->
     vm_args_collect(T, Flag, Acc#{Flag := maps:get(Flag, Acc) ++ [Word]}).
 
-%% Split into words: whitespace separates, `#` starts a comment at the start
-%% of a word, and a quoted word may hold whitespace.
+%% Split into words as erl's arg-file reader does (checked against `erl`):
+%% whitespace separates, `#` starts a comment to the end of the line, `\\`
+%% escapes the next character, and a quoted word may hold whitespace.
 vm_args_words([], [], Acc) ->
     lists:reverse(Acc);
 vm_args_words([], Cur, Acc) ->
     lists:reverse([lists:reverse(Cur) | Acc]);
 vm_args_words([C | T], Cur, Acc) when C =:= $\s; C =:= $\t; C =:= $\n; C =:= $\r ->
     vm_args_words(T, [], vm_args_flush(Cur, Acc));
-vm_args_words([$# | T], [], Acc) ->
-    vm_args_words(lists:dropwhile(fun(C) -> C =/= $\n end, T), [], Acc);
+vm_args_words([$# | T], Cur, Acc) ->
+    vm_args_words(lists:dropwhile(fun(C) -> C =/= $\n end, T), [], vm_args_flush(Cur, Acc));
+vm_args_words([$\\, C | T], Cur, Acc) ->
+    vm_args_words(T, [C | Cur], Acc);
 vm_args_words([Q | T], Cur, Acc) when Q =:= $"; Q =:= $' ->
     {Quoted, Rest} = lists:splitwith(fun(C) -> C =/= Q end, T),
     vm_args_words(lists:nthtail(min(1, length(Rest)), Rest), lists:reverse(Quoted) ++ Cur, Acc);
@@ -450,7 +460,20 @@ vm_args_flags() ->
         {ok, [[Path | _] | _]} ->
             case file:read_file(Path) of
                 {ok, Text} ->
-                    {ok, vm_args_dist_flags(Text)};
+                    case vm_args_dist_flags(Text) of
+                        #{args_file := [Nested | _]} ->
+                            %% The node would load it; this check cannot see inside.
+                            {error,
+                                io_lib:format(
+                                    "'~ts' sets -args_file ~ts: the check cannot read the "
+                                    "distribution flags in a nested argument file; put "
+                                    "-ssl_dist_opt, -ssl_dist_optfile and -proto_dist in the "
+                                    "[release] vm-args file itself",
+                                    [Path, Nested]
+                                )};
+                        Flags ->
+                            {ok, Flags}
+                    end;
                 {error, Reason} ->
                     {error,
                         io_lib:format("cannot read '~ts': ~ts", [Path, file:format_error(Reason)])}

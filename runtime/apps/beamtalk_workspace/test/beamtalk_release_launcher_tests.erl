@@ -209,7 +209,7 @@ vm_args_dist_flags_test_() ->
     Flags = fun(Text) -> beamtalk_release_launcher:vm_args_dist_flags(Text) end,
     [
         ?_assertEqual(
-            #{ssl_dist_opt => [], ssl_dist_optfile => [], proto_dist => []},
+            #{ssl_dist_opt => [], ssl_dist_optfile => [], proto_dist => [], args_file => []},
             Flags("-mode interactive\n-sname stray\n-detached\n-s init stop\n-eval \"x().\"\n")
         ),
         %% A stray -sname does not hide a later weaker -ssl_dist_opt.
@@ -217,13 +217,19 @@ vm_args_dist_flags_test_() ->
             #{
                 ssl_dist_opt => ["server_verify", "verify_none"],
                 ssl_dist_optfile => [],
-                proto_dist => []
+                proto_dist => [],
+                args_file => []
             },
             Flags("-sname stray\n-ssl_dist_opt server_verify verify_none\n")
         ),
         %% `+` emulator flags and a non-UTF-8 comment do not leak into the words.
         ?_assertEqual(
-            #{ssl_dist_opt => ["a"], ssl_dist_optfile => ["f"], proto_dist => ["inet_tls"]},
+            #{
+                ssl_dist_opt => ["a"],
+                ssl_dist_optfile => ["f"],
+                proto_dist => ["inet_tls"],
+                args_file => []
+            },
             Flags(
                 <<"# caf", 16#E9,
                     "\n-ssl_dist_opt a\n+K true\n-ssl_dist_optfile f +P 9\n-proto_dist inet_tls\n+sbwt none\n">>
@@ -233,14 +239,30 @@ vm_args_dist_flags_test_() ->
             #{
                 ssl_dist_opt => ["a", "b", "c d"],
                 ssl_dist_optfile => ["/p q/o.conf"],
-                proto_dist => ["inet_tls"]
+                proto_dist => ["inet_tls"],
+                args_file => []
             },
             Flags(
                 "# -ssl_dist_opt commented\n-ssl_dist_opt a b\n-detached\n"
                 "-ssl_dist_opt 'c d' -ssl_dist_optfile \"/p q/o.conf\"\n"
                 "-proto_dist inet_tls\n-extra -proto_dist other\n"
             )
-        )
+        ),
+        %% A `+` flag between two -ssl_dist_opt groups must not shift their pairs.
+        ?_assertMatch(
+            #{ssl_dist_opt := ["server_verify", "verify_peer", "client_verify", "verify_none"]},
+            Flags(
+                "-ssl_dist_opt server_verify verify_peer\n+A30\n"
+                "-ssl_dist_opt client_verify verify_none\n"
+            )
+        ),
+        %% erl's own reading: `#` ends a word, `\\` escapes the next character.
+        ?_assertMatch(
+            #{ssl_dist_opt := ["a", "b c"], ssl_dist_optfile := ["f"]},
+            Flags("-ssl_dist_opt a b\\ c#x\n-ssl_dist_optfile f # note\n")
+        ),
+        %% A nested argument file is reported, for the launcher to refuse.
+        ?_assertMatch(#{args_file := ["more.args"]}, Flags("-args_file more.args\n"))
     ].
 
 %% An epmd that already runs on loopback only would hide the node from other
