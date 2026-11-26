@@ -1129,7 +1129,7 @@ This holds however the receiver is typed: an untyped local or parameter, an `:: 
 | `n > x`  | `x greaterThanFromNumber: n`    | `n > x`  |
 | `n >= x` | `x greaterOrEqualFromNumber: n` | `n >= x` |
 
-This covers every send: an inlined `5 < x`, `perform:`, and the methods built on the four operators (`max:`, `min:`, `between:and:`). An argument whose class has no hook raises `does_not_understand` for the hook, with a hint naming the operator typed, instead of answering by the BEAM's term order (`3 <= nil` used to be `true`, `3 max: nil` used to be `nil`):
+This covers every send: an inlined `5 < x`, `perform:`, and the methods built on the four operators (`max:`, `min:`, `between:and:`), and Collection `max` / `min` (all numbers, all Strings or all Symbols compare natively; any other mix is folded pairwise with the dispatched `>` / `<`, so `#(3, nil) max` raises as `3 max: nil` does). An argument whose class has no hook raises `does_not_understand` for the hook, with a hint naming the operator typed, instead of answering by the BEAM's term order (`3 <= nil` used to be `true`, `3 max: nil` used to be `nil`):
 
 ```beamtalk
 3 <= nil
