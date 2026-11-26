@@ -108,7 +108,7 @@ handle_term(<<"reload-file">>, Params, _Msg, _SessionPid) ->
         {ok, [Path]} ->
             case beamtalk_repl_eval:reload_file(binary_to_list(Path)) of
                 {ok, ClassNames} ->
-                    {value, #{<<"classes">> => [to_bin(Name) || Name <- ClassNames]}};
+                    {value, #{<<"classes">> => ClassNames}};
                 {error, Reason} ->
                     {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
             end;
@@ -128,7 +128,7 @@ save_method(Class, Selector, Source, Params) ->
                 )
             of
                 {ok, ClassName} ->
-                    {value, #{<<"class">> => to_bin(ClassName), <<"selector">> => Selector}};
+                    {value, #{<<"class">> => ClassName, <<"selector">> => Selector}};
                 {error, Reason} ->
                     {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
             end;
@@ -185,11 +185,6 @@ missing_param(Op, Key) ->
             iolist_to_binary([Op, <<" requires a non-empty ">>, Key]),
             iolist_to_binary([<<"Pass ">>, Key, <<" as a String.">>])
         )}.
-
--spec to_bin(binary() | atom() | string()) -> binary().
-to_bin(Value) when is_binary(Value) -> Value;
-to_bin(Value) when is_atom(Value) -> atom_to_binary(Value, utf8);
-to_bin(Value) when is_list(Value) -> unicode:characters_to_binary(Value).
 
 %%====================================================================
 %% Op descriptors for dynamic describe
