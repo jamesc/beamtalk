@@ -158,6 +158,17 @@ start_exit_watcher(ActorPid, Block) ->
 %% ADR 0079 / ADR 0126: name-resolving proxy fan-out. Name-only selectors
 %% answer from the proxy itself; other selectors resolve the name to the
 %% currently-registered pid and re-enter the pid-based clauses below.
+async_send_impl({registered, _Name, Node} = Ref, isAlive, [], FuturePid, ClassHint) when
+    Node =/= node()
+->
+    %% A node-qualified ref's isAlive resolves the name on `Node`: off the
+    %% sender, as for a remote pid (BT-5192).
+    ask_alive_async(FuturePid, class_label(ClassHint), Node, fun() ->
+        case proxy_route(Ref, isAlive, []) of
+            {answer, Alive} -> {ok, Alive};
+            {error, _} = Error -> Error
+        end
+    end);
 async_send_impl(Ref, Selector, Args, FuturePid, ClassHint) when ?IS_PROXY_REF(Ref) ->
     case proxy_route(Ref, Selector, Args) of
         {answer, Value} ->
@@ -169,29 +180,15 @@ async_send_impl(Ref, Selector, Args, FuturePid, ClassHint) when ?IS_PROXY_REF(Re
             beamtalk_future:reject(FuturePid, Error),
             ok
     end;
-async_send_impl(ActorPid, isAlive, [], FuturePid, ClassHint) when node(ActorPid) =/= node() ->
+async_send_impl(ActorPid, isAlive, [], FuturePid, ClassHint) when
+    is_pid(ActorPid), node(ActorPid) =/= node()
+->
     %% BT-5192: a remote isAlive asks the actor's node (up to the remote-call
-    %% timeout). Ask from a separate process so an async send hands back its
-    %% future at once instead of blocking the sender on the round trip; the
-    %% future's own orphan cap is far longer than that bound.
+    %% timeout), off the sender; see ask_alive_async/4.
     Class = class_label(ClassHint),
-    _ = spawn(fun() ->
-        %% Settle the future on every path, so a raise here never leaves an
-        %% awaiting caller hanging until the future's orphan cap.
-        try beamtalk_pid:ask_alive(ActorPid, Class, isAlive) of
-            {ok, Alive} -> beamtalk_future:resolve(FuturePid, Alive);
-            {error, Error} -> beamtalk_future:reject(FuturePid, Error)
-        catch
-            ErrClass:Reason ->
-                beamtalk_future:reject(
-                    FuturePid,
-                    beamtalk_pid:unexpected_answer_error(
-                        Class, isAlive, node(ActorPid), {ErrClass, Reason}
-                    )
-                )
-        end
-    end),
-    ok;
+    ask_alive_async(FuturePid, Class, node(ActorPid), fun() ->
+        beamtalk_pid:ask_alive(ActorPid, Class, isAlive)
+    end);
 async_send_impl(ActorPid, Selector, Args, FuturePid, _ClassHint) when
     ?IS_LOCAL_LIFECYCLE(Selector, Args)
 ->
@@ -278,6 +275,29 @@ async_send_impl(ActorPid, Selector, Args, FuturePid, ClassHint) ->
             false ->
                 beamtalk_future:reject(FuturePid, actor_dead_error_record(Selector)),
                 {ok, error}
+        end
+    end),
+    ok.
+
+%% Settle `FuturePid` with `Ask()`'s `{ok, Alive}` / `{error, Error}` from a
+%% separate process, so an async `isAlive` that has to ask another node hands
+%% back its future at once instead of blocking the sender on the round trip
+%% (bounded by the remote-call timeout; the future's orphan cap is far longer).
+%% The future is settled on every path, including a raise.
+-spec ask_alive_async(
+    pid(), atom(), node(), fun(() -> {ok, boolean()} | {error, #beamtalk_error{}})
+) -> ok.
+ask_alive_async(FuturePid, Class, Node, Ask) ->
+    _ = spawn(fun() ->
+        try Ask() of
+            {ok, Alive} -> beamtalk_future:resolve(FuturePid, Alive);
+            {error, Error} -> beamtalk_future:reject(FuturePid, Error)
+        catch
+            ErrClass:Reason ->
+                beamtalk_future:reject(
+                    FuturePid,
+                    beamtalk_pid:unexpected_answer_error(Class, isAlive, Node, {ErrClass, Reason})
+                )
         end
     end),
     ok.

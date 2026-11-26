@@ -7641,7 +7641,9 @@ worker disconnect                               // => true
 `connect` (and `ping`, which auto-connects) apply a security policy (see
 Security, below): a same-host connection always succeeds; an off-host
 connection is refused with `kind = insecure_distribution` unless this node
-runs TLS distribution. `Node named:` only validates the `name@host` shape and
+runs TLS distribution. Deciding whether a host is this host takes a name
+lookup, which is bounded at 2 seconds per address family: a host that has not
+resolved by then is treated as off-host. `Node named:` only validates the `name@host` shape and
 never touches the network, so it always succeeds for a well-formed name —
 reachability is only proven by `connect`/`ping`.
 
@@ -7713,6 +7715,14 @@ real operational cost, not just a lookup convenience:
 > **Connect waits for `global`.** `Node connect` answers only after OTP's
 > `global` has synced names with the new peer, so a `scope: #global` name
 > registered right after `connect` is visible from the peer at once.
+
+> **Registration is bounded.** Registering a global name waits for `global`'s
+> cluster-wide lock, which another node may be holding. `spawnAs:scope: #global`
+> waits at most 5 seconds for it; if the lock is not free by then the new
+> actor is stopped and the result is an `Error` tagged `timeout`, whose
+> `details` name the requested name. A supervised `withName:scope: #global`
+> child in that situation is not started (a warning is logged), like one
+> whose name is held on another node.
 
 When a netsplit heals and the same global name was registered on both sides,
 Beamtalk's own resolver keeps the *older* registrant (by start time) and
@@ -7817,14 +7827,16 @@ SystemAnnouncer current when: NodeVersionSkew do: [:e |
   guard: when a node connects, and again whenever a class reloads while
   peers stay connected, this node compares its own `Beamtalk shapeManifest`
   against each connected peer's and announces one event per class whose
-  version differs. It **never refuses the connection** — doing so would make
+  version differs. A skew is announced once per connection: again only if
+  the class matches and then skews again, its versions change, or the peer
+  reconnects. It **never refuses the connection** — doing so would make
   ADR 0125's rolling-upgrade procedure impossible — it only makes skew
   visible before the first send actually fails on it (the per-message check
   above is the real safety net). `aNode shapeSkew` (below) surfaces the same
   information as a point-in-time, queryable snapshot rather than only a
   live event stream. The count is kept on both sides: when one node reloads
-  a class, both it and the peer announce `NodeShapeSkew` and update their
-  counts. A peer that disconnects drops out of the count.
+  a class, both it and the peer update their counts, and each announces
+  `NodeShapeSkew` if the class's skew is new to it. A peer that disconnects drops out of the count.
 - **`NodeVersionSkew`** is announced once per connect (best-effort) when
   the peer runs a different wire-format version (`localWireVersion` /
   `remoteWireVersion`) or Beamtalk version (`localBeamtalkVersion` /

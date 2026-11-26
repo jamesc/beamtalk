@@ -210,7 +210,7 @@ with_other_creation(Pid) ->
     <<131, 88, Rest/binary>> = term_to_binary(Pid, [{minor_version, 2}]),
     Size = byte_size(Rest) - 4,
     <<Head:Size/binary, Creation:32>> = Rest,
-    binary_to_term(<<131, 88, Head/binary, (Creation + 1):32>>).
+    binary_to_term(<<131, 88, Head/binary, (Creation bxor 1):32>>).
 
 is_alive_across_partition(PeerNode) ->
     Pid = start_remote_counter(PeerNode),
@@ -334,7 +334,7 @@ unexpected_remote_results_are_errors(PeerNode) ->
 %%====================================================================
 
 remote_name_registered_to_port(PeerNode) ->
-    Name = list_to_atom("bt5192_port_" ++ beamtalk_test_unique:id()),
+    Name = beamtalk_test_unique:atom("bt5192_port"),
     Holder = rpc:call(PeerNode, erlang, spawn, [?MODULE, hold_registered_port, [Name, self()]]),
     ?awaitMessage({port_registered, Holder}),
     try

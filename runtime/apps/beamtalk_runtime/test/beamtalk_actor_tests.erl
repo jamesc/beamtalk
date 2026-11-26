@@ -4498,3 +4498,16 @@ bt5192_local_stop_failure_is_actor_dead_test() ->
         #beamtalk_error{kind = timeout},
         beamtalk_actor_send:lifecycle_exit_error(Local, stop, timeout)
     ).
+
+%% Async `isAlive` on a node-qualified proxy whose node cannot be reached
+%% rejects its future with `node_down` (asked off the sender).
+bt5192_async_proxy_is_alive_on_unreachable_node_rejects_node_down_test() ->
+    Node = node(beamtalk_dist_test_helper:unreachable_pid(bt5192_ghost)),
+    Future = beamtalk_future:new(),
+    ok = beamtalk_actor:async_send({registered, bt5192_some_name, Node}, isAlive, [], Future),
+    ?assertThrow(
+        {future_rejected, #beamtalk_error{
+            kind = node_down, selector = isAlive, details = #{node := Node}
+        }},
+        beamtalk_future:await(Future, 10000)
+    ).
