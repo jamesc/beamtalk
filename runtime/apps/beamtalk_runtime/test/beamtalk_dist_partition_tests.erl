@@ -210,7 +210,7 @@ with_other_creation(Pid) ->
     <<131, 88, Rest/binary>> = term_to_binary(Pid, [{minor_version, 2}]),
     Size = byte_size(Rest) - 4,
     <<Head:Size/binary, Creation:32>> = Rest,
-    binary_to_term(<<131, 88, Head/binary, (Creation + 1):32>>).
+    binary_to_term(<<131, 88, Head/binary, (Creation bxor 1):32>>).
 
 is_alive_across_partition(PeerNode) ->
     Pid = start_remote_counter(PeerNode),
