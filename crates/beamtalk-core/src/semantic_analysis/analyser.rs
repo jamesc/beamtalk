@@ -438,7 +438,8 @@ impl Analyser {
             // `x :: T` element of a destructuring pattern (BT-5284) binds
             // the name like a plain variable.
             Pattern::Type { binding, .. } => {
-                if self.scope.lookup_immut(&binding.name).is_none() {
+                // `_ :: T` (BT-5294) binds nothing.
+                if binding.name != "_" && self.scope.lookup_immut(&binding.name).is_none() {
                     self.scope
                         .define(&binding.name, binding.span, BindingKind::Local);
                 }

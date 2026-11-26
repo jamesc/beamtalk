@@ -337,6 +337,37 @@ impl CoreErlangGenerator {
                     already_bound,
                 )
             }
+            // BT-5294: `x :: T` / `_ :: T` element — extract the element, then
+            // class-test it like a top-level type arm; a miss falls through.
+            Pattern::Type { binding, class, .. } => {
+                let core_var = if binding.name == "_" {
+                    self.fresh_temp_var("TypeElem")
+                } else {
+                    Self::to_core_erlang_var(&binding.name)
+                };
+                let next = self.build_array_arm_body(
+                    array_var,
+                    elements,
+                    start + 1,
+                    continuation,
+                    failure_doc,
+                    already_bound,
+                )?;
+                let tested =
+                    self.dispatch_type_pattern_strategy(&core_var, &class.name, next, failure_doc);
+                Ok(docvec![
+                    "let ",
+                    leaf::var(core_var.clone()),
+                    " = ",
+                    self.runtime_send_call(
+                        leaf::var(array_var.to_string()),
+                        "at:",
+                        vec![index_lit(one_based)]
+                    ),
+                    " in ",
+                    tested
+                ])
+            }
             elem => Err(CodeGenError::UnsupportedFeature {
                 feature: "Unsupported pattern in Array match arm element".to_string(),
                 span: Some(elem.span()),

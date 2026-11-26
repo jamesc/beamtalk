@@ -420,9 +420,7 @@ fn parse_constructor_binding_type_annotation_bare_double_colon_rejected_with_sin
         "expected exactly one diagnostic (no cascade), got: {diags:?}"
     );
     assert!(
-        diags[0].message.contains(
-            "type annotations are not supported in a constructor pattern binding position"
-        ),
+        diags[0].message.contains("Expected a class name after '::'"),
         "unexpected diagnostic message: {:?}",
         diags[0].message
     );
@@ -499,21 +497,11 @@ fn parse_constructor_binding_bare_true_false_recovers_as_wildcard() {
 // ── Constructor binding `x :: ClassName` tail ──────────────────
 
 #[test]
-fn parse_constructor_binding_type_annotation_rejected_with_single_diagnostic() {
+fn parse_constructor_binding_type_annotation_is_a_type_pattern() {
+    // BT-5294: `Result ok: x :: Integer` is a type pattern, not an error.
     let (module, diags) =
-        parse_source("r match: [Result ok: x :: Integer -> x; Result error: _ -> 0]");
-    assert_eq!(
-        diags.len(),
-        1,
-        "expected exactly one diagnostic (no cascade), got: {diags:?}"
-    );
-    assert!(
-        diags[0].message.contains(
-            "type annotations are not supported in a constructor pattern binding position"
-        ),
-        "unexpected diagnostic message: {:?}",
-        diags[0].message
-    );
+        parse_source("r match: [Result ok: x :: Integer -> x; Result error: _ :: Error -> 0]");
+    assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
     let Expression::Match { arms, .. } = &module.expressions[0].expression else {
         panic!("expected Expression::Match");
     };
@@ -524,10 +512,45 @@ fn parse_constructor_binding_type_annotation_rejected_with_single_diagnostic() {
         panic!("expected Pattern::Constructor, got: {:?}", arms[0].pattern);
     };
     assert!(
-        matches!(ok_kw[0].1, Pattern::Wildcard(_)),
-        "expected 'x :: Integer' binding to recover as Pattern::Wildcard, got: {:?}",
+        matches!(&ok_kw[0].1, Pattern::Type { binding, class, .. }
+            if binding.name == "x" && class.name == "Integer"),
+        "got: {:?}",
         ok_kw[0].1
     );
+    let Pattern::Constructor {
+        keywords: err_kw, ..
+    } = &arms[1].pattern
+    else {
+        panic!("expected Pattern::Constructor");
+    };
+    assert!(
+        matches!(&err_kw[0].1, Pattern::Type { binding, class, .. }
+            if binding.name == "_" && class.name == "Error"),
+        "got: {:?}",
+        err_kw[0].1
+    );
+}
+
+#[test]
+fn parse_wildcard_type_pattern_in_tuple_and_top_level() {
+    // BT-5294: `_ :: T` parses at the top level and nested in a tuple.
+    let (module, diags) =
+        parse_source("e match: [_ :: ExitError -> 1; {_, port :: Integer} -> port; _ -> 0]");
+    assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!("expected Expression::Match");
+    };
+    assert!(
+        matches!(&arms[0].pattern, Pattern::Type { binding, class, .. }
+            if binding.name == "_" && class.name == "ExitError"),
+        "got: {:?}",
+        arms[0].pattern
+    );
+    let Pattern::Tuple { elements, .. } = &arms[1].pattern else {
+        panic!("expected tuple");
+    };
+    assert!(matches!(&elements[1], Pattern::Type { .. }));
+    assert!(matches!(&arms[2].pattern, Pattern::Wildcard(_)));
 }
 
 #[test]
