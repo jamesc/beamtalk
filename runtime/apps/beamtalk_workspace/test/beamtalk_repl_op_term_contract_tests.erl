@@ -89,6 +89,7 @@ eval_runtime_error_shape_test_() ->
 %%====================================================================
 
 inspect_live_actor_shape_test() ->
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     {ok, ActorPid} = beamtalk_actor:safe_spawn_linked(test_counter, 0),
     PidBin = list_to_binary(pid_to_list(ActorPid)),
     try
@@ -109,6 +110,7 @@ inspect_live_actor_shape_test() ->
 %%====================================================================
 
 error_record_fields_test() ->
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     %% An invalid actor pid is refused with a structured error term, never an
     %% exception and never JSON. The fields below are the ones a client may
     %% match on; `kind` is the stable discriminator.

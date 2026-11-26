@@ -125,6 +125,8 @@ defmodule BtAttach.RemoteCallAllowlistTest do
           acc -> MapSet.put(acc, {m, f})
         end
 
+      # A `:dynamic` call (git_mutate/2) covers every entry of its module, so
+      # no `beamtalk_git` entry can be reported stale until BT-5205 removes it.
       dynamic_modules =
         for {_file, {:call, {m, :dynamic}, _line}} <- remote_calls(), into: MapSet.new(), do: m
 
@@ -167,6 +169,7 @@ defmodule BtAttach.RemoteCallAllowlistTest do
         def g, do: rpc(:beamtalk_git, fun, [])
         def h, do: :rpc.multicall([node()], :m, :f, [])
         def i, do: Node.spawn(node(), fn -> :ok end)
+        def k, do: erpc(:beamtalk_direct_erpc, :go, [], 1, true)
 
         # The transport helper's own body takes its target as variables.
         defp erpc(mod, fun, args), do: :erpc.call(node(), mod, fun, args, 1)
@@ -187,6 +190,7 @@ defmodule BtAttach.RemoteCallAllowlistTest do
       assert {:call, {:beamtalk_cap, :fun}} in found
       assert {:call, {:beamtalk_mf, :run}} in found
       assert {:call, {:beamtalk_git, :dynamic}} in found
+      assert {:call, {:beamtalk_direct_erpc, :go}} in found
       assert {:forbidden, ":rpc.multicall"} in found
       assert {:forbidden, "Node.spawn"} in found
       refute Enum.any?(found, &match?({:dynamic_module, _}, &1))
@@ -292,6 +296,9 @@ defmodule BtAttach.RemoteCallAllowlistTest do
   end
 
   defp drop_transport_helpers(ast, _file), do: ast
+
+  # The transport's own local `erpc/5`, called directly, is as remote as `rpc/…`.
+  defp collect({:erpc, meta, [mod, fun | _]}, acc), do: [target(mod, fun, meta) | acc]
 
   # BtAttach.Workspace's local `rpc/2..4` transport call.
   defp collect({:rpc, meta, [mod, fun | rest]}, acc) do

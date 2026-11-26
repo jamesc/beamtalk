@@ -356,9 +356,9 @@ fn scan_liveview(text: &str) -> Vec<Sent> {
         let close = matching(bytes, open);
         let mut keys = elixir_map_keys(&text[open..=close]);
         keys.remove("op");
-        // `Map.put(request, "k", …)` additions before the decode call.
+        // `Map.put(request, "k", …)` additions before the `request_op(` call.
         let tail_end = text[close..]
-            .find("rpc(:beamtalk_repl_protocol")
+            .find("request_op(")
             .map_or(text.len(), |n| close + n);
         keys.extend(elixir_added_keys(&text[close..tail_end]));
         out.push(Sent {

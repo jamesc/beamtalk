@@ -1186,8 +1186,8 @@ defmodule BtAttach.Workspace do
   end
 
   # Dispatch a browse op through the op layer's request entry point
-  # (`beamtalk_repl_ops:request/3`). The browse ops ignore the session pid (they are workspace-global reflection), so
-  # `self()` is passed only to satisfy `request/3`'s arity. The `{:value, _}`
+  # (`beamtalk_repl_ops:request/3`). The browse ops ignore the session pid (they
+  # are workspace-global reflection), so `self()` is passed only to satisfy `request/3`'s arity. The `{:value, _}`
   # term is returned verbatim — `encode/2` (JSON) is never invoked, so the
   # wire-shaped rows arrive live over distribution (BT-2399 / ADR 0096).
   defp dispatch_browse(op, params) when is_binary(op) and is_map(params) do
@@ -1231,24 +1231,24 @@ defmodule BtAttach.Workspace do
   # whereas hover always resolves the hovered token against its line context, so
   # the distinction does not apply here.
   defp dispatch_hover(session_pid, code, context) do
+    before = Map.get(context, :before, "")
+    suffix = Map.get(context, :suffix, "")
+    {class, side} = hover_scope(context)
+
     params =
-      Map.merge(
-        %{
-          "code" => code,
-          "before" => Map.get(context, :before, ""),
-          "suffix" => Map.get(context, :suffix, "")
-        },
-        hover_scope(context)
-      )
+      %{"code" => code, "before" => before, "suffix" => suffix}
+      |> maybe_put_param("class", class)
+      |> maybe_put_param("side", side)
 
     request_op("hover", params, session_pid, @rpc_interactive_timeout)
   end
 
-  # BT-4463: the edited method's class, only when a method editor sent one.
+  # BT-4463: the edited method's class and side, only when a method editor sent
+  # both.
   defp hover_scope(%{class: class, side: side}) when is_binary(class) and is_binary(side),
-    do: %{"class" => class, "side" => side}
+    do: {class, side}
 
-  defp hover_scope(_context), do: %{}
+  defp hover_scope(_context), do: {nil, nil}
 
   # Build the `diagnostics` request as a flat map (`code` + `mode` top-level),
   # and send it with one `request/3` call, which dispatches through the term-returning op
