@@ -1076,8 +1076,10 @@ skips dependabot, and GitHub counts a skipped job as a passing required check.
 The workflow runs on `pull_request_target`, so it never checks out or runs PR
 code, and it runs only when both the PR author and the event's actor are
 `dependabot[bot]`. Because `main` no longer requires up-to-date branches, there is
-no branch-updater job. One repo setting is needed: Settings → Actions → General →
-"Allow GitHub Actions to create and approve pull requests". To check it, wait for
+no branch-updater job. Two repo settings are needed: Settings → Actions → General →
+"Allow GitHub Actions to create and approve pull requests", and Settings →
+General → "Allow auto-merge". `ci-ok` is the only gate on a bump, so a 0.x minor
+or a GitHub Actions bump merges once CI is green. To check it, wait for
 the next Monday dependabot PR (or comment `@dependabot recreate` on one): a
 patch/minor PR gets an approval from `github-actions[bot]` and auto-merge enabled;
 a major PR gets neither. `scripts/ci/test_dependabot_auto.py` pins the rest.

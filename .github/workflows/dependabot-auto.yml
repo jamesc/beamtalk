@@ -20,16 +20,12 @@ name: Dependabot auto-merge
 #   dependabot branch makes the actor a person, so the job skips.
 # * Values from the event reach the shell only through `env:`, never `${{ }}`
 #   inside `run:`.
-# Repo setting needed: Settings -> Actions -> General -> "Allow GitHub Actions to
-# create and approve pull requests". Pinned by scripts/ci/test_dependabot_auto.py.
+# Repo settings needed: "Allow GitHub Actions to create and approve pull requests"
+# (Settings -> Actions -> General) and "Allow auto-merge" (Settings -> General).
+# CI (`ci-ok`) is the only gate on a bump: a 0.x minor counts as a minor. Pinned by scripts/ci/test_dependabot_auto.py.
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
-
-# One run per PR; a newer push supersedes the older run.
-concurrency:
-  group: dependabot-auto-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
 
 permissions: {}
 
@@ -43,6 +39,11 @@ jobs:
       github.actor == 'dependabot[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository
     timeout-minutes: 5
+    # On the job, not the workflow: a skipped job (a person reopening the PR, say)
+    # never joins the group, so it cannot cancel a dependabot run mid-approval.
+    concurrency:
+      group: dependabot-auto-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     permissions:
       contents: write       # `gh pr merge --auto` (enable auto-merge)
       pull-requests: write  # approve the PR

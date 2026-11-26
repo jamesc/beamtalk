@@ -13,7 +13,9 @@ design: claude-review.yml skips dependabot (a skipped job passes the required
 import json
 import re
 import shutil
+import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -97,23 +99,26 @@ class DependabotAuto(unittest.TestCase):
             "empty": ([], "false"),
         }
         for name, (deps, want) in cases.items():
-            out = Path(self.id() + ".out")
-            out.write_text("")
-            try:
+            with tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp) / "out"
+                out.touch()
                 subprocess.run(["bash", "-e", "-c", script], check=True, capture_output=True,
-                               env={"PATH": __import__("os").environ["PATH"], "UPDATED": json.dumps(deps),
-                                    "GITHUB_OUTPUT": str(out.resolve())})
+                               env={"PATH": os.environ["PATH"], "UPDATED": json.dumps(deps),
+                                    "GITHUB_OUTPUT": str(out)})
                 self.assertEqual(out.read_text().strip(), f"eligible={want}", name)
-            finally:
-                out.unlink(missing_ok=True)
+
+    def test_concurrency_is_on_the_job_so_a_skipped_run_cannot_cancel_it(self):
+        self.assertNotIn("concurrency", self.doc)
+        self.assertTrue(self.job["concurrency"]["cancel-in-progress"])
 
 
 class ReviewCheckForDependabot(unittest.TestCase):
     def test_review_skips_dependabot_so_the_required_check_is_a_skip_not_a_run(self):
         job = load(REVIEW)["jobs"]["review"]
         self.assertEqual(job["name"], "Claude BeamTalk Review")
-        trusted = re.search(r"fromJSON\('(\[.*?\])'\)", job["if"]).group(1)
-        self.assertNotIn("dependabot", json.loads(trusted))
+        m = re.search(r"fromJSON\('(\[.*?\])'\)", job["if"])
+        self.assertIsNotNone(m, "claude-review.yml's trusted-author list changed shape: update this test")
+        self.assertNotIn("dependabot", json.loads(m.group(1)))
 
     def test_auto_workflow_has_no_job_named_like_the_required_review(self):
         for job in load(AUTO)["jobs"].values():
