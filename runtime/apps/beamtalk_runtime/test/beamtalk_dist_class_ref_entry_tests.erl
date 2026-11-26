@@ -227,6 +227,13 @@ peer_only_class_is_class_not_found(PeerNode) ->
             supervisionSpec,
             beamtalk_supervisor_spec:build_child_spec(peer_class_object(Name, PeerPid), static)
         ),
+        ?assertBtError(
+            class_not_found,
+            Name,
+            beamtalk_supervisor_spec:spec_to_otp(
+                supervision_spec(peer_class_object(Name, PeerPid)), static
+            )
+        ),
         %% A DynamicSupervisor `childClass` keeps its init-config contract: an
         %% exit with the structured error, which `supervisor_start_failed` reports.
         ?assertExit(
@@ -303,5 +310,24 @@ supervisor_child_peer_ref_is_local(Name, LocalPid, PeerPid) ->
             supervisionSpec,
             beamtalk_supervisor_spec:build_child_spec(PeerRef, static)
         ),
-        ?assert(is_process_alive(LocalPid))
+        ?assert(is_process_alive(LocalPid)),
+        %% A `SupervisionSpec` whose `start` names the peer's class: the child
+        %% spec is built against this node's class, never asking the peer.
+        ?assertMatch(
+            #{id := 1}, beamtalk_supervisor_spec:spec_to_otp(supervision_spec(PeerRef), static)
+        )
     end).
+
+%% The Erlang shape of a `SupervisionSpec` whose `start` is
+%% `#[ChildClass, #spawn, #()]`.
+supervision_spec(ChildClass) ->
+    #{
+        id => 1,
+        start => #{
+            ?BT_CLASS_TAG_KEY => 'Array',
+            data => #{0 => ChildClass, 1 => spawn, 2 => []}
+        },
+        restart => permanent,
+        shutdown => 5000,
+        type => worker
+    }.

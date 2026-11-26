@@ -79,6 +79,7 @@ ADR 0126 §5.1 calls out explicitly (a *builtin* collection's contents, and a
     decode/1,
     localise_class_object/1,
     ensure_local_class_object/1,
+    ensure_local_class_object/2,
     wire_version_unsupported_error/4
 ]).
 
@@ -148,6 +149,17 @@ ensure_local_class_object(Term) ->
     case localise_class_object(Term) of
         {ok, Local} -> Local;
         {error, Error} -> beamtalk_error:raise(Error)
+    end.
+
+-doc """
+`ensure_local_class_object/1` for a send of `Selector`: the `class_not_found`
+error names the selector, as every other failed send does.
+""".
+-spec ensure_local_class_object(term(), atom()) -> term().
+ensure_local_class_object(Term, Selector) ->
+    case localise_class_object(Term) of
+        {ok, Local} -> Local;
+        {error, Error} -> beamtalk_error:raise(beamtalk_error:with_selector(Error, Selector))
     end.
 
 %% The class name a class object's tag names (`'Point class'` -> `'Point'`).

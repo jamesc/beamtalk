@@ -391,12 +391,7 @@ local_class_pid(_Receiver, ClassPid, _Selector) when
 ->
     ClassPid;
 local_class_pid(Receiver, _ClassPid, Selector) ->
-    case beamtalk_wire:localise_class_object(Receiver) of
-        {ok, #beamtalk_object{pid = LocalPid}} ->
-            LocalPid;
-        {error, Error} ->
-            beamtalk_error:raise(beamtalk_error:with_selector(Error, Selector))
-    end.
+    (beamtalk_wire:ensure_local_class_object(Receiver, Selector))#beamtalk_object.pid.
 
 -doc """
 Raise the structured `actor_dead` error, shared by send/3 and send/4 so

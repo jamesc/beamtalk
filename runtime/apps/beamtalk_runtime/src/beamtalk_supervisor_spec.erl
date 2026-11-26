@@ -57,15 +57,9 @@ build_child_spec(ClassObj, Mode) when
             %% `supervisionSpec`, then `childSpec`. A bare nested supervisor
             %% is therefore an anonymous child, like any other.
             %% BT-5274: a child class from another node is this node's class.
-            ChildClassPid =
-                case beamtalk_wire:localise_class_object(ClassObj) of
-                    {ok, LocalClass} ->
-                        element(4, LocalClass);
-                    {error, Error} ->
-                        beamtalk_error:raise(
-                            beamtalk_error:with_selector(Error, 'supervisionSpec')
-                        )
-                end,
+            ChildClassPid = element(
+                4, beamtalk_wire:ensure_local_class_object(ClassObj, 'supervisionSpec')
+            ),
             BtSpec = beamtalk_object_class:class_send(ChildClassPid, 'supervisionSpec', []),
             spec_to_otp(beamtalk_message_dispatch:send(BtSpec, 'childSpec', []), Mode);
         false ->
@@ -123,7 +117,9 @@ spec_to_otp(BtSpec, Mode) ->
     %% 0090); read the elements as an ordered list via beamtalk_tagged_map.
     StartBtArray = maps:get(start, BtSpec),
     StartElems = beamtalk_tagged_map:array_to_list(StartBtArray),
-    ClassObj = lists:nth(1, StartElems),
+    %% BT-5274: a child class from another node (a `SupervisionSpec` built
+    %% from a peer's class object) is this node's class.
+    ClassObj = beamtalk_wire:ensure_local_class_object(lists:nth(1, StartElems)),
     ChildModule = element(3, ClassObj),
     ChildClassPid = element(4, ClassObj),
     ChildClass = beamtalk_object_class_read:class_name_safe(ChildClassPid),
