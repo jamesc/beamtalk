@@ -354,6 +354,21 @@ spawn_named_scoped(Scope, Link, Name, Module, Args) ->
                     {ok, Pid};
                 {error, {already_started, _Other}} ->
                     name_registered_error(Name);
+                {error, {register_timeout, Name}} ->
+                    %% BT-5192: `global` did not register the name in time
+                    %% (another node held its lock); the actor was stopped.
+                    {error,
+                        beamtalk_error:with_details(
+                            beamtalk_error:timeout(
+                                'Actor',
+                                spawnAs,
+                                <<
+                                    "The global name registry did not answer in time "
+                                    "(another node may hold its lock); the actor was not started"
+                                >>
+                            ),
+                            #{name => Name}
+                        )};
                 {error, Reason} ->
                     {error, Reason}
             catch

@@ -307,6 +307,15 @@ rather than silently re-resolving against the receiver's registry. The
 `pid` field type widens to
 `pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()}`.
 
+*As built (BT-5192):* a send to a `{registered, Name, Node}` ref does not
+address `{Name, Node}` directly. It first resolves the name on `Node` with an
+`erpc` `erlang:whereis/1` (bounded by the 5000 ms remote-call timeout), then
+sends to the pid it gets back through the ordinary pid send path, so a remote
+named send costs two round trips. That path is what answers the lifecycle
+selectors, the class hint and the `no_such_process` / `node_down` split of
+§7.1 for a ref, so sending to `{Name, Node}` directly needs those moved onto
+the ref path first; that is tracked as BT-5271.
+
 ### 4. Cluster-unique names (opt-in `global`)
 
 Node-local names are the default and stay the default. A cluster-unique name
@@ -340,6 +349,19 @@ future pluggable-registry scope.
 (ADR 0079; the blocklist already contains `global_name_server`,
 `global_group`, `net_kernel`, `rex`). Refs carry `{global, Name}` and resolve
 via `global:whereis_name/1` per send, like registered refs.
+
+**Registration is bounded (BT-5192).** `global:register_name/3` waits for
+`global`'s cluster-wide lock for as long as another holder keeps it (another
+registration, a `global:trans/2`, a partition-heal name sync). The start
+waits at most 5000 ms for it (application env `global_register_timeout_ms`).
+On timeout the just-started actor is stopped (gracefully for up to 5000 ms,
+then killed) and `spawnAs:scope: #global` answers
+`#beamtalk_error{kind = timeout}` with the name in `details`; a registration
+`global` completes after that is dropped, since its process has exited, and a
+new start of the same name that meets that dead holder waits for `global` to
+drop it and retries once. A supervised `withName:scope: #global` child whose
+registration times out is `ignore`d with a logged warning, like one whose name
+is held on another node, so it does not spend restart intensity.
 
 **Partition heal.** When a netsplit heals with the same global name on both
 sides, `global` calls the registration's resolve function. OTP's default
@@ -856,6 +878,13 @@ code execution, and the distribution boundary is single-user.
    This is a guard on the Beamtalk API, not a firewall — FFI and raw
    `net_kernel` remain available to operators who configure distribution
    themselves.
+   The host lookup behind the guard is bounded per address family
+   (BT-5192): 2000 ms each by default (application env
+   `node_resolve_timeout_ms`), whichever resolver is configured. A family that
+   has not answered by then contributes no addresses, and a host left with
+   none cannot be proven local, so it is treated like one that does not
+   resolve: refused without TLS. The connection attempt itself is bounded by
+   OTP's `net_setuptime`.
 3. **No cookie API.** `Node` exposes no cookie getter or setter. Cookies come
    from `RELEASE_COOKIE`/`vm.args` (releases) or the workspace cookie file
    (workspaces), never from Beamtalk code. Per-peer cookies remain an FFI

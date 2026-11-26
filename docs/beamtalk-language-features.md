@@ -7641,7 +7641,9 @@ worker disconnect                               // => true
 `connect` (and `ping`, which auto-connects) apply a security policy (see
 Security, below): a same-host connection always succeeds; an off-host
 connection is refused with `kind = insecure_distribution` unless this node
-runs TLS distribution. `Node named:` only validates the `name@host` shape and
+runs TLS distribution. Deciding whether a host is this host takes a name
+lookup, which is bounded at 2 seconds per address family: a host that has not
+resolved by then is treated as off-host. `Node named:` only validates the `name@host` shape and
 never touches the network, so it always succeeds for a well-formed name —
 reachability is only proven by `connect`/`ping`.
 
@@ -7713,6 +7715,14 @@ real operational cost, not just a lookup convenience:
 > **Connect waits for `global`.** `Node connect` answers only after OTP's
 > `global` has synced names with the new peer, so a `scope: #global` name
 > registered right after `connect` is visible from the peer at once.
+
+> **Registration is bounded.** Registering a global name waits for `global`'s
+> cluster-wide lock, which another node may be holding. `spawnAs:scope: #global`
+> waits at most 5 seconds for it; if the lock is not free by then the new
+> actor is stopped and the result is an `Error` tagged `timeout`, whose
+> `details` name the requested name. A supervised `withName:scope: #global`
+> child in that situation is not started (a warning is logged), like one
+> whose name is held on another node.
 
 When a netsplit heals and the same global name was registered on both sides,
 Beamtalk's own resolver keeps the *older* registrant (by start time) and
