@@ -1013,9 +1013,10 @@ lint-repo: \
     test-determine-version \
     test-install-script \
     test-lint-stamp \
-    test-setup-cloud \
+    test-publish-guard \
     test-publish-rolling-release \
     test-refresh-edge \
+    test-setup-cloud \
     test-sign-macos-nested-binaries \
     test-uat-dispatch-payload \
     test-vs-elixir-nightly \
@@ -1108,6 +1109,16 @@ test-publish-rolling-release:
 [windows]
 test-publish-rolling-release:
     @echo "test-publish-rolling-release: skipped on Windows (covered by Linux CI)"
+
+# Test (BT-5313): publish-guard.sh lets only the allowed caller publish a channel,
+# and verify-release-assets.sh checks attached assets against their sidecars.
+[unix]
+test-publish-guard:
+    @bash scripts/ci/test-publish-guard.sh
+
+[windows]
+test-publish-guard:
+    @echo "test-publish-guard: skipped on Windows (covered by Linux CI)"
 
 # Test (BT-5306): uat-dispatch-payload.sh builds the beamtalk-artifact payload.
 [unix]

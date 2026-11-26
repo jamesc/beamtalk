@@ -3,38 +3,76 @@
 #
 # Compiler/Runtime Release Pipeline
 # ===================================
-# Builds platform-specific distribution archives bundling Rust binaries and
-# Erlang BEAM runtime files, then uploads them to GitHub Releases.
+# Build-and-attach for a release candidate (ADR 0154 § 10 step 1, BT-5313).
+#
+# A `v*` tag push:
+#   1. `prepare` creates the GitHub release for the tag as a PRE-RELEASE (never
+#      latest), or reuses the one already there.
+#   2. Every target is built and attached to that pre-release: the four
+#      platform bundles with their `.sha256` files, the `.vsix`
+#      (release-vscode.yml), the LiveView IDE archives (liveview-release.yml)
+#      and the desktop installers (desktop-release.yml).
+#   3. The IDE image is pushed as ghcr.io/<owner>/beamtalk-ide:rc-<sha>
+#      (liveview-docker.yml) and its digest recorded.
+#   4. `notify-uat` dispatches `beamtalk-artifact` to beamtalk-uat with every
+#      attached asset's sha256 and the image digest (`ide_image`), ADR 0154 § 3.
+#
+# Nothing above publishes. The publish halves (Marketplace, the ghcr
+# <version>/latest retag, the desktop and IDE-archive publish) and marking the
+# release latest belong to promote.yml, which runs only after uat passes
+# (BT-5315). Each channel workflow exposes its publish half as a `publish`
+# input for promote.yml to call (see the `interim-*` jobs below for the exact
+# calls); scripts/ci/publish-guard.sh refuses any other caller once the
+# repository variable RELEASE_PUBLISH_MODE is `promote`.
+#
+# Until promote.yml lands, RELEASE_PUBLISH_MODE is unset (= `legacy`) and the
+# `interim-*` jobs keep today's behaviour on a tag push: they publish every
+# channel and mark the release latest, as publishing the release by hand used
+# to. BT-5315 sets RELEASE_PUBLISH_MODE=promote, which skips them, and moves
+# those calls into promote.yml.
+#
+# workflow_dispatch is a DRY RUN of the tag flow for a TEST tag (one not
+# starting with `v`, so it never starts the real flow and never collides with a
+# real candidate): it builds that tag's commit and attaches to its pre-release
+# (creating the tag at the dispatched commit if needed), but never publishes,
+# never moves `latest` and never dispatches uat (the payload is still built and
+# shown). The image is pushed as `dryrun-<sha>`, not `rc-<sha>`. `discard`
+# deletes the pre-release, the tag and that image afterwards.
 #
 # The VS Code extension has its own pipeline (release-vscode.yml) because:
 #   1. VS Code Marketplace is a different distribution channel
 #   2. Extension versioning may diverge from compiler versioning
 #   3. LSP-only bugfixes can ship without a full compiler release
 #
-# On a full release (tag push), this workflow triggers release-vscode.yml
-# via workflow_call to build and publish the extension automatically.
-#
-# Related: release-vscode.yml (VS Code extension distribution)
-# Issue: BT-717
+# Related: release-vscode.yml, liveview-release.yml, liveview-docker.yml,
+#          desktop-release.yml, docs/development/releasing.md
+# Issue: BT-717, BT-5313
 
 name: Release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ['v[0-9]*']
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Version tag (e.g., v0.1.0). Defaults to latest release tag.'
-        required: false
+        description: 'Test tag to dry-run, not starting with v (e.g. 0.0.0-test.1); created at this commit if it does not exist. Built and attached to its pre-release; nothing is published.'
+        required: true
         type: string
+      discard:
+        description: 'Afterwards delete the pre-release, the tag and the dry-run image'
+        required: false
+        type: boolean
+        default: false
 
+# One run per tag, never cancelled: a cancelled run leaves a half-attached
+# pre-release.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -42,11 +80,19 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
-  # ─── Full distribution (Linux x86_64) ─────────────────────────────────
-  linux-x86_64:
-    # Pinned, not floating: uat tests each target on the image that built it (ADR 0154 § 3).
+  # ─── Pre-release for the tag ──────────────────────────────────────────
+  # The one place the tag, version and commit are resolved: every other job
+  # builds `sha` and attaches to `tag`.
+  prepare:
+    # Pinned, not floating: ADR 0154 § 3.
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 10
+    permissions:
+      contents: write # gh release create
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.sha.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -57,9 +103,88 @@ jobs:
         id: version
         env:
           EVENT_NAME: ${{ github.event_name }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REF_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
           INPUT_TAG: ${{ inputs.tag }}
-        run: scripts/ci/determine-version.sh "$EVENT_NAME" "$RELEASE_TAG" "$INPUT_TAG"
+        run: scripts/ci/determine-version.sh "$EVENT_NAME" "$REF_TAG" "$INPUT_TAG"
+
+      # On a push the tag is the pushed commit. A dispatch names a test tag; if it
+      # does not exist yet it is created at the dispatched commit by the release
+      # create below.
+      - name: Resolve the tagged commit
+        id: sha
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if ! sha="$(git rev-parse --verify --quiet "refs/tags/${TAG}^{commit}")"; then
+            if [ "${EVENT_NAME}" = push ]; then
+              echo "::error::tag ${TAG} does not exist; push it first"
+              exit 1
+            fi
+            sha="${GITHUB_SHA}"
+            echo "::notice::test tag ${TAG} does not exist; it will be created at ${sha}"
+          fi
+          if [ "${EVENT_NAME}" = push ] && [ "${sha}" != "${GITHUB_SHA}" ]; then
+            echo "::error::tag ${TAG} is ${sha}, but this push is ${GITHUB_SHA}"
+            exit 1
+          fi
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "Release candidate \`${TAG}\` at \`${sha}\` (${EVENT_NAME})" >> "$GITHUB_STEP_SUMMARY"
+
+      # A dry run must never touch a real candidate: rebuilt bytes would replace
+      # the ones uat was sent, and discard would delete it.
+      - name: Refuse a release tag in a dry run
+        if: github.event_name == 'workflow_dispatch' && startsWith(steps.version.outputs.tag, 'v')
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          echo "::error::a dry run takes a test tag (not starting with v, e.g. 0.0.0-test.1); ${TAG} is a release tag, built only by its own push."
+          exit 1
+
+      # Never latest: the pre-release is what uat tests and promote.yml promotes.
+      - name: Create or reuse the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+          SHA: ${{ steps.sha.outputs.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if state="$(gh release view "${TAG}" --json isPrerelease,isDraft --jq '"\(.isPrerelease) \(.isDraft)"' 2>/dev/null)"; then
+            if [ "${state}" = "true false" ]; then
+              echo "Reusing pre-release ${TAG}."
+            elif [ "${EVENT_NAME}" != push ]; then
+              # A draft or full release made by hand: a dry run never clobbers it.
+              echo "::error::release ${TAG} is not a published pre-release (isPrerelease isDraft = ${state}); a dry run never touches it."
+              exit 1
+            else
+              # A release published by hand still gets its assets, as before BT-5313.
+              echo "::warning::release ${TAG} already exists and is not a pre-release (isPrerelease isDraft = ${state}); attaching to it as it is. Users can already install it."
+            fi
+          else
+            # --target only matters for a new test tag; an existing tag keeps its commit.
+            gh release create "${TAG}" --target "${SHA}" --prerelease --latest=false \
+              --title "${TAG}" \
+              --notes "Release candidate built from ${SHA}. It stays a pre-release until the beamtalk-uat gate passes and it is promoted (ADR 0154 § 10). See CHANGELOG.md for what changed."
+            echo "Created pre-release ${TAG}."
+          fi
+
+  # ─── Full distribution (Linux x86_64) ─────────────────────────────────
+  linux-x86_64:
+    needs: prepare
+    permissions:
+      contents: write # gh release upload
+    # Pinned, not floating: uat tests each target on the image that built it (ADR 0154 § 3).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+          fetch-depth: 0
 
       - name: Set up Beamtalk toolchain
         uses: ./.github/actions/setup-beamtalk
@@ -90,23 +215,19 @@ jobs:
 
       - name: Package tarball
         id: package
-        run: scripts/ci/package-release.sh "${{ steps.version.outputs.version }}" linux-x86_64
+        run: scripts/ci/package-release.sh "${{ needs.prepare.outputs.version }}" linux-x86_64
 
       - name: Upload release asset
-        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "${{ steps.version.outputs.tag }}" \
-            "${{ steps.package.outputs.archive }}" \
-            "${{ steps.package.outputs.archive }}.sha256" \
-            --clobber
+          TAG: ${{ needs.prepare.outputs.tag }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: gh release upload "${TAG}" "${ARCHIVE}" "${ARCHIVE}.sha256" --clobber
 
-      - name: Upload artifact (workflow_dispatch)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Upload artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: beamtalk-${{ steps.version.outputs.version }}-linux-x86_64
+          name: beamtalk-${{ needs.prepare.outputs.version }}-linux-x86_64
           path: |
             ${{ steps.package.outputs.archive }}
             ${{ steps.package.outputs.archive }}.sha256
@@ -114,6 +235,9 @@ jobs:
 
   # ─── Full distribution (macOS x86_64) ──────────────────────────────────
   macos-x86_64:
+    needs: prepare
+    permissions:
+      contents: write # gh release upload
     runs-on: macos-15-intel
     # The Intel runner is the slowest: the v0.5.0 release build took ~29 min
     # and the smoke test was cut off at 30. The nightly gives the same job 65.
@@ -121,16 +245,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
           fetch-depth: 0
-
-      - name: Determine version
-        id: version
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          INPUT_TAG: ${{ inputs.tag }}
-        run: scripts/ci/determine-version.sh "$EVENT_NAME" "$RELEASE_TAG" "$INPUT_TAG"
 
       - name: Set up Beamtalk toolchain
         uses: ./.github/actions/setup-beamtalk
@@ -161,23 +278,19 @@ jobs:
 
       - name: Package tarball
         id: package
-        run: scripts/ci/package-release.sh "${{ steps.version.outputs.version }}" macos-x86_64
+        run: scripts/ci/package-release.sh "${{ needs.prepare.outputs.version }}" macos-x86_64
 
       - name: Upload release asset
-        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "${{ steps.version.outputs.tag }}" \
-            "${{ steps.package.outputs.archive }}" \
-            "${{ steps.package.outputs.archive }}.sha256" \
-            --clobber
+          TAG: ${{ needs.prepare.outputs.tag }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: gh release upload "${TAG}" "${ARCHIVE}" "${ARCHIVE}.sha256" --clobber
 
-      - name: Upload artifact (workflow_dispatch)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Upload artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: beamtalk-${{ steps.version.outputs.version }}-macos-x86_64
+          name: beamtalk-${{ needs.prepare.outputs.version }}-macos-x86_64
           path: |
             ${{ steps.package.outputs.archive }}
             ${{ steps.package.outputs.archive }}.sha256
@@ -185,22 +298,18 @@ jobs:
 
   # ─── Full distribution (macOS ARM64) ──────────────────────────────────
   macos-arm64:
+    needs: prepare
+    permissions:
+      contents: write # gh release upload
     # Pinned, not floating: uat tests each target on the image that built it (ADR 0154 § 3).
     runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
           fetch-depth: 0
-
-      - name: Determine version
-        id: version
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          INPUT_TAG: ${{ inputs.tag }}
-        run: scripts/ci/determine-version.sh "$EVENT_NAME" "$RELEASE_TAG" "$INPUT_TAG"
 
       - name: Set up Beamtalk toolchain
         uses: ./.github/actions/setup-beamtalk
@@ -231,23 +340,19 @@ jobs:
 
       - name: Package tarball
         id: package
-        run: scripts/ci/package-release.sh "${{ steps.version.outputs.version }}" macos-arm64
+        run: scripts/ci/package-release.sh "${{ needs.prepare.outputs.version }}" macos-arm64
 
       - name: Upload release asset
-        if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "${{ steps.version.outputs.tag }}" \
-            "${{ steps.package.outputs.archive }}" \
-            "${{ steps.package.outputs.archive }}.sha256" \
-            --clobber
+          TAG: ${{ needs.prepare.outputs.tag }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: gh release upload "${TAG}" "${ARCHIVE}" "${ARCHIVE}.sha256" --clobber
 
-      - name: Upload artifact (workflow_dispatch)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Upload artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: beamtalk-${{ steps.version.outputs.version }}-macos-arm64
+          name: beamtalk-${{ needs.prepare.outputs.version }}-macos-arm64
           path: |
             ${{ steps.package.outputs.archive }}
             ${{ steps.package.outputs.archive }}.sha256
@@ -255,23 +360,18 @@ jobs:
 
   # ─── Full distribution (Windows x86_64) ────────────────────────────────
   windows-x86_64:
+    needs: prepare
+    permissions:
+      contents: write # gh release upload
     # Pin to 2022: erlef/setup-beam@v1 doesn't support win25 (windows-2025) yet
     runs-on: windows-2022
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
           fetch-depth: 0
-
-      - name: Determine version
-        id: version
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          INPUT_TAG: ${{ inputs.tag }}
-        run: scripts/ci/determine-version.sh "$EVENT_NAME" "$RELEASE_TAG" "$INPUT_TAG"
 
       - name: Install Rust toolchain
         # The channel and components come from rust-toolchain.toml alone (BT-5086).
@@ -330,7 +430,7 @@ jobs:
       - name: Package zip
         id: package
         shell: bash
-        run: scripts/ci/package-release.sh "${{ steps.version.outputs.version }}" windows-x86_64
+        run: scripts/ci/package-release.sh "${{ needs.prepare.outputs.version }}" windows-x86_64
 
       # Windows verification of BT-5077's share/ data. 7z is on the runner
       # (package-release.sh uses it); the archive is extracted afresh so the
@@ -345,152 +445,74 @@ jobs:
           rm -rf archive-check
 
       - name: Upload release asset
-        if: github.event_name == 'release'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "${{ steps.version.outputs.tag }}" \
-            "${{ steps.package.outputs.archive }}" \
-            "${{ steps.package.outputs.archive }}.sha256" \
-            --clobber
+          TAG: ${{ needs.prepare.outputs.tag }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+        run: gh release upload "${TAG}" "${ARCHIVE}" "${ARCHIVE}.sha256" --clobber
 
-      - name: Upload artifact (workflow_dispatch)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Upload artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: beamtalk-${{ steps.version.outputs.version }}-windows-x86_64
+          name: beamtalk-${{ needs.prepare.outputs.version }}-windows-x86_64
           path: |
             ${{ steps.package.outputs.archive }}
             ${{ steps.package.outputs.archive }}.sha256
           retention-days: 7
 
-  # ─── Notify beamtalk-uat acceptance gate (BT-2449) ──────────────────────
-  # After every platform's release archive is built and uploaded, fire a
-  # repository_dispatch into jamesc/beamtalk-uat so the UAT gate (BT-2253)
-  # runs against this exact published version. The consumer (BT-2451) listens
-  # for the event-type `beamtalk-release` and reads `version` + `tag` from the
-  # client-payload.
-  #
-  # Guarded by `github.event_name == 'release'` — the same condition that gates
-  # the real "Upload release asset" steps above — so dry-run / artifact-only
-  # invocations (workflow_dispatch) no-op cleanly and never dispatch.
-  notify-uat:
-    needs: [linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64]
-    if: github.event_name == 'release'
-    # Pinned, not floating: uat tests each target on the image that built it (ADR 0154 § 3).
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-
-      # Re-resolve version/tag here (each build job computes these in its own
-      # runner; this is a separate job, so derive them the same way).
-      - name: Determine version
-        id: version
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          INPUT_TAG: ${{ inputs.tag }}
-        run: scripts/ci/determine-version.sh "$EVENT_NAME" "$RELEASE_TAG" "$INPUT_TAG"
-
-      - name: Dispatch UAT gate
-        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
-        with:
-          # UAT_DISPATCH_TOKEN: a PAT / fine-grained token with
-          # `contents: write` (i.e. repository_dispatch) scope on
-          # jamesc/beamtalk-uat. It must be provisioned separately as a repo
-          # secret in this repo's settings — it is NOT GITHUB_TOKEN, which
-          # cannot dispatch across repositories.
-          token: ${{ secrets.UAT_DISPATCH_TOKEN }}
-          repository: jamesc/beamtalk-uat
-          event-type: beamtalk-release
-          client-payload: |
-            {
-              "version": "${{ steps.version.outputs.version }}",
-              "tag": "${{ steps.version.outputs.tag }}"
-            }
-
-  # ─── beamtalk-artifact dispatch (ADR 0154 § 3, BT-5306) ──────────────────
-  # The payload uat verifies: every asset's sha256 and the OTP window. It waits
-  # for the lanes that attach assets to the release (VS Code .vsix, LiveView IDE
-  # archives, desktop installers) so `assets` is complete, but runs whether or
-  # not those lanes succeed: it is gated on the four platform builds only, and a
-  # failed lane just contributes no assets. The `beamtalk-release` dispatch above
-  # stays until uat accepts both event types; a follow-up removes it.
-  notify-uat-artifact:
-    needs: [linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, vscode-extension, liveview-ide, desktop-app]
-    if: >-
-      ${{ !cancelled() && github.event_name == 'release'
-      && needs.linux-x86_64.result == 'success' && needs.macos-x86_64.result == 'success'
-      && needs.macos-arm64.result == 'success' && needs.windows-x86_64.result == 'success' }}
-    # Pinned, not floating: ADR 0154 § 3.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-
-      - name: Determine version
-        id: version
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          INPUT_TAG: ${{ inputs.tag }}
-        run: scripts/ci/determine-version.sh "$EVENT_NAME" "$RELEASE_TAG" "$INPUT_TAG"
-
-      - name: Build uat dispatch payload
-        id: uat
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
-          TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          set -euo pipefail
-          payload="$(scripts/ci/uat-dispatch-payload.sh release "${VERSION}" "${TAG}" "${GITHUB_SHA}")"
-          echo "payload=${payload}" >> "$GITHUB_OUTPUT"
-
-      - name: Dispatch beamtalk-artifact to uat
-        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
-        with:
-          token: ${{ secrets.UAT_DISPATCH_TOKEN }}
-          repository: jamesc/beamtalk-uat
-          event-type: beamtalk-artifact
-          client-payload: ${{ steps.uat.outputs.payload }}
-
-  # ─── VS Code extension (delegated to release-vscode.yml) ────────────────
+  # ─── VS Code extension: build-and-attach (release-vscode.yml) ───────────
   vscode-extension:
+    needs: prepare
+    permissions:
+      contents: write # attach the .vsix
     uses: ./.github/workflows/release-vscode.yml
     with:
-      publish: ${{ github.event_name == 'release' }}
-      attach_to_release: ${{ github.event_name == 'release' }}
-      tag: ${{ github.event.release.tag_name }}
-    secrets:
-      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      ref: ${{ needs.prepare.outputs.sha }}
+      attach_to_release: true
+      tag: ${{ needs.prepare.outputs.tag }}
 
-  # ─── LiveView IDE (delegated to liveview-release.yml) ────────────────────
-  # Ships the IDE on its own lane (BT-2512): self-contained mix-release archives,
-  # uploaded to the GitHub Release on a full release. Independent of the core
-  # bundle above — the Elixir/Phoenix toolchain is never added to it.
+  # ─── LiveView IDE archives: build-and-attach (liveview-release.yml) ─────
+  # Ships the IDE on its own lane (BT-2512): self-contained mix-release
+  # archives. Independent of the core bundle above; the Elixir/Phoenix
+  # toolchain is never added to it.
   liveview-ide:
+    needs: prepare
+    permissions:
+      contents: write # attach the archives
     uses: ./.github/workflows/liveview-release.yml
     with:
-      publish: ${{ github.event_name == 'release' }}
+      ref: ${{ needs.prepare.outputs.sha }}
+      attach: true
+      tag: ${{ needs.prepare.outputs.tag }}
 
-  # ─── Desktop app (delegated to desktop-release.yml) ──────────────────────
-  # Ships the Tauri desktop attach client (ADR 0097, BT-5006) on its own lane:
-  # Linux/macOS/Windows installers uploaded to the GitHub Release on a full
-  # release. The Apple secrets are optional — without them the macOS legs
-  # build unsigned, un-notarized artifacts instead of failing.
+  # ─── LiveView IDE image: push rc-<sha> (liveview-docker.yml) ────────────
+  # Its `image` output (pinned by digest) is the payload's `ide_image`.
+  ide-image:
+    needs: prepare
+    permissions:
+      contents: read
+      packages: write # push rc-<sha>
+    uses: ./.github/workflows/liveview-docker.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      push_rc: true
+      # A dry run must not move a real candidate's rc-<sha> at the same commit.
+      tag_prefix: ${{ github.event_name == 'push' && 'rc' || 'dryrun' }}
+
+  # ─── Desktop app: build-and-attach (desktop-release.yml) ────────────────
+  # The Tauri desktop attach client (ADR 0097, BT-5006). The Apple secrets are
+  # optional: without them the macOS legs build unsigned, un-notarized
+  # installers instead of failing.
   desktop-app:
+    needs: prepare
+    permissions:
+      contents: write # attach the installers
     uses: ./.github/workflows/desktop-release.yml
     with:
-      publish: ${{ github.event_name == 'release' }}
+      ref: ${{ needs.prepare.outputs.sha }}
+      attach: true
+      tag: ${{ needs.prepare.outputs.tag }}
     secrets:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -498,3 +520,214 @@ jobs:
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+  # ─── beamtalk-artifact dispatch to uat (ADR 0154 § 3, BT-5306, BT-5313) ──
+  # The payload uat verifies and promote.yml re-checks: every attached asset's
+  # sha256, the rc image digest (`ide_image`) and the OTP window. It waits for
+  # every lane so `assets` is complete, but runs whether or not the lanes
+  # succeed: it is gated on the four platform builds only, and a failed lane
+  # just contributes no assets (or no `ide_image`). It runs on the tag push
+  # itself, not on `release: published`. A dry run builds and shows the payload
+  # but does not dispatch it. The legacy `beamtalk-release` event is gone: uat
+  # accepts `beamtalk-artifact` (BT-5303), and ADR 0154 § 3 drops the old type
+  # with this switch.
+  notify-uat:
+    needs: [prepare, linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, vscode-extension, liveview-ide, ide-image, desktop-app]
+    if: >-
+      ${{ !cancelled() && needs.prepare.result == 'success'
+      && needs.linux-x86_64.result == 'success' && needs.macos-x86_64.result == 'success'
+      && needs.macos-arm64.result == 'success' && needs.windows-x86_64.result == 'success' }}
+    # Pinned, not floating: ADR 0154 § 3.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # The tagged commit: otp-support.toml must match the artifacts.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+
+      - name: Build uat dispatch payload
+        id: uat
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+          IDE_IMAGE: ${{ needs.ide-image.outputs.image }}
+        run: |
+          set -euo pipefail
+          if [ -z "${IDE_IMAGE}" ]; then
+            echo "::warning::no rc IDE image was pushed; the payload has no ide_image"
+          fi
+          payload="$(scripts/ci/uat-dispatch-payload.sh release "${VERSION}" "${TAG}" "${SHA}")"
+          echo "payload=${payload}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## uat dispatch payload (beamtalk-artifact)"
+            echo ""
+            echo '```json'
+            jq . <<<"${payload}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dispatch beamtalk-artifact to uat
+        if: github.event_name == 'push'
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
+        with:
+          # UAT_DISPATCH_TOKEN: a fine-grained token that may send
+          # repository_dispatch to jamesc/beamtalk-uat. GITHUB_TOKEN cannot
+          # dispatch across repositories.
+          token: ${{ secrets.UAT_DISPATCH_TOKEN }}
+          repository: jamesc/beamtalk-uat
+          event-type: beamtalk-artifact
+          client-payload: ${{ steps.uat.outputs.payload }}
+
+  # ═══ Interim publish, until promote.yml (BT-5315) ═══════════════════════
+  # Today's behaviour, behind RELEASE_PUBLISH_MODE: on a tag push, while the
+  # variable is not `promote`, publish every channel and mark the release
+  # latest, as publishing the release by hand used to. Never on a dry run, and
+  # only once all four platform bundles are attached: no channel goes out for a
+  # release users cannot install.
+  # These are exactly the calls promote.yml makes once uat passes; BT-5315
+  # moves them there and sets RELEASE_PUBLISH_MODE=promote.
+
+  interim-publish-vscode:
+    needs: [prepare, linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, vscode-extension]
+    if: ${{ github.event_name == 'push' && vars.RELEASE_PUBLISH_MODE != 'promote' }}
+    # write, not read: GitHub checks a called workflow's job permissions
+    # statically, including its (skipped here) attach job.
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-vscode.yml
+    with:
+      publish: true
+      tag: ${{ needs.prepare.outputs.tag }}
+    secrets:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+  interim-publish-ide-image:
+    needs: [prepare, linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, ide-image]
+    if: ${{ github.event_name == 'push' && vars.RELEASE_PUBLISH_MODE != 'promote' }}
+    permissions:
+      contents: read
+      packages: write # retag <version> and latest
+    uses: ./.github/workflows/liveview-docker.yml
+    with:
+      publish: true
+      image: ${{ needs.ide-image.outputs.image }}
+      version: ${{ needs.prepare.outputs.version }}
+
+  interim-publish-liveview-ide:
+    needs: [prepare, linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, liveview-ide]
+    if: ${{ github.event_name == 'push' && vars.RELEASE_PUBLISH_MODE != 'promote' }}
+    # write, not read: GitHub checks a called workflow's job permissions
+    # statically, including its (skipped here) attach job.
+    permissions:
+      contents: write
+    uses: ./.github/workflows/liveview-release.yml
+    with:
+      publish: true
+      tag: ${{ needs.prepare.outputs.tag }}
+
+  interim-publish-desktop:
+    needs: [prepare, linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, desktop-app]
+    if: ${{ github.event_name == 'push' && vars.RELEASE_PUBLISH_MODE != 'promote' }}
+    # write, not read: GitHub checks a called workflow's job permissions
+    # statically, including its (skipped here) attach job.
+    permissions:
+      contents: write
+    uses: ./.github/workflows/desktop-release.yml
+    with:
+      publish: true
+      tag: ${{ needs.prepare.outputs.tag }}
+
+  # After the uat dispatch, and only when everything is attached: every platform
+  # bundle and every lane, so a release never goes latest with missing assets
+  # (a failed lane is fixed by re-running failed jobs, which re-runs this). It
+  # does not wait on the interim publishes: a Marketplace or ghcr problem must
+  # not keep the toolchain from installers.
+  interim-make-latest:
+    needs: [prepare, linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, vscode-extension, liveview-ide, ide-image, desktop-app, notify-uat]
+    if: >-
+      ${{ !cancelled() && github.event_name == 'push' && vars.RELEASE_PUBLISH_MODE != 'promote'
+      && needs.prepare.result == 'success'
+      && needs.linux-x86_64.result == 'success' && needs.macos-x86_64.result == 'success'
+      && needs.macos-arm64.result == 'success' && needs.windows-x86_64.result == 'success'
+      && needs.vscode-extension.result == 'success' && needs.liveview-ide.result == 'success'
+      && needs.ide-image.result == 'success' && needs.desktop-app.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write # gh release edit
+    steps:
+      - name: Mark the release latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          echo "::notice::RELEASE_PUBLISH_MODE is not 'promote', so ${TAG} is promoted without the uat gate (interim, until BT-5315)."
+          gh release edit "${TAG}" --prerelease=false --latest
+
+  # ═══ Dry-run cleanup ════════════════════════════════════════════════════
+  # `discard` on a test tag: record what the pre-release held, then delete it,
+  # its tag and the rc image. After every job that attaches or reads assets.
+  discard:
+    needs: [prepare, notify-uat, ide-image]
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.discard && needs.prepare.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # delete the release and tag
+      packages: write # delete the rc image version
+    steps:
+      - name: Record the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2016  # the backticks are Markdown, inside a jq string
+          {
+            echo "## Discarded dry-run pre-release \`${TAG}\`"
+            echo ""
+            gh api "repos/${GH_REPO}/releases/tags/${TAG}" \
+              --jq '"prerelease: \(.prerelease), draft: \(.draft), assets: \(.assets | length)"'
+            echo ""
+            echo "| Asset | Size | Digest |"
+            echo "|---|---|---|"
+            gh api "repos/${GH_REPO}/releases/tags/${TAG}" \
+              --jq '.assets[] | "| `\(.name)` | \(.size) | `\(.digest // "")` |"'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Delete the pre-release and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh release delete "${TAG}" --cleanup-tag --yes
+
+      # Best effort: GITHUB_TOKEN may lack admin on the package. Only a version
+      # whose every tag is dryrun-* is deleted, so a real rc-<sha> that happens
+      # to share the digest survives. A leftover dryrun-<sha> is harmless.
+      - name: Delete the dry-run image
+        if: needs.ide-image.outputs.image != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          OWNER_KIND: ${{ github.event.repository.owner.type == 'Organization' && 'orgs' || 'users' }}
+          IMAGE: ${{ needs.ide-image.outputs.image }}
+        run: |
+          set -uo pipefail
+          digest="${IMAGE##*@}"
+          base="${OWNER_KIND}/${OWNER}/packages/container/beamtalk-ide/versions"
+          if id="$(gh api --paginate "${base}" --jq ".[] | select(.name == \"${digest}\")
+                | select(all(.metadata.container.tags[]; startswith(\"dryrun-\"))) | .id")" \
+             && [ -n "${id}" ] && gh api -X DELETE "${base}/${id}"; then
+            echo "Deleted ${IMAGE}."
+          else
+            echo "::warning::did not delete ${IMAGE} (no permission, or it carries a non-dryrun tag); remove its dryrun-<sha> tag by hand"
+          fi
