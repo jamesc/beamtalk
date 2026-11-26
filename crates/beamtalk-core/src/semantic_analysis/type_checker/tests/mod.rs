@@ -58,6 +58,7 @@ mod bt4385_list_literal_element_check;
 mod bt4444_block_value_arg_check;
 mod bt4456_shared_registries;
 mod bt4458_match_return_arm;
+mod bt5332_nested_type_pattern_narrowing;
 mod bt4482_protocol_assignment_conformance;
 mod bt4487_destructure_tuple_types;
 mod bt4512_cascade_drops_update;
