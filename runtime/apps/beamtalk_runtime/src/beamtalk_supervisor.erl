@@ -2192,6 +2192,9 @@ watches the name: the child stays down until a later `restartChild:` finds
 it free; while the name is still held, `restartChild:` answers `Ok(nil)`.
 Under `one_for_all` / `rest_for_one` the loser's exit still restarts its
 siblings as the strategy says.
+A `{global, Name}` start whose registration timed out (`global`'s lock held
+on another node, BT-5192) also answers `ignore` with a logged warning, for the
+same reason.
 If the holder is gone by the time the start looks (`global:whereis_name/1`
 answers `undefined`), the start is tried once more and otherwise keeps its
 error. A holder on the **same** node stays an error (a programming mistake).
@@ -2232,7 +2235,11 @@ start_actor_child(ChildModule, Args, Name) ->
     end.
 
 %% A supervised `{global, Name}` start (BT-5231): `ignore` when `Name` is
-%% held on another node, one retry when the holder is already gone.
+%% held on another node, one retry when the holder is already gone. A
+%% registration that timed out (`global`'s lock held elsewhere, typically a
+%% partition-heal name sync, BT-5192) is `ignore` too, for the same reason:
+%% failing the start would spend restart intensity on a condition that only
+%% clears when `global` does, and could take the siblings down.
 -spec start_global_actor_child(atom(), module(), term(), non_neg_integer()) ->
     {ok, pid()} | ignore | {error, term()}.
 start_global_actor_child(Name, ChildModule, Args, Retries) ->
@@ -2255,6 +2262,13 @@ start_global_actor_child(Name, ChildModule, Args, Retries) ->
                 _ ->
                     Error
             end;
+        {error, #beamtalk_error{kind = timeout}} ->
+            ?LOG_WARNING(
+                "Supervised #global child ~p (~p) not started: global name registration timed out",
+                [Name, ChildModule],
+                #{domain => [beamtalk, runtime], child => Name}
+            ),
+            ignore;
         Other ->
             Other
     end.

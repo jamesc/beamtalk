@@ -361,7 +361,7 @@ spawn_named_scoped(Scope, Link, Name, Module, Args) ->
                         beamtalk_error:with_details(
                             beamtalk_error:timeout(
                                 'Actor',
-                                'spawnAs:scope:',
+                                spawnAs,
                                 <<
                                     "The global name registry did not answer in time "
                                     "(another node may hold its lock); the actor was not started"

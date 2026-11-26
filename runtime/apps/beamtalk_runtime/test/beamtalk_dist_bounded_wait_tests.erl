@@ -96,14 +96,10 @@ host_lookup_is_bounded() ->
 %% 2. spawnAs:scope: #global's name registration
 %%====================================================================
 
-global_registration_is_bounded_test_() ->
-    {timeout, 60, ?_test(global_registration_is_bounded())}.
-
-global_registration_is_bounded() ->
-    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-    Name = list_to_atom("bt5192_bounded_global_" ++ beamtalk_test_unique:id()),
+%% Hold `global`'s own lock (the one `register_name/3` takes) in a helper
+%% process; answers the helper, which releases the lock on `release`.
+hold_global_lock() ->
     Caller = self(),
-    %% Holds `global`'s own lock (the one `register_name/3` takes) until told.
     Holder = spawn(fun() ->
         true = global:set_lock({global, self()}, [node()], infinity),
         Caller ! {locked, self()},
@@ -112,6 +108,15 @@ global_registration_is_bounded() ->
         end
     end),
     ?awaitMessage({locked, Holder}),
+    Holder.
+
+global_registration_is_bounded_test_() ->
+    {timeout, 60, ?_test(global_registration_is_bounded())}.
+
+global_registration_is_bounded() ->
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
+    Name = list_to_atom("bt5192_bounded_global_" ++ beamtalk_test_unique:id()),
+    Holder = hold_global_lock(),
     try
         Result = with_app_env(global_register_timeout_ms, 300, fun() ->
             call_within(
@@ -125,14 +130,56 @@ global_registration_is_bounded() ->
     after
         Holder ! release
     end,
-    %% `global` runs registrations one at a time, so this one returns only after
-    %% the refused start's late registration (if any) has run.
-    Flush = list_to_atom("bt5192_flush_" ++ beamtalk_test_unique:id()),
-    yes = global:register_name(Flush, self()),
-    _ = global:unregister_name(Flush),
-    %% The refused start leaves nothing behind: its actor was stopped, so a
-    %% late registration of it is dropped.
-    ok = beamtalk_test_wait:until(fun() -> global:whereis_name(Name) =:= undefined end),
+    %% Straight away, with the refused start's request possibly still queued
+    %% in `global`'s registrar (it registers the stopped actor, which `global`
+    %% then drops): the same name starts cleanly.
     {ok, Pid} = beamtalk_actor_registry:'spawnAsGlobal'(Name, test_counter, 0),
     ?assertEqual(Pid, global:whereis_name(Name)),
     gen_server:stop(Pid).
+
+%% A supervised `withName:scope: #global` child whose registration times out is
+%% not started (`ignore`), so it spends no restart intensity.
+supervised_global_child_registration_timeout_is_ignored_test_() ->
+    {timeout, 60, ?_test(supervised_global_child_registration_timeout_is_ignored())}.
+
+supervised_global_child_registration_timeout_is_ignored() ->
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
+    Name = list_to_atom("bt5192_sup_global_" ++ beamtalk_test_unique:id()),
+    Holder = hold_global_lock(),
+    try
+        Result = with_app_env(global_register_timeout_ms, 300, fun() ->
+            call_within(
+                fun() -> beamtalk_supervisor:start_actor_child(test_counter, 0, {global, Name}) end,
+                ?ANSWER_WITHIN_MS
+            )
+        end),
+        ?assertEqual(ignore, Result)
+    after
+        Holder ! release
+    end.
+
+%% Each address family is bounded on its own: a stalled IPv6 lookup does not
+%% throw away a host's local IPv4 answer.
+slow_ipv6_lookup_keeps_ipv4_answer_test_() ->
+    {timeout, 60, ?_test(slow_ipv6_lookup_keeps_ipv4_answer())}.
+
+slow_ipv6_lookup_keeps_ipv4_answer() ->
+    ok = meck:new(inet, [unstick, passthrough, no_link]),
+    try
+        ok = meck:expect(inet, getaddrs, fun
+            (_Host, inet) ->
+                {ok, [{127, 0, 0, 1}]};
+            (_Host, inet6) ->
+                receive
+                    never -> {error, nxdomain}
+                after 30000 -> {error, timeout}
+                end
+        end),
+        Node = 'w@bt5192-v4-only-alias.example',
+        Result = with_app_env(node_resolve_timeout_ms, 300, fun() ->
+            call_within(fun() -> beamtalk_node:connect_policy(Node, false) end, ?ANSWER_WITHIN_MS)
+        end),
+        ?assertEqual(ok, Result)
+    after
+        meck:unload(inet)
+    end.
