@@ -1036,19 +1036,32 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     # the first `.row` is a selectable class regardless of project content.
     |> select("Class source filter", option: "All")
     # The tree lists the live image's classes (the e2e workspace loads the project).
-    |> assert_has("#system-browser-tree .row")
-    # Select the first class in the tree (the tree holds only class rows until one
-    # is picked): the bottom pane loads its protocol filter + method list over the
-    # live browse ops — the `.sb-protocols` row appears only once a class is set.
-    # Clicking via the DOM (the phx-click lives on the `.row`) sidesteps a
-    # strict-mode multi-match and does not depend on any specific class name.
+    |> assert_has("#system-browser-tree .row:not(.context)")
+    # Select the first selectable class in the tree: the bottom pane loads its
+    # protocol filter + method list over the live browse ops — the `.sb-protocols`
+    # row appears only once a class is set. Clicking via the DOM (the phx-click
+    # lives on the `.row`) sidesteps a strict-mode multi-match and does not depend
+    # on any specific class name. BT-5252: `.row:not(.context)` is the readiness
+    # signal. Until the "All" filter round-trip lands, the tree still holds the
+    # Project view, whose leading rows can be dimmed `.context` ancestors with no
+    # `phx-click` — clicking one selects nothing and `.sb-protocols` never shows.
+    # Poll for a selectable row in the same evaluate so the click targets the row
+    # present at click time, not one read before a re-render replaced it.
     |> evaluate("""
-    (() => {
-      const r = document.querySelector("#system-browser-tree .row");
-      if (!r) throw new Error("no class rows in the System Browser tree");
-      r.click();
-      return true;
-    })()
+    new Promise((resolve, reject) => {
+      const start = Date.now();
+      const tick = () => {
+        const r = document.querySelector("#system-browser-tree .row:not(.context)");
+        if (r) {
+          r.click();
+          return resolve(true);
+        }
+        if (Date.now() - start > 5000)
+          return reject(new Error("no selectable class rows in the System Browser tree"));
+        requestAnimationFrame(tick);
+      };
+      tick();
+    })
     """)
     |> assert_has(".sb-protocols")
     # The Category view toggle re-groups the tree (a server round-trip); its
