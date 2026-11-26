@@ -407,9 +407,7 @@ sealed typed Object subclass: SystemNavigation
     sends
       inject: List new
       into: [:acc :s |
-        sentSel := s at: 1
-        line := s at: 2
-        recv := s at: 3
+        {sentSel, line, recv} := s
         // Skip Erlang FFI sends — same exclusion as `unusedSelectors`. An
         // `Erlang foo` chain is an Erlang call routed through the DNU bridge,
         // not a Beamtalk message send, so its "selectors" (module + function
@@ -740,8 +738,7 @@ sealed typed Object subclass: SystemNavigation
     sites
       inject: result
       into: [:acc :site |
-        line := site at: 1
-        announcementName := site at: 2
+        {line, announcementName} := site
         cls := self findClass: announcementName
         isAnnouncement := self isAnnouncementClass: cls
         isAnnouncement
@@ -1717,9 +1714,7 @@ sealed typed Object subclass: SystemNavigation
     sends
       inject: result
       into: [:acc :s |
-        sentSel := s at: 1
-        line := s at: 2
-        recv := s at: 3
+        {sentSel, line, recv} := s
         self
           recordSend: sentSel
           line: line
@@ -1974,8 +1969,7 @@ sealed typed Object subclass: SystemNavigation
     sends
       inject: result
       into: [:acc :s |
-        sentSel := s at: 1
-        recv := s at: 3
+        {sentSel, _, recv} := s
         recv == #erlang_ffi ifTrue: [acc] ifFalse: [acc add: sentSel]
       ]
 
