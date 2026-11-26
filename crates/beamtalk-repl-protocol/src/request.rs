@@ -41,7 +41,8 @@ pub const FLUSH_KINDS: [&str; 5] = [
 ];
 
 /// What a `flush` request is scoped to (BT-5204). The operation takes at most
-/// one of `class`, `file` and `kind`; this enum makes sending two impossible.
+/// one of `class`, `file` and `kind`, or a `selector` (alone, or with a
+/// `class`); this enum makes sending a combination the op refuses impossible.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlushScope<'a> {
     /// Every pending durable change.
@@ -52,6 +53,10 @@ pub enum FlushScope<'a> {
     File(&'a str),
     /// One `ChangeEntry` kind, such as `new-class`.
     Kind(&'a str),
+    /// One method selector (`increment`, `at:put:`) in every class (BT-5297).
+    Selector(&'a str),
+    /// One method selector in one class: `(class, selector)` (BT-5297).
+    ClassSelector(&'a str, &'a str),
 }
 
 /// Whether a `ChangeLog`-recording request comes from a person or an agent
@@ -392,6 +397,11 @@ impl RequestBuilder {
             FlushScope::Class(class) => req["class"] = class.into(),
             FlushScope::File(file) => req["file"] = file.into(),
             FlushScope::Kind(kind) => req["kind"] = kind.into(),
+            FlushScope::Selector(selector) => req["selector"] = selector.into(),
+            FlushScope::ClassSelector(class, selector) => {
+                req["class"] = class.into();
+                req["selector"] = selector.into();
+            }
         }
         if confirm_destructive {
             req["confirm_destructive"] = true.into();
@@ -971,7 +981,7 @@ mod tests {
     fn flush_unscoped_sends_no_scope_and_no_confirmation() {
         let req = RequestBuilder::flush(FlushScope::All, false);
         assert_eq!(req["op"], "flush");
-        for key in ["class", "file", "kind", "confirm_destructive"] {
+        for key in ["class", "file", "kind", "selector", "confirm_destructive"] {
             assert!(req.get(key).is_none(), "{key} must be absent: {req}");
         }
     }
@@ -989,6 +999,21 @@ mod tests {
         let req = RequestBuilder::flush(FlushScope::Kind("new-class"), false);
         assert_eq!(req["kind"], "new-class");
         assert!(req.get("class").is_none() && req.get("file").is_none());
+    }
+
+    /// BT-5297: a selector is sent alone, or together with its class.
+    #[test]
+    fn flush_selector_scope_sends_selector_and_optional_class() {
+        let req = RequestBuilder::flush(FlushScope::Selector("increment"), false);
+        assert_eq!(req["selector"], "increment");
+        for key in ["class", "file", "kind"] {
+            assert!(req.get(key).is_none(), "{key} must be absent: {req}");
+        }
+
+        let req = RequestBuilder::flush(FlushScope::ClassSelector("Counter", "at:put:"), true);
+        assert_eq!(req["class"], "Counter");
+        assert_eq!(req["selector"], "at:put:");
+        assert!(req.get("file").is_none() && req.get("kind").is_none());
     }
 
     #[test]

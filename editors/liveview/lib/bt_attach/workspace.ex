@@ -1715,13 +1715,13 @@ defmodule BtAttach.Workspace do
   # error (BT-2634). Route it to the supervision-tree path instead: list its direct
   # children as drillable rows (each carrying a live `{:beamtalk_supervisor, ...}` /
   # `{:beamtalk_object, ...}` handle so the Inspector can drill into a child as its
-  # own reference, ADR 0095). Returns `{:ok, {:supervisor_children, rows}}` — a
+  # own reference, ADR 0095). Returns `{:ok, {:supervisor_children, rows, truncated}}` — a
   # tagged result the LiveView renders as a children view, distinct from the
   # actor instance-field table. A dead/unreachable supervisor degrades to
   # `{:error, reason}` (rendered as a clear empty state, never a crash).
   defp inspect_supervisor(pid) when is_pid(pid) do
     case supervisor_children(pid) do
-      {:ok, rows} -> {:ok, {:supervisor_children, rows}}
+      {:ok, rows, truncated} -> {:ok, {:supervisor_children, rows, truncated}}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -1776,17 +1776,28 @@ defmodule BtAttach.Workspace do
   for a Beamtalk child, or `:null` for a foreign / restarting child (which renders
   but is not drillable).
 
-  Returns `{:ok, rows}` (the empty list for a supervisor with no running
-  children), or `{:error, reason_term}` for a dead/unreachable supervisor (a
+  Returns `{:ok, rows, truncated}` (the empty list for a supervisor with no
+  running children). `truncated` is the runtime's own flag: true when the
+  `children` op cut the list at its cap, so the Inspector can say the rows are
+  not the whole supervisor. The cap itself is never copied here.
+
+  Returns `{:error, reason_term}` for a dead/unreachable supervisor (a
   structured `#beamtalk_error{}`), so the caller renders a clear empty state.
   """
-  @spec supervisor_children(pid()) :: {:ok, [map()]} | {:error, term()}
+  @spec supervisor_children(pid()) :: {:ok, [map()], boolean()} | {:error, term()}
   def supervisor_children(sup_pid) when is_pid(sup_pid) do
     case dispatch_simple("children", %{"supervisor" => sup_pid}) do
-      {:children, %{"children" => rows}} when is_list(rows) -> {:ok, rows}
-      {:error, reason} -> {:error, reason}
-      {:badrpc, reason} -> {:error, {:unreachable, reason}}
-      other -> {:error, {:unexpected_reply, other}}
+      {:children, %{"children" => rows} = reply} when is_list(rows) ->
+        {:ok, rows, Map.get(reply, "truncated", false) == true}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
     end
   end
 
@@ -1998,6 +2009,8 @@ defmodule BtAttach.Workspace do
 
     * `:class`, `:file`, `:kind` — at most one; scope the flush to one class, one
       source file or one ChangeEntry kind (e.g. `"new-class"`)
+    * `:selector` — scope the flush to one method selector, alone or with
+      `:class` (not with `:file` or `:kind`)
     * `:confirm_destructive` — `true` also applies pending Tier 2 entries
       (`remove-class`, `rename-class`, `rename-method`) within that scope;
       anything but the boolean `true` leaves them withheld (reported in `skipped`)
@@ -2012,6 +2025,7 @@ defmodule BtAttach.Workspace do
             class: "class",
             file: "file",
             kind: "kind",
+            selector: "selector",
             confirm_destructive: "confirm_destructive"
           ],
           (value = Keyword.get(opts, key)) != nil,

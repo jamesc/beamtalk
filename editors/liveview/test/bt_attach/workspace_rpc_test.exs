@@ -1139,6 +1139,19 @@ defmodule BtAttach.WorkspaceRpcTest do
       assert Workspace.flush() == {:ok, summary}
     end
 
+    test "flush/1 sends a selector scope, alone or with its class (BT-5297)" do
+      mock_rpc(
+        decode_asserting(
+          fn request ->
+            assert request == %{"op" => "flush", "class" => "Counter", "selector" => "increment"}
+          end,
+          {:value, %{"flushed" => 0}}
+        )
+      )
+
+      assert {:ok, _} = Workspace.flush(class: "Counter", selector: "increment")
+    end
+
     test "flush/1 sends the scope and the confirmation as the operation's own params" do
       mock_rpc(
         decode_asserting(
@@ -1660,7 +1673,23 @@ defmodule BtAttach.WorkspaceRpcTest do
       )
 
       assert Workspace.inspect_value({:beamtalk_supervisor, "Sup", Sup, pid}) ==
-               {:ok, {:supervisor_children, [row]}}
+               {:ok, {:supervisor_children, [row], false}}
+    end
+
+    test "supervisor_children/1 carries the runtime's truncated flag" do
+      row = %{"label" => "worker", "handle" => nil}
+
+      mock_rpc(
+        decode_ok(
+          {:beamtalk_repl_ops, :request},
+          {:children, %{"children" => [row], "truncated" => true}}
+        )
+      )
+
+      assert Workspace.supervisor_children(self()) == {:ok, [row], true}
+
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:children, %{"children" => [row]}}))
+      assert Workspace.supervisor_children(self()) == {:ok, [row], false}
     end
 
     test "a supervisor handle propagates a children error" do

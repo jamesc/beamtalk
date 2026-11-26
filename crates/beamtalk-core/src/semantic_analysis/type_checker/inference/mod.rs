@@ -25,11 +25,12 @@
 
 use crate::ast::{Expression, ExpressionStatement, Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
-use crate::semantic_analysis::type_checker::CollectedReturn;
 use crate::semantic_analysis::type_checker::diagnostic_facts::DynamicInTypedClass;
 use crate::semantic_analysis::type_checker::narrowing::extract::extract_variable_name;
 use crate::semantic_analysis::type_checker::type_resolver;
+use crate::semantic_analysis::type_checker::validation::ReturnSite;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
+use crate::semantic_analysis::type_checker::{CollectedReturn, CollectedReturnKind};
 use crate::semantic_analysis::type_checker::{
     DynamicReason, EnvKey, InferredType, TypeChecker, TypeEnv,
 };
@@ -387,6 +388,7 @@ impl TypeChecker {
     }
 
     #[allow(clippy::too_many_arguments)] // mirrors `check_method_body`
+    #[allow(clippy::too_many_lines)] // BT-5292: early-`^` loop
     #[allow(clippy::fn_params_excessive_bools)] // mirrors `check_method_body`
     fn check_method_body_inner(
         &mut self,
@@ -448,7 +450,9 @@ impl TypeChecker {
         };
         let body_type =
             self.resolve_self_delegate_return_type(method, body_type, class_name, hierarchy);
-        self.check_return_type(method, &body_type, class_name, hierarchy);
+        let diagnostics_before_tail = self.diagnostics.len();
+        self.check_return_type(method, &body_type, class_name, hierarchy, ReturnSite::Tail);
+        let tail_reported = self.diagnostics.len() > diagnostics_before_tail;
         // BT-5283: every other `^` (early return, non-local return in a block,
         // match arm) answers the method too, so each distinct type is checked
         // against the declared return type on its own — not unioned into the
@@ -460,12 +464,31 @@ impl TypeChecker {
             let mut seen: Vec<InferredType> = tail_returned;
             // A body that ends in `^expr` is already checked as the body type.
             seen.push(body_type.clone());
+            // BT-5292: when the union tail check already reported, its
+            // diagnostic names every member of the union, so an early `^` of
+            // one of those types is not reported a second time. (A silent
+            // tail check — untyped class — leaves them to the early-`^`
+            // check.)
+            // A union with a class-object member reports that member and
+            // stops before judging the instance members, so only a union of
+            // instance members counts as fully judged by the tail check.
+            if let (true, InferredType::Union { members, .. }) = (tail_reported, &body_type)
+                && Self::non_class_object_members(members).len() == members.len()
+            {
+                seen.extend(members.iter().cloned());
+            }
+            let mut seen_spans = Vec::new();
             for returned in collected_returns {
-                let ty = match returned {
-                    CollectedReturn::Value(ty) => ty,
+                // The same `^` can be inferred more than once (re-inferred
+                // block bodies); report it once, at its own span.
+                if seen_spans.contains(&returned.span) {
+                    continue;
+                }
+                let ty = match returned.kind {
+                    CollectedReturnKind::Value(ty) => ty,
                     // BT-5290: report an error-variant `^x` with the declared
                     // success type, so a mismatch names the error type.
-                    CollectedReturn::ResultErrorVariant(ty) => {
+                    CollectedReturnKind::ResultErrorVariant(ty) => {
                         self.error_variant_as_declared_success(method, &ty)
                     }
                 };
@@ -474,8 +497,19 @@ impl TypeChecker {
                 {
                     continue;
                 }
-                self.check_return_type(method, &ty, class_name, hierarchy);
-                seen.push(ty);
+                let before = self.diagnostics.len();
+                self.check_return_type(
+                    method,
+                    &ty,
+                    class_name,
+                    hierarchy,
+                    ReturnSite::Early(returned.span),
+                );
+                // Only a reported `^` is final: a later inference of the same
+                // `^` under different narrowing is still checked otherwise.
+                if self.diagnostics.len() > before {
+                    seen_spans.push(returned.span);
+                }
             }
         }
         if check_override {
@@ -851,7 +885,7 @@ impl TypeChecker {
                 in_abstract_method,
             ),
             // Returns propagate the value type
-            Expression::Return { value, .. } => {
+            Expression::Return { value, span } => {
                 let ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
                 // BT-5283: every `^` answers the enclosing method. BT-5290: a
                 // `^x` where `x` is known to be a `Result`'s error variant
@@ -860,10 +894,13 @@ impl TypeChecker {
                 // `Result(U, E')` whose `E'` accepts `E`.
                 let error_variant = extract_variable_name(value)
                     .is_some_and(|key| env.is_result_error_variant(&key));
-                self.collected_returns.push(if error_variant {
-                    CollectedReturn::ResultErrorVariant(Self::result_error_variant(&ty))
-                } else {
-                    CollectedReturn::Value(ty.clone())
+                self.collected_returns.push(CollectedReturn {
+                    span: *span,
+                    kind: if error_variant {
+                        CollectedReturnKind::ResultErrorVariant(Self::result_error_variant(&ty))
+                    } else {
+                        CollectedReturnKind::Value(ty.clone())
+                    },
                 });
                 ty
             }

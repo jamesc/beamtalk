@@ -197,13 +197,15 @@ ops() ->
             <<"flush">>,
             beamtalk_repl_ops_state,
             [],
-            [<<"class">>, <<"file">>, <<"kind">>, <<"confirm_destructive">>],
+            [<<"class">>, <<"file">>, <<"kind">>, <<"selector">>, <<"confirm_destructive">>],
             workspace,
             execute,
             <<
                 "Write pending ChangeLog entries to disk. At most one of `class`, `file`, "
                 "`kind` scopes it (each a non-empty String; `kind` is `new-class`, "
                 "`remove-method`, `remove-class`, `rename-class` or `rename-method`); "
+                "`selector` (a method selector) scopes it to that method and may be combined "
+                "with `class`, but not `file` or `kind`; "
                 "`confirm_destructive: true` also applies Tier 2 entries."
             >>
         ),

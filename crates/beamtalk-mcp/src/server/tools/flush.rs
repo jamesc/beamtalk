@@ -22,9 +22,9 @@ impl BeamtalkMcp {
     /// flushIncludingDestructive` / `Workspace flush: <selector>
     /// confirmDestructive: true` (Tier 1 + Tier 2). The optional `class`,
     /// `file`, and `kind` filters are mutually exclusive; at most one may be
-    /// supplied.
+    /// supplied. A `selector` scopes to one method, alone or with a `class`.
     #[tool(
-        description = "Write pending durable ChangeLog entries to disk via byte-span splice + atomic rename, with external-edit conflict detection. With no arguments, flushes every pending durable Tier-1 change ('Workspace flush'). At most one of 'class', 'file', or 'kind' may be supplied: 'class' scopes to one class ('Workspace flush: ClassName'), 'file' scopes to one source file ('Workspace flush: #{ #file => \"path\" }'), and 'kind' scopes to one ChangeEntry kind: \"new-class\", \"remove-method\", \"remove-class\", \"rename-class\" or \"rename-method\" ('Workspace flush: #'new-class'). An empty string for any of the three is refused, not read as unscoped. DESTRUCTIVE when 'confirm_destructive' is true: pending 'remove-class' entries (from 'remove_class') delete their .bt file from disk — see 'confirm_destructive's own description for the required-argument gate. Returns a FlushResult summary listing files written and any conflicts; a skipped destructive entry is reported distinctly as 'skipped: destructive', not applied. (ADR 0082 Phase 3 / ADR 0113 Phase 2, BT-2288/BT-3207.)",
+        description = "Write pending durable ChangeLog entries to disk via byte-span splice + atomic rename, with external-edit conflict detection. With no arguments, flushes every pending durable Tier-1 change ('Workspace flush'). At most one of 'class', 'file', or 'kind' may be supplied, except that 'selector' (a method selector such as \"increment\" or \"at:put:\") scopes the flush to that method and may be combined with 'class' to flush one method of one class (not with 'file' or 'kind'): 'class' scopes to one class ('Workspace flush: ClassName'), 'file' scopes to one source file ('Workspace flush: #{ #file => \"path\" }'), and 'kind' scopes to one ChangeEntry kind: \"new-class\", \"remove-method\", \"remove-class\", \"rename-class\" or \"rename-method\" ('Workspace flush: #'new-class'). An empty string for any of these is refused, not read as unscoped. DESTRUCTIVE when 'confirm_destructive' is true: pending 'remove-class' entries (from 'remove_class') delete their .bt file from disk — see 'confirm_destructive's own description for the required-argument gate. Returns a FlushResult summary listing files written and any conflicts; a skipped destructive entry is reported distinctly as 'skipped: destructive', not applied. (ADR 0082 Phase 3 / ADR 0113 Phase 2, BT-2288/BT-3207.)",
         annotations(read_only_hint = false, destructive_hint = true)
     )]
     pub(crate) async fn flush(
@@ -38,6 +38,7 @@ impl BeamtalkMcp {
             ("class", params.class.as_deref()),
             ("file", params.file.as_deref()),
             ("kind", params.kind.as_deref()),
+            ("selector", params.selector.as_deref()),
         ] {
             if value.is_some_and(str::is_empty) {
                 return Err(rmcp::ErrorData::invalid_params(
@@ -46,7 +47,8 @@ impl BeamtalkMcp {
                 ));
             }
         }
-        // Mutual exclusivity: at most one filter.
+        // Mutual exclusivity: at most one of class/file/kind, and a selector
+        // combines only with a class.
         let provided = [
             params.class.as_deref(),
             params.file.as_deref(),
@@ -55,7 +57,14 @@ impl BeamtalkMcp {
         .into_iter()
         .flatten()
         .count();
-        if provided > 1 {
+        if params.selector.is_some() {
+            if params.file.is_some() || params.kind.is_some() {
+                return Err(rmcp::ErrorData::invalid_params(
+                    "flush: 'selector' combines only with 'class' — not with 'file' or 'kind'.",
+                    None,
+                ));
+            }
+        } else if provided > 1 {
             return Err(rmcp::ErrorData::invalid_params(
                 "flush: 'class', 'file', and 'kind' are mutually exclusive — pass at most one.",
                 None,
@@ -67,15 +76,34 @@ impl BeamtalkMcp {
             class = ?params.class,
             file = ?params.file,
             kind = ?params.kind,
+            selector = ?params.selector,
             confirm_destructive,
             "tool invoked"
         );
+
+        let selector = params.selector.as_deref().map(|s| {
+            let s = s.trim();
+            s.strip_prefix('#').unwrap_or(s).trim_matches('\'')
+        });
+        if selector.is_some_and(str::is_empty) {
+            return Err(rmcp::ErrorData::invalid_params(
+                "flush: 'selector' must not be empty — omit it to flush everything.",
+                None,
+            ));
+        }
 
         let scope = match (
             params.class.as_deref(),
             params.file.as_deref(),
             params.kind.as_deref(),
         ) {
+            (Some(class), None, None) if selector.is_some() => {
+                validate_class_name(class)?;
+                FlushScope::ClassSelector(class, selector.unwrap_or_default())
+            }
+            (None, None, None) if selector.is_some() => {
+                FlushScope::Selector(selector.unwrap_or_default())
+            }
             (Some(class), None, None) => {
                 validate_class_name(class)?;
                 FlushScope::Class(class)

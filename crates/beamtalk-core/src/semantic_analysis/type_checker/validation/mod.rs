@@ -39,4 +39,5 @@ mod returns;
 mod selectors;
 
 pub(super) use protocol_args::UnionArgCompat;
+pub(super) use returns::ReturnSite;
 pub(super) use selectors::ProtocolSendResolution;

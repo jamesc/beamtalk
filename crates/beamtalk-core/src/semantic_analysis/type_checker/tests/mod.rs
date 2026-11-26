@@ -86,6 +86,7 @@ mod bt5216_to_by_do_block_param;
 mod bt5241_class_field_reflection_dnu;
 mod bt5284_typed_destructure;
 mod bt5290_result_error_narrowing;
+mod bt5292_early_return_diagnostics;
 mod bt5298_loop_head_join;
 mod cast_and_sync_send;
 mod destructure_and_extension;
