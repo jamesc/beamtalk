@@ -211,7 +211,7 @@ erpc_ok_result_is_local(Name, LocalPid, PeerPid) ->
     assert_local_class(Name, LocalPid, maps:get('okValue', Result)).
 
 peer_only_class_is_class_not_found(PeerNode) ->
-    with_peer_only_class(PeerNode, fun(Name, _PeerPid) ->
+    with_peer_only_class(PeerNode, fun(Name, PeerPid) ->
         ?assertBtError(
             class_not_found, Name, ffi(?MODULE, peer_class_by_raw_message, [PeerNode, Name])
         ),
@@ -219,6 +219,14 @@ peer_only_class_is_class_not_found(PeerNode) ->
             class_not_found,
             Name,
             ffi(erpc, call, [PeerNode, beamtalk_class_registry, resolve_class_object, [Name]])
+        ),
+        %% A DynamicSupervisor `childClass` keeps its init-config contract: an
+        %% exit with the structured error, which `supervisor_start_failed` reports.
+        ?assertExit(
+            #beamtalk_error{kind = class_not_found, class = Name},
+            beamtalk_supervisor_init_config:child_class_entry(
+                sup, peer_class_object(Name, PeerPid)
+            )
         )
     end).
 

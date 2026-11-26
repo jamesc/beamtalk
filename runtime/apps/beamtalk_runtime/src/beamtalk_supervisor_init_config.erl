@@ -194,7 +194,9 @@ child_class_entry(ClassName, ChildClass) ->
     case is_tuple(ChildClass) andalso beamtalk_class_registry:is_class_object(ChildClass) of
         true ->
             %% BT-5274: a child class from another node is this node's class.
-            LocalClass = beamtalk_wire:ensure_local_class_object(ChildClass),
+            %% `config_result/1` keeps this function's `exit(#beamtalk_error{})`
+            %% contract when the class is not registered here.
+            LocalClass = config_result(beamtalk_wire:localise_class_object(ChildClass)),
             {
                 beamtalk_object_class_read:class_name_safe(element(4, LocalClass)),
                 element(3, LocalClass)
