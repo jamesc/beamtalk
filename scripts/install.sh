@@ -258,7 +258,7 @@ verify_checksum() {
         echo "Error: Could not fetch the checksum file (${CHECKSUM_URL})."
         echo "  Refusing to install an unverified archive."
         echo "  Retry, or pass --insecure-skip-checksum to install without verification."
-        exit 1
+        return 1
     fi
 
     EXPECTED=$(awk '{print $1}' "${CHECKSUM_FILE}")
@@ -278,10 +278,27 @@ verify_checksum() {
         echo "  Expected: ${EXPECTED}"
         echo "  Actual:   ${ACTUAL}"
         rm -f "${ARCHIVE}" "${CHECKSUM_FILE}"
-        exit 1
+        return 1
     fi
 
     echo "✅ Checksum verified"
+}
+
+# BT-5337: edge.yml republishes the rolling `edge` release on every merge, and
+# GitHub has no atomic multi-asset replace, so for a few seconds an asset can
+# be missing or an archive can sit next to its old checksum. Fetch and verify
+# in one step so a caller can retry the whole pair. Never relaxes the check:
+# every attempt ends in verify_checksum.
+fetch_and_verify() {
+    if ! download "${ARCHIVE_URL}" "${TMPDIR}/${ARCHIVE_NAME}"; then
+        echo "Error: Could not download ${ARCHIVE_URL}"
+        return 1
+    fi
+    if [ "${SKIP_CHECKSUM}" != "1" ]; then
+        rm -f "${TMPDIR}/${ARCHIVE_NAME}.sha256"
+        download "${CHECKSUM_URL}" "${TMPDIR}/${ARCHIVE_NAME}.sha256" 2>/dev/null || true
+    fi
+    verify_checksum "${TMPDIR}/${ARCHIVE_NAME}" "${TMPDIR}/${ARCHIVE_NAME}.sha256"
 }
 
 # ─── Install ────────────────────────────────────────────────────────────
@@ -295,12 +312,22 @@ install_beamtalk() {
     trap 'rm -rf "${TMPDIR}"' EXIT
 
     echo "Downloading beamtalk ${VERSION} for ${PLATFORM}..."
-    download "${ARCHIVE_URL}" "${TMPDIR}/${ARCHIVE_NAME}"
-    if [ "${SKIP_CHECKSUM}" != "1" ]; then
-        download "${CHECKSUM_URL}" "${TMPDIR}/${ARCHIVE_NAME}.sha256" 2>/dev/null || true
-    fi
-
-    verify_checksum "${TMPDIR}/${ARCHIVE_NAME}" "${TMPDIR}/${ARCHIVE_NAME}.sha256"
+    # Only the rolling edge release is republished under a reader's feet, so
+    # only it retries (4 attempts, backoff 5s/10s/20s; BEAMTALK_RETRY_DELAY
+    # overrides the first delay). Every other install is a single attempt.
+    MAX_ATTEMPTS=1
+    if [ "${EDGE}" = "1" ]; then MAX_ATTEMPTS=4; fi
+    DELAY="${BEAMTALK_RETRY_DELAY:-5}"
+    case "${DELAY}" in ''|*[!0-9]*) DELAY=5 ;; esac
+    ATTEMPT=1
+    while ! fetch_and_verify; do
+        if [ "${ATTEMPT}" -ge "${MAX_ATTEMPTS}" ]; then exit 1; fi
+        echo "The edge release may be mid-publish (a merge to main republishes it)."
+        echo "  Retrying in ${DELAY}s (attempt $((ATTEMPT + 1)) of ${MAX_ATTEMPTS})..."
+        sleep "${DELAY}"
+        DELAY=$((DELAY * 2))
+        ATTEMPT=$((ATTEMPT + 1))
+    done
 
     echo "Installing to ${PREFIX}..."
     mkdir -p "${PREFIX}"
