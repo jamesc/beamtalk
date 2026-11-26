@@ -4,7 +4,6 @@
 //! ADR 0082 Phase 3: executeCommand expression-builder tests for flush, `save_class`, `precheck_method`, `recheck_image`, `remove_method`, plus class-name/selector validation and the beamtalk.* command-list constant check.
 
 use super::*;
-use beamtalk_core::unparse::escape_string_literal;
 
 // ----------------------------------------------------------------------
 // ADR 0082 Phase 3: executeCommand expression builder + helpers
@@ -87,26 +86,54 @@ fn build_flush_kind_rejects_invalid_chars() {
 }
 
 #[test]
-fn build_save_class_emits_workspace_newclass_expression() {
-    let source = "Object subclass: Greeter\n  instanceMethods\n  greet => 'hi'";
+fn save_class_call_sends_the_save_class_op_with_structured_params() {
+    // The source travels as a value in the `save-class` request, never as
+    // text escaped into a `Workspace newClass:at:` expression (BT-5276).
+    let source = "Object subclass: Greeter\n  greet => \"hi {name}\"";
     let path = "src/greeter.bt";
-    let expr = build_command_expression(
+    let call = build_command_call(
         CMD_SAVE_CLASS,
         &[serde_json::json!(source), serde_json::json!(path)],
     )
     .expect("ok");
-    // Roundtrip the source through the Beamtalk escaper.
-    let expected_source = escape_string_literal(source);
-    let expected_path = escape_string_literal(path);
     assert_eq!(
-        expr,
-        format!("Workspace newClass: \"{expected_source}\" at: \"{expected_path}\"")
+        call,
+        CommandCall::SaveClass {
+            source: source.to_string(),
+            path: path.to_string()
+        }
     );
+    let request = call.request();
+    assert_eq!(request["op"], "save-class");
+    assert_eq!(request["source"], source);
+    assert_eq!(request["path"], path);
+    assert!(request.get("code").is_none(), "must not be an eval request");
+}
+
+#[test]
+fn save_class_is_not_an_expression_command() {
+    let err = build_command_expression(
+        CMD_SAVE_CLASS,
+        &[
+            serde_json::json!("Object subclass: X"),
+            serde_json::json!("src/x.bt"),
+        ],
+    )
+    .expect_err("save-class has no eval expression");
+    assert!(err.contains("unknown LSP command"));
+}
+
+#[test]
+fn other_commands_still_send_eval() {
+    let call = build_command_call(CMD_FLUSH, &[]).expect("ok");
+    let request = call.request();
+    assert_eq!(request["op"], "eval");
+    assert_eq!(request["code"], "Workspace flush");
 }
 
 #[test]
 fn build_save_class_rejects_empty_source() {
-    let err = build_command_expression(
+    let err = build_command_call(
         CMD_SAVE_CLASS,
         &[serde_json::json!(""), serde_json::json!("src/x.bt")],
     )
@@ -116,7 +143,7 @@ fn build_save_class_rejects_empty_source() {
 
 #[test]
 fn build_save_class_rejects_empty_path() {
-    let err = build_command_expression(
+    let err = build_command_call(
         CMD_SAVE_CLASS,
         &[
             serde_json::json!("Object subclass: X"),
@@ -132,7 +159,7 @@ fn build_save_class_accepts_object_wrapped_arguments() {
     // LSP clients sometimes pack arguments as `{"source": "...", "path":
     // "..."}` instead of a positional `[source, path]`. The handler
     // accepts either shape.
-    let expr = build_command_expression(
+    let call = build_command_call(
         CMD_SAVE_CLASS,
         &[
             serde_json::json!({"source": "Object subclass: X"}),
@@ -140,8 +167,21 @@ fn build_save_class_accepts_object_wrapped_arguments() {
         ],
     )
     .expect("ok");
-    assert!(expr.starts_with("Workspace newClass: \"Object subclass: X\""));
-    assert!(expr.ends_with("at: \"src/x.bt\""));
+    assert_eq!(
+        call,
+        CommandCall::SaveClass {
+            source: "Object subclass: X".to_string(),
+            path: "src/x.bt".to_string()
+        }
+    );
+}
+
+#[test]
+fn save_class_warnings_lists_changelog_warning_texts() {
+    let value = serde_json::json!({"path": "src/x.bt", "warnings": ["w1", "w2"]});
+    assert_eq!(save_class_warnings(Some(&value)), vec!["w1", "w2"]);
+    assert!(save_class_warnings(Some(&serde_json::json!({"path": "p"}))).is_empty());
+    assert!(save_class_warnings(None).is_empty());
 }
 
 #[test]

@@ -5773,7 +5773,7 @@ external-edit conflict detection.
 | `aClass >> sel => body` (parser sugar) | durable | yes | humans at the REPL |
 | `aClass compile: #sel source: "body"` | durable | yes | MCP `save_method`, browser "Save", REPL editor |
 | `aClass tryCompile: #sel source: "body"` | ephemeral (auto-prunes) | yes | MCP `try_method`, agent spikes |
-| `Workspace newClass: source at: path` | durable, `kind: #'new-class'` | yes | MCP `save_class`, browser "New File" |
+| `Workspace newClass: source at: path` | durable, `kind: #'new-class'` | yes | MCP `save_class` and LSP `beamtalk.saveClass` (via the `save-class` op), browser "New File" |
 
 `>>` and `compile:source:` are equivalent in effect — both install the new
 method and append a durable ChangeEntry. The keyword form takes the body as a
