@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5214 fixture: a value type whose `>` and `<` answer a non-Boolean
+// (`nil`), so `max` / `min` must raise what `Number>>max:` raises.
+
+Value subclass: Sloppy
+
+  /// Answers `nil`, not a Boolean.
+  > _other => nil
+
+  /// Answers `nil`, not a Boolean.
+  < _other => nil
