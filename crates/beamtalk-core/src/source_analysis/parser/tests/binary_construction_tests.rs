@@ -743,3 +743,134 @@ fn shape_errors_match_the_pattern_side() {
         "binary segment sizes must be non-negative, got -1",
     );
 }
+
+// --- Integer literals beyond i64 (BT-5239) ---
+
+const BIG: &str = "100000000000000000000"; // 10^20: 67 bits
+
+#[test]
+fn bignum_segment_value_parses_in_a_pattern_and_a_construction() {
+    // 10^20 needs 67 bits: clean at 72, in both directions.
+    for source in [
+        format!("x match: [<<{BIG}:72>> -> 1]"),
+        format!("<<{BIG}:72>>"),
+        "<<16rFFFFFFFFFFFFFFFFFF:72>>".to_string(),
+    ] {
+        assert!(diagnostics_of(&source).is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn bignum_segment_value_keeps_its_digits() {
+    let module = parse_ok(&format!("<<{BIG}:72, -{BIG}:72/signed>>"));
+    let Expression::BinaryConstruction { segments, .. } = &module.expressions[0].expression else {
+        panic!("expected a binary construction");
+    };
+    assert!(matches!(
+        &segments[0].value,
+        Expression::Literal(Literal::BigInteger(d), _) if d.as_str() == BIG
+    ));
+    assert!(matches!(
+        &segments[1].value,
+        Expression::Literal(Literal::BigInteger(d), _) if d.as_str() == format!("-{BIG}")
+    ));
+}
+
+#[test]
+fn bignum_that_does_not_fit_warns_in_a_pattern() {
+    assert_one(
+        &format!("x match: [<<{BIG}:64>> -> 1]"),
+        Severity::Warning,
+        &format!(
+            "this arm can never match because the value {BIG} will not fit in an 'unsigned' binary segment of size 64"
+        ),
+    );
+    assert_one(
+        &format!("x match: [<<-{BIG}:72>> -> 1]"),
+        Severity::Warning,
+        &format!(
+            "this arm can never match because the negative value -{BIG} will never match the value of an 'unsigned' binary segment"
+        ),
+    );
+    // Default size is 8 bits.
+    assert_one(
+        &format!("x match: [<<{BIG}>> -> 1]"),
+        Severity::Warning,
+        &format!(
+            "this arm can never match because the value {BIG} will not fit in an 'unsigned' binary segment of size 8"
+        ),
+    );
+}
+
+#[test]
+fn bignum_that_does_not_fit_warns_in_a_construction() {
+    assert_one(
+        &format!("<<{BIG}:64>>"),
+        Severity::Warning,
+        &format!(
+            "the value {BIG} does not fit in an 'unsigned' binary segment of size 64 and is truncated to its low 64 bits"
+        ),
+    );
+}
+
+#[test]
+fn bignum_signed_boundaries() {
+    // 2^71 = 2361183241434822606848 needs 72 bits unsigned-magnitude.
+    let two_71 = "2361183241434822606848";
+    // Positive 2^71 does not fit signed 72; negative 2^71 does.
+    assert_eq!(diagnostics_of(&format!("<<{two_71}:72/signed>>")).len(), 1);
+    assert!(diagnostics_of(&format!("<<-{two_71}:72/signed>>")).is_empty());
+    // One beyond -2^71 does not.
+    assert_eq!(
+        diagnostics_of("<<-2361183241434822606849:72/signed>>").len(),
+        1
+    );
+    // 2^71 - 1 fits signed 72 and unsigned 71.
+    assert!(diagnostics_of("<<2361183241434822606847:72/signed>>").is_empty());
+    assert!(diagnostics_of(&format!("<<{two_71}:72>>")).is_empty());
+    assert_eq!(diagnostics_of(&format!("<<{two_71}:71>>")).len(), 1);
+}
+
+#[test]
+fn bignum_in_a_size_zero_segment_warns() {
+    assert_eq!(diagnostics_of(&format!("<<{BIG}:0>>")).len(), 1);
+    assert_eq!(diagnostics_of(&format!("<<{BIG}:0/signed>>")).len(), 1);
+}
+
+#[test]
+fn bignum_size_is_too_large() {
+    for source in [
+        format!("<<1:{BIG}>>"),
+        format!("x match: [<<v:{BIG}>> -> v]"),
+        format!("x match: [<<_:{BIG}>> -> 1]"),
+        format!("<<1:({BIG})>>"),
+    ] {
+        let diagnostics = diagnostics_of(&source);
+        assert!(
+            diagnostics.iter().any(|(sev, m)| *sev == Severity::Error
+                && m == &format!("binary segment size {BIG} is too large")),
+            "{source}: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn bignum_unit_is_too_large() {
+    assert_one(
+        &format!("<<1:8/unit:{BIG}>>"),
+        Severity::Error,
+        &format!("binary segment unit {BIG} is too large; it must be between 1 and 256"),
+    );
+}
+
+#[test]
+fn very_long_bignum_is_elided_in_diagnostics() {
+    let digits = "9".repeat(60);
+    let diagnostics = diagnostics_of(&format!("<<{digits}>>"));
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert!(
+        diagnostics[0].1.contains("(60 digits)") && !diagnostics[0].1.contains(&digits),
+        "{}",
+        diagnostics[0].1
+    );
+}

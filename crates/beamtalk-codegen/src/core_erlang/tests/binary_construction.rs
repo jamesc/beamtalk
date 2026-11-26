@@ -425,3 +425,36 @@ fn assignment_in_a_segment_value_is_sequenced_left_to_right() {
         assert!(code.contains("#{"), "{context}: {code}");
     }
 }
+
+// --- Integer literals beyond i64 (BT-5239) ---
+
+#[test]
+fn bignum_segment_value_lowers_in_a_construction() {
+    let code = compile_body("<<100000000000000000000:72>>");
+    let built = construction(&code);
+    assert!(
+        built.contains("#<100000000000000000000>(72,"),
+        "expected the bignum literal as the segment value in\n{built}"
+    );
+}
+
+#[test]
+fn negative_bignum_segment_value_lowers_in_a_construction() {
+    let code = compile_body("<<-100000000000000000000:72/signed>>");
+    let built = construction(&code);
+    assert!(
+        built.contains("#<-100000000000000000000>(72,"),
+        "expected the negative bignum literal in\n{built}"
+    );
+}
+
+#[test]
+fn bignum_segment_pattern_lowers_to_a_core_erlang_binary_pattern() {
+    let code = compile_through_erlc(
+        "Object subclass: Framer\n  build: v with: p =>\n    v match: [<<100000000000000000000:72>> -> 1; _ -> 0]\n",
+    );
+    assert!(
+        code.contains("#<100000000000000000000>(72,"),
+        "expected the bignum literal in a binary pattern in\n{code}"
+    );
+}
