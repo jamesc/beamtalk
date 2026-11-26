@@ -131,6 +131,13 @@ class_send(undefined, Selector, _Args, _Timeout) ->
 class_send(ClassName, Selector, _Args, _Timeout) when is_atom(ClassName) ->
     Error = beamtalk_error:new(class_not_found, ClassName, Selector),
     beamtalk_error:raise(Error);
+%% BT-5274 (ADR 0126 §5.1/§5.5): a class send never runs in a peer's class
+%% process. A class object that carries a peer's pid is resolved by name
+%% before it gets here (`beamtalk_message_dispatch:local_class_pid/3`); a bare
+%% foreign pid has no name to resolve, so it is refused instead of falling
+%% through to a remote `gen_server:call`.
+class_send(ClassPid, Selector, _Args, _Timeout) when node(ClassPid) =/= node() ->
+    beamtalk_error:raise(foreign_class_pid_error(ClassPid, Selector));
 %% ADR 0135 §1: `supervise` and the spawn family on a Supervisor or
 %% DynamicSupervisor class start the tree in the caller, through
 %% `beamtalk_supervisor:class_start/4`, never in the class gen_server (which
@@ -149,6 +156,25 @@ class_send(ClassPid, Selector, Args, Timeout) when
     end;
 class_send(ClassPid, Selector, Args, Timeout) ->
     class_send_plain(ClassPid, Selector, Args, Timeout).
+
+%% `class_not_found` for a class send aimed at a class process on another node
+%% (BT-5274). The pid alone names no class, so nothing can be resolved here.
+-spec foreign_class_pid_error(pid(), selector()) -> #beamtalk_error{}.
+foreign_class_pid_error(ClassPid, Selector) ->
+    beamtalk_error:with_details(
+        beamtalk_error:with_hint(
+            beamtalk_error:new(class_not_found, unknown, Selector),
+            beamtalk_error:chars_to_binary(
+                io_lib:format(
+                    "the class process ~p is on node ~p, not this one; a class reference "
+                    "from another node resolves by name on this node (send to the class "
+                    "object, not its pid)",
+                    [ClassPid, node(ClassPid)]
+                )
+            )
+        ),
+        #{node => node(ClassPid)}
+    ).
 
 %% `{ok, ClassName, Module}` when `ClassPid` is a Supervisor or
 %% DynamicSupervisor class (ETS reads only), else `error`.
@@ -1262,6 +1288,9 @@ Self carries `class='Metaclass'` so method dispatch receives the correct receive
 %% `self new` / `self spawnAs:`, and raise a clear error for everything else.
 metaclass_send(Pid, Selector, Args, _Self) when Pid =:= self() ->
     beamtalk_class_dispatch_recovery:handle_metaclass_self_call(Selector, Args);
+%% BT-5274: as `class_send/4`, never a call into a peer's class process.
+metaclass_send(Pid, Selector, _Args, _Self) when node(Pid) =/= node() ->
+    beamtalk_error:raise(foreign_class_pid_error(Pid, Selector));
 metaclass_send(Pid, Selector, Args, Self) ->
     %% Wrap in crash recovery, same as class_send.
     %% Update Self's pid on recovery so downstream dispatch uses the new process.
