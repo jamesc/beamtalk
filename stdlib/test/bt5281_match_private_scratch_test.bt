@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-5281: see stdlib/test/fixtures/bt5281_match_private_scratch_actor.bt.
+// BT-5281: see stdlib/test/fixtures/Bt5281MatchPrivateScratchActor.bt.
 
 TestCase subclass: Bt5281MatchPrivateScratchTest
 
