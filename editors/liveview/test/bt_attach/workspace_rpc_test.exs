@@ -401,10 +401,9 @@ defmodule BtAttach.WorkspaceRpcTest do
       mock_rpc(%{
         {:beamtalk_repl_ops, :request} => fn [op, params, _session_pid] ->
           request = Map.put(params, "op", op)
-          decoded = request
-          refute Map.has_key?(decoded, "old_name")
-          refute Map.has_key?(decoded, "before_selector")
-          refute Map.has_key?(decoded, "before_side")
+          refute Map.has_key?(request, "old_name")
+          refute Map.has_key?(request, "before_selector")
+          refute Map.has_key?(request, "before_side")
 
           {:value, %{"ok" => true}}
         end
@@ -465,15 +464,6 @@ defmodule BtAttach.WorkspaceRpcTest do
     test "complete/2 degrades an unrecognised reply to unexpected_reply" do
       mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
       assert Workspace.complete(self(), "x") == {:error, {:unexpected_reply, :odd}}
-    end
-
-    test "complete/2 surfaces a badrpc from the decode step itself (dispatch_complete's own catch-all)" do
-      # Distinct from the dispatch-step badrpc above: here decode/1 itself
-      # badrpc's, hitting dispatch_complete/2's own `other -> other` catch-all
-      # (there is no dedicated {:badrpc, _} clause at the decode step, unlike
-      # dispatch_browse/2 / dispatch_simple/2) rather than the {:ok, msg} branch.
-      mock_rpc(%{{:beamtalk_repl_ops, :request} => {:badrpc, :mock_scripted}})
-      assert Workspace.complete(self(), "x") == {:error, {:unreachable, :mock_scripted}}
     end
 
     test "hover/2 returns the formatted docs string" do
@@ -545,11 +535,6 @@ defmodule BtAttach.WorkspaceRpcTest do
       assert Workspace.hover(self(), "x") == {:error, {:unexpected_reply, :odd}}
     end
 
-    test "hover/2 surfaces a badrpc from the decode step itself (dispatch_hover's own catch-all)" do
-      mock_rpc(%{{:beamtalk_repl_ops, :request} => {:badrpc, :mock_scripted}})
-      assert Workspace.hover(self(), "x") == {:error, {:unreachable, :mock_scripted}}
-    end
-
     test "diagnostics/1 defaults mode to expression and normalizes each diagnostic" do
       diag = %{start: 0, end: 3, severity: :error, message: "bad token"}
       mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:diagnostics, [diag]}))
@@ -578,11 +563,6 @@ defmodule BtAttach.WorkspaceRpcTest do
     test "diagnostics/2 degrades an unrecognised reply to unexpected_reply" do
       mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, :odd))
       assert Workspace.diagnostics("x", "expression") == {:error, {:unexpected_reply, :odd}}
-    end
-
-    test "diagnostics/2 surfaces a badrpc from the decode step itself (dispatch_diagnostics's own catch-all)" do
-      mock_rpc(%{{:beamtalk_repl_ops, :request} => {:badrpc, :mock_scripted}})
-      assert Workspace.diagnostics("x", "expression") == {:error, {:unreachable, :mock_scripted}}
     end
   end
 
@@ -679,11 +659,6 @@ defmodule BtAttach.WorkspaceRpcTest do
     test "list_tests/0 surfaces a badrpc at the decode step as unreachable" do
       mock_rpc(%{{:beamtalk_repl_ops, :request} => {:badrpc, :mock_scripted}})
       assert Workspace.list_tests() == {:error, {:unreachable, :mock_scripted}}
-    end
-
-    test "list_tests/0 degrades an unrecognised decode reply to unexpected_reply" do
-      mock_rpc(%{{:beamtalk_repl_ops, :request} => :odd})
-      assert Workspace.list_tests() == {:error, {:unexpected_reply, :odd}}
     end
 
     test "list_tests/0 surfaces a badrpc from the request call as unreachable" do
@@ -1265,20 +1240,6 @@ defmodule BtAttach.WorkspaceRpcTest do
                {:error, {:unreachable, :mock_scripted}}
     end
 
-    test "an object handle whose decode step itself badrpcs is unreachable" do
-      # Distinct from the pid_to_list badrpc above: pid_to_list succeeds here,
-      # and it's dispatch_inspect/1's own decode step that badrpc's, hitting
-      # both dispatch_inspect/1's `other -> other` catch-all AND
-      # dispatch_inspect_result/1's {:badrpc, _} clause.
-      mock_rpc(%{
-        {:erlang, :pid_to_list} => ~c"<0.99.0>",
-        {:beamtalk_repl_ops, :request} => {:badrpc, :mock_scripted}
-      })
-
-      assert Workspace.inspect_value({:beamtalk_object, "Counter", Counter, self()}) ==
-               {:error, {:unreachable, :mock_scripted}}
-    end
-
     test "an object handle whose inspect dispatch reply is wholly unrecognised" do
       mock_rpc(
         Map.merge(
@@ -1388,20 +1349,6 @@ defmodule BtAttach.WorkspaceRpcTest do
 
     test "pid_stats/1 surfaces a badrpc pid_to_list as unreachable" do
       mock_rpc(%{{:erlang, :pid_to_list} => {:badrpc, :mock_scripted}})
-
-      assert Workspace.pid_stats({:beamtalk_object, "Counter", Counter, self()}) ==
-               {:error, {:unreachable, :mock_scripted}}
-    end
-
-    test "pid_stats/1 surfaces a badrpc from the decode step itself" do
-      # Mirrors the inspect_value/1 case above: pid_to_list succeeds, and it's
-      # dispatch_pid_stats/1's own decode step that badrpc's, hitting both its
-      # own `other -> other` catch-all AND dispatch_pid_stats_result/1's
-      # {:badrpc, _} clause.
-      mock_rpc(%{
-        {:erlang, :pid_to_list} => ~c"<0.99.0>",
-        {:beamtalk_repl_ops, :request} => {:badrpc, :mock_scripted}
-      })
 
       assert Workspace.pid_stats({:beamtalk_object, "Counter", Counter, self()}) ==
                {:error, {:unreachable, :mock_scripted}}

@@ -86,6 +86,8 @@ defmodule BtAttach.RemoteCallAllowlistTest do
     {:lists, :map, :encoding, "BT-5205"}
   ]
 
+  @dynamic_function_modules [:beamtalk_git]
+
   @lib Path.expand("../../lib", __DIR__)
   @inventory Path.expand("../../../../docs/development/surface-parity.md", __DIR__)
 
@@ -246,8 +248,10 @@ defmodule BtAttach.RemoteCallAllowlistTest do
     end
   end
 
+  # A variable function name is accepted only where a module opts in: the git
+  # mutators share one transport (`git_mutate/2`) until BT-5205 migrates them.
   defp permitted?(:call, {m, :dynamic}, _allowed, allowed_modules),
-    do: MapSet.member?(allowed_modules, m)
+    do: m in @dynamic_function_modules and MapSet.member?(allowed_modules, m)
 
   defp permitted?(:call, {m, f}, allowed, _allowed_modules), do: MapSet.member?(allowed, {m, f})
   defp permitted?(_kind, _target, _allowed, _allowed_modules), do: false
@@ -306,6 +310,12 @@ defmodule BtAttach.RemoteCallAllowlistTest do
   defp collect({{:., _, [rpc_mod, call]}, meta, _args}, acc) when rpc_mod in [:erpc, :rpc] do
     [{:forbidden, ":#{rpc_mod}.#{call}", meta[:line]} | acc]
   end
+
+  # Dynamic dispatch hides the target from the walker. (Local `apply/3` is
+  # ordinary Elixir and is not flagged; only the erlang-level forms are.)
+  defp collect({{:., _, [:erlang, call]}, meta, _}, acc)
+       when call in [:apply, :spawn, :spawn_link, :spawn_monitor, :spawn_opt],
+       do: [{:forbidden, ":erlang.#{call}", meta[:line]} | acc]
 
   defp collect({{:., _, [{:__aliases__, _, [:Node]}, spawn]}, meta, _}, acc)
        when spawn in [:spawn, :spawn_link, :spawn_monitor] do

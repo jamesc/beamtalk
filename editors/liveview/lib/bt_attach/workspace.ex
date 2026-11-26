@@ -25,7 +25,7 @@ defmodule BtAttach.Workspace do
   `docs/development/repl-op-term-contract.md`.
 
   Display (`render_term/1`) is a *separate* concern from the data path: it
-  reuses the workspace's own `beamtalk_repl_json:term_to_json/1` formatter — the
+  reuses the workspace's own formatter (`beamtalk_repl_ops:render/2`) — the
   same one the browser WebSocket protocol uses — so the LiveView shows
   byte-identical values to the Phase-1 browser workspace, surface-consistent for
   free, while `eval/2` still returns the live term.
@@ -1209,7 +1209,7 @@ defmodule BtAttach.Workspace do
   end
 
   # Build the `complete` request as a flat map (`code` + `cursor` top-level,
-  # mirroring `dispatch_eval`), decode it on the workspace node, and dispatch
+  # mirroring `dispatch_eval`), and send it with one `request/3` call, which dispatches
   # through the term-returning op layer so the `{completions, _}` term arrives
   # live (no JSON edge). `session_pid` is passed as `request/3`'s SessionPid so
   # the op resolves the session's bindings for instance-method completion
@@ -1225,7 +1225,7 @@ defmodule BtAttach.Workspace do
   end
 
   # Build the `hover` request as a flat map (`code` top-level, mirroring
-  # `dispatch_complete`), decode it on the workspace node, and dispatch through
+  # `dispatch_complete`), and send it with one `request/3` call, which dispatches through
   # the term-returning op layer so the `{docs, _}` term arrives live (no JSON
   # edge). `session_pid` is passed as `request/3`'s SessionPid so the op
   # resolves the session's bindings for receiver classification (BT-1045).
@@ -1255,7 +1255,7 @@ defmodule BtAttach.Workspace do
   end
 
   # Build the `diagnostics` request as a flat map (`code` + `mode` top-level),
-  # decode it on the workspace node, and dispatch through the term-returning op
+  # and send it with one `request/3` call, which dispatches through the term-returning op
   # layer so the `{diagnostics, _}` term arrives live (no JSON edge). No session
   # pid is needed — diagnostics are workspace-global parse-only analysis — so
   # `self()` is passed only to satisfy `request/3`'s arity, mirroring
@@ -2359,7 +2359,7 @@ defmodule BtAttach.Workspace do
   end
 
   # Build the `pid-stats` request as a flat map (`actor` top-level, mirroring
-  # `dispatch_inspect/1`), decode it on the workspace node, and dispatch through
+  # `dispatch_inspect/1`), and send it with one `request/3` call, which dispatches through
   # the term-returning op layer so the metrics map stays a live term.
   defp dispatch_pid_stats(pid_str) do
     # pid-stats ignores SessionPid; pass self() to satisfy request/3.
@@ -2585,7 +2585,8 @@ defmodule BtAttach.Workspace do
   # decode/get_params prelude stay on the workspace node.
   #
   # `wire_params/1` first gives the map the shape a decoded WebSocket frame has
-  # (binary keys; atoms and `nil` as the strings/null JSON would carry), with
+  # (binary keys; atoms, `nil` included, as the strings JSON would carry: `nil` is
+  # the string `"nil"`, so callers omit an absent param rather than pass `nil`), with
   # the OTP `:json` module, so a handler cannot tell this caller from the
   # WebSocket. The result is returned verbatim, `{:badrpc, _}` included.
   defp request_op(op, params, session_pid, timeout)

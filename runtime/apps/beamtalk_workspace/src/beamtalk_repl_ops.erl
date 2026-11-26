@@ -20,6 +20,10 @@ layer into two halves:
   directly over Erlang distribution, where JSON is both overhead and *lossy*
   (a live `{beamtalk_object, Class, Module, Pid}` carries a real remote pid
   that JSON would flatten to a dead display string).
+* `request/3` — the entry point for a dist-attached caller: builds the
+  request from an op name and a flat params map, then calls `dispatch/4`.
+* `render/2` — the one rendering function for such a caller (display text for
+  a term, a term list or an error).
 * `encode/2` — encodes an `op_result()` to the protocol JSON binary at the
   **WebSocket transport edge only**. The browser wire format is unchanged.
 
@@ -144,8 +148,14 @@ envelope keys `op`, `id` and `session` are not params and are dropped.
 """.
 -spec request(binary(), map(), pid()) -> op_result().
 request(Op, Params, SessionPid) when is_binary(Op), is_map(Params), is_pid(SessionPid) ->
-    {ok, Msg} = beamtalk_repl_protocol:decode_map(Params#{<<"op">> => Op}),
-    dispatch(Op, beamtalk_repl_protocol:get_params(Msg), Msg, SessionPid).
+    case beamtalk_repl_protocol:decode_map(Params#{<<"op">> => Op}) of
+        {ok, Msg} ->
+            dispatch(Op, beamtalk_repl_protocol:get_params(Msg), Msg, SessionPid);
+        {error, _Reason} ->
+            %% Unreachable while `op` is always set; keeps the "return, never
+            %% raise" contract if decode_map/1 ever validates more.
+            unknown_op(Op)
+    end.
 
 -doc """
 The one rendering function for dist-attached clients (BT-5201).

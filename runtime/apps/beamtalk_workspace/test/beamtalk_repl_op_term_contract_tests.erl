@@ -124,7 +124,7 @@ error_record_fields_test() ->
             element(1, Err#beamtalk_error.hint) =:= beamtalk_string
     ),
     ?assert(is_map(Err#beamtalk_error.details)),
-    %% The record is a plain tuple tagged `beamtalk_error` (6 fields), so a
+    %% The record is a plain tuple tagged `beamtalk_error` (7-tuple: tag + 6 fields), so a
     %% client without the .hrl matches `{:beamtalk_error, kind, ...}`.
     ?assertEqual(7, tuple_size(Err)),
     ?assertEqual(beamtalk_error, element(1, Err)).

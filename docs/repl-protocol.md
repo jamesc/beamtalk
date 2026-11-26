@@ -947,8 +947,8 @@ A handler cannot tell `request/3` from a WebSocket frame: it is `dispatch/4` wit
 the `protocol_msg()` built on the workspace node. The client therefore never
 needs the record's definition, and does not call `beamtalk_repl_protocol:decode/1`
 or `get_params/1`. A client written in Elixir passes its params through the OTP
-`json` module once (`:json.decode(:json.encode(params))`) so atoms and `nil`
-take the shape JSON would give them.
+`json` module once (`:json.decode(:json.encode(params))`) so atoms take the shape
+JSON would give them (`nil` becomes the string `"nil"`, so omit an absent param).
 
 *Design note (BT-5201).* The request entry point is `request(Op, Params,
 SessionPid)`: the simplest signature that serves every current caller. Evals,
