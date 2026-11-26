@@ -1997,3 +1997,22 @@ Full tables, the exact commands and the conditions are in [`benchmarks/vs-elixir
 | `beamtalk_result:tryDo/1`, block answers | direct timing, no benchmark row exists | n/a | n/a | 23.0 (bare `try`: 8.4) |
 
 The inventory that drives the removal is [`class-state-removal-inventory.md`](class-state-removal-inventory.md), a one-off file deleted by the last issue of the epic.
+
+## ADR 0153 after: class variables and cross-file extensions removed, and the guard read (BT-5164)
+
+The "after" run for the BT-5145 baseline above, measured with three runs interleaved against the baseline commit (`b464155e`) on the same host and build profile, versus `main` at `1e3755e`. Full tables and per-run numbers: [`benchmarks/vs-elixir/results/bench-bt5164-after.md`](../../benchmarks/vs-elixir/results/bench-bt5164-after.md). Reductions and words are exact; time on this 4-core cloud host is noisy (run to run ±10-30%), so read the time columns as ratios within one run; the time deltas on rows 3a-3c, 8a, 8b and e1 are inside that noise and only the reductions are firm.
+
+| Row | Operation | base red | main red | base ns | main ns |
+|---|---|--:|--:|--:|--:|
+| 3a-3c | class send, guarded direct call | 3.0 | 3.0 | 22 / 22 / 24 | 27 / 21 / 34 |
+| 3d | class in a variable | 24.1 | **31.0** | 660 | 746 |
+| 3e | inherited class method | 31.1 | 28.3 | 939 | **1516** |
+| 8a | `on: Error do:` without a raise | 5.0 | **3.0** | 65.3 | 64.6 |
+| 8b | `on: Error do:` with a raise | 99.2 | 95.2 | 2546 | 2462 |
+| e1 | dispatch `on: Error do:` | 5.0 | **3.0** | 67.9 | 74.6 |
+| `beamtalk_result:tryDo/1` over a bare `try` (noisy) | | n/a | n/a | 15.2 | 9.9 |
+
+- **What the removals saved.** The class-variable snapshot cost `on:do:` 2 reductions (5 → 3) and `Result tryDo:` at most a few ns on its success path (0.5-6 ns over three runs, not distinguishable from noise); `on:do:` time did not move beyond noise. The class-send rows 3a-3c have equal reductions (3.0) and their time is inconclusive (3c slower on main in all three runs of one harness, faster in the other); the guard is the same read.
+- **The guard read is still there and still dominant.** One `persistent_term:get` per class send (`'<Class> static calls'` or `'<Class> class'`), about 16-17 ns at the floor (BT-4987 said 15 ns, also a floor) of a 19-21 ns send: roughly 75-90%. Replacing it with `atomics:get` (21 ns) or `ets:lookup` (27 ns) would be slower. Removing it would leave a send of very roughly 3-5 ns (an estimate from two noisy figures), like Elixir's remote call. Conclusion (a): it can go in principle, but safely only with two owner decisions (a runtime fun shadowing a compiled selector; a `ClassSelf` that carries a pid), tracked in BT-5268 (spike, `needs-spec`). No guard code was changed.
+- **Regression found.** A class held in a variable (3d, 3e, c5) now reads the raw `runtime_fun` and ready flags per send instead of the derived flag: 3 reads instead of 2, 24 → 31 reductions on 3d, and 3e is +60% in time in all three runs (more than one extra read explains). Tracked in BT-5267.
+- Rows 3f-3j and c4 no longer exist (they measured class variables and cross-file extensions); the old numbers stay in the baseline above and in the files under `benchmarks/vs-elixir/results/`.
