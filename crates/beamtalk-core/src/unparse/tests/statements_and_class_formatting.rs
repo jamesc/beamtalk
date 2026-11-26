@@ -482,6 +482,34 @@ fn map_literal_long_breaks() {
     );
 }
 
+// --- BT-5299: map destructuring pattern wraps like the literal ---
+
+const LONG_MAP_PATTERN: &str = "Object subclass: Probe\n\n  class a: m :: Dictionary -> Object =>\n    #{\n      #access_token => accessToken,\n      #token_type => tokenType,\n      #expires_in => expiresIn,\n      #refresh_token => refreshToken,\n      #scope => scope\n    } := m\n";
+
+#[test]
+fn map_pattern_long_breaks_one_entry_per_line() {
+    let formatted = format_source(LONG_MAP_PATTERN).expect("source must parse");
+    assert!(
+        formatted.contains("#{\n      #access_token => accessToken,\n"),
+        "long map pattern should wrap one entry per line: {formatted}"
+    );
+    assert!(
+        formatted.lines().all(|l| l.len() <= 100),
+        "no line should exceed the width: {formatted}"
+    );
+    assert_identity(LONG_MAP_PATTERN);
+}
+
+#[test]
+fn map_pattern_short_stays_inline() {
+    let source = "Object subclass: Probe\n  class a: m :: Dictionary -> Object =>\n    #{#x => x, #y => y} := m\n";
+    let formatted = format_source(source).expect("source must parse");
+    assert!(
+        formatted.contains("#{#x => x, #y => y} := m"),
+        "short map pattern should stay inline: {formatted}"
+    );
+}
+
 // --- BT-5024: package-qualified superclass keeps its `package@` prefix ---
 
 #[test]

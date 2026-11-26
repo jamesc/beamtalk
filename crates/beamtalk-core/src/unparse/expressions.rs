@@ -1487,8 +1487,7 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
                     docvec![key_doc, " => ", unparse_pattern(&p.value)]
                 })
                 .collect();
-            let joined = join_docs(pair_docs, ", ");
-            docvec!["#{", joined, "}"]
+            unparse_wrapped_map(pair_docs)
         }
         Pattern::Constructor {
             class, keywords, ..
@@ -1717,7 +1716,12 @@ fn unparse_map_literal(pairs: &[MapPair], span: Span) -> Document<'static> {
     if let Some(slots) = literal_comment_slots(span) {
         return unparse_commented_literal("#{", "}", pair_docs, None, &slots);
     }
-    // Try inline first (#{a => 1, b => 2}), break to one-per-line if too wide
+    unparse_wrapped_map(pair_docs)
+}
+
+/// `#{a => 1, b => 2}` inline when it fits, one entry per line otherwise.
+/// Shared by map literals and map patterns so both wrap identically.
+fn unparse_wrapped_map(pair_docs: Vec<Document<'static>>) -> Document<'static> {
     let mut body = Vec::new();
     for (i, pair_doc) in pair_docs.into_iter().enumerate() {
         if i > 0 {
