@@ -2498,13 +2498,13 @@ fn test_actor_match_in_direct_params_loop_keeps_scratch_private() {
         "    count\n",
     );
     let code = codegen(src);
-    // The loop really is direct-params (it rebuilds StateAcc once at exit), so
-    // the success of `codegen` above shows the error branch is not reached.
+    // The loop really is direct-params (it rebuilds StateAcc once at exit).
     assert_has(
         "Outer loop should be direct-params (rebuild StateAcc at exit)",
         &code,
         &["ExitSA"],
     );
+    crate::core_erlang::tests::assert_compiles_through_erlc("test", &code);
 }
 
 // ── BT-3916: receiver guard of the inlined writing fold ──────

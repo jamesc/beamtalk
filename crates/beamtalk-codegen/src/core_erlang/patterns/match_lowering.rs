@@ -240,11 +240,17 @@ impl CoreErlangGenerator {
         // uniform `{Value, State}` shape via `generate_match_arm_body`, so the
         // whole `match:` expression threads state exactly like `ifTrue:`/
         // `ifFalse:` mutations — see `match_needs_state_threading`.
-        let state_threading_base = if producer.is_none() && self.match_needs_state_threading(arms) {
-            Some(self.current_state_var())
-        } else {
-            None
-        };
+        // BT-5281: in a frame with a private scratch map the arms start from a
+        // scratch seeded as a conditional's is there, never from a `StateAcc`
+        // the frame does not bind (`construct_base_state`).
+        let (base_seed, state_threading_base) =
+            if producer.is_none() && self.match_needs_state_threading(arms) {
+                let frame = self.current_frame();
+                let (seed, base) = self.construct_base_state(frame);
+                (seed, Some(base))
+            } else {
+                (Document::Nil, None)
+            };
         let state_threading = state_threading_base
             .as_deref()
             .map(|base_state| MatchThreading {
@@ -311,6 +317,7 @@ impl CoreErlangGenerator {
             };
 
         Ok(docvec![
+            base_seed,
             "let ",
             leaf::var(match_var.clone()),
             " = ",

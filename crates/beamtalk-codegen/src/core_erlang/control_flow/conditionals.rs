@@ -593,6 +593,25 @@ impl CoreErlangGenerator {
         (seed_doc, seeded_state)
     }
 
+    /// BT-5281: the base `State` a construct that threads no outer local of
+    /// its own (a non-producer `match:` whose arms thread `State`) starts its
+    /// arms from in `frame`: the frame's `State` where it continues one, else
+    /// a private scratch seeded as a conditional's is there
+    /// ([`ScratchStart::Fresh`]: the captured `State` or the cell in a plain
+    /// closure body, an empty map in a direct-params or tuple-acc loop or fold
+    /// body, which binds no `StateAcc`). Returns the seed's `let` (empty when
+    /// none is needed) and the base variable.
+    pub(in crate::core_erlang) fn construct_base_state(
+        &mut self,
+        frame: FrameId,
+    ) -> (Document<'static>, String) {
+        if self.conditional_has_private_scratch(frame) {
+            self.seed_scratch_locals(&[], ScratchStart::Fresh, "")
+        } else {
+            (Document::Nil, self.current_state_var())
+        }
+    }
+
     /// BT-4206: [`Self::seed_scratch_locals`] for a local-threading producer
     /// whose operands may splice a prelude into its frame (`match:`, a
     /// lookup), seeding from the frame's current `State` and recording, in

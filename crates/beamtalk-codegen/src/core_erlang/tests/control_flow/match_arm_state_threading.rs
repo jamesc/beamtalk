@@ -735,6 +735,27 @@ fn test_match_in_private_scratch_closure_frame_compiles() {
         "    x match: [_ -> x > 0 ifTrue: [p := x. self.n := p]]\n",
         "    self.n\n",
     );
+    // A direct-params loop body and a fold body are private-scratch frames
+    // too (`conditional_has_private_scratch`); the same `match:` in each.
+    let direct_params_loop = concat!(
+        "Actor subclass: MatchPrivateScratch\n",
+        "  state: n = 0\n\n",
+        "  run =>\n",
+        "    count := 0\n",
+        "    1 to: 3 do: [:i | count := count + 1. i match: [_ -> i > 0 ifTrue: [p := i]]]\n",
+        "    count\n",
+    );
+    let fold = concat!(
+        "Actor subclass: MatchPrivateScratch\n",
+        "  state: n = 0\n\n",
+        "  run: xs =>\n",
+        "    xs inject: 0 into: [:a :i | i match: [_ -> i > 0 ifTrue: [p := i]]. a + i]\n",
+    );
+    for src in [direct_params_loop, fold] {
+        assert_parses(src);
+        let code = codegen_named(src, "matchprivatescratch");
+        assert_compiles_through_erlc("matchprivatescratch", &code);
+    }
     for src in [nested, guards] {
         assert_parses(src);
         // A debug-build verifier finding panics, so this also proves the
