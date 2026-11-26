@@ -406,10 +406,15 @@ TestCase subclass: BinaryConstructionTest
       equals: 100000000000000000000
 
   testInexactBignumFloatSegmentIsConvertedByTheRuntime =>
-    // 166153499473114502559719956244594689 is not a float: the BEAM rounds
-    // it to 2^117 at run time, as it does for `float/1` of the same integer.
+    // 166153499473114502559719956244594689 is not a float. The BEAM's
+    // `float/1` on a bignum rounds differently across OTP versions (OTP 28
+    // gives 2^117, OTP 29 the nearest float, 2^117 + 2^65), so the literal is
+    // not folded at compile time: it must build whatever the runtime builds
+    // for the same integer held in a variable.
+    v := 166153499473114502559719956244594689
+    expected := <<v:64/float>>
     bin := <<166153499473114502559719956244594689:64/float>>
-    self assert: bin toBytes equals: #(71, 64, 0, 0, 0, 0, 0, 0)
+    self assert: bin toBytes equals: expected toBytes
 
   testExactBignumFloatSegmentIsFolded =>
     bin := <<100000000000000000000/float>>

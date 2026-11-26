@@ -480,9 +480,10 @@ fn bignum_in_a_float_segment_lowers_as_a_float() {
 #[test]
 fn inexact_bignum_float_segment_is_left_to_the_runtime() {
     // The BEAM's `float/1` on 166153499473114502559719956244594689 gives
-    // 2^117 (`<<71,64,0,0,0,0,0,0>>`, checked with `erl`), where a correctly
-    // rounding parse gives 2^117 + 2^65. A value no float equals exactly is
-    // therefore not folded: the integer stays in the segment.
+    // 2^117 on OTP 28 (`<<71,64,0,0,0,0,0,0>>`) but the nearest float,
+    // 2^117 + 2^65, on OTP 29, where a correctly rounding parse gives the
+    // latter. A value no float equals exactly is therefore not folded: the
+    // integer stays in the segment.
     let code = compile_body("<<166153499473114502559719956244594689/float>>");
     assert!(
         construction(&code).contains("#<166153499473114502559719956244594689>(64,1,'float'"),
