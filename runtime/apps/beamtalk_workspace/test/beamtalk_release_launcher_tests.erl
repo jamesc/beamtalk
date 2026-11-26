@@ -225,7 +225,8 @@ vm_args_dist_flags_test_() ->
         ?_assertEqual(
             #{ssl_dist_opt => ["a"], ssl_dist_optfile => ["f"], proto_dist => ["inet_tls"]},
             Flags(
-                <<"# caf\xE9\n-ssl_dist_opt a\n+K true\n-ssl_dist_optfile f +P 9\n-proto_dist inet_tls\n+sbwt none\n">>
+                <<"# caf", 16#E9,
+                    "\n-ssl_dist_opt a\n+K true\n-ssl_dist_optfile f +P 9\n-proto_dist inet_tls\n+sbwt none\n">>
             )
         ),
         ?_assertEqual(
