@@ -510,9 +510,12 @@ check and a peer's reload notification — and is announced once. A new
 connection's tally starts empty, so a reconnect announces its skew again.
 
 While the entry's `baseline` is `pending` (this monitor restarted while
-the peer stayed connected, and no connect-time shape check has finished
-yet), a class's first result is the state the connection was already in,
-from whichever check it comes, and is not announced. A later change is.
+the peer stayed connected, and no connect-time shape check has compared
+the manifests yet), a class's first result is taken as the state the
+connection was already in, from whichever check it comes, and is not
+announced. A later change is. A reload in that window is not told apart
+from skew that was already there, so its first result is not announced
+either; it is still counted.
 """.
 -spec should_announce(pending | done, check_result() | none, check_result()) -> boolean().
 should_announce(pending, none, _Result) -> false;
@@ -725,8 +728,11 @@ manifest via `erpc` (`beamtalk_node:remote_shape_manifest/1` — the same
 helper `Node>>shapeManifest` uses, AGENTS.md's no-duplicate-implementations
 rule) and compare every class shared with this node's own
 `beamtalk_release:shape_manifest/0` (the BT-3575 projection, never
-re-derived). One `NodeShapeSkew` per class whose `version` differs;
-matching-version and non-shared classes stay silent.
+re-derived). Each shared class's result goes to the tally, and a skew is
+announced as `should_announce/3` says; matching-version and non-shared
+classes stay silent. Once the comparison has run, it tells the monitor
+(`connect_check_done`), which takes the connection's baseline as in place;
+a check that could not read the peer does not.
 
 Best-effort and fault-isolated like `announce/2` above: an unreachable peer
 (already gone by the time this runs, a `connect_policy` mismatch — should
@@ -757,7 +763,10 @@ check_shape_skew_on_connect(PeerNode, Gen, Stamp) ->
                         end
                     end,
                     LocalManifest
-                );
+                ),
+                %% After its results, from the same process, so they are
+                %% in place first.
+                gen_server:cast(?MODULE, {connect_check_done, PeerNode, Gen});
             {error, FetchReason} ->
                 ?LOG_WARNING("Could not fetch peer shape manifest on connect", #{
                     domain => [beamtalk, runtime],
@@ -775,8 +784,7 @@ check_shape_skew_on_connect(PeerNode, Gen, Stamp) ->
                 stacktrace => Stacktrace
             })
     end,
-    %% After its results, from the same process, so they are in place first.
-    gen_server:cast(?MODULE, {connect_check_done, PeerNode, Gen}).
+    ok.
 
 -doc """
 Reload-time re-check (ADR 0126 §5.3): re-runs the comparison for exactly

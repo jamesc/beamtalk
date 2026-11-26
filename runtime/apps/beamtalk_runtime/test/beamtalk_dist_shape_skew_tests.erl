@@ -497,10 +497,13 @@ earlier_connection_notification_dropped(Peer, PeerNode) ->
     end.
 
 -doc """
-The peer reloads a class after the connection is up but before its
-monitor has handled `nodeup` for this node (its monitor is suspended).
-This node's own reload check of the class runs first and reads the peer's
-old entry. The reload must still reach this node's tally, announced once.
+A peer reload that its monitor handles before its `nodeup` for this node
+sends this node no notification (its reload check does not include this
+node yet). The peer's monitor is suspended with `nodeup` queued, and the
+class is swapped without `ClassLoaded`, so it never notifies; this node's
+own `nodeup` check and reload check of the class have both read the
+peer's old version 1 first. Only the check this node runs on the peer's
+`hello` can find version 2, so before BT-5265 the tally stayed clear.
 """.
 peer_reload_before_its_nodeup_counted(Peer, PeerNode) ->
     flush_events(),
@@ -513,30 +516,25 @@ peer_reload_before_its_nodeup_counted(Peer, PeerNode) ->
     Base =
         try
             reconnect(PeerNode),
-            %% This node's nodeup check, then its own reload check of the
-            %% class, both read the peer's version 1.
             _ = sys:get_state(beamtalk_node_monitor),
             await_local_checks_done(),
             beamtalk_node_monitor ! {'$beamtalk_class_loaded', Class},
             _ = sys:get_state(beamtalk_node_monitor),
             await_local_checks_done(),
-            ?assertEqual(clear, class_result(PeerNode, Class)),
-            ok = peer_call(Peer, reload_with_shape_version, [
+            Count = beamtalk_node_monitor:skew_count(PeerNode),
+            ok = peer_call(Peer, install_shape_version_stub, [
                 Class, shape_skew_peer_reload_cart_v2_stub, 2
             ]),
-            beamtalk_node_monitor:skew_count(PeerNode)
+            Count
         after
             ok = peer_call(Peer, resume_monitor, [])
         end,
     try
         Event = expect_skew_event(PeerNode, Class),
         ?assertEqual(2, maps:get(remoteVersion, Event)),
-        beamtalk_test_wait:until(
-            fun() -> beamtalk_node_monitor:skew_count(PeerNode) =:= Base + 1 end, 10000
-        ),
         await_connect_checks_done(Peer),
-        expect_no_skew_event(Class, 1000),
-        ?assertEqual({skewed, 1, 2}, class_result(PeerNode, Class))
+        ?assertEqual(Base + 1, beamtalk_node_monitor:skew_count(PeerNode)),
+        expect_no_skew_event(Class, 1000)
     after
         beamtalk_announcements:unsubscribe(Sub),
         ok = peer_call(Peer, reload_to_real_module, [Class, shape_skew_peer_reload_cart])

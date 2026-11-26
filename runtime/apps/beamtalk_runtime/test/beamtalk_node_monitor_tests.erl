@@ -15,8 +15,8 @@ the unknown-cast fallback, and `handle_info/2` for own `nodedown`, peer
 `handle_info/2` / `handle_cast/2` directly on a state value, so the
 reconnect and reload orderings they check are exact, not timing-dependent.
 
-Shape-skew connect/reload paths (`check_shape_skew_on_connect/4`,
-`check_one_peer_class/5`, `announce_if_skewed/7`) require a two-node setup
+Shape-skew connect/reload paths (`check_shape_skew_on_connect/3`,
+`check_one_peer_class/5`, `announce_if_skewed/6`) require a two-node setup
 and are exercised by `beamtalk_dist_shape_skew_tests`.
 """.
 
@@ -397,7 +397,7 @@ own_nodeup_sets_own_name_test_() ->
 %%====================================================================
 
 %% Covers handle_info lines 183-188: a peer-nodeup fires announce/2 and
-%% spawns check_shape_skew_on_connect/1. The erpc call in that spawn fails
+%% spawns check_shape_skew_on_connect/3. The erpc call in that spawn fails
 %% for a non-existent node, is caught and logged, and must not crash the
 %% gen_server.
 peer_nodeup_server_survives_test_() ->
@@ -774,13 +774,17 @@ connect_checks_test_() ->
                         Entry = beamtalk_node_monitor:peer_entry(Gen, existing),
                         setelement(4, S, maps:put(?PEER5265, Entry, element(4, S)))
                     end),
-                    %% A reload check lands before any connect check: its
-                    %% class's first result is not announced either.
+                    %% A connect check that cannot read the peer leaves the
+                    %% baseline pending...
+                    Failed = say_hello(true),
+                    finish_check(Failed, unreachable),
+                    %% ...so a reload check landing now: its class's first
+                    %% result is not announced either.
                     gen_server:cast(
                         beamtalk_node_monitor,
                         {skew_detected, ?PEER5265, Gen, 1, 'Bt5265Reloaded', {1, 2}}
                     ),
-                    First = say_hello(true),
+                    First = say_hello(false),
                     finish_check(First, 2),
                     ?assertEqual(2, beamtalk_node_monitor:skew_count(?PEER5265)),
                     ?assertEqual([], shape_skews_announced()),
@@ -817,6 +821,7 @@ block_reads() ->
         (?PEER5265) ->
             Test ! {reading, self()},
             receive
+                {go, unreachable} -> {error, timeout};
                 {go, Version} -> {ok, #{?CLASS => shape_entry(Version)}}
             end;
         (Other) ->
