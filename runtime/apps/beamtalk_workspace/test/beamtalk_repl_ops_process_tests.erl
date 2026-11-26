@@ -146,11 +146,17 @@ wire_projects_live_handles_to_stable_ids_test() ->
         #{<<"label">> => <<"process">>, <<"handle">> => null}
     ],
     {value, #{<<"children">> := Wired}} =
-        beamtalk_repl_ops_process:wire({value, #{<<"children">> => Rows, <<"truncated">> => false}}),
+        beamtalk_repl_ops_process:wire(
+            {value, #{<<"children">> => Rows, <<"truncated">> => false}}
+        ),
     Text = pid_text(Pid),
     ?assertMatch(
         [
-            #{<<"handle">> := #{<<"kind">> := <<"actor">>, <<"class">> := <<"Counter">>, <<"pid">> := Text}},
+            #{
+                <<"handle">> := #{
+                    <<"kind">> := <<"actor">>, <<"class">> := <<"Counter">>, <<"pid">> := Text
+                }
+            },
             #{<<"handle">> := #{<<"kind">> := <<"supervisor">>, <<"class">> := <<"Sup">>}},
             #{<<"handle">> := null}
         ],
@@ -192,7 +198,10 @@ process_info_of_a_live_pid_test() ->
 %% Not an actor: `pid-stats` refuses it, `process-info` reads it.
 process_info_needs_no_actor_test() ->
     Pid = beamtalk_test_proc:spawn_idle(),
-    ?assertMatch({error, #beamtalk_error{kind = unknown_actor}}, request(<<"pid-stats">>, #{<<"actor">> => Pid})),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = unknown_actor}},
+        request(<<"pid-stats">>, #{<<"actor">> => Pid})
+    ),
     ?assertMatch({value, #{<<"alive">> := true}}, request(<<"process-info">>, #{<<"pid">> => Pid})).
 
 process_info_of_a_dead_pid_is_not_an_error_test() ->
@@ -245,7 +254,10 @@ actor_ops_accept_a_live_pid_test() ->
     try
         Text = pid_text(Actor),
         ?assertMatch({inspect, _}, request(<<"inspect">>, #{<<"actor">> => Actor})),
-        ?assertEqual(request(<<"inspect">>, #{<<"actor">> => Text}), request(<<"inspect">>, #{<<"actor">> => Actor})),
+        ?assertEqual(
+            request(<<"inspect">>, #{<<"actor">> => Text}),
+            request(<<"inspect">>, #{<<"actor">> => Actor})
+        ),
         ?assertMatch(
             {value, #{<<"pid">> := Text, <<"alive">> := true}},
             request(<<"pid-stats">>, #{<<"actor">> => Actor})

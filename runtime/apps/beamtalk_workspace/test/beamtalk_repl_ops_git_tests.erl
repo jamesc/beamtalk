@@ -19,7 +19,9 @@ not run: the working tree is unchanged after each refused call.
 
 git_ops_test_() ->
     {foreach, fun setup/0, fun cleanup/1, [
-        fun(Ctx) -> {"git-status reports the branch and changed files", fun() -> status(Ctx) end} end,
+        fun(Ctx) ->
+            {"git-status reports the branch and changed files", fun() -> status(Ctx) end}
+        end,
         fun(Ctx) -> {"git-diff returns both sides for a path", fun() -> diff(Ctx) end} end,
         fun(Ctx) -> {"git-log lists commits and applies its limit", fun() -> log(Ctx) end} end,
         fun(Ctx) -> {"git-log clamps and validates count", fun() -> log_count(Ctx) end} end,
@@ -185,8 +187,12 @@ commit_message_is_literal(#{top := Top}) ->
     modify(Top),
     {value, _} = request(<<"git-stage">>, #{<<"path">> => <<"src/counter.bt">>}),
     Marker = filename:join(Top, "pwned"),
-    Message = iolist_to_binary([<<"x\"; touch ">>, Marker, <<"; $(touch ">>, Marker, <<") `touch ">>, Marker, <<"` -n">>]),
-    ?assertEqual({value, #{<<"committed">> => true}}, request(<<"git-commit">>, #{<<"message">> => Message})),
+    Message = iolist_to_binary([
+        <<"x\"; touch ">>, Marker, <<"; $(touch ">>, Marker, <<") `touch ">>, Marker, <<"` -n">>
+    ]),
+    ?assertEqual(
+        {value, #{<<"committed">> => true}}, request(<<"git-commit">>, #{<<"message">> => Message})
+    ),
     ?assertNot(filelib:is_file(Marker)),
     {value, #{<<"commits">> := [#{<<"subject">> := Subject} | _]}} = request(<<"git-log">>, #{}),
     ?assertEqual(Message, Subject).
@@ -289,7 +295,9 @@ diff_is_bounded(#{top := Top}) ->
     ?assertEqual(true, maps:get(<<"truncated">>, Diff)),
     ?assert(byte_size(maps:get(<<"worktree">>, Diff)) =< 1048576),
     ?assertNotEqual(<<>>, maps:get(<<"worktree">>, Diff)),
-    ?assertMatch(Bin when is_binary(Bin), unicode:characters_to_binary(maps:get(<<"worktree">>, Diff))).
+    ?assertMatch(
+        Bin when is_binary(Bin), unicode:characters_to_binary(maps:get(<<"worktree">>, Diff))
+    ).
 
 diff_is_utf8(#{top := Top}) ->
     %% A Latin-1 byte, then a cut that falls inside a multi-byte character.
@@ -310,7 +318,9 @@ encodes_as_json(#{top := Top}) ->
     Value = maps:get(<<"value">>, Decoded),
     ?assertMatch([#{<<"path">> := <<"src/counter.bt">>}], maps:get(<<"files">>, Value)),
     ErrMsg = {protocol_msg, <<"git-diff">>, <<"m2">>, <<"s1">>, #{}},
-    ErrJson = beamtalk_repl_ops_git:handle(<<"git-diff">>, #{<<"path">> => <<"/etc/hosts">>}, ErrMsg, self()),
+    ErrJson = beamtalk_repl_ops_git:handle(
+        <<"git-diff">>, #{<<"path">> => <<"/etc/hosts">>}, ErrMsg, self()
+    ),
     ?assertNotEqual(nomatch, binary:match(ErrJson, <<"project root">>)).
 
 not_a_repo() ->
