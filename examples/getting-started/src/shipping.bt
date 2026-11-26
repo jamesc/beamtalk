@@ -1,0 +1,72 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+type ShippingSpeed = #standard | #express | #overnight
+
+/// Shipping quotes: pattern matching on tagged data.
+///
+/// Orders arrive as tagged tuples, the way Erlang code and messages hand
+/// them over. This example shows the pattern features together:
+///
+/// - **Tuple and guard patterns** pick an order apart in `quote:`.
+/// - **Destructuring assignment** names the parts of a result tuple.
+/// - **Constructor patterns** (`Result ok: v`) read a `Result` in `describe:`.
+/// - **`matchExhaustive:`** prices a `ShippingSpeed`. Add a speed to the
+///   `type` above and `priceFor:weight:` stops compiling until it is handled.
+///   Values from tuples are unchecked, so `quote:` validates the speed first.
+///
+/// ## Examples
+/// ```beamtalk
+/// > Shipping quote: {#parcel, #express, 2500}
+/// Result ok: 1500
+/// > Shipping describe: (Shipping quote: {#parcel, #express, 2500})
+/// "costs 1500 cents"
+/// > Shipping describe: (Shipping quote: {#parcel, #standard, 0})
+/// "rejected: weight must be positive"
+/// ```
+Value subclass: Shipping
+
+  /// Price in cents for `speed` and a weight in grams.
+  ///
+  /// `matchExhaustive:` makes a speed missing from the arms a compile error.
+  class priceFor: speed :: ShippingSpeed weight: grams :: Integer -> Integer =>
+    speed matchExhaustive: [
+      #standard -> 500 + ((grams div: 1000) * 100);
+      #express -> 900 + ((grams div: 1000) * 300);
+      #overnight -> 1500 + ((grams div: 1000) * 500)
+    ]
+
+  /// True if `speed` is one of the `ShippingSpeed` symbols. Tuples come
+  /// from outside the type checker's view, so `quote:` checks them here.
+  /// Keep this list in step with `type ShippingSpeed` at the top of the file.
+  class isSpeed: speed => #(#standard, #express, #overnight) includes: speed
+
+  /// Quote a `{#parcel, speed, grams}` order as a `Result`.
+  class quote: order :: Tuple -> Result(Integer, String) =>
+    order match: [
+      {#parcel, speed, grams} when: [grams > 0] -> (self isSpeed: speed) ifTrue: [
+        Result ok: (self priceFor: speed weight: grams)
+      ] ifFalse: [Result error: "unknown speed"];
+      {#parcel, _, _} -> Result error: "weight must be positive";
+      _ -> Result error: "not a parcel order"
+    ]
+
+  /// One line of text for a quote result.
+  class describe: quoted :: Result -> String =>
+    quoted match: [
+      Result ok: cents -> "costs {cents} cents";
+      Result error: reason -> "rejected: {reason}"
+    ]
+
+  /// Total price of the orders that can be quoted, and how many were
+  /// rejected, as `{total, rejected}`.
+  class totalFor: orders :: List -> Tuple =>
+    orders
+      inject: {0, 0}
+      into: [:acc :order |
+        {total, rejected} := acc
+        (self quote: order) match: [
+          Result ok: cents -> {total + cents, rejected};
+          Result error: _ -> {total, rejected + 1}
+        ]
+      ]
