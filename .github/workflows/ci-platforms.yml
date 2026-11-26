@@ -4,8 +4,9 @@
 # macOS / Windows / desktop CI, opt-in (BT-4209).
 #
 # ci.yml runs the Linux suite on every PR and push. The other platforms are off
-# there by default: they run here, on a daily schedule, on workflow_dispatch, and
-# on a PR carrying the `ci:all-platforms` label. This is a separate workflow so
+# there by default: they run here, on a daily schedule, on workflow_dispatch, on a
+# PR carrying the `ci:all-platforms` label, and (platform-check only, to warm the
+# Rust cache, BT-5273) on a push to main that changes the dependency set. This is a separate workflow so
 # that labelling a PR never re-triggers (or cancels) ci.yml, and so that none of
 # its job names can shadow a required check from ci.yml.
 # nightly.yml additionally runs the full test suite on macOS/Windows and builds
@@ -139,8 +140,8 @@ jobs:
           "$TOOLCHAIN_CARGO" --version
 
       - name: Build, lint, and fast tests
-        # Shorter than the job limit so the cache post step still runs (BT-5273).
-        timeout-minutes: 52
+        # Well inside the job limit, which also covers setup and the cache save, so the post step still runs (BT-5273).
+        timeout-minutes: 45
         # build first so clippy and test-rust reuse its artifacts.
         # Full test-stdlib/test-bunit/test-runtime run only in the Linux-only 'test' job.
         # The full Rust suite (`test-rust`) runs on Linux only; macOS and Windows run
@@ -191,7 +192,8 @@ jobs:
   # ci.yml's `test-desktop` is the ubuntu-only leg for PRs touching the desktop
   # paths; both run the composite action .github/actions/test-desktop.
   platform-desktop:
-    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:all-platforms') && (github.event.action != 'labeled' || github.event.label.name == 'ci:all-platforms'))
+    # Not on a push to main: that trigger only warms platform-check's Rust cache.
+    if: github.event_name != 'push' && (github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:all-platforms') && (github.event.action != 'labeled' || github.event.label.name == 'ci:all-platforms'))))
     strategy:
       fail-fast: false
       matrix:
