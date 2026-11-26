@@ -56,6 +56,11 @@ TestCase subclass: WritingFoldDnuOverrideTest
       self writingToByDo: Bt5236DnuProxy spawn
     ] raise: #stateful_block_dispatch
 
+  testSubclassOfProxyInheritsOverride =>
+    self should: [
+      self writingCollect: Bt5236DnuProxySub spawn
+    ] raise: #stateful_block_dispatch
+
   testNoOverrideStillDoesNotUnderstand =>
     self should: [self writingCollect: #sym] raise: #does_not_understand
     self should: [self writingToDo: nil] raise: #does_not_understand
