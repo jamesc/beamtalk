@@ -1464,14 +1464,17 @@ pub fn collect_project_test_helper_modules(
 /// lives under `<root>/test/` — the files that may call `native/test/`
 /// helpers (BT-5251).
 ///
-/// Both paths are canonicalised (falling back to the spelling given), so a
+/// Both paths are canonicalised, `file` even when it does not exist (falling back to the spelling given), so a
 /// relative `lint test/x.bt`, a symlinked checkout or macOS `/var` vs
 /// `/private/var` all compare equal, as `is_under_stubs_dir` does.
 #[must_use]
 pub fn is_project_test_file(project_root: &Utf8Path, file: &Utf8Path) -> bool {
+    // Lenient: a test file the editor has open may not exist on disk yet, and
+    // its spelling must still match the canonical root (Windows 8.3 short names
+    // in a temp dir, macOS `/var` vs `/private/var`).
     let canon = |p: &Utf8Path| {
-        crate::paths::canonicalize(p.as_std_path())
-            .unwrap_or_else(|_| p.as_std_path().to_path_buf())
+        crate::paths::canonicalize_lenient(p.as_std_path())
+            .unwrap_or_else(|| p.as_std_path().to_path_buf())
     };
     canon(file).starts_with(canon(project_root).join("test"))
 }
