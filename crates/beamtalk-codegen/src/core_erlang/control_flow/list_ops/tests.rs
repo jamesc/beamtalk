@@ -2480,7 +2480,7 @@ fn test_sort_comparator_cf_mutations_local_assign_unpacks_tuple() {
 }
 
 #[test]
-fn test_actor_match_in_direct_params_loop_never_reaches_private_scratch_error() {
+fn test_actor_match_in_direct_params_loop_keeps_scratch_private() {
     // ADR 0131 section 3: `match:` is a State-family producer. In an actor
     // instance method a loop body holding a `match:` that writes a local (the
     // loop threads only locals: the direct-params shape) must compile. (BT-5281

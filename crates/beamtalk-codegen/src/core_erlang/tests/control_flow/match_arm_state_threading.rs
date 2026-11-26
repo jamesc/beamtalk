@@ -737,7 +737,54 @@ fn test_match_in_private_scratch_closure_frame_compiles() {
     );
     for src in [nested, guards] {
         assert_parses(src);
+        // A debug-build verifier finding panics, so this also proves the
+        // lowering is `verify()`-clean.
         let code = codegen_named(src, "matchprivatescratch");
         assert_compiles_through_erlc("matchprivatescratch", &code);
+        // The arm's field write inside the fallback closure goes through the
+        // actor-state cell, not into the private scratch map nothing adopts.
+        assert_has(
+            "fallback closure writes the field through the cell",
+            &code,
+            &["call 'beamtalk_actor_state':'put'(Self, 'n'"],
+        );
+    }
+}
+
+/// BT-5281: the invariant behind keeping a private-scratch `match:` tuple
+/// private: no field write is lowered on a private scratch map outside an
+/// actor closure's cell mode (`VerifyError::FieldWriteOnPrivateScratch`). A
+/// loop whose body holds a `match:` with a field-writing arm threads `State`
+/// and is verifier-clean; forced onto the direct-params shape (fault
+/// `StatelessFieldWrites`), the arm's write would be dropped with the scratch
+/// map, and the verifier reports it where it is lowered.
+#[test]
+fn test_match_arm_field_write_on_private_scratch_is_reported() {
+    use crate::core_erlang::fault::Fault;
+    for (name, body) in [
+        (
+            "to_do_nested_arm",
+            "1 to: 2 do: [:x | t := t + x. x match: [_ -> x > 0 ifTrue: [d := x. self.n := d]]]",
+        ),
+        (
+            "while_nested_arm",
+            "m := 0. [m < 2] whileTrue: [m := m + 1. t := t + m. m match: [_ -> m > 0 ifTrue: [d := m. self.n := d]]]",
+        ),
+    ] {
+        let src = format!(
+            "Actor subclass: MatchLoopWrite\n  state: n = 0\n\n  run =>\n    t := 0\n    {body}\n    #[t, self.n]\n"
+        );
+        assert_parses(&src);
+        assert_eq!(
+            verifier_report(&src, None),
+            None,
+            "{name}: clean without the fault:\n{src}"
+        );
+        let report = verifier_report(&src, Some(Fault::StatelessFieldWrites))
+            .unwrap_or_else(|| panic!("{name}: faulted compile should report:\n{src}"));
+        assert!(
+            report.contains("FieldWriteOnPrivateScratch"),
+            "{name}: expected FieldWriteOnPrivateScratch, got:\n{report}\n{src}"
+        );
     }
 }

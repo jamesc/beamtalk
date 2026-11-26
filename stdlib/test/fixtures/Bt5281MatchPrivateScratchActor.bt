@@ -39,3 +39,23 @@ Actor subclass: Bt5281MatchPrivateScratchActor
       Result error: _ -> nil
     ]
     self.total
+
+  // `cond` is a non-Boolean (`NonBooleanCondCalling`): the inner conditional
+  // sends `ifTrue:ifFalse:` to it, whose false block (a plain closure, the
+  // private-scratch frame) runs the `match:`. Its field write goes through
+  // the actor-state cell.
+  nested: cond with: x =>
+    x isNil
+      ifTrue: [nil]
+      ifFalse: [
+        cond
+          ifTrue: [nil]
+          ifFalse: [
+            x match: [_ -> x > 0
+              ifTrue: [
+                d := x
+                self.total := d
+              ]]
+            self.total
+          ]
+      ]

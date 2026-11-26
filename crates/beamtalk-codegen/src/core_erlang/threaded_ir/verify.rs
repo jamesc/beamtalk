@@ -938,6 +938,19 @@ pub(in crate::core_erlang) enum VerifyError {
     /// verified without its ancestor frames.
     SyncedCallOnPrivateScratch { at: Span },
 
+    /// BT-5281 (ADR 0131 §3): an actor field write lowered, outside an actor
+    /// closure's cell mode, in a frame whose `StateAcc` is a private scratch
+    /// map (`CoreErlangGenerator::in_private_scratch`: a direct-params or
+    /// tuple-accumulator loop frame, or an arm frame nested in one). Nothing
+    /// adopts such a scratch map as the next `State` (a producer there binds
+    /// no `State` family, `conditional_families`), so the write would be
+    /// silently lost. The invariant, for every scope kind: a frame that holds
+    /// a field write holds the actor's whole `State` (mode selection keeps a
+    /// body that writes a field off the direct-params and tuple-acc shapes),
+    /// or writes through the cell (an actor closure). Reported from
+    /// `note_field_write`, the one hook every field-write lowering calls.
+    FieldWriteOnPrivateScratch { field: String, at: Span },
+
     /// BT-4279: a [`ThreadedStmt::SyncedCall`] carries a
     /// [`FastPath`](super::ir::FastPath) but is not a value bracket that
     /// reloads (`result` and `load` both set, no Tier 2 rebinds): the fast
