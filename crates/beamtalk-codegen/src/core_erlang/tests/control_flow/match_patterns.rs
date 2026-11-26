@@ -686,8 +686,7 @@ fn test_match_wildcard_type_pattern_lowers() {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, diags) = beamtalk_core::source_analysis::parse(tokens);
     assert!(diags.is_empty(), "parse diagnostics: {diags:?}");
-    let code = generate_module(&module, CodegenOptions::new("foo"))
-        .expect("`_ :: T` should lower");
+    let code = generate_module(&module, CodegenOptions::new("foo")).expect("`_ :: T` should lower");
     assert_has(
         "both type tests are emitted",
         &code,

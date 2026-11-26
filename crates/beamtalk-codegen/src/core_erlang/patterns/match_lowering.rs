@@ -21,8 +21,8 @@
 use super::super::control_flow::ArmFrame;
 use super::super::threaded_ir::{ThreadedValue, VersionPrefix};
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
-use super::type_tests::pattern_has_nested_type;
 use super::binary_patterns::{binary_needs_segmented, nested_split_span, pattern_has_binary};
+use super::type_tests::pattern_has_nested_type;
 use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -223,12 +223,10 @@ impl CoreErlangGenerator {
         // one `case`: both arm kinds flow through `generate_match_chain`,
         // which dispatches each arm (in source order) to its own strategy
         // and recurses for the rest.
-        let has_type_arm = arms
-            .iter()
-            .any(|arm| {
-                matches!(arm.pattern, Pattern::Type { .. })
-                    || (pattern_has_nested_type(&arm.pattern) && !pattern_has_binary(&arm.pattern))
-            });
+        let has_type_arm = arms.iter().any(|arm| {
+            matches!(arm.pattern, Pattern::Type { .. })
+                || (pattern_has_nested_type(&arm.pattern) && !pattern_has_binary(&arm.pattern))
+        });
         // BT-4173: a top-level binary arm unwraps a `String` scrutinee to
         // its bytes before the native binary match (see
         // `binary_match_scrutinee`) — a per-arm scrutinee rewrite the

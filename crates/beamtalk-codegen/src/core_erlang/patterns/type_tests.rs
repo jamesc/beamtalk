@@ -168,7 +168,11 @@ impl CoreErlangGenerator {
         }
     }
 
-    fn hoist_type_subpattern(&mut self, sub: &mut Pattern, hoisted: &mut Vec<(String, Identifier)>) {
+    fn hoist_type_subpattern(
+        &mut self,
+        sub: &mut Pattern,
+        hoisted: &mut Vec<(String, Identifier)>,
+    ) {
         if let Pattern::Type {
             binding,
             class,

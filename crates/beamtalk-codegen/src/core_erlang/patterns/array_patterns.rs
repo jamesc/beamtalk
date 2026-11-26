@@ -11,7 +11,7 @@ use crate::core_erlang::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::{MatchArm, Pattern};
+use beamtalk_core::ast::{Identifier, MatchArm, Pattern};
 use std::collections::HashSet;
 
 use super::match_lowering::MatchThreading;
@@ -242,6 +242,47 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// BT-5294: an `x :: T` / `_ :: T` array element — extract it, then
+    /// class-test it like a top-level type arm; a miss runs `failure_doc`.
+    #[allow(clippy::too_many_arguments)]
+    fn build_array_type_element(
+        &mut self,
+        array_var: &str,
+        elements: &[Pattern],
+        start: usize,
+        (binding, class): (&Identifier, &Identifier),
+        continuation: Document<'static>,
+        failure_doc: &Document<'static>,
+        already_bound: &mut HashSet<String>,
+    ) -> Result<Document<'static>> {
+        let core_var = if binding.name == "_" {
+            self.fresh_temp_var("TypeElem")
+        } else {
+            Self::to_core_erlang_var(&binding.name)
+        };
+        let next = self.build_array_arm_body(
+            array_var,
+            elements,
+            start + 1,
+            continuation,
+            failure_doc,
+            already_bound,
+        )?;
+        let tested = self.dispatch_type_pattern_strategy(&core_var, &class.name, next, failure_doc);
+        Ok(docvec![
+            "let ",
+            leaf::var(core_var),
+            " = ",
+            self.runtime_send_call(
+                leaf::var(array_var.to_string()),
+                "at:",
+                vec![index_lit(start + 1)]
+            ),
+            " in ",
+            tested
+        ])
+    }
+
     /// Recursively builds element-extraction `let`-bindings for an array pattern arm.
     ///
     /// Handles nested `Pattern::Array` elements by wrapping the continuation in a
@@ -339,35 +380,15 @@ impl CoreErlangGenerator {
             }
             // BT-5294: `x :: T` / `_ :: T` element — extract the element, then
             // class-test it like a top-level type arm; a miss falls through.
-            Pattern::Type { binding, class, .. } => {
-                let core_var = if binding.name == "_" {
-                    self.fresh_temp_var("TypeElem")
-                } else {
-                    Self::to_core_erlang_var(&binding.name)
-                };
-                let next = self.build_array_arm_body(
-                    array_var,
-                    elements,
-                    start + 1,
-                    continuation,
-                    failure_doc,
-                    already_bound,
-                )?;
-                let tested =
-                    self.dispatch_type_pattern_strategy(&core_var, &class.name, next, failure_doc);
-                Ok(docvec![
-                    "let ",
-                    leaf::var(core_var.clone()),
-                    " = ",
-                    self.runtime_send_call(
-                        leaf::var(array_var.to_string()),
-                        "at:",
-                        vec![index_lit(one_based)]
-                    ),
-                    " in ",
-                    tested
-                ])
-            }
+            Pattern::Type { binding, class, .. } => self.build_array_type_element(
+                array_var,
+                elements,
+                start,
+                (binding, class),
+                continuation,
+                failure_doc,
+                already_bound,
+            ),
             elem => Err(CodeGenError::UnsupportedFeature {
                 feature: "Unsupported pattern in Array match arm element".to_string(),
                 span: Some(elem.span()),

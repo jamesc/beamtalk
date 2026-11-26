@@ -420,7 +420,9 @@ fn parse_constructor_binding_type_annotation_bare_double_colon_rejected_with_sin
         "expected exactly one diagnostic (no cascade), got: {diags:?}"
     );
     assert!(
-        diags[0].message.contains("Expected a class name after '::'"),
+        diags[0]
+            .message
+            .contains("Expected a class name after '::'"),
         "unexpected diagnostic message: {:?}",
         diags[0].message
     );
