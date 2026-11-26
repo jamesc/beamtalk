@@ -572,7 +572,6 @@ fn declared_type_any_shape(ty: &DeclaredType, bare_name: &dyn Fn(&str) -> bool) 
         DeclaredType::Simple(name) => bare_name(name),
         DeclaredType::Generic { parameters, .. } => parameters.iter().any(rec),
         DeclaredType::Union(members) => members.iter().any(rec),
-        DeclaredType::FalseOr(inner) => rec(inner),
         DeclaredType::Difference { base, excluded } => rec(base) || rec(excluded),
         DeclaredType::Intersection { left, right } => rec(left) || rec(right),
         DeclaredType::Singleton(_)

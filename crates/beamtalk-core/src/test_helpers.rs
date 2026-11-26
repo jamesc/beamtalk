@@ -261,7 +261,7 @@ pub mod test_support {
 
     /// Arbitrary [`DeclaredType`] values, recursively covering every
     /// grouping shape the type-string fidelity properties exercise:
-    /// union, generic, `FalseOr`/optional, difference, intersection, and
+    /// union, generic, difference, intersection, and
     /// the `Self`-family leaves (`Self`, `Self class`, `<Name> class`).
     ///
     /// Shared by `declared_type.rs`'s own `parse`/`Display` fixed-point
@@ -289,9 +289,6 @@ pub mod test_support {
                     prop::collection::vec(inner.clone(), 1..3),
                 )
                     .prop_map(|(base, params)| DeclaredType::generic(base, params)),
-                inner
-                    .clone()
-                    .prop_map(|t| DeclaredType::FalseOr(Box::new(t))),
                 (inner.clone(), inner.clone()).prop_map(|(base, excluded)| {
                     DeclaredType::Difference {
                         base: Box::new(base),

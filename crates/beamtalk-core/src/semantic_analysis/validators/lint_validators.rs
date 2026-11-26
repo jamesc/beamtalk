@@ -860,7 +860,6 @@ pub(crate) fn check_redundant_local_type_annotation(
         if matches!(
             annotation,
             TypeAnnotation::Union { .. }
-                | TypeAnnotation::FalseOr { .. }
                 | TypeAnnotation::Difference { .. }
                 | TypeAnnotation::Intersection { .. }
                 // A shape resolves to bare `Dictionary` until ADR 0147
@@ -994,7 +993,6 @@ pub(crate) fn find_narrowing_casts(
         if matches!(
             annotation,
             TypeAnnotation::Union { .. }
-                | TypeAnnotation::FalseOr { .. }
                 | TypeAnnotation::Difference { .. }
                 | TypeAnnotation::Intersection { .. }
                 | TypeAnnotation::Shape { .. }

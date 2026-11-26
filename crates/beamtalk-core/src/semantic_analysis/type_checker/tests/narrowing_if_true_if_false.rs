@@ -700,7 +700,6 @@ fn bt2868_unannotated_return_method_reports_honest_reason() {
         methods: vec![MethodInfo {
             selector: eco_string("ifTrue:"),
             arity: 1,
-            kind: MethodKind::Primary,
             defined_in: eco_string("Weird"),
             is_sealed: false,
             is_internal: false,

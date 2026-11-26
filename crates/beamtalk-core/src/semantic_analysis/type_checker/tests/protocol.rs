@@ -355,7 +355,6 @@ fn setup_json_class_side_fixture(
         class_methods: vec![MethodInfo {
             selector: "generate:".into(),
             arity: 1,
-            kind: MethodKind::Primary,
             defined_in: "JsonEncoder".into(),
             is_sealed: false,
             is_internal: false,
@@ -781,7 +780,6 @@ fn setup_intersection_param_fixture() -> (
             MethodInfo {
                 selector: "process:".into(),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: "Zzyzx".into(),
                 is_sealed: false,
                 is_internal: false,
@@ -808,7 +806,6 @@ fn setup_intersection_param_fixture() -> (
             MethodInfo {
                 selector: "store:".into(),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: "Zzyzx".into(),
                 is_sealed: false,
                 is_internal: false,
@@ -825,7 +822,6 @@ fn setup_intersection_param_fixture() -> (
             MethodInfo {
                 selector: "describe:".into(),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: "Zzyzx".into(),
                 is_sealed: false,
                 is_internal: false,
@@ -925,7 +921,6 @@ fn test_intersection_param_conforms_to_both_no_warning() {
             MethodInfo {
                 selector: "asString".into(),
                 arity: 0,
-                kind: MethodKind::Primary,
                 defined_in: "Report".into(),
                 is_sealed: false,
                 is_internal: false,
@@ -942,7 +937,6 @@ fn test_intersection_param_conforms_to_both_no_warning() {
             MethodInfo {
                 selector: "serialize".into(),
                 arity: 0,
-                kind: MethodKind::Primary,
                 defined_in: "Report".into(),
                 is_sealed: false,
                 is_internal: false,
@@ -1016,7 +1010,6 @@ fn add_widget_class(hierarchy: &mut ClassHierarchy, class_side_selectors: &[&str
         .map(|sel| MethodInfo {
             selector: (*sel).into(),
             arity: 0,
-            kind: MethodKind::Primary,
             defined_in: "Widget".into(),
             is_sealed: false,
             is_internal: false,

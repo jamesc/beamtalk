@@ -1290,7 +1290,6 @@ mod tests {
         let MethodInfo {
             selector: _,
             arity: _,
-            kind: _,
             defined_in: _,
             is_sealed: _,
             is_internal: _,
@@ -1307,9 +1306,6 @@ mod tests {
         let method_fields: Vec<(&str, Class, MethodMutator)> = vec![
             ("selector", Signature, |m| m.selector = "renamed".into()),
             ("arity", Signature, |m| m.arity += 1),
-            // `MethodKind` has a single variant today: nothing to mutate, so the
-            // hash check is skipped below. Still a signature field.
-            ("kind", Signature, |_| {}),
             ("defined_in", Signature, |m| m.defined_in = "Other".into()),
             ("is_sealed", Signature, |m| m.is_sealed = !m.is_sealed),
             ("is_internal", Signature, |m| m.is_internal = !m.is_internal),
@@ -1339,9 +1335,6 @@ mod tests {
             }),
         ];
         for (field, class, mutate) in &method_fields {
-            if *field == "kind" {
-                continue;
-            }
             for class_side in [false, true] {
                 let mut changed = base.clone();
                 let methods = if class_side {

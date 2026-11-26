@@ -533,7 +533,6 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
             methods: vec![MethodInfo {
                 selector: "accept:".into(),
                 arity: 1,
-                kind: crate::ast::MethodKind::Primary,
                 defined_in: "ClassChecker".into(),
                 is_sealed: false,
                 is_internal: false,
@@ -616,7 +615,6 @@ fn arg_ty_side_alias_name_is_recorded_in_referenced_aliases() {
         methods: vec![MethodInfo {
             selector: "restart:".into(),
             arity: 1,
-            kind: crate::ast::MethodKind::Primary,
             defined_in: "Widget".into(),
             is_sealed: false,
             is_internal: false,

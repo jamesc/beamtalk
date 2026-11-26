@@ -140,7 +140,6 @@ fn test_hierarchy_with_class_literal_arg(
             methods: vec![MethodInfo {
                 selector: "accept:".into(),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: "ClassChecker".into(),
                 is_sealed: false,
                 is_internal: false,
@@ -544,7 +543,6 @@ fn union_protocol_mixed_conformance_hints() {
         methods: vec![MethodInfo {
             selector: "sortKey".into(),
             arity: 0,
-            kind: MethodKind::Primary,
             defined_in: "SortableInt".into(),
             is_sealed: false,
             is_internal: false,
@@ -732,7 +730,6 @@ fn union_type_param_bounds_mixed_conformance_hints() {
             methods: vec![MethodInfo {
                 selector: "sortKey".into(),
                 arity: 0,
-                kind: MethodKind::Primary,
                 defined_in: "SortableInt".into(),
                 is_sealed: false,
                 is_internal: false,
@@ -1447,7 +1444,6 @@ fn union_arg_parameterized_member_mismatch_warns() {
         methods: vec![MethodInfo {
             selector: "take:".into(),
             arity: 1,
-            kind: MethodKind::Primary,
             defined_in: "Sink".into(),
             is_sealed: false,
             is_internal: false,
@@ -1509,7 +1505,6 @@ fn union_arg_parameterized_members_all_match_no_warning() {
         methods: vec![MethodInfo {
             selector: "take:".into(),
             arity: 1,
-            kind: MethodKind::Primary,
             defined_in: "Sink".into(),
             is_sealed: false,
             is_internal: false,

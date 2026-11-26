@@ -128,9 +128,6 @@ impl InternalAliasExpander {
                     .map(|p| self.expand_inner(p, active, shadowed))
                     .collect(),
             },
-            DeclaredType::FalseOr(inner) => {
-                DeclaredType::FalseOr(Box::new(self.expand_inner(inner, active, shadowed)))
-            }
             DeclaredType::Shape { fields, open } => DeclaredType::Shape {
                 fields: fields
                     .iter()

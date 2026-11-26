@@ -486,7 +486,6 @@ pub fn for_each_type_child<'a>(ty: &'a TypeAnnotation, f: &mut dyn FnMut(&'a Typ
         | TypeAnnotation::Generic {
             parameters: types, ..
         } => types.iter().for_each(f),
-        TypeAnnotation::FalseOr { inner, .. } => f(inner),
         TypeAnnotation::Difference { base, excluded, .. } => {
             f(base);
             f(excluded);
@@ -536,7 +535,6 @@ pub fn dismantle_type_annotation(ty: TypeAnnotation) {
             | TypeAnnotation::Generic {
                 parameters: types, ..
             } => stack.extend(types),
-            TypeAnnotation::FalseOr { inner, .. } => stack.push(*inner),
             TypeAnnotation::Difference { base, excluded, .. } => {
                 stack.push(*base);
                 stack.push(*excluded);

@@ -859,9 +859,6 @@ fn check_unbound_type_vars(
                 check_unbound_type_vars(member, hierarchy, alias_name, diagnostics);
             }
         }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            check_unbound_type_vars(inner, hierarchy, alias_name, diagnostics);
-        }
         TypeAnnotation::Difference { base, excluded, .. } => {
             check_unbound_type_vars(base, hierarchy, alias_name, diagnostics);
             check_unbound_type_vars(excluded, hierarchy, alias_name, diagnostics);
@@ -1133,9 +1130,6 @@ fn collect_alias_references(
             for member in types {
                 collect_alias_references(member, aliases, out, record);
             }
-        }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            collect_alias_references(inner, aliases, out, record);
         }
         TypeAnnotation::Difference { base, excluded, .. } => {
             collect_alias_references(base, aliases, out, record);

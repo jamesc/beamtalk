@@ -23,7 +23,7 @@ use super::{CodeGenContext, CoreErlangGenerator};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{
-    ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, MethodKind, Module,
+    ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module,
     ParameterDefinition, ProtocolMethodSignature, TypeAnnotation, WellKnownSelector,
 };
 use beamtalk_core::unparse::unparse_method_display_signature;
@@ -36,7 +36,6 @@ impl CoreErlangGenerator {
         class
             .methods
             .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
             .filter(|m| m.selector == MessageSelector::Unary("new".into()))
             .any(|m| Self::is_self_error_body(&m.body))
     }
@@ -59,7 +58,6 @@ impl CoreErlangGenerator {
             .methods
             .iter()
             .chain(class.class_methods.iter())
-            .filter(|m| m.kind == MethodKind::Primary)
             .any(|m| m.selector == MessageSelector::Unary("new".into()))
     }
 
@@ -151,11 +149,7 @@ impl CoreErlangGenerator {
 
         for (i, class) in module.classes.iter().enumerate() {
             // Instance methods — used for methodSource, methodSignatures, and methodDocs
-            let instance_methods: Vec<_> = class
-                .methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-                .collect();
+            let instance_methods: Vec<_> = class.methods.iter().collect();
 
             // Method source
             let method_source_doc = Self::build_selector_map(&instance_methods, |m| {
@@ -170,12 +164,8 @@ impl CoreErlangGenerator {
             });
 
             // Class-side method display signatures for :help command
-            let class_methods_primary: Vec<_> = class
-                .class_methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-                .collect();
-            let class_method_sigs_doc = Self::build_selector_map(&class_methods_primary, |m| {
+            let class_method_refs: Vec<_> = class.class_methods.iter().collect();
+            let class_method_sigs_doc = Self::build_selector_map(&class_method_refs, |m| {
                 let sig_str = unparse_method_display_signature(m);
                 leaf::binary_lit(&sig_str)
             });
@@ -183,7 +173,7 @@ impl CoreErlangGenerator {
             // Class-side method source — mirrors method_source for the
             // instance side. Required by SystemNavigation `sendersOf:` /
             // `referencesTo:` / `methodsMatching:` to scan class-side bodies.
-            let class_method_source_doc = Self::build_selector_map(&class_methods_primary, |m| {
+            let class_method_source_doc = Self::build_selector_map(&class_method_refs, |m| {
                 let source_str = self.extract_method_source(class.name.name.as_str(), true, m);
                 leaf::binary_lit(&source_str)
             });
@@ -192,7 +182,7 @@ impl CoreErlangGenerator {
             // into register_class/0. Forwarded to beamtalk_xref synchronously at
             // class-load time by beamtalk_object_class:init/1.
             let method_xref_doc =
-                self.build_method_xref_list(class, &instance_methods, &class_methods_primary);
+                self.build_method_xref_list(class, &instance_methods, &class_method_refs);
 
             // Per-instance-variable declaration-line index, the
             // state-var analogue of `method_xref_doc` above.
@@ -212,7 +202,7 @@ impl CoreErlangGenerator {
 
             // Class method doc comments
             let class_method_docs_doc =
-                Self::build_selector_map_filtered(&class_methods_primary, |m| {
+                Self::build_selector_map_filtered(&class_method_refs, |m| {
                     m.doc_comment.as_ref().map(|doc| leaf::binary_lit(doc))
                 });
 
@@ -238,14 +228,12 @@ impl CoreErlangGenerator {
             );
             let class_method_sigs_doc = Self::extend_selector_map_doc(
                 class_method_sigs_doc,
-                class_methods_primary.is_empty(),
+                class_method_refs.is_empty(),
                 synth.class_sigs,
             );
             let class_method_docs_doc = Self::extend_selector_map_doc(
                 class_method_docs_doc,
-                !class_methods_primary
-                    .iter()
-                    .any(|m| m.doc_comment.is_some()),
+                !class_method_refs.iter().any(|m| m.doc_comment.is_some()),
                 synth.class_docs,
             );
 

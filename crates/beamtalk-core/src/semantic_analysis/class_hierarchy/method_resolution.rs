@@ -5,8 +5,6 @@
 //!
 //! Contains `all_methods`, `find_method`, `resolves_selector`, sealed-method
 //! ancestor checks, DNU override detection, and return-type inference application.
-
-use crate::ast::MethodKind;
 use crate::semantic_analysis::type_checker::InferredType;
 use ecow::EcoString;
 use std::collections::HashMap;
@@ -53,12 +51,8 @@ impl ClassHierarchy {
 
         for info in self.ancestors(class_name) {
             for method in &info.class_methods {
-                if method.kind == MethodKind::Primary {
-                    if !seen_selectors.contains_key(&method.selector) {
-                        seen_selectors.insert(method.selector.clone(), methods.len());
-                        methods.push(method.clone());
-                    }
-                } else {
+                if !seen_selectors.contains_key(&method.selector) {
+                    seen_selectors.insert(method.selector.clone(), methods.len());
                     methods.push(method.clone());
                 }
             }
@@ -108,7 +102,7 @@ impl ClassHierarchy {
                 .method_indexes
                 .get(info.name.as_str())
                 .and_then(|mi| mi.get(selector))?;
-            Some(&info.methods[idx]).filter(|m| m.kind == MethodKind::Primary)
+            Some(&info.methods[idx])
         })
     }
 
@@ -130,7 +124,7 @@ impl ClassHierarchy {
         let overridden = self.all_subclasses(receiver_class).iter().any(|sub| {
             self.get_class(sub)
                 .and_then(|info| info.methods.iter().find(|m| m.selector == selector))
-                .is_some_and(|m| m.kind == MethodKind::Primary && !m.answers_receiver)
+                .is_some_and(|m| !m.answers_receiver)
         });
         !overridden
     }
@@ -146,7 +140,7 @@ impl ClassHierarchy {
                 .class_method_indexes
                 .get(info.name.as_str())
                 .and_then(|mi| mi.get(selector))?;
-            Some(&info.class_methods[idx]).filter(|m| m.kind == MethodKind::Primary)
+            Some(&info.class_methods[idx])
         })
     }
 
@@ -176,7 +170,6 @@ impl ClassHierarchy {
         self.classes.get(class_name).is_some_and(|info| {
             get_methods(info).iter().any(|m| {
                 m.selector.as_str() == "doesNotUnderstand:args:"
-                    && m.kind == MethodKind::Primary
                     && m.defined_in.as_str() == class_name
             })
         })
@@ -206,10 +199,7 @@ impl ClassHierarchy {
     ) -> Option<(EcoString, MethodInfo)> {
         for info in self.sealed_lookup_lineage(start_class) {
             for method in &info.methods {
-                if method.kind == MethodKind::Primary
-                    && method.selector.as_str() == selector
-                    && method.is_sealed
-                {
+                if method.selector.as_str() == selector && method.is_sealed {
                     return Some((info.name.clone(), method.clone()));
                 }
             }
@@ -226,10 +216,7 @@ impl ClassHierarchy {
     ) -> Option<(EcoString, MethodInfo)> {
         for info in self.sealed_lookup_lineage(start_class) {
             for method in &info.class_methods {
-                if method.kind == MethodKind::Primary
-                    && method.selector.as_str() == selector
-                    && method.is_sealed
-                {
+                if method.selector.as_str() == selector && method.is_sealed {
                     return Some((info.name.clone(), method.clone()));
                 }
             }
@@ -272,9 +259,7 @@ impl ClassHierarchy {
                 } else {
                     &mut class_info.methods
                 };
-                if let Some(method) = methods
-                    .iter_mut()
-                    .find(|m| m.kind == MethodKind::Primary && m.selector == *selector)
+                if let Some(method) = methods.iter_mut().find(|m| m.selector == *selector)
                     && method.return_type.is_none()
                 {
                     method.return_type = Some(return_type.clone());

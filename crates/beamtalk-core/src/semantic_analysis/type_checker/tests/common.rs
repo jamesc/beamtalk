@@ -12,8 +12,8 @@ pub(super) use super::super::*;
 pub(super) use crate::ast::{
     Block, CascadeMessage, ClassDefinition, ClassKind, ClassModifiers, CommentAttachment,
     ExpectCategory, Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MatchArm,
-    MessageSelector, MethodDefinition, MethodKind, Module, ParameterDefinition, Pattern,
-    ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
+    MessageSelector, MethodDefinition, Module, ParameterDefinition, Pattern, ProtocolDefinition,
+    ProtocolMethodSignature, StateDeclaration, TypeAnnotation,
 };
 pub(super) use crate::semantic_analysis::class_hierarchy::DeclaredType;
 pub(super) use crate::semantic_analysis::class_hierarchy::MethodInfo;
@@ -668,7 +668,6 @@ pub(super) fn method_info(
     MethodInfo {
         selector: selector.into(),
         arity,
-        kind: MethodKind::Primary,
         defined_in: "TestClass".into(),
         is_sealed: false,
         is_internal: false,
@@ -726,7 +725,6 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
             MethodInfo {
                 selector: eco_string("unwrap"),
                 arity: 0,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("GenResult"),
                 is_sealed: true,
                 is_internal: false,
@@ -743,7 +741,6 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
             MethodInfo {
                 selector: eco_string("error"),
                 arity: 0,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("GenResult"),
                 is_sealed: true,
                 is_internal: false,
@@ -760,7 +757,6 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
             MethodInfo {
                 selector: eco_string("map:"),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("GenResult"),
                 is_sealed: true,
                 is_internal: false,
@@ -777,7 +773,6 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
             MethodInfo {
                 selector: eco_string("isOk"),
                 arity: 0,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("GenResult"),
                 is_sealed: true,
                 is_internal: false,
@@ -796,7 +791,6 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
             MethodInfo {
                 selector: eco_string("ok:"),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("GenResult"),
                 is_sealed: true,
                 is_internal: false,
@@ -813,7 +807,6 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
             MethodInfo {
                 selector: eco_string("error:"),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("GenResult"),
                 is_sealed: true,
                 is_internal: false,

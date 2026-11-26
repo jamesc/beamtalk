@@ -170,9 +170,6 @@ fn collect_type_lines(
                 collect_type_lines(ty, class_name, source, lines);
             }
         }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            collect_type_lines(inner, class_name, source, lines);
-        }
         TypeAnnotation::Difference { base, excluded, .. } => {
             collect_type_lines(base, class_name, source, lines);
             collect_type_lines(excluded, class_name, source, lines);
