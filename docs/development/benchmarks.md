@@ -2014,5 +2014,22 @@ The "after" run for the BT-5145 baseline above, measured with three runs interle
 
 - **What the removals saved.** The class-variable snapshot cost `on:do:` 2 reductions (5 → 3) and `Result tryDo:` at most a few ns on its success path (0.5-6 ns over three runs, not distinguishable from noise); `on:do:` time did not move beyond noise. The class-send rows 3a-3c have equal reductions (3.0) and their time is inconclusive (3c slower on main in all three runs of one harness, faster in the other); the guard is the same read.
 - **The guard read is still there and still dominant.** One `persistent_term:get` per class send (`'<Class> static calls'` or `'<Class> class'`), about 16-17 ns at the floor (BT-4987 said 15 ns, also a floor) of a 19-21 ns send: roughly 75-90%. Replacing it with `atomics:get` (21 ns) or `ets:lookup` (27 ns) would be slower. Removing it would leave a send of very roughly 3-5 ns (an estimate from two noisy figures), like Elixir's remote call. Conclusion (a): it can go in principle, but safely only with two owner decisions (a runtime fun shadowing a compiled selector; a `ClassSelf` that carries a pid), tracked in BT-5268 (spike, `needs-spec`). No guard code was changed.
-- **Regression found.** A class held in a variable (3d, 3e, c5) now reads the raw `runtime_fun` and ready flags per send instead of the derived flag: 3 reads instead of 2, 24 → 31 reductions on 3d, and 3e is +60% in time in all three runs (more than one extra read explains). Tracked in BT-5267.
+- **Regression found.** A class held in a variable (3d, 3e, c5) now reads the raw `runtime_fun` and ready flags per send instead of the derived flag: 3 reads instead of 2, 24 → 31 reductions on 3d, and 3e is +60% in time in all three runs (more than one extra read explains). Tracked in BT-5267, fixed below.
 - Rows 3f-3j and c4 no longer exist (they measured class variables and cross-file extensions); the old numbers stay in the baseline above and in the files under `benchmarks/vs-elixir/results/`.
+
+## Class-in-a-variable send back to two reads (BT-5267)
+
+The fix for the regression found in BT-5164. Three runs, interleaved: base `b464155e` (the BT-5145 baseline), `main` at `b66c683`, and the change. Full tables and per-run numbers: [`benchmarks/vs-elixir/results/bench-bt5267.md`](../../benchmarks/vs-elixir/results/bench-bt5267.md). Reductions, words and the read list are exact; time is noisy.
+
+| Row | Operation | base red | main red | change red | base words | main words | change words | base ns | main ns | change ns |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| 3d | class in a variable | 24.1 | 31.0 | **24.0** | 42 | 46 | **41** | 620 | 711 | 584 |
+| 3e | inherited class method | 31.1 | 28.3 | **21.1** | 36 | 40 | **35** | 851 | 1429 | 876 |
+| 3e untraced (`VS_BENCH_NO_TRACE=1`) | | | | | | | | 477 | 388 | 356 |
+| c5 | dispatch, class in a variable | 24.0 | 31.1 | **24.0** | n/a | n/a | n/a | 307 | 331 | 318 |
+| 3a-3c, c1-c3 | guarded direct calls (control) | 3.0 | 3.0 | 3.0 | 0 | 0 | 0 | 19-26 | 20-28 | 19-24 |
+
+- **Reads.** `bench-dispatch keys c5` shows two `persistent_term` reads again: the owner memo's generation and the defining class's derived flag (`beamtalk_class_shadow_flags:body_route/2`, which owns the "ready and no `runtime_fun`" rule; `direct_call_ok/2` wraps it). Main read the generation and the two raw flags. A test pins the list (`beamtalk_class_in_caller_tests`, `class_in_variable_test_`).
+- **3e's time.** The vs-elixir harness traces garbage collection while it times a row, and on these rows that tracing is most of the time. Untraced, main's 3e was already faster than base's (388 vs 477 ns); traced, it rose to 1429 ns. The cause was allocation: `is_shadowed/1` built a `{beamtalk_class_shadow, runtime_fun, Class}` key tuple on every send (+4 words). The fix drops it, and the owner memo's key loses its leading tag (`{ClassPid, Selector}`, 2 words less per send). Traced 3e is back to 876 ns.
+- **Unchanged semantics.** A runtime fun still runs in the caller (BT-5161). A shadowed defining class takes the fun-store route after the derived flag misses: generation, derived flag, readiness, `runtime_fun` flag, then the fun store (one more read than main on that path, which also does an ETS lookup). Runtime-fun shadowing on an ancestor, `removeSelector:` and a hot reload each take effect between two sends of a class held in a variable (tests in `class_in_variable_test_`).
+
