@@ -807,9 +807,11 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   @impl true
   def terminate(_reason, socket) do
-    # Best-effort: drop our Transcript + bindings subscriptions so the workspace
-    # doesn't keep pushing to this (now-dead) pid. The event server also
-    # auto-removes dead subscribers via its monitor, so this is belt-and-braces.
+    # Best-effort: drop every live push-stream subscription (transcript, actors,
+    # classes, bindings, flush, reload_check) so the workspace doesn't keep pushing
+    # to this (now-dead) pid. The bus also auto-removes dead subscribers via its
+    # monitor, so this is belt-and-braces (BT-5206: it named only two streams and
+    # left `classes` and `reload_check` to the monitor's `net_ticktime` lag).
     #
     # Then hand the session to the registry's grace window rather than closing it
     # outright. A LiveView `terminate/2` fires on BOTH a real tab close AND a
@@ -823,8 +825,7 @@ defmodule BtAttachWeb.WorkspaceLive do
     # LiveView process), so it does NOT go away just because we exit — the
     # registry's reap is what actually reclaims it.
     if socket.assigns[:connected] do
-      Workspace.unsubscribe_transcript(self())
-      Workspace.unsubscribe_bindings(self())
+      Workspace.unsubscribe_all(self())
 
       # Also drop any live per-object change subscription (BT-2492) so the watch
       # server stops pushing to this dead pid. Belt-and-braces: the watch server

@@ -35,6 +35,11 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               # BT-5204: the opts of the most recent `flush/1`, so a test can
               # assert the scope and confirmation the caller sent.
               last_flush_opts: nil,
+              # BT-5206: warnings the next `save_method/3` replies with (nil = none).
+              save_warnings: nil,
+              # BT-5206: the summary the next `flush/1` answers (nil = the canned
+              # clean one), so a test can drive the conflicts path.
+              flush_summary: nil,
               git_status: nil,
               git_log: nil,
               # BT-2597: seeded test-runner pane results so the async run/load
@@ -385,8 +390,18 @@ defmodule BtAttachWeb.StubWorkspaceClient do
       Map.put(sources, {class, selector}, source)
     end)
 
-    {:ok, class}
+    case get(:save_warnings) do
+      [_ | _] = warnings -> {:ok, class, warnings}
+      _ -> {:ok, class}
+    end
   end
+
+  @doc """
+  Test helper (BT-5206): the next `save_method/3` replies `{:ok, class, warnings}`,
+  as the workspace does when the method is live but its ChangeLog entry could not
+  be recorded.
+  """
+  def put_save_warnings(warnings) when is_list(warnings), do: put(:save_warnings, warnings)
 
   @doc """
   Test helper (BT-3321): drop every recorded `:changes` entry WITHOUT the
@@ -406,15 +421,23 @@ defmodule BtAttachWeb.StubWorkspaceClient do
     changes = get(:changes)
     put(:changes, %{})
 
-    summary = %{
-      flushed: map_size(changes),
-      files: Map.values(changes) |> Enum.uniq(),
-      conflicts: [],
-      skipped: []
-    }
+    summary =
+      get(:flush_summary) ||
+        %{
+          flushed: map_size(changes),
+          files: Map.values(changes) |> Enum.uniq(),
+          conflicts: [],
+          skipped: []
+        }
 
     {:ok, summary}
   end
+
+  @doc """
+  Test helper (BT-5206): the next `flush/1` answers `summary`, so a test can drive
+  the conflicts path (`conflicts: [%{"file" => ..., "reason" => ...}]`).
+  """
+  def put_flush_summary(summary) when is_map(summary), do: put(:flush_summary, summary)
 
   @doc "Test helper: the opts of the most recent `flush/1` (nil before any)."
   def last_flush_opts, do: get(:last_flush_opts)

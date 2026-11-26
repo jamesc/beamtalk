@@ -84,6 +84,16 @@ Dispatch is caller-side (per-announcer), so there is **no cross-announcer orderi
 guarantee** — weaker than the retired serialised gen_servers. This is acceptable:
 every consumer of these streams is refresh-trigger driven.
 
+## Logs stream (BT-5206)
+
+`subscribe-logs` / `unsubscribe-logs` stream OTP logger events to one WebSocket
+client. It is a diagnostic stream with a *level* and a bounded mailbox, not one of
+the `stream()` values `subscribe_all/0` covers, and only the WebSocket transport
+has it (LiveView has no log pane). `subscribe_logs/1` / `unsubscribe_logs/0` name
+it here, so the WebSocket handler reaches every push stream through this module
+and not `beamtalk_ws_log_handler` directly. Like `subscribe/1` they act for the
+calling process.
+
 ## Per-object change subscriptions (ADR 0095 §5)
 
 The streams above are *system-wide* (every transcript line, every class load).
@@ -115,7 +125,9 @@ membership read and never builds or sends an event (see `beamtalk_object_watch`)
     unsubscribe_all/0,
     unsubscribe_all/1,
     subscribe_object/2,
-    unsubscribe_object/2
+    unsubscribe_object/2,
+    subscribe_logs/1,
+    unsubscribe_logs/0
 ]).
 
 %% The Transcript stream stays bespoke (line-rate, ADR 0093 §5) — the facade owns
@@ -294,3 +306,21 @@ subscribe_object(ActorPid, Subscriber) when is_pid(ActorPid), is_pid(Subscriber)
 -spec unsubscribe_object(pid(), pid()) -> ok.
 unsubscribe_object(ActorPid, Subscriber) when is_pid(ActorPid), is_pid(Subscriber) ->
     beamtalk_object_watch:unsubscribe(ActorPid, Subscriber).
+
+-doc """
+Subscribe the calling process to live log events at `Level` (an OTP logger
+level; `debug` is everything). A repeat call from the same process only changes
+the level. The WebSocket handler's `subscribe-logs` op.
+""".
+-spec subscribe_logs(logger:level()) -> ok.
+subscribe_logs(Level) when is_atom(Level) ->
+    beamtalk_ws_log_handler:subscribe(Level).
+
+-doc """
+Unsubscribe the calling process from log events. Idempotent: a process that was
+never subscribed is unaffected. Called on `unsubscribe-logs` and on every WebSocket
+exit path.
+""".
+-spec unsubscribe_logs() -> ok.
+unsubscribe_logs() ->
+    beamtalk_ws_log_handler:unsubscribe().

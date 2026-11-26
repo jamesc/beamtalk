@@ -120,8 +120,9 @@ Class: **operation layer** and **subscription** are where calls end up;
 runtime function with no operation behind it yet; **encoding helper** builds
 requests or renders results. "Covered by" says whether an operation in
 `beamtalk_repl_op_table.erl` already does the job. BT-5205 moved git and
-process navigation onto operations (below), so the allowlist now holds only
-`permanent` rows. BT-5206 closes out the epic.
+process navigation onto operations (below), so the allowlist holds only
+`permanent` rows, and BT-5206 closed out the epic: the test enforces that every
+entry is permanent and names the operation layer or the subscription facade.
 
 | Target | Class | What it does | Covered by | Migrating issue |
 |--------|-------|--------------|------------|-----------------|
@@ -134,6 +135,7 @@ process navigation onto operations (below), so the allowlist now holds only
 | `beamtalk_repl_ops:session_count` | operation layer | Count the session supervisor's active children (`session_count/0`, used by the teardown tests) (BT-5202). | itself: the shared session API | permanent |
 | `beamtalk_repl_subscriptions:subscribe` | subscription | Subscribe the LiveView pid to the `transcript`, `bindings`, `actors`, `classes` or `reload_check` push stream. | the facade (not an op) | permanent |
 | `beamtalk_repl_subscriptions:unsubscribe` | subscription | Unsubscribe the LiveView pid from one of those streams. | the facade (not an op) | permanent |
+| `beamtalk_repl_subscriptions:unsubscribe_all` | subscription | Unsubscribe the LiveView pid from every stream on any exit path, so `terminate/2` need not name each one (BT-5206). | the facade (not an op) | permanent |
 | `beamtalk_repl_subscriptions:subscribe_object` | subscription | Track one object's changes for the live Inspector (ADR 0095). | the facade (not an op) | permanent |
 | `beamtalk_repl_subscriptions:unsubscribe_object` | subscription | Stop tracking that object. | the facade (not an op) | permanent |
 
@@ -168,12 +170,22 @@ LiveView's pane has) and `reload-findings` (the LSP already seeds findings
 from that op), and `info` for a version-skew warning on connect. None of that is
 done here.
 
-`BtAttach.Facade` declares one op with no implementation, kept visible in
-`BtAttach.Facade.reserved_ops/0` and pinned by `facade_parity_test.exs` so the
-list can only shrink: `rotate_cookie` (decided in BT-5206). `info` (BT-5204)
-and `subscribe_actors` (BT-5205, the `actors` push stream) are implemented by
-dispatch.
+`BtAttach.Facade` has no reserved ops (BT-5206): every op in its vocabulary is
+implemented by dispatch. `rotate_cookie` was removed (cookie rotation belongs in
+the release tooling), and `info` (BT-5204) and `subscribe_actors` (BT-5205, the
+`actors` push stream) are implemented. Each op's capability class is checked
+against the runtime op table's `access` column
+(`editors/liveview/test/bt_attach/facade_parity_test.exs`).
 
+**Close-out (BT-5206).** MCP `save_method` and `save_class` are recorded in the
+ChangeLog as `agent` (`author` `mcp:save_method` / `mcp:save_class`, ADR 0082)
+through the `save-method` / `save-class` `author` and `author_kind` params; a
+request that names none is `repl`/`human`. `save-method` returns the same
+ChangeLog `warnings` as `save-class`, and MCP and LiveView show them. `flush`
+refuses an empty `class`/`file`/`kind`, and the CLI REPL's `:flush` and
+`:flush-destructive` send the `flush` op, as MCP and LiveView do, and show
+conflicts as a failure to write those files. `GET /readiness` answers
+`workspace_too_old` for a workspace without the operation layer.
 
 ### Desktop attach client (native shell over the LiveView IDE, ADR 0097)
 

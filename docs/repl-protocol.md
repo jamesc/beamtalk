@@ -824,7 +824,12 @@ Every op the server understands, generated from the one Erlang op table
 give the wire examples for the commonly used ops; this table is the complete
 list. *Capability* is the node class from ADR 0125 §1.5: `compiler` ops need a
 compiler on the node, `workspace` ops need a working tree, and `always` ops run
-everywhere. *Handler* names the Erlang module that serves the op.
+everywhere. *Access* is who may call the op (ADR 0091 Decisions 3 and 4, BT-5206):
+`read` runs no user code, so an Observer may call it; `execute` runs or loads code
+or changes the image, the ChangeLog, the working tree or history, so it is
+Owner-only; `admin` stops actors or the workspace. Every op has one, and
+LiveView's `BtAttach.Facade` is tested against it. *Handler* names the Erlang
+module that serves the op.
 
 A fast test (`crates/beamtalk-repl-protocol/tests/op_table_doc.rs`) fails when
 this table drifts from the fixture. To refresh it after editing the op table:
@@ -832,74 +837,74 @@ this table drifts from the fixture. To refresh it after editing the op table:
 `BEAMTALK_BLESS_OP_TABLE_DOC=1 cargo test -p beamtalk-repl-protocol --test op_table_doc`.
 
 <!-- op-table:begin -->
-| Op | Params | Optional | Capability | Handler |
-|----|--------|----------|------------|---------|
-| `eval` | `code` | `trace` | `compiler` | `beamtalk_repl_ops_eval` |
-| `stdin` | `value` | — | `always` | `beamtalk_ws_handler` |
-| `run-entry` | `class`, `selector` | `args` | `always` | `beamtalk_ws_handler` |
-| `interrupt` | — | — | `always` | `beamtalk_repl_ops_actors` |
-| `complete` | `code` | `cursor` | `always` | `beamtalk_repl_ops_dev` |
-| `hover` | `code` | `before`, `suffix`, `class`, `side` | `always` | `beamtalk_repl_ops_dev` |
-| `diagnostics` | `code` | `mode`, `source_path` | `compiler` | `beamtalk_repl_ops_dev` |
-| `show-codegen` | — | `code`, `class`, `selector` | `compiler` | `beamtalk_repl_ops_dev` |
-| `erlang-help` | `module` | `function` | `always` | `beamtalk_repl_ops_dev` |
-| `erlang-complete` | — | `prefix`, `module` | `always` | `beamtalk_repl_ops_dev` |
-| `test` | — | `class`, `file` | `always` | `beamtalk_repl_ops_dev` |
-| `test-all` | — | — | `always` | `beamtalk_repl_ops_dev` |
-| `list-tests` | — | — | `always` | `beamtalk_repl_ops_dev` |
-| `load-tests` | — | — | `compiler` | `beamtalk_repl_ops_dev` |
-| `load-source` | `source` | — | `compiler` | `beamtalk_repl_ops_load` |
-| `load-project` | — | `path`, `include_tests`, `force`, `package_name` | `compiler` | `beamtalk_repl_ops_load` |
-| `unload` | `module` | — | `workspace` | `beamtalk_repl_ops_load` |
-| `save-native-source` | `module`, `source` | — | `workspace` | `beamtalk_repl_ops_load` |
-| `save-section` | `class`, `new_name` | `old_name`, `before_selector`, `before_side` | `workspace` | `beamtalk_repl_ops_load` |
-| `save-method` | `class`, `selector`, `source` | `author`, `author_kind` | `compiler` | `beamtalk_repl_ops_edit` |
-| `save-class` | `source`, `path` | — | `compiler` | `beamtalk_repl_ops_edit` |
-| `revert-method` | `class`, `selector` | `side` | `workspace` | `beamtalk_repl_ops_edit` |
-| `reload-file` | `path` | — | `compiler` | `beamtalk_repl_ops_edit` |
-| `flush` | — | `class`, `file`, `kind`, `confirm_destructive` | `workspace` | `beamtalk_repl_ops_state` |
-| `changes` | — | — | `always` | `beamtalk_repl_ops_state` |
-| `info` | — | — | `always` | `beamtalk_repl_ops_state` |
-| `git-status` | — | — | `always` | `beamtalk_repl_ops_git` |
-| `git-diff` | `path` | — | `always` | `beamtalk_repl_ops_git` |
-| `git-log` | — | `count` | `always` | `beamtalk_repl_ops_git` |
-| `git-stage` | `path` | — | `workspace` | `beamtalk_repl_ops_git` |
-| `git-unstage` | `path` | — | `workspace` | `beamtalk_repl_ops_git` |
-| `git-commit` | `message` | — | `workspace` | `beamtalk_repl_ops_git` |
-| `git-revert-file` | `path` | — | `workspace` | `beamtalk_repl_ops_git` |
-| `sessions` | — | — | `always` | `beamtalk_repl_ops_session` |
-| `close` | — | — | `always` | `beamtalk_repl_ops_session` |
-| `health` | — | — | `always` | `beamtalk_repl_ops_session` |
-| `shutdown` | `cookie` | — | `always` | `beamtalk_repl_ops_session` |
-| `actors` | — | — | `always` | `beamtalk_repl_ops_actors` |
-| `inspect` | `actor` | — | `always` | `beamtalk_repl_ops_actors` |
-| `kill` | `actor` | — | `always` | `beamtalk_repl_ops_actors` |
-| `pid-stats` | `actor` | — | `always` | `beamtalk_repl_ops_watch` |
-| `children` | `supervisor` | — | `always` | `beamtalk_repl_ops_process` |
-| `process-info` | `pid` | — | `always` | `beamtalk_repl_ops_process` |
-| `describe` | — | — | `always` | `beamtalk_repl_ops_dev` |
-| `methods` | `class` | — | `always` | `beamtalk_repl_ops_dev` |
-| `inherited-methods` | `class` | — | `always` | `beamtalk_repl_ops_dev` |
-| `list-classes` | — | `filter` | `always` | `beamtalk_repl_ops_dev` |
-| `reload-findings` | — | — | `always` | `beamtalk_repl_ops_dev` |
-| `nav-query` | `kind` | `selector`, `class`, `module`, `code`, `before`, `suffix` | `always` | `beamtalk_repl_ops_nav` |
-| `nav-symbols` | — | `scope` | `always` | `beamtalk_repl_ops_nav_symbols` |
-| `enable-tracing` | — | — | `always` | `beamtalk_repl_ops_perf` |
-| `disable-tracing` | — | — | `always` | `beamtalk_repl_ops_perf` |
-| `get-traces` | — | `actor`, `selector`, `class`, `outcome`, `min_duration_ns`, `limit` | `always` | `beamtalk_repl_ops_perf` |
-| `actor-stats` | — | `actor` | `always` | `beamtalk_repl_ops_perf` |
-| `export-traces` | — | `path`, `actor`, `selector`, `class`, `outcome`, `min_duration_ns`, `limit` | `always` | `beamtalk_repl_ops_perf` |
-| `browse-classes` | — | — | `always` | `beamtalk_repl_ops_browse` |
-| `browse-protocols` | `class`, `side` | — | `always` | `beamtalk_repl_ops_browse` |
-| `browse-method-source` | `class`, `side`, `selector` | — | `always` | `beamtalk_repl_ops_browse` |
-| `browse-class-definition` | `class` | — | `always` | `beamtalk_repl_ops_browse` |
-| `browse-categories` | `class` | — | `always` | `beamtalk_repl_ops_browse` |
-| `browse-native-source` | — | `class`, `module`, `selector` | `always` | `beamtalk_repl_ops_browse` |
-| `browse-native-modules` | — | — | `always` | `beamtalk_repl_ops_browse` |
-| `browse-type-aliases` | — | — | `always` | `beamtalk_repl_ops_browse` |
-| `browse-alias-source` | `name` | `package` | `always` | `beamtalk_repl_ops_browse` |
-| `subscribe-logs` | — | `level` | `always` | `beamtalk_ws_handler` |
-| `unsubscribe-logs` | — | — | `always` | `beamtalk_ws_handler` |
+| Op | Params | Optional | Capability | Access | Handler |
+|----|--------|----------|------------|--------|---------|
+| `eval` | `code` | `trace` | `compiler` | `execute` | `beamtalk_repl_ops_eval` |
+| `stdin` | `value` | — | `always` | `execute` | `beamtalk_ws_handler` |
+| `run-entry` | `class`, `selector` | `args` | `always` | `execute` | `beamtalk_ws_handler` |
+| `interrupt` | — | — | `always` | `execute` | `beamtalk_repl_ops_actors` |
+| `complete` | `code` | `cursor` | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `hover` | `code` | `before`, `suffix`, `class`, `side` | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `diagnostics` | `code` | `mode`, `source_path` | `compiler` | `read` | `beamtalk_repl_ops_dev` |
+| `show-codegen` | — | `code`, `class`, `selector` | `compiler` | `read` | `beamtalk_repl_ops_dev` |
+| `erlang-help` | `module` | `function` | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `erlang-complete` | — | `prefix`, `module` | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `test` | — | `class`, `file` | `always` | `execute` | `beamtalk_repl_ops_dev` |
+| `test-all` | — | — | `always` | `execute` | `beamtalk_repl_ops_dev` |
+| `list-tests` | — | — | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `load-tests` | — | — | `compiler` | `execute` | `beamtalk_repl_ops_dev` |
+| `load-source` | `source` | — | `compiler` | `execute` | `beamtalk_repl_ops_load` |
+| `load-project` | — | `path`, `include_tests`, `force`, `package_name` | `compiler` | `execute` | `beamtalk_repl_ops_load` |
+| `unload` | `module` | — | `workspace` | `execute` | `beamtalk_repl_ops_load` |
+| `save-native-source` | `module`, `source` | — | `workspace` | `execute` | `beamtalk_repl_ops_load` |
+| `save-section` | `class`, `new_name` | `old_name`, `before_selector`, `before_side` | `workspace` | `execute` | `beamtalk_repl_ops_load` |
+| `save-method` | `class`, `selector`, `source` | `author`, `author_kind` | `compiler` | `execute` | `beamtalk_repl_ops_edit` |
+| `save-class` | `source`, `path` | `author`, `author_kind` | `compiler` | `execute` | `beamtalk_repl_ops_edit` |
+| `revert-method` | `class`, `selector` | `side` | `workspace` | `execute` | `beamtalk_repl_ops_edit` |
+| `reload-file` | `path` | — | `compiler` | `execute` | `beamtalk_repl_ops_edit` |
+| `flush` | — | `class`, `file`, `kind`, `confirm_destructive` | `workspace` | `execute` | `beamtalk_repl_ops_state` |
+| `changes` | — | — | `always` | `read` | `beamtalk_repl_ops_state` |
+| `info` | — | — | `always` | `read` | `beamtalk_repl_ops_state` |
+| `git-status` | — | — | `always` | `read` | `beamtalk_repl_ops_git` |
+| `git-diff` | `path` | — | `always` | `read` | `beamtalk_repl_ops_git` |
+| `git-log` | — | `count` | `always` | `read` | `beamtalk_repl_ops_git` |
+| `git-stage` | `path` | — | `workspace` | `execute` | `beamtalk_repl_ops_git` |
+| `git-unstage` | `path` | — | `workspace` | `execute` | `beamtalk_repl_ops_git` |
+| `git-commit` | `message` | — | `workspace` | `execute` | `beamtalk_repl_ops_git` |
+| `git-revert-file` | `path` | — | `workspace` | `execute` | `beamtalk_repl_ops_git` |
+| `sessions` | — | — | `always` | `read` | `beamtalk_repl_ops_session` |
+| `close` | — | — | `always` | `execute` | `beamtalk_repl_ops_session` |
+| `health` | — | — | `always` | `read` | `beamtalk_repl_ops_session` |
+| `shutdown` | `cookie` | — | `always` | `admin` | `beamtalk_repl_ops_session` |
+| `actors` | — | — | `always` | `read` | `beamtalk_repl_ops_actors` |
+| `inspect` | `actor` | — | `always` | `read` | `beamtalk_repl_ops_actors` |
+| `kill` | `actor` | — | `always` | `admin` | `beamtalk_repl_ops_actors` |
+| `pid-stats` | `actor` | — | `always` | `read` | `beamtalk_repl_ops_watch` |
+| `children` | `supervisor` | — | `always` | `read` | `beamtalk_repl_ops_process` |
+| `process-info` | `pid` | — | `always` | `read` | `beamtalk_repl_ops_process` |
+| `describe` | — | — | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `methods` | `class` | — | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `inherited-methods` | `class` | — | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `list-classes` | — | `filter` | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `reload-findings` | — | — | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `nav-query` | `kind` | `selector`, `class`, `module`, `code`, `before`, `suffix` | `always` | `read` | `beamtalk_repl_ops_nav` |
+| `nav-symbols` | — | `scope` | `always` | `read` | `beamtalk_repl_ops_nav_symbols` |
+| `enable-tracing` | — | — | `always` | `execute` | `beamtalk_repl_ops_perf` |
+| `disable-tracing` | — | — | `always` | `execute` | `beamtalk_repl_ops_perf` |
+| `get-traces` | — | `actor`, `selector`, `class`, `outcome`, `min_duration_ns`, `limit` | `always` | `read` | `beamtalk_repl_ops_perf` |
+| `actor-stats` | — | `actor` | `always` | `read` | `beamtalk_repl_ops_perf` |
+| `export-traces` | — | `path`, `actor`, `selector`, `class`, `outcome`, `min_duration_ns`, `limit` | `always` | `execute` | `beamtalk_repl_ops_perf` |
+| `browse-classes` | — | — | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `browse-protocols` | `class`, `side` | — | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `browse-method-source` | `class`, `side`, `selector` | — | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `browse-class-definition` | `class` | — | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `browse-categories` | `class` | — | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `browse-native-source` | — | `class`, `module`, `selector` | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `browse-native-modules` | — | — | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `browse-type-aliases` | — | — | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `browse-alias-source` | `name` | `package` | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `subscribe-logs` | — | `level` | `always` | `read` | `beamtalk_ws_handler` |
+| `unsubscribe-logs` | — | — | `always` | `read` | `beamtalk_ws_handler` |
 <!-- op-table:end -->
 
 ### Example Payloads
@@ -979,7 +984,7 @@ the client to the `protocol_msg()` record. It is gone.
 
 ### Result shapes
 
-`flush` takes at most one of `class`, `file` or `kind` (two is `invalid_argument`) and `confirm_destructive`; the destructive tier is applied only for a boolean `true`, and any other value is `invalid_argument`. `save-class`'s `{value, Map}` also carries `warnings` (a list of texts) when the class went live but its ChangeLog entry could not be recorded, so `flush` will not write the file.
+`flush` takes at most one of `class`, `file` or `kind` (two is `invalid_argument`) and `confirm_destructive`; the destructive tier is applied only for a boolean `true`, and any other value is `invalid_argument`. A scope param must be a non-empty String: `""` is `invalid_argument`, never read as "no scope" (BT-5206). `kind` is one of five `ChangeEntry` kinds: `new-class`, `remove-method`, `remove-class`, `rename-class` or `rename-method` (a leading `#` and quotes, as in `#'new-class'`, are accepted); any other name is `invalid_argument`. The result is a `FlushResult` summary (`flushed`, `files`, `skipped`, `conflicts`): a client that gets a non-empty `conflicts` list shows the conflicts, not a success, because those files were not written. The CLI REPL's `:flush [<Class>|#kind|#{ #file => "path" }]` and `:flush-destructive` send this operation, as the MCP `flush` tool and the LiveView "Save All to Disk" button do. `save-method` and `save-class` take optional `author` and `author_kind` (`human` | `agent`) for the ChangeLog audit trail (ADR 0082); the MCP tools send `agent`, and a request that names none is recorded as the connection's own (`repl`, `human`). The `{value, Map}` of both also carries `warnings` (a list of texts) when the change went live but its ChangeLog entry could not be recorded, so `flush` will not write it.
 
 **Git ops (BT-5205).** `git-status`, `git-diff`, `git-log`, `git-stage`, `git-unstage`, `git-commit` and `git-revert-file` run system `git` in the project's repository (never through a shell; pathspecs are literal). A `path` must be relative to the project root, with no `..` segment, no NUL byte, and not empty; anything else is `invalid_argument` and git is not started. `git-status` answers `{branch, upstream, ahead, behind, files: [{path, index, worktree}], truncated}` (at most 5000 files); `git-diff` `{path, worktree, staged, truncated}` (at most 1 MiB per side, valid UTF-8); `git-log` takes an optional positive `count` (default 20, capped at 500) and answers `{commits: [{sha, short_sha, subject, author, ts}], limit}`; `git-stage`, `git-unstage` and `git-revert-file` answer `{path}`; `git-commit` takes `message` (a String, at most 64 KiB) and answers `{committed: true}`.
 

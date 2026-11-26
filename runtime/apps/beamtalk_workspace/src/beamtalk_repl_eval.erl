@@ -1173,8 +1173,20 @@ do_compile_method(ClassNameBin, SelectorBin, Source, Intent, Author, AuthorKind,
             IsClassMethod
         )
     of
-        {ok, _Result, _Output, _W, _S} -> {ok, ClassNameBin};
-        {error, Reason, _Output, _W, _S} -> {error, Reason}
+        {ok, _Result, _Output, Warnings, _S} ->
+            %% The install reply carries a ChangeLog append failure as a String
+            %% warning (BT-5013). Queue it for the caller's collector
+            %% (`beamtalk_refactor_support:collect_changelog_warnings/1`, used by
+            %% the `save-method` operation) instead of dropping it; outside a
+            %% collector this is a no-op and the ERROR log is the report. Compiler
+            %% warnings (maps) are not ChangeLog warnings and stay out.
+            lists:foreach(
+                fun(W) -> beamtalk_refactor_support:note_changelog_result({warning, W}) end,
+                [W || W <- Warnings, is_binary(W)]
+            ),
+            {ok, ClassNameBin};
+        {error, Reason, _Output, _W, _S} ->
+            {error, Reason}
     end.
 
 %% `{ok, Module}' when `ClassNameBin' names a loaded built-in (stdlib) class,

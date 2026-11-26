@@ -65,7 +65,8 @@ defmodule BtAttach.Workspace do
   version report, BT-2991, BT-5204) and distinguishes *why* an unreachable workspace failed —
   `:epmd_absent` (this node couldn't even publish itself to the local epmd),
   `:bad_cookie` (epmd knows the target node but the dist handshake was
-  rejected), or `:dead_workspace` (epmd has no record of the target node at
+  rejected), `:workspace_too_old` (the workspace answers but lacks the operation
+  layer, BT-5206), or `:dead_workspace` (epmd has no record of the target node at
   all) — so the broker can surface a precise error before opening a window,
   and the version report lets it warn/refuse on a runtime/protocol mismatch.
   """
@@ -160,6 +161,12 @@ defmodule BtAttach.Workspace do
     * `{:error, :epmd_absent}`   — no local dist name server to publish to.
     * `{:error, :bad_cookie}`    — epmd knows the target node; dist handshake
                                    rejected (mismatched cookie).
+    * `{:error, :workspace_too_old}` — the workspace is running but predates the
+                                    operation layer this front calls
+                                    (`beamtalk_repl_ops:request/3` is `undef`, or
+                                    the `info` op is unknown), so no other call
+                                    would work either (BT-5206). Restart it from a
+                                    Beamtalk install that matches this front.
     * `{:error, :dead_workspace}` — epmd has no record of the target node, the
                                     workspace died between connect and RPC, or
                                     (the rare `:ignored` case) this node's own
@@ -1374,6 +1381,19 @@ defmodule BtAttach.Workspace do
   end
 
   @doc """
+  Unsubscribe `pid` from every live push stream (transcript, actors, classes,
+  bindings, flush, reload_check) through the subscription facade (BT-5206).
+
+  The one call a LiveView makes on any exit path, so a stream added later is
+  covered without every exit path being edited to name it. Per-object change
+  subscriptions (`subscribe_object_changes/2`) are keyed by the watched actor and
+  are dropped separately.
+  """
+  def unsubscribe_all(pid) when is_pid(pid) do
+    rpc(:beamtalk_repl_subscriptions, :unsubscribe_all, [pid])
+  end
+
+  @doc """
   Subscribe the given `pid` (the LiveView process) to the workspace's
   bindings-changed push stream through the BT-2399 subscription facade.
 
@@ -1791,7 +1811,9 @@ defmodule BtAttach.Workspace do
   Returns:
 
     * success → `{:ok, class}` where `class` is the class-name binary the install
-      confirmed
+      confirmed, or `{:ok, class, warnings}` when the method is live but its
+      ChangeLog entry could not be recorded, so `flush` will not write it
+      (BT-5206, as `new_class/2` does)
     * error   → `{:error, reason_term}` where `reason_term` is the structured
       `#beamtalk_error{}` for a failed compile/save (rendered via
       `render_error/1`), or `{:unreachable, _}` if the workspace is gone
@@ -1809,8 +1831,14 @@ defmodule BtAttach.Workspace do
     }
 
     case dispatch_browse("save-method", params) do
-      {:value, %{"class" => class_bin}} -> {:ok, to_string(class_bin)}
-      other -> edit_error(other)
+      {:value, %{"class" => class_bin, "warnings" => [_ | _] = warnings}} ->
+        {:ok, to_string(class_bin), Enum.map(warnings, &to_string/1)}
+
+      {:value, %{"class" => class_bin}} ->
+        {:ok, to_string(class_bin)}
+
+      other ->
+        edit_error(other)
     end
   end
 
@@ -2415,6 +2443,36 @@ defmodule BtAttach.Workspace do
 
   def format_flush_summary(other), do: inspect(other)
 
+  @doc """
+  The conflicts of a `FlushResult` summary as an error message, or `nil` when it
+  has none (BT-5206). A flush that returns conflicts did not write those files, so
+  a caller shows this in place of its success message. Keys are read as
+  `format_flush_summary/1` reads them (atom or string).
+  """
+  @spec format_flush_conflicts(term()) :: String.t() | nil
+  def format_flush_conflicts(summary) when is_map(summary) do
+    case summary |> summary_field(:conflicts, []) |> List.wrap() do
+      [] ->
+        nil
+
+      conflicts ->
+        listed =
+          Enum.map_join(conflicts, "; ", fn conflict ->
+            file = conflict_field(conflict, :file, "?")
+            "#{file} (#{conflict_field(conflict, :reason, "unknown")})"
+          end)
+
+        "Flush found #{length(conflicts)} conflict(s); not written: #{listed}"
+    end
+  end
+
+  def format_flush_conflicts(_other), do: nil
+
+  defp conflict_field(conflict, key, default) when is_map(conflict),
+    do: conflict |> summary_field(key, default) |> to_string()
+
+  defp conflict_field(_conflict, _key, default), do: default
+
   defp summary_field(map, key, default) do
     Map.get(map, key, Map.get(map, Atom.to_string(key), default))
   end
@@ -2701,14 +2759,25 @@ defmodule BtAttach.Workspace do
       {:ok, %{version: report}} when is_map(report) ->
         {:ok, report}
 
+      # BT-5206: a workspace older than this front has no operation layer (or no
+      # `info` op in it), so the call lands as `undef` or `unknown_op`. Name that,
+      # rather than reporting a workspace that is plainly running as dead.
+      {:error, {:unreachable, {:EXIT, {:undef, [{:beamtalk_repl_ops, _, _, _} | _]}}}} ->
+        {:error, :workspace_too_old}
+
+      {:error, err}
+      when is_tuple(err) and tuple_size(err) > 1 and elem(err, 0) == :beamtalk_error ->
+        if elem(err, 1) == :unknown_op,
+          do: {:error, :workspace_too_old},
+          else: {:error, :dead_workspace}
+
       {:error, {:unreachable, _reason}} ->
         {:error, :dead_workspace}
 
       # Defensive catch-all matching the rest of this module's degrade-
       # gracefully contract (e.g. eval/2's `other -> {:unexpected_reply, _}`):
-      # an older workspace predating beamtalk_version (BT-2991) or a future
-      # shape change should surface as a clean :dead_workspace 503, not crash
-      # the /readiness controller with a CaseClauseError.
+      # a future shape change should surface as a clean :dead_workspace 503, not
+      # crash the /readiness controller with a CaseClauseError.
       _other ->
         {:error, :dead_workspace}
     end

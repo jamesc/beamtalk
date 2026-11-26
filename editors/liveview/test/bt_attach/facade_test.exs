@@ -213,7 +213,8 @@ defmodule BtAttach.FacadeTest do
       assert Facade.capability(:processes_system) == :execute
 
       assert Facade.capability(:kill) == :admin
-      assert Facade.capability(:rotate_cookie) == :admin
+      # BT-5206: cookie rotation belongs in the release tooling, not the editor.
+      refute Facade.known?(:rotate_cookie)
     end
 
     test "known?/1 and an unknown op" do
@@ -256,12 +257,13 @@ defmodule BtAttach.FacadeTest do
       assert RecordingClient.calls() == [{:sub_a, self()}]
     end
 
-    test "a catalog op with no UI binding is unsupported, not a dist call" do
-      # `rotate_cookie` is in the vocabulary (so RBAC can reason about it) but
-      # has no route yet — it must not silently no-op or hit the client.
-      assert Facade.dispatch(:rotate_cookie, %{}) ==
-               {:error, {:unsupported_op, :rotate_cookie}}
+    test "a dropped op is forbidden, and a known op with unusable params is not a dist call" do
+      # BT-5206: `rotate_cookie` left the vocabulary, so it is off-catalog.
+      assert Facade.dispatch(:rotate_cookie, %{}) == {:error, :forbidden_op}
 
+      # A known op whose params no clause accepts must not silently no-op or hit
+      # the client.
+      assert Facade.dispatch(:eval, %{}) == {:error, {:unsupported_op, :eval}}
       assert RecordingClient.calls() == []
     end
 
@@ -564,10 +566,9 @@ defmodule BtAttach.FacadeTest do
       assert Enum.sort(flushes.()) == [[], [class: "Foo", confirm_destructive: true]]
     end
 
-    test "info is implemented by dispatch and no longer reserved (BT-5204)" do
+    test "info is implemented by dispatch (BT-5204)" do
       assert Facade.dispatch(:info, %{}) == {:ok, %{node: "ws@host"}}
       assert {:info} in RecordingClient.calls()
-      refute :info in Facade.reserved_ops()
     end
 
     test "autoflush routes to the client and returns the bare boolean (BT-2590)" do

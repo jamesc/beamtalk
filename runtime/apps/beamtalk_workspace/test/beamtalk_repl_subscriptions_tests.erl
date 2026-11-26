@@ -236,3 +236,41 @@ received_class(Class) ->
         {got, _Other} -> received_class(Class)
     after 1000 -> false
     end.
+
+%%% ===========================================================================
+%%% BT-5206: every push stream goes through the facade
+%%% ===========================================================================
+
+%% The logs stream is named by the facade, so the WebSocket handler need not reach
+%% for `beamtalk_ws_log_handler`: subscribing registers the caller, unsubscribing
+%% removes it, and a repeat unsubscribe is harmless.
+logs_stream_subscribes_and_unsubscribes_the_caller_test() ->
+    Self = self(),
+    ?assertEqual(ok, beamtalk_repl_subscriptions:subscribe_logs(warning)),
+    ?assertMatch([{Self, warning, _, _}], ets:lookup(beamtalk_ws_log_subscribers, Self)),
+    %% A repeat call changes the level of the one subscription.
+    ?assertEqual(ok, beamtalk_repl_subscriptions:subscribe_logs(error)),
+    ?assertMatch([{Self, error, _, _}], ets:lookup(beamtalk_ws_log_subscribers, Self)),
+    ?assertEqual(ok, beamtalk_repl_subscriptions:unsubscribe_logs()),
+    ?assertEqual([], ets:lookup(beamtalk_ws_log_subscribers, Self)),
+    ?assertEqual(ok, beamtalk_repl_subscriptions:unsubscribe_logs()).
+
+%% No client casts `{subscribe, self()}` at a gen_server, and the WebSocket handler
+%% reaches every push stream through the facade: it names none of the modules the
+%% facade wraps. A source scan, so a later direct call fails here.
+ws_handler_reaches_push_streams_only_through_the_facade_test() ->
+    {source, Path} = lists:keyfind(source, 1, beamtalk_ws_handler:module_info(compile)),
+    {ok, Source} = file:read_file(Path),
+    Direct = [
+        <<"beamtalk_ws_log_handler:subscribe">>,
+        <<"beamtalk_ws_log_handler:unsubscribe">>,
+        <<"beamtalk_transcript_stream:subscribe">>,
+        <<"beamtalk_transcript_stream:unsubscribe">>,
+        <<"beamtalk_announcements:subscribe">>,
+        <<"beamtalk_announcements:system_unsubscribe">>,
+        <<"beamtalk_object_watch:subscribe">>,
+        <<"{subscribe, self()}">>,
+        <<"{unsubscribe, self()}">>
+    ],
+    Found = [P || P <- Direct, binary:match(Source, P) =/= nomatch],
+    ?assertEqual([], Found).

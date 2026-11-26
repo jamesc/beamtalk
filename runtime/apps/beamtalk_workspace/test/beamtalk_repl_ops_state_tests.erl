@@ -45,6 +45,9 @@ state_ops_test_() ->
                 flush_rejects_mistyped_scope(Ctx)
             end}
         end,
+        fun(Ctx) ->
+            {"flush refuses an empty-string scope", fun() -> flush_rejects_empty_scope(Ctx) end}
+        end,
         fun(_Ctx) ->
             {"flush with an unknown kind is a structured error", fun flush_unknown_kind/0}
         end,
@@ -229,6 +232,21 @@ flush_rejects_mistyped_scope(#{proj_dir := ProjDir}) ->
                     )
                 end,
                 [123, null, [<<"Gone">>], #{}]
+            )
+        end,
+        [<<"class">>, <<"file">>, <<"kind">>]
+    ),
+    ?assert(filelib:is_regular(File)).
+
+%% BT-5206: an empty-string scope used to read as "no scope" and flush
+%% everything; it is refused, with nothing written.
+flush_rejects_empty_scope(#{proj_dir := ProjDir}) ->
+    {File, _Seq} = seed_remove_class(ProjDir, <<"GoneEmpty">>),
+    lists:foreach(
+        fun(Key) ->
+            ?assertMatch(
+                {error, #beamtalk_error{kind = invalid_argument}},
+                request(<<"flush">>, #{Key => <<>>, <<"confirm_destructive">> => true})
             )
         end,
         [<<"class">>, <<"file">>, <<"kind">>]

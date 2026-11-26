@@ -38,14 +38,22 @@ both. It is pure data: it never calls a handler module.
     lookup/1,
     handler/1,
     capability/1,
+    access/1,
     describe/0,
     describe_for/1,
     to_json_term/0
 ]).
 
--export_type([entry/0, capability_class/0]).
+-export_type([entry/0, capability_class/0, access_class/0]).
 
 -type capability_class() :: always | compiler | workspace.
+
+%% Who may call the op (ADR 0091 Decisions 3 and 4): `read` runs no user code,
+%% so an Observer may call it; `execute` compiles, loads or runs code or changes
+%% the image, the ChangeLog, the working tree or history, so it is Owner-only;
+%% `admin` stops actors or the workspace. Not `capability_class()`, which says
+%% what a node can do; this says what a caller may do.
+-type access_class() :: read | execute | admin.
 
 -type entry() :: #{
     op := binary(),
@@ -53,6 +61,7 @@ both. It is pure data: it never calls a handler module.
     params := [binary()],
     optional := [binary()],
     capability := capability_class(),
+    access := access_class(),
     notes => binary()
 }.
 
@@ -63,14 +72,14 @@ both. It is pure data: it never calls a handler module.
 ops() ->
     [
         %% --- Evaluation ---
-        e(<<"eval">>, beamtalk_repl_ops_eval, [<<"code">>], [<<"trace">>], compiler),
-        e(<<"stdin">>, ?WS, [<<"value">>], [], always),
+        e(<<"eval">>, beamtalk_repl_ops_eval, [<<"code">>], [<<"trace">>], compiler, execute),
+        e(<<"stdin">>, ?WS, [<<"value">>], [], always, execute),
         %% Connected-mode `beamtalk run` (ADR 0099 §3): dispatches a class entry
         %% method with argv. Compile-free, so available in every mode.
-        e(<<"run-entry">>, ?WS, [<<"class">>, <<"selector">>], [<<"args">>], always),
-        e(<<"interrupt">>, beamtalk_repl_ops_actors, [], [], always),
+        e(<<"run-entry">>, ?WS, [<<"class">>, <<"selector">>], [<<"args">>], always, execute),
+        e(<<"interrupt">>, beamtalk_repl_ops_actors, [], [], always, execute),
         %% --- Editor support ---
-        e(<<"complete">>, beamtalk_repl_ops_dev, [<<"code">>], [<<"cursor">>], always),
+        e(<<"complete">>, beamtalk_repl_ops_dev, [<<"code">>], [<<"cursor">>], always, read),
         %% Live-image hover docs; optional `before`/`suffix` resolve keyword
         %% selectors; `class` + `side` (`instance` | `class`), sent together by
         %% method editors, give `self` its type.
@@ -79,7 +88,8 @@ ops() ->
             beamtalk_repl_ops_dev,
             [<<"code">>],
             [<<"before">>, <<"suffix">>, <<"class">>, <<"side">>],
-            always
+            always,
+            read
         ),
         %% Parse-only diagnostics; `mode` is `expression` | `method`; `source_path`
         %% checks under that file's project scope.
@@ -88,51 +98,57 @@ ops() ->
             beamtalk_repl_ops_dev,
             [<<"code">>],
             [<<"mode">>, <<"source_path">>],
-            compiler
+            compiler,
+            read
         ),
         e(
             <<"show-codegen">>,
             beamtalk_repl_ops_dev,
             [],
             [<<"code">>, <<"class">>, <<"selector">>],
-            compiler
+            compiler,
+            read
         ),
         e(
             <<"erlang-help">>,
             beamtalk_repl_ops_dev,
             [<<"module">>],
             [<<"function">>],
-            always
+            always,
+            read
         ),
         e(
             <<"erlang-complete">>,
             beamtalk_repl_ops_dev,
             [],
             [<<"prefix">>, <<"module">>],
-            always
+            always,
+            read
         ),
         %% --- Tests ---
-        e(<<"test">>, beamtalk_repl_ops_dev, [], [<<"class">>, <<"file">>], always),
-        e(<<"test-all">>, beamtalk_repl_ops_dev, [], [], always),
-        e(<<"list-tests">>, beamtalk_repl_ops_dev, [], [], always),
-        e(<<"load-tests">>, beamtalk_repl_ops_dev, [], [], compiler),
+        e(<<"test">>, beamtalk_repl_ops_dev, [], [<<"class">>, <<"file">>], always, execute),
+        e(<<"test-all">>, beamtalk_repl_ops_dev, [], [], always, execute),
+        e(<<"list-tests">>, beamtalk_repl_ops_dev, [], [], always, read),
+        e(<<"load-tests">>, beamtalk_repl_ops_dev, [], [], compiler, execute),
         %% --- Loading and workspace mutation ---
-        e(<<"load-source">>, beamtalk_repl_ops_load, [<<"source">>], [], compiler),
+        e(<<"load-source">>, beamtalk_repl_ops_load, [<<"source">>], [], compiler, execute),
         e(
             <<"load-project">>,
             beamtalk_repl_ops_load,
             [],
             [<<"path">>, <<"include_tests">>, <<"force">>, <<"package_name">>],
-            compiler
+            compiler,
+            execute
         ),
-        e(<<"unload">>, beamtalk_repl_ops_load, [<<"module">>], [], workspace),
+        e(<<"unload">>, beamtalk_repl_ops_load, [<<"module">>], [], workspace, execute),
         %% Edit, compile, reload and write back a project-owned native module.
         e(
             <<"save-native-source">>,
             beamtalk_repl_ops_load,
             [<<"module">>, <<"source">>],
             [],
-            workspace
+            workspace,
+            execute
         ),
         %% Add or rename a `// === Name ===` section divider in a class's source file.
         e(
@@ -140,7 +156,8 @@ ops() ->
             beamtalk_repl_ops_load,
             [<<"class">>, <<"new_name">>],
             [<<"old_name">>, <<"before_selector">>, <<"before_side">>],
-            workspace
+            workspace,
+            execute
         ),
         %% Code editing (BT-5203): structured-param writes shared by LiveView,
         %% MCP and wire clients; no Beamtalk source is assembled from the params.
@@ -152,17 +169,27 @@ ops() ->
             [<<"class">>, <<"selector">>, <<"source">>],
             [<<"author">>, <<"author_kind">>],
             compiler,
+            execute,
             <<"Durably install a method; `source` is the body right of `=>`.">>
         ),
-        e(<<"save-class">>, beamtalk_repl_ops_edit, [<<"source">>, <<"path">>], [], compiler),
+        e(
+            <<"save-class">>,
+            beamtalk_repl_ops_edit,
+            [<<"source">>, <<"path">>],
+            [<<"author">>, <<"author_kind">>],
+            compiler,
+            execute,
+            <<"Queue a new class at `path`; `author_kind` is `human` | `agent` (ChangeLog audit).">>
+        ),
         e(
             <<"revert-method">>,
             beamtalk_repl_ops_edit,
             [<<"class">>, <<"selector">>],
             [<<"side">>],
-            workspace
+            workspace,
+            execute
         ),
-        e(<<"reload-file">>, beamtalk_repl_ops_edit, [<<"path">>], [], compiler),
+        e(<<"reload-file">>, beamtalk_repl_ops_edit, [<<"path">>], [], compiler, execute),
         %% Workspace state (BT-5204): the Changes pane, flush and the workspace
         %% facts a client needs, shared by LiveView, MCP and wire clients. The
         %% findings snapshot is the `reload-findings` op below.
@@ -172,47 +199,52 @@ ops() ->
             [],
             [<<"class">>, <<"file">>, <<"kind">>, <<"confirm_destructive">>],
             workspace,
+            execute,
             <<
                 "Write pending ChangeLog entries to disk. At most one of `class`, `file`, "
-                "`kind` scopes it; `confirm_destructive: true` also applies Tier 2 entries."
+                "`kind` scopes it (each a non-empty String; `kind` is `new-class`, "
+                "`remove-method`, `remove-class`, `rename-class` or `rename-method`); "
+                "`confirm_destructive: true` also applies Tier 2 entries."
             >>
         ),
-        e(<<"changes">>, beamtalk_repl_ops_state, [], [], always),
+        e(<<"changes">>, beamtalk_repl_ops_state, [], [], always, read),
         e(
             <<"info">>,
             beamtalk_repl_ops_state,
             [],
             [],
             always,
+            read,
             <<"Version, node, workspace id and the settings a client needs.">>
         ),
         %% Git working tree (BT-5205): shared by LiveView's Git panel and wire
         %% clients. Every `path` is checked by `beamtalk_repl_paths` first; reads
         %% are bounded. The mutating ops change the index, working tree or
         %% history, so they are `workspace` (refused in a release).
-        e(<<"git-status">>, beamtalk_repl_ops_git, [], [], always),
-        e(<<"git-diff">>, beamtalk_repl_ops_git, [<<"path">>], [], always),
-        e(<<"git-log">>, beamtalk_repl_ops_git, [], [<<"count">>], always),
-        e(<<"git-stage">>, beamtalk_repl_ops_git, [<<"path">>], [], workspace),
-        e(<<"git-unstage">>, beamtalk_repl_ops_git, [<<"path">>], [], workspace),
+        e(<<"git-status">>, beamtalk_repl_ops_git, [], [], always, read),
+        e(<<"git-diff">>, beamtalk_repl_ops_git, [<<"path">>], [], always, read),
+        e(<<"git-log">>, beamtalk_repl_ops_git, [], [<<"count">>], always, read),
+        e(<<"git-stage">>, beamtalk_repl_ops_git, [<<"path">>], [], workspace, execute),
+        e(<<"git-unstage">>, beamtalk_repl_ops_git, [<<"path">>], [], workspace, execute),
         e(
             <<"git-commit">>,
             beamtalk_repl_ops_git,
             [<<"message">>],
             [],
             workspace,
+            execute,
             <<"Commit the staged index through system `git`, so hooks and signing apply.">>
         ),
-        e(<<"git-revert-file">>, beamtalk_repl_ops_git, [<<"path">>], [], workspace),
+        e(<<"git-revert-file">>, beamtalk_repl_ops_git, [<<"path">>], [], workspace, execute),
         %% --- Sessions ---
-        e(<<"sessions">>, beamtalk_repl_ops_session, [], [], always),
-        e(<<"close">>, beamtalk_repl_ops_session, [], [], always),
-        e(<<"health">>, beamtalk_repl_ops_session, [], [], always),
-        e(<<"shutdown">>, beamtalk_repl_ops_session, [<<"cookie">>], [], always),
+        e(<<"sessions">>, beamtalk_repl_ops_session, [], [], always, read),
+        e(<<"close">>, beamtalk_repl_ops_session, [], [], always, execute),
+        e(<<"health">>, beamtalk_repl_ops_session, [], [], always, read),
+        e(<<"shutdown">>, beamtalk_repl_ops_session, [<<"cookie">>], [], always, admin),
         %% --- Actors ---
-        e(<<"actors">>, beamtalk_repl_ops_actors, [], [], always),
-        e(<<"inspect">>, beamtalk_repl_ops_actors, [<<"actor">>], [], always),
-        e(<<"kill">>, beamtalk_repl_ops_actors, [<<"actor">>], [], always),
+        e(<<"actors">>, beamtalk_repl_ops_actors, [], [], always, read),
+        e(<<"inspect">>, beamtalk_repl_ops_actors, [<<"actor">>], [], always, read),
+        e(<<"kill">>, beamtalk_repl_ops_actors, [<<"actor">>], [], always, admin),
         %% ADR 0095 §5: live-Inspector process metrics, the request/response
         %% companion to the `object` push stream.
         e(
@@ -221,6 +253,7 @@ ops() ->
             [<<"actor">>],
             [],
             always,
+            read,
             <<
                 "Live process metrics (queue depth, memory, reductions, status) "
                 "for an actor pid."
@@ -235,17 +268,18 @@ ops() ->
             [<<"supervisor">>],
             [],
             always,
+            read,
             <<"List a supervisor's children as drillable rows.">>
         ),
-        e(<<"process-info">>, beamtalk_repl_ops_process, [<<"pid">>], [], always),
+        e(<<"process-info">>, beamtalk_repl_ops_process, [<<"pid">>], [], always, read),
         %% --- Reflection ---
-        e(<<"describe">>, beamtalk_repl_ops_dev, [], [], always),
-        e(<<"methods">>, beamtalk_repl_ops_dev, [<<"class">>], [], always),
+        e(<<"describe">>, beamtalk_repl_ops_dev, [], [], always, read),
+        e(<<"methods">>, beamtalk_repl_ops_dev, [<<"class">>], [], always, read),
         %% Lazy per-defining-class inherited method listing for the sidebar.
-        e(<<"inherited-methods">>, beamtalk_repl_ops_dev, [<<"class">>], [], always),
-        e(<<"list-classes">>, beamtalk_repl_ops_dev, [], [<<"filter">>], always),
+        e(<<"inherited-methods">>, beamtalk_repl_ops_dev, [<<"class">>], [], always, read),
+        e(<<"list-classes">>, beamtalk_repl_ops_dev, [], [<<"filter">>], always, read),
         %% Reload-induced findings snapshot read (ADR 0105 surface-parity gap).
-        e(<<"reload-findings">>, beamtalk_repl_ops_dev, [], [], always),
+        e(<<"reload-findings">>, beamtalk_repl_ops_dev, [], [], always, read),
         e(
             <<"nav-query">>,
             beamtalk_repl_ops_nav,
@@ -258,12 +292,13 @@ ops() ->
                 <<"before">>,
                 <<"suffix">>
             ],
-            always
+            always,
+            read
         ),
-        e(<<"nav-symbols">>, beamtalk_repl_ops_nav_symbols, [], [<<"scope">>], always),
+        e(<<"nav-symbols">>, beamtalk_repl_ops_nav_symbols, [], [<<"scope">>], always, read),
         %% --- Tracing and performance (ADR 0069) ---
-        e(<<"enable-tracing">>, beamtalk_repl_ops_perf, [], [], always),
-        e(<<"disable-tracing">>, beamtalk_repl_ops_perf, [], [], always),
+        e(<<"enable-tracing">>, beamtalk_repl_ops_perf, [], [], always, execute),
+        e(<<"disable-tracing">>, beamtalk_repl_ops_perf, [], [], always, execute),
         e(
             <<"get-traces">>,
             beamtalk_repl_ops_perf,
@@ -276,9 +311,10 @@ ops() ->
                 <<"min_duration_ns">>,
                 <<"limit">>
             ],
-            always
+            always,
+            read
         ),
-        e(<<"actor-stats">>, beamtalk_repl_ops_perf, [], [<<"actor">>], always),
+        e(<<"actor-stats">>, beamtalk_repl_ops_perf, [], [<<"actor">>], always, read),
         e(
             <<"export-traces">>,
             beamtalk_repl_ops_perf,
@@ -293,21 +329,23 @@ ops() ->
                 <<"limit">>
             ],
             always,
+            execute,
             <<"Exports trace events to a JSON file with optional filters.">>
         ),
         %% --- System Browser (ADR 0095) ---
-        e(<<"browse-classes">>, beamtalk_repl_ops_browse, [], [], always),
-        e(<<"browse-protocols">>, beamtalk_repl_ops_browse, [<<"class">>, <<"side">>], [], always),
+        e(<<"browse-classes">>, beamtalk_repl_ops_browse, [], [], always, read),
+        e(<<"browse-protocols">>, beamtalk_repl_ops_browse, [<<"class">>, <<"side">>], [], always, read),
         e(
             <<"browse-method-source">>,
             beamtalk_repl_ops_browse,
             [<<"class">>, <<"side">>, <<"selector">>],
             [],
-            always
+            always,
+            read
         ),
-        e(<<"browse-class-definition">>, beamtalk_repl_ops_browse, [<<"class">>], [], always),
+        e(<<"browse-class-definition">>, beamtalk_repl_ops_browse, [<<"class">>], [], always, read),
         %% The divider-grouped ("// === Name ===") method view.
-        e(<<"browse-categories">>, beamtalk_repl_ops_browse, [<<"class">>], [], always),
+        e(<<"browse-categories">>, beamtalk_repl_ops_browse, [<<"class">>], [], always, read),
         %% One of `class` / `module` is required (`module` addresses a standalone
         %% native module with no backing class); `selector` narrows to a
         %% `handle_call` clause. The one-of rule is enforced by the handler.
@@ -317,37 +355,43 @@ ops() ->
             [],
             [<<"class">>, <<"module">>, <<"selector">>],
             always,
+            read,
             <<"One of `class` / `module` is required.">>
         ),
-        e(<<"browse-native-modules">>, beamtalk_repl_ops_browse, [], [], always),
+        e(<<"browse-native-modules">>, beamtalk_repl_ops_browse, [], [], always, read),
         %% ADR 0108 Phase 8: type-alias enumeration and source view. `package`
         %% disambiguates a same-named alias declared by more than one package.
-        e(<<"browse-type-aliases">>, beamtalk_repl_ops_browse, [], [], always),
+        e(<<"browse-type-aliases">>, beamtalk_repl_ops_browse, [], [], always, read),
         e(
             <<"browse-alias-source">>,
             beamtalk_repl_ops_browse,
             [<<"name">>],
             [<<"package">>],
-            always
+            always,
+            read
         ),
         %% --- Log streaming ---
-        e(<<"subscribe-logs">>, ?WS, [], [<<"level">>], always),
-        e(<<"unsubscribe-logs">>, ?WS, [], [], always)
+        e(<<"subscribe-logs">>, ?WS, [], [<<"level">>], always, read),
+        e(<<"unsubscribe-logs">>, ?WS, [], [], always, read)
     ].
 
--spec e(binary(), module(), [binary()], [binary()], capability_class()) -> entry().
-e(Op, Handler, Params, Optional, Capability) ->
+-spec e(binary(), module(), [binary()], [binary()], capability_class(), access_class()) ->
+    entry().
+e(Op, Handler, Params, Optional, Capability, Access) ->
     #{
         op => Op,
         handler => Handler,
         params => Params,
         optional => Optional,
-        capability => Capability
+        capability => Capability,
+        access => Access
     }.
 
--spec e(binary(), module(), [binary()], [binary()], capability_class(), binary()) -> entry().
-e(Op, Handler, Params, Optional, Capability, Notes) ->
-    (e(Op, Handler, Params, Optional, Capability))#{notes => Notes}.
+-spec e(
+    binary(), module(), [binary()], [binary()], capability_class(), access_class(), binary()
+) -> entry().
+e(Op, Handler, Params, Optional, Capability, Access, Notes) ->
+    (e(Op, Handler, Params, Optional, Capability, Access))#{notes => Notes}.
 
 -doc "The table entry for `Op`, or `error` if the op is unknown.".
 -spec lookup(binary()) -> {ok, entry()} | error.
@@ -392,6 +436,20 @@ capability(Op) ->
     end.
 
 -doc """
+The access class of a REPL op: `read`, `execute` or `admin`. Every entry has one
+(`e/6,7` takes it), so an op cannot be added without deciding who may call it.
+LiveView's `BtAttach.Facade` is checked against this (its per-op RBAC class must
+equal the class of the wire op it dispatches), and an op the table does not name
+is `error`, never read as permitted.
+""".
+-spec access(binary()) -> {ok, access_class()} | error.
+access(Op) ->
+    case lookup(Op) of
+        {ok, #{access := Access}} -> {ok, Access};
+        error -> error
+    end.
+
+-doc """
 The `describe` op's `ops` map: every op in the table, keyed by name, with its
 `params`, its `optional` params when it has any, and its `notes` when set.
 """.
@@ -423,7 +481,7 @@ descriptor(#{params := Params, optional := Optional} = Entry) ->
 
 -doc """
 The table as a JSON-encodable term: a list of objects with `op`, `handler`,
-`params`, `optional`, `capability` and (when set) `notes`. This is the shape of
+`params`, `optional`, `capability`, `access` and (when set) `notes`. This is the shape of
 `test/fixtures/repl_op_table.json`, the fixture the Rust clients check
 themselves against.
 """.
@@ -432,13 +490,14 @@ to_json_term() ->
     [json_entry(E) || E <- ops()].
 
 -spec json_entry(entry()) -> map().
-json_entry(#{op := Op, handler := Handler, capability := Cap} = Entry) ->
+json_entry(#{op := Op, handler := Handler, capability := Cap, access := Access} = Entry) ->
     Base = #{
         <<"op">> => Op,
         <<"handler">> => atom_to_binary(Handler, utf8),
         <<"params">> => maps:get(params, Entry),
         <<"optional">> => maps:get(optional, Entry),
-        <<"capability">> => atom_to_binary(Cap, utf8)
+        <<"capability">> => atom_to_binary(Cap, utf8),
+        <<"access">> => atom_to_binary(Access, utf8)
     },
     case Entry of
         #{notes := Notes} -> Base#{<<"notes">> => Notes};

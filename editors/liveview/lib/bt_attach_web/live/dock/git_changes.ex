@@ -369,30 +369,35 @@ defmodule BtAttachWeb.Live.Dock.GitChanges do
       pid,
       :flush,
       %{class: class, confirm_destructive: true},
-      fn socket, result ->
-        case result do
-          {:ok, _summary} ->
-            socket
-            |> assign(
-              save_result: nil,
-              save_error: nil,
-              flush_result: rename_flush_message(kind, class),
-              flush_error: nil
-            )
-            |> WorkspaceLive.assign_changes()
-            # BT-2586: a successful destructive flush can delete a tracked file,
-            # so the git panel must reflect it immediately, same as an ordinary
-            # "Save All to Disk" flush.
-            |> WorkspaceLive.maybe_refresh_git()
-
-          {:error, reason} ->
-            WorkspaceLive.status_error(socket, FacadeError.render(reason))
-        end
-      end,
+      fn socket, result -> destructive_flush_done(socket, result, class, kind) end,
       &flush_destructive_failed(&1, class, &2),
       key: flush_destructive_key(class, kind)
     )
   end
+
+  # Fold the destructive flush's result into the socket. A flush that returned
+  # conflicts did not write those files, so the conflicts are shown, not the
+  # success message (BT-5206).
+  @doc false
+  def destructive_flush_done(socket, {:ok, summary}, class, kind) do
+    conflicts = Workspace.format_flush_conflicts(summary)
+
+    socket
+    |> assign(
+      save_result: nil,
+      save_error: nil,
+      flush_result: if(conflicts, do: nil, else: rename_flush_message(kind, class)),
+      flush_error: conflicts
+    )
+    |> WorkspaceLive.assign_changes()
+    # BT-2586: a successful destructive flush can delete a tracked file, so the
+    # git panel must reflect it immediately, same as an ordinary "Save All to
+    # Disk" flush.
+    |> WorkspaceLive.maybe_refresh_git()
+  end
+
+  def destructive_flush_done(socket, {:error, reason}, _class, _kind),
+    do: WorkspaceLive.status_error(socket, FacadeError.render(reason))
 
   # BT-5189: the pending key of a destructive flush of `class`'s `kind` entry —
   # its Changes-pane button stays disabled while the flush is queued or running.

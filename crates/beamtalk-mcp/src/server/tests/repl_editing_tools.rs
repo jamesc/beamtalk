@@ -80,7 +80,12 @@ async fn save_method_dispatches_the_save_method_op_with_structured_params() {
             "op": "save-method",
             "class": "Counter",
             "selector": "at:put:",
-            "source": body
+            "source": body,
+            // ADR 0082: an MCP save is the agent's, never the connection's own
+            // `repl`/human author. `respond_only_to` matches every field, so
+            // this fails if the attribution is dropped.
+            "author": "mcp:save_method",
+            "author_kind": "agent"
         }),
         serde_json::json!({"value": {"class": "Counter", "selector": "at:put:"}}),
     ))
@@ -104,7 +109,9 @@ async fn save_class_dispatches_the_save_class_op_with_structured_params() {
         serde_json::json!({
             "op": "save-class",
             "source": source,
-            "path": "src/greeter.bt"
+            "path": "src/greeter.bt",
+            "author": "mcp:save_class",
+            "author_kind": "agent"
         }),
         serde_json::json!({"value": {"path": "src/greeter.bt"}}),
     ))
@@ -118,6 +125,32 @@ async fn save_class_dispatches_the_save_class_op_with_structured_params() {
         .unwrap();
     assert_ne!(result.is_error, Some(true), "{}", call_text(&result));
     assert_eq!(call_text(&result), "New class queued for src/greeter.bt");
+}
+
+#[tokio::test]
+async fn save_method_reports_changelog_warnings() {
+    let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+        "value": {
+            "class": "Counter",
+            "selector": "inc",
+            "warnings": ["The change is live but ChangeLog append failed"]
+        }
+    })))
+    .await;
+    let result = mcp
+        .save_method(Parameters(SaveMethodParams {
+            class: "Counter".to_string(),
+            selector: "inc".to_string(),
+            body: "1".to_string(),
+        }))
+        .await
+        .unwrap();
+    let text = call_text(&result);
+    assert!(text.starts_with("Counter"), "{text}");
+    assert!(
+        text.contains("Warning: The change is live but ChangeLog append failed"),
+        "{text}"
+    );
 }
 
 #[tokio::test]
@@ -476,6 +509,33 @@ async fn flush_rejects_multiple_filters() {
         .await
         .expect_err("class + file together should be rejected");
     assert!(err.message.contains("mutually exclusive"));
+}
+
+/// An empty scope used to read as "no scope" and flush every pending change.
+#[tokio::test]
+async fn flush_rejects_an_empty_scope() {
+    // The fake answers anything, so a request that reached it would succeed.
+    for (class, file, kind, name) in [
+        (Some(""), None, None, "class"),
+        (None, Some(""), None, "file"),
+        (None, None, Some(""), "kind"),
+    ] {
+        let (_fake, mcp) = fake_mcp(respond(serde_json::json!({"flushed": 1}))).await;
+        let err = mcp
+            .flush(Parameters(FlushParams {
+                class: class.map(str::to_string),
+                file: file.map(str::to_string),
+                kind: kind.map(str::to_string),
+                confirm_destructive: Some(true),
+            }))
+            .await
+            .expect_err("an empty scope should be rejected");
+        assert!(
+            err.message.contains(name) && err.message.contains("empty"),
+            "{}",
+            err.message
+        );
+    }
 }
 
 #[tokio::test]

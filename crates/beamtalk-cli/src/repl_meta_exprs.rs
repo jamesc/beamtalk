@@ -10,7 +10,7 @@
 //! test — which links only the library target — can call the real parsing
 //! logic instead of re-implementing it. A hand-copied "mirror" of
 //! `remove_method_expr_for`'s logic in a test harness risks drifting
-//! from the real implementation; `:flush <sel>`'s equivalent duplication
+//! from the real implementation; `:flush <scope>`'s equivalent duplication
 //! was extracted the same way, for the same reason.
 
 /// Construct the `<Class> removeSelector: #<selector>` expression a
@@ -40,29 +40,74 @@ pub fn remove_method_expr_for(arg: &str) -> Option<String> {
     ))
 }
 
-/// Construct the `Workspace flush: <selector>` expression a `:flush
-/// <selector>` REPL line dispatches to (ADR 0082 Phase 3).
-///
-/// `selector` is passed through **verbatim** (only trimmed) into the
-/// generated expression, so callers can pass a Class (`Counter`), a Symbol
-/// kind (`#'new-class'`), or a Dictionary (`#{ #file => "path" }`) — unlike
-/// [`remove_method_expr_for`], there is no leading-`#` stripping here since
-/// a `#`-prefixed selector is a legitimate Symbol-kind argument, not a
-/// Symbol-literal-decorated method name.
-///
-/// Returns `None` when `selector` is empty (including a selector that is
-/// only whitespace, once trimmed), so the caller can print a usage hint
-/// instead of evaluating a malformed bare `Workspace flush: ` send — this
-/// emptiness check is exactly the kind of guard a hand-copied test-harness
-/// mirror can silently drop (as a hand-copied mirror of
-/// `remove_method_expr_for`'s own `#`-stripping order could); routing both callers through this one
-/// function makes that class of drift structurally impossible.
-pub fn flush_expr_for(selector: &str) -> Option<String> {
-    let selector = selector.trim();
-    if selector.is_empty() {
-        return None;
+/// What a `:flush [<scope>]` / `:flush-destructive [<scope>]` REPL line is
+/// scoped to, parsed from its argument. The `flush` operation takes the scope
+/// as one of three params, so the line is parsed once here, for both
+/// commands, and sent through [`ReplFlushScope::as_scope`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReplFlushScope {
+    /// A class name (`Counter`, or `#Counter` for a class `:remove-class`
+    /// already unbound: the ChangeLog matches it by name).
+    Class(String),
+    /// An entry kind from [`beamtalk_repl_protocol::FLUSH_KINDS`]
+    /// (`#'new-class'`, `#remove-class`).
+    Kind(String),
+    /// A source file (`#{ #file => "path" }`).
+    File(String),
+}
+
+impl ReplFlushScope {
+    /// The scope as the `flush` request builder takes it.
+    #[must_use]
+    pub fn as_scope(&self) -> beamtalk_repl_protocol::FlushScope<'_> {
+        match self {
+            Self::Class(c) => beamtalk_repl_protocol::FlushScope::Class(c),
+            Self::Kind(k) => beamtalk_repl_protocol::FlushScope::Kind(k),
+            Self::File(f) => beamtalk_repl_protocol::FlushScope::File(f),
+        }
     }
-    Some(format!("Workspace flush: {selector}"))
+}
+
+/// Parse the argument of `:flush <scope>` / `:flush-destructive <scope>`.
+///
+/// Accepts a class (`Counter`), a Symbol (`#'new-class'`, `#remove-class`,
+/// `#Counter`) and a one-key dictionary (`#{ #file => "src/foo.bt" }`), the
+/// forms these commands took when they evaluated `Workspace flush:`. A Symbol
+/// naming one of the five entry kinds is a kind scope; any other Symbol names a
+/// class, which `:flush-destructive #Class` needs after `:remove-class` has
+/// unbound the name.
+///
+/// Returns `None` for an empty (or whitespace-only) argument and for one in
+/// none of those forms, so the caller prints a usage hint instead of sending an
+/// unscoped flush: an unreadable scope must never widen into "everything".
+#[must_use]
+pub fn flush_scope_for(arg: &str) -> Option<ReplFlushScope> {
+    let arg = arg.trim();
+    if let Some(dict) = arg.strip_prefix("#{") {
+        let (key, path) = dict.trim_end().strip_suffix('}')?.split_once("=>")?;
+        if key.trim() != "#file" {
+            return None;
+        }
+        let path = path.trim().strip_prefix('"')?.strip_suffix('"')?;
+        return (!path.is_empty() && !path.contains('"'))
+            .then(|| ReplFlushScope::File(path.to_string()));
+    }
+    if let Some(symbol) = arg.strip_prefix('#') {
+        let name = symbol.trim().trim_matches('\'');
+        if name.is_empty() {
+            return None;
+        }
+        if beamtalk_repl_protocol::FLUSH_KINDS.contains(&name) {
+            return Some(ReplFlushScope::Kind(name.to_string()));
+        }
+        return is_class_name(name).then(|| ReplFlushScope::Class(name.to_string()));
+    }
+    is_class_name(arg).then(|| ReplFlushScope::Class(arg.to_string()))
+}
+
+fn is_class_name(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_alphabetic())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Construct the `<Class> removeFromSystem` expression a `:remove-class
@@ -86,52 +131,6 @@ pub fn remove_class_expr_for(arg: &str) -> Option<String> {
         return None;
     }
     Some(format!("{class} removeFromSystem"))
-}
-
-/// The unscoped `Workspace flushIncludingDestructive` expression a bare
-/// `:flush-destructive` REPL line dispatches to (ADR 0113 Phase 4).
-///
-/// A `const`, not a function, because the bare form takes no argument to
-/// build from — mirroring `Flush`'s own bare-form handling in
-/// `commands/repl/handlers.rs` (`"Workspace flush"` is written as a literal there
-/// too; this one is exposed as a shared constant instead purely so the
-/// integration-test harness in `tests/repl_protocol.rs` can reference it by
-/// name rather than re-typing the literal — see the module doc's
-/// no-hand-copied-mirror rationale).
-pub const FLUSH_INCLUDING_DESTRUCTIVE_EXPR: &str = "Workspace flushIncludingDestructive";
-
-/// Construct the `Workspace flush: <selector> confirmDestructive: true`
-/// expression a `:flush-destructive <selector>` REPL line dispatches to
-/// (ADR 0113 Phase 4).
-///
-/// `selector` is passed through **verbatim** (only trimmed), exactly like
-/// [`flush_expr_for`] — a Class, a Symbol kind (`#'remove-class'`), or a
-/// Dictionary (`#{ #file => "path" }`) are all legal scopes for
-/// `workspace.bt`'s `flush: filter confirmDestructive: confirmDestructive`
-/// keyword form. Returns `None` when `selector` is empty (including
-/// whitespace-only), so the caller can print a usage hint instead of
-/// evaluating a malformed bare `Workspace flush: confirmDestructive: true`
-/// send — same emptiness guard `flush_expr_for` uses, for the same reason.
-///
-/// **After `:remove-class <Class>`, scope by `#Class` (a Symbol literal),
-/// not the bare class name.** `removeFromSystem` already unbinds the name —
-/// a bare `<Class>` argument here fails to *evaluate* (an unresolved-class
-/// error) before the `flush:` send ever runs. `beamtalk_workspace_flush`'s
-/// filter normalisation matches a Symbol against the `ChangeLog` entry's
-/// recorded `class` field by name, needing no live class to resolve —
-/// exactly the case a destructive flush of an already-removed class needs.
-/// This is pre-existing `Workspace flush:` behaviour (its Class-vs-Symbol-
-/// kind filter dispatch predates ADR 0113), not something new here; it just
-/// becomes load-bearing for this REPL pairing specifically because
-/// `:remove-class` always runs first.
-pub fn flush_destructive_expr_for(selector: &str) -> Option<String> {
-    let selector = selector.trim();
-    if selector.is_empty() {
-        return None;
-    }
-    Some(format!(
-        "Workspace flush: {selector} confirmDestructive: true"
-    ))
 }
 
 /// Construct the `<Class> renameTo: #<NewName>` expression a `:rename-class
@@ -283,47 +282,62 @@ mod tests {
     }
 
     #[test]
-    fn flush_expr_for_cases() {
-        check(
-            flush_expr_for,
-            &[
-                (
-                    "flush_class_selector_translates_to_workspace_flush_message",
-                    "Counter",
-                    Some("Workspace flush: Counter"),
-                ),
-                // A leading "#" here is a legitimate Symbol-kind argument (not a
-                // decorated method name like `remove_method_expr_for`'s selector),
-                // so it must survive untouched.
-                (
-                    "flush_symbol_kind_selector_translates_verbatim",
-                    "#'new-class'",
-                    Some("Workspace flush: #'new-class'"),
-                ),
-                (
-                    "flush_dictionary_selector_translates_verbatim",
-                    "#{ #file => \"src/foo.bt\" }",
-                    Some("Workspace flush: #{ #file => \"src/foo.bt\" }"),
-                ),
-                (
-                    "flush_trims_surrounding_whitespace",
-                    "  Counter  ",
-                    Some("Workspace flush: Counter"),
-                ),
-                ("flush_with_empty_selector_reports_no_expression", "", None),
-                // The historical-bug-class risk this guards against: a hand-copied
-                // test-harness mirror of `Workspace flush: {selector}` that skips
-                // this emptiness check (as the old `tests/repl_protocol.rs` inline
-                // duplicate did) would blindly eval a malformed bare
-                // `Workspace flush: ` send instead of hitting the usage-error path.
-                // Because both the real dispatch and the test harness now call this
-                // one function, that drift can no longer happen.
-                (
-                    "flush_with_whitespace_only_selector_reports_no_expression",
-                    "   ",
-                    None,
-                ),
-            ],
+    fn flush_scope_for_cases() {
+        use ReplFlushScope::{Class, File, Kind};
+        let class = |c: &str| Some(Class(c.to_string()));
+        let kind = |k: &str| Some(Kind(k.to_string()));
+        for (arg, want) in [
+            ("Counter", class("Counter")),
+            ("  Counter  ", class("Counter")),
+            // The five entry kinds are kind scopes, in either Symbol spelling.
+            ("#'new-class'", kind("new-class")),
+            ("#new-class", kind("new-class")),
+            ("#'remove-class'", kind("remove-class")),
+            ("#rename-method", kind("rename-method")),
+            // Any other Symbol names a class: `:flush-destructive #Gone` after
+            // `:remove-class Gone` has unbound the bare name.
+            ("#Counter", class("Counter")),
+            (
+                "#{ #file => \"src/foo.bt\" }",
+                Some(File("src/foo.bt".to_string())),
+            ),
+            (
+                "#{#file=>\"src/foo.bt\"}",
+                Some(File("src/foo.bt".to_string())),
+            ),
+            // Nothing readable is never an unscoped flush.
+            ("", None),
+            ("   ", None),
+            ("#", None),
+            ("#''", None),
+            ("#{ #file => \"\" }", None),
+            ("#{ #class => \"Counter\" }", None),
+            ("#{ #file => src/foo.bt }", None),
+            ("#{ #file => \"a\" , #x => 1 }", None),
+            ("two words", None),
+            ("new-class", None),
+            ("9Lives", None),
+        ] {
+            assert_eq!(flush_scope_for(arg), want, "{arg:?}");
+        }
+    }
+
+    /// `FlushScope` is what the request builder takes: a class, a kind and a
+    /// file each map to exactly one param.
+    #[test]
+    fn repl_flush_scope_maps_onto_the_request_scope() {
+        use beamtalk_repl_protocol::FlushScope;
+        assert_eq!(
+            ReplFlushScope::Class("C".into()).as_scope(),
+            FlushScope::Class("C")
+        );
+        assert_eq!(
+            ReplFlushScope::Kind("new-class".into()).as_scope(),
+            FlushScope::Kind("new-class")
+        );
+        assert_eq!(
+            ReplFlushScope::File("a.bt".into()).as_scope(),
+            FlushScope::File("a.bt")
         );
     }
 
@@ -349,40 +363,6 @@ mod tests {
                 ),
                 (
                     "remove_class_with_empty_argument_reports_no_expression",
-                    "   ",
-                    None,
-                ),
-            ],
-        );
-    }
-
-    #[test]
-    fn flush_destructive_expr_for_cases() {
-        check(
-            flush_destructive_expr_for,
-            &[
-                (
-                    "flush_destructive_class_selector_appends_confirm_destructive_keyword",
-                    "Counter",
-                    Some("Workspace flush: Counter confirmDestructive: true"),
-                ),
-                (
-                    "flush_destructive_symbol_kind_selector_translates_verbatim",
-                    "#'remove-class'",
-                    Some("Workspace flush: #'remove-class' confirmDestructive: true"),
-                ),
-                (
-                    "flush_destructive_trims_surrounding_whitespace",
-                    "  Counter  ",
-                    Some("Workspace flush: Counter confirmDestructive: true"),
-                ),
-                (
-                    "flush_destructive_with_empty_selector_reports_no_expression",
-                    "",
-                    None,
-                ),
-                (
-                    "flush_destructive_with_empty_selector_reports_no_expression",
                     "   ",
                     None,
                 ),
@@ -505,14 +485,6 @@ mod tests {
                     None,
                 ),
             ],
-        );
-    }
-
-    #[test]
-    fn flush_including_destructive_expr_is_the_bare_unscoped_selector() {
-        assert_eq!(
-            FLUSH_INCLUDING_DESTRUCTIVE_EXPR,
-            "Workspace flushIncludingDestructive"
         );
     }
 }

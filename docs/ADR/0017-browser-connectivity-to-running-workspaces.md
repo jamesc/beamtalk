@@ -669,6 +669,10 @@ Build the workspace experience on Phase 0's validated transport. The browser mus
 | 3 | BT-2415 | Remove the Phase-1 vanilla-JS browser frontend + its --web listener | — | Done |
 | 3 | BT-2411 | LiveView IDE Wave 5: auth + non-localhost deployment | — | Duplicate (of BT-2416, ADR 0091 — Done) |
 
+### Implementation note: one operation layer for both transports (BT-5200)
+
+Phase 3 started as a second client of the workspace that reached into runtime modules directly. BT-5200 replaced that: the WebSocket handler and the Phoenix LiveView front share one operation layer (`beamtalk_repl_ops:request/3`, table in `beamtalk_repl_op_table`) and one subscription facade (`beamtalk_repl_subscriptions`, which also owns the `logs` stream). The WebSocket edge encodes the same terms to JSON that LiveView consumes as terms, so an operation has one implementation for the CLI REPL, MCP, VS Code and LiveView. `BtAttach.Facade` (ADR 0091) is Phoenix-side discipline over this layer, not a sandbox. See `docs/repl-protocol.md` and `docs/development/surface-parity.md`.
+
 ## Migration Path
 
 No migration needed — this is purely additive. The WebSocket REPL transport (ADR 0020/BT-683) is already in place. The `load-source` op is a new operation alongside the existing `load-file` op.
