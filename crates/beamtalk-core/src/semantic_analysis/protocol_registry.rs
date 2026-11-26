@@ -28,6 +28,7 @@ use crate::semantic_analysis::namespace_collision::{
     Declared, Existing, Origin, namespace_collision,
 };
 use crate::semantic_analysis::receiver_knowledge;
+use crate::semantic_analysis::stdlib_protocols;
 use crate::semantic_analysis::trait_expansion;
 use crate::semantic_analysis::type_checker::TypeChecker;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
@@ -640,7 +641,7 @@ impl ProtocolRegistry {
         // protocol needs its parent in this module's registry even when the
         // module declares no protocols of its own, so every file agrees on
         // what conformance to it requires.
-        self.seed_stdlib_parents(module, current_package);
+        self.seed_stdlib_parents(module, current_package, hierarchy);
         if !module.protocols.is_empty() {
             diagnostics.extend(self.register_module(module, hierarchy));
         }
@@ -658,14 +659,30 @@ impl ProtocolRegistry {
     /// tier, and is off while compiling the stdlib itself (`current_package`
     /// is `stdlib`), which carries its protocols live. Parents of a seeded
     /// protocol are seeded in turn.
-    fn seed_stdlib_parents(&mut self, module: &Module, current_package: Option<&str>) {
+    fn seed_stdlib_parents(
+        &mut self,
+        module: &Module,
+        current_package: Option<&str>,
+        hierarchy: &ClassHierarchy,
+    ) {
         let own: std::collections::HashSet<&EcoString> =
             module.protocols.iter().map(|p| &p.name.name).collect();
+        // BT-5333: every baked stdlib protocol is also seeded, so a bound
+        // (`T :: Comparable`) or annotation (`x :: Comparable`) naming one is
+        // checked rather than assumed to conform (an unknown protocol
+        // conforms). A class of the same name that is not a protocol's
+        // synthetic class entry keeps the name (as in `add_pre_loaded`).
+        let stdlib_names = stdlib_protocols::stdlib_protocol_names();
         let mut pending: Vec<EcoString> = module
             .protocols
             .iter()
             .filter_map(|p| p.extending.as_ref().map(|e| e.name.clone()))
             .chain(self.protocols.values().filter_map(|p| p.extending.clone()))
+            .chain(stdlib_names.into_iter().filter(|n| {
+                !hierarchy
+                    .get_class(n)
+                    .is_some_and(|ci| ci.superclass.as_deref() != Some("Protocol"))
+            }))
             .collect();
         while let Some(parent) = pending.pop() {
             if own.contains(&parent) || self.protocols.contains_key(&parent) {
