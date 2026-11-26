@@ -282,14 +282,17 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   def inspect_value({:beamtalk_supervisor, class, _module, pid} = _term) when is_pid(pid) do
     case to_string(class) do
       "EmptySup" ->
-        {:ok, {:supervisor_children, []}}
+        {:ok, {:supervisor_children, [], false}}
 
       "DeadSup" ->
         {:error,
          {:beamtalk_error, :stale_handle, :Inspector, :children, "supervisor is not alive"}}
 
+      "CutSup" ->
+        {:ok, {:supervisor_children, stub_supervisor_children(), true}}
+
       _ ->
-        {:ok, {:supervisor_children, stub_supervisor_children()}}
+        {:ok, {:supervisor_children, stub_supervisor_children(), false}}
     end
   end
 
@@ -368,7 +371,7 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   for a live supervisor pid.
   """
   def supervisor_children(sup_pid) when is_pid(sup_pid),
-    do: {:ok, stub_supervisor_children()}
+    do: {:ok, stub_supervisor_children(), false}
 
   defp extract_class_name(code) do
     case Regex.run(~r/(?:Actor|Object)\s+subclass:\s+(\w+)/, code) do

@@ -7252,6 +7252,8 @@ The REPL `:` commands are convenience aliases that desugar to the native message
 | `:flush` | the `flush` operation (same effect as `Workspace flush`) |
 | `:flush Counter` | the `flush` operation scoped to a class (`Workspace flush: Counter`) |
 | `:flush #'new-class'` | the `flush` operation scoped to an entry kind (`Workspace flush: #'new-class'`) |
+| `:flush #increment` | the `flush` operation scoped to a method selector (`Workspace flush: #increment`) |
+| `:flush Counter>>#increment` | the `flush` operation scoped to one method of one class |
 | `:flush #{ #file => "path" }` | the `flush` operation scoped to a file (`Workspace flush: #{ #file => "path" }`) |
 
 The native forms work from compiled code, scripts, and actor methods — not just

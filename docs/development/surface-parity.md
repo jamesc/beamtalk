@@ -153,7 +153,9 @@ them takes a Beamtalk expression assembled from user text.
 
 Workspace state (BT-5204) goes through three operations in
 `beamtalk_repl_ops_state` plus an existing one. `flush` (optional `class` /
-`file` / `kind`, mutually exclusive, and `confirm_destructive`) is the one
+`file` / `kind`, mutually exclusive, a `selector` that scopes it to one method
+alone or with a `class` (BT-5297; REPL `:flush #sel` / `:flush Class>>#sel`, MCP
+`selector`), and `confirm_destructive`) is the one
 flush implementation: MCP's `flush` tool and LiveView's "Save All to Disk" and
 per-row "Delete file" actions all dispatch it, and the destructive tier is
 applied only for a boolean `true` (anything else is refused, never read as
@@ -343,7 +345,7 @@ The git ops are **`surface-specific` to the LiveView cockpit** — the human-fac
 | `actor-stats` | -- | `surface-specific: agent-only workflow (BT-1606)` | `actor_stats` | -- | Aggregate stats: per-class/method always, plus per-actor detail while tracing is enabled (BT-4103) |
 | `export-traces` | -- | `surface-specific: agent-only workflow (BT-1606)` | `export_traces` | -- | Export traces to JSON file |
 | `pid-stats` | -- | `surface-specific: LiveView IDE Inspector` | *(via LiveView IDE)* | -- | Live process metrics (queue depth, memory, reductions, status, current function) for one actor pid — the read companion to the live-Inspector per-object change stream (ADR 0095 §5, BT-2489). Read-only `process_info` reflection (the `:observer`/LiveDashboard primitive set), guarded so a dead pid degrades to `status: dead`. The Cockpit Inspector pane re-issues it on each `{object_changed, …}` push (or a refresh timer). |
-| `children` | -- | `surface-specific: LiveView IDE Inspector` | *(via LiveView IDE)* | -- | List one supervisor's direct children as drillable rows (`label`, `className`, `kind`, `pid`, `registeredName`, `childCount`, `isSupervisor`, `handle`), at most 500 (BT-5205, over `beamtalk_process_navigation:child_handles/1`). Param `supervisor`: the node-local pid text, or the live pid from a client attached over Erlang distribution. Over distribution each `handle` is the live `{beamtalk_supervisor \| beamtalk_object, Class, Module, Pid}` the Inspector follows (`null` for a foreign or restarting child); on the WebSocket it is the stable id `{kind, class, pid}`. A dead supervisor is a `stale_handle` error. `always` capability; `:read` in the Facade is the Inspector's supervisor view (`supervisor_children/1`). |
+| `children` | -- | `surface-specific: LiveView IDE Inspector` | *(via LiveView IDE)* | -- | List one supervisor's direct children as drillable rows (`label`, `className`, `kind`, `pid`, `registeredName`, `childCount`, `isSupervisor`, `handle`), at most 500, with `truncated: true` when it cuts; the Inspector then shows "Showing the first N children; the list is cut." with N counted from the rows (BT-5293) (BT-5205, over `beamtalk_process_navigation:child_handles/1`). Param `supervisor`: the node-local pid text, or the live pid from a client attached over Erlang distribution. Over distribution each `handle` is the live `{beamtalk_supervisor \| beamtalk_object, Class, Module, Pid}` the Inspector follows (`null` for a foreign or restarting child); on the WebSocket it is the stable id `{kind, class, pid}`. A dead supervisor is a `stale_handle` error. `always` capability; `:read` in the Facade is the Inspector's supervisor view (`supervisor_children/1`). |
 | `process-info` | -- | `surface-specific: LiveView IDE Inspector` | *(via LiveView IDE)* | -- | Status, message-queue length, memory and reductions of any local pid (a future or a bare pid, which `pid-stats` refuses because it is not an actor) (BT-5205, `erlang:process_info/2`). Param `pid`, as for `children`. A dead pid is `alive: false`, never an error. `always` capability. |
 
 ## Server Operations
