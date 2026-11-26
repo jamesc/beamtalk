@@ -159,12 +159,15 @@ test_fallthrough_absent_class() ->
     %% assertion below and re-register 'Class' before class_send runs. Unwatch
     %% it first (synchronous), so the kill leaves 'Class' absent until the
     %% `after` block re-registers it. Wait on the DOWN, not a sleep.
-    ok = beamtalk_class_monitor:unwatch('Class'),
-    Ref = erlang:monitor(process, ClassPid),
-    exit(ClassPid, kill),
-    ?awaitMessage({'DOWN', Ref, process, ClassPid, _Reason}, 1000),
-
     try
+        ok = beamtalk_class_monitor:unwatch('Class'),
+        Ref = erlang:monitor(process, ClassPid),
+        exit(ClassPid, kill),
+        ?awaitMessage({'DOWN', Ref, process, ClassPid, _Reason}, 1000),
+        %% The registered name is released before the DOWN is delivered, so
+        %% this proves 'Class' is really absent (not restarted) here.
+        ?assertEqual(undefined, beamtalk_class_registry:whereis_class('Class')),
+
         %% Should raise does_not_understand, not crash
         ?assertBtError(
             does_not_understand,
@@ -173,8 +176,12 @@ test_fallthrough_absent_class() ->
         )
     after
         %% Re-register the real 'Class' (same module it had) and the probe so
-        %% later tests and modules in the same VM are not affected.
-        ok = ClassModule:register_class(),
+        %% later tests and modules in the same VM are not affected. Skip the
+        %% re-register if the kill never took effect and 'Class' is still live.
+        case beamtalk_class_registry:whereis_class('Class') of
+            undefined -> ok = ClassModule:register_class();
+            _ -> ok
+        end,
         register_probe()
     end.
 
