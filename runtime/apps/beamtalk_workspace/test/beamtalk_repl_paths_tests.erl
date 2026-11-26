@@ -20,7 +20,11 @@ accepts_project_relative_paths_test_() ->
             <<"src/..foo/bar">>,
             <<"src/a..b">>,
             <<"./src/x.bt">>,
-            <<"é/ü.bt"/utf8>>
+            <<"é/ü.bt"/utf8>>,
+            %% Not drives: ordinary relative names on a POSIX node.
+            <<"Z:x.bt">>,
+            <<"a:notes.bt">>,
+            <<"src/C:/x">>
         ]
     ].
 
@@ -34,8 +38,14 @@ refuses_absolute_paths_test_() ->
             <<"\\\\server\\share\\x">>,
             <<"C:\\x.bt">>,
             <<"c:/x.bt">>,
-            <<"Z:x.bt">>
+            <<"C:">>
         ]
+    ].
+
+refuses_the_tree_root_test_() ->
+    [
+        ?_assertEqual({error, whole_tree}, beamtalk_repl_paths:check_relative(Path))
+     || Path <- [<<".">>, <<"./">>, <<"./.">>, <<".\\">>, <<"././">>]
     ].
 
 refuses_parent_segments_test_() ->

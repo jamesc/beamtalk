@@ -17,9 +17,16 @@ LiveView uses over distribution.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
--export([init/1, start_idle/0, idle_loop/0]).
+-export([init/1, start_idle/0, idle_loop/0, handle_call/3, handle_cast/2]).
+
+%% gen_server callbacks of the crash-on-unexpected-call fixture. The supervisor
+%% and the gen_server share `init/1`, told apart by their argument.
+handle_call(known, _From, State) -> {reply, ok, State}.
+handle_cast(_Msg, State) -> {noreply, State}.
 
 %% supervisor: one foreign worker child, or (`many`) a pool started on demand.
+init(crash_on_call) ->
+    {ok, undefined};
 init(many) ->
     {ok,
         {#{strategy => simple_one_for_one, intensity => 1, period => 5}, [
@@ -96,6 +103,27 @@ children_of_a_worker_is_empty_test() ->
             request(<<"children">>, #{<<"supervisor">> => Worker})
         )
     end).
+
+%% A process that is not a supervisor is never sent `which_children`: a
+%% gen_server with no catch-all `handle_call` would crash on it.
+children_never_calls_a_non_supervisor_test() ->
+    {ok, Server} = gen_server:start(?MODULE, crash_on_call, []),
+    try
+        ?assertEqual(
+            {value, #{<<"children">> => [], <<"truncated">> => false}},
+            request(<<"children">>, #{<<"supervisor">> => Server})
+        ),
+        ?assert(is_process_alive(Server))
+    after
+        exit(Server, kill)
+    end.
+
+%% A pid of another node cannot be asked: an error, not a crashed handler.
+children_of_a_remote_pid_is_an_error_test() ->
+    ?assertMatch(
+        {error, #beamtalk_error{}},
+        request(<<"children">>, #{<<"supervisor">> => remote_pid()})
+    ).
 
 children_of_a_dead_supervisor_is_stale_handle_test() ->
     Dead = beamtalk_test_proc:spawn_idle(),

@@ -21,13 +21,17 @@ loader) to resolve what is inside it.
 
 -export([check_relative/1]).
 
+-define(IS_LETTER(L), ((L >= $a andalso L =< $z) orelse (L >= $A andalso L =< $Z))).
+
 -export_type([refusal/0]).
 
--type refusal() :: not_a_string | empty | nul | absolute | parent_segment.
+-type refusal() :: not_a_string | empty | nul | absolute | parent_segment | whole_tree.
 
 -doc """
 `ok` for a project-relative path, else why it is refused: `not_a_string`,
-`empty`, `nul` (a NUL byte), `absolute` (a root, a UNC path or a drive letter) or `parent_segment` (a `..` segment).
+`empty`, `nul` (a NUL byte), `absolute` (a root, a UNC path or a drive such as `C:\\`;
+a name like `a:b.bt` is an ordinary relative file name) or `parent_segment` (a `..` segment) or `whole_tree` (a path that names the root itself,
+such as `.` or `./`, which a git write would read as "every file").
 """.
 -spec check_relative(term()) -> ok | {error, refusal()}.
 check_relative(Path) when not is_binary(Path) ->
@@ -40,7 +44,7 @@ check_relative(Path) ->
         _ -> {error, nul}
     end.
 
--spec check_segments(binary()) -> ok | {error, absolute | parent_segment}.
+-spec check_segments(binary()) -> ok | {error, absolute | parent_segment | whole_tree}.
 check_segments(Path) ->
     Segments = binary:split(Path, [<<"/">>, <<"\\">>], [global]),
     case lists:member(<<"..">>, Segments) of
@@ -48,8 +52,13 @@ check_segments(Path) ->
             {error, parent_segment};
         false ->
             case is_absolute(Path) of
-                true -> {error, absolute};
-                false -> ok
+                true ->
+                    {error, absolute};
+                false ->
+                    case [S || S <- Segments, S =/= <<>>, S =/= <<".">>] of
+                        [] -> {error, whole_tree};
+                        _ -> ok
+                    end
             end
     end.
 
@@ -58,5 +67,6 @@ check_segments(Path) ->
 %% the same everywhere.
 -spec is_absolute(binary()) -> boolean().
 is_absolute(<<C, _/binary>>) when C =:= $/; C =:= $\\ -> true;
-is_absolute(<<L, $:, _/binary>>) when (L >= $a andalso L =< $z); (L >= $A andalso L =< $Z) -> true;
+is_absolute(<<L, $:>>) when ?IS_LETTER(L) -> true;
+is_absolute(<<L, $:, Sep, _/binary>>) when ?IS_LETTER(L), Sep =:= $/ orelse Sep =:= $\\ -> true;
 is_absolute(Path) -> filename:pathtype(binary_to_list(Path)) =/= relative.

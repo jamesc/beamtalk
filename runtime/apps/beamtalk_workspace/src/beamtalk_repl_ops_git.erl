@@ -23,16 +23,20 @@ a repository and a `git` that is not installed all arrive that way.
 
 ## Paths and limits
 
-A `path` is checked by the shared project-path policy
+A `path` is checked by the shared path policy
 (`beamtalk_repl_paths:check_relative/1`) before git runs: relative, no `..`
-segment, no NUL byte. It is then passed to git as a literal pathspec, so
+segment, no NUL byte, not the tree root itself (`.`). It is relative to the
+repository root, the form `git-status` reports (the project directory when it
+is the root). The writes also refuse a path ending in a separator, which names
+a directory. It is then passed to git as a literal pathspec, so
 `:(top)`-style magic or a glob in a name cannot reach outside it. A refused
 path is an `invalid_argument` error and git is not started.
 
-Output is bounded: `git-diff` returns at most 1 MiB per side
+The reply is bounded: `git-diff` returns at most 1 MiB per side
 (`truncated` is `true` when it cut), `git-log` at most 500 commits (the
 `limit` it applied is in the reply) and `git-status` at most 5000 files
-(`truncated`). Diff text is always valid UTF-8; bytes that are not are read
+(`truncated`). The cap is on the reply, not on what git prints: `beamtalk_git`
+still buffers git's output (bounded in time by its 30 s timeout). Diff text is always valid UTF-8; bytes that are not are read
 as Latin-1. A commit message is at most 64 KiB.
 
 ## Results
@@ -109,9 +113,18 @@ handle_term(<<"git-revert-file">>, Params, _Msg, _SessionPid) ->
 handle_term(<<"git-commit">>, Params, _Msg, _SessionPid) ->
     case maps:get(<<"message">>, Params, undefined) of
         Message when is_binary(Message), byte_size(Message) =< ?MAX_MESSAGE_BYTES ->
-            case beamtalk_git:git_commit(Message) of
-                {ok, _} -> {value, #{<<"committed">> => true}};
-                {error, Reason} -> {error, structured(Reason)}
+            case binary:match(Message, <<0>>) of
+                nomatch ->
+                    case beamtalk_git:git_commit(Message) of
+                        {ok, _} -> {value, #{<<"committed">> => true}};
+                        {error, Reason} -> {error, structured(Reason)}
+                    end;
+                _ ->
+                    {error,
+                        invalid(
+                            <<"git-commit: message must not contain a NUL byte">>,
+                            <<"Remove the NUL byte from the commit message.">>
+                        )}
             end;
         Message when is_binary(Message) ->
             {error,
@@ -144,11 +157,22 @@ with_path(Op, Params, Fun) ->
     beamtalk_repl_ops:op_result().
 mutate_path(Op, Params, Git) ->
     with_path(Op, Params, fun(Path) ->
-        case Git(Path) of
-            {ok, _} -> {value, #{<<"path">> => Path}};
-            {error, Reason} -> {error, structured(Reason)}
+        case names_directory(Path) of
+            true ->
+                {error, refused_path(Op, whole_tree)};
+            false ->
+                case Git(Path) of
+                    {ok, _} -> {value, #{<<"path">> => Path}};
+                    {error, Reason} -> {error, structured(Reason)}
+                end
         end
     end).
+
+%% A write names a file: a trailing separator names a directory, which git
+%% would read as every file under it.
+-spec names_directory(binary()) -> boolean().
+names_directory(Path) ->
+    binary:last(Path) =:= $/ orelse binary:last(Path) =:= $\\.
 
 %% `count` is absent (the default) or a positive integer, clamped to the cap;
 %% anything else is refused rather than read as the default.
@@ -168,7 +192,7 @@ log_limit(_Other) ->
 refused_path(Op, Refusal) ->
     invalid(
         iolist_to_binary([Op, <<": ">>, refusal_text(Refusal)]),
-        <<"Pass a path relative to the project root, such as src/Counter.bt, without '..'.">>
+        <<"Pass a path relative to the repository root, as git-status reports it, without '..'.">>
     ).
 
 -spec refusal_text(beamtalk_repl_paths:refusal()) -> binary().
@@ -176,7 +200,8 @@ refusal_text(not_a_string) -> <<"path must be a String">>;
 refusal_text(empty) -> <<"path must not be empty">>;
 refusal_text(nul) -> <<"path must not contain a NUL byte">>;
 refusal_text(absolute) -> <<"path must be relative to the project root">>;
-refusal_text(parent_segment) -> <<"path must not contain '..'">>.
+refusal_text(parent_segment) -> <<"path must not contain '..'">>;
+refusal_text(whole_tree) -> <<"path must name a file, not the whole tree">>.
 
 -spec invalid(binary(), binary()) -> #beamtalk_error{}.
 invalid(Message, Hint) ->

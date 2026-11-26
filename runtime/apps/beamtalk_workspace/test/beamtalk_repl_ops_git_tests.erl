@@ -211,7 +211,8 @@ commit_bad_message(#{top := Top}) ->
             #{},
             #{<<"message">> => 5},
             #{<<"message">> => null},
-            #{<<"message">> => binary:copy(<<"a">>, 65537)}
+            #{<<"message">> => binary:copy(<<"a">>, 65537)},
+            #{<<"message">> => <<"fix", 0, "secret">>}
         ]
     ),
     %% A blank subject is refused by `beamtalk_git` itself, before git runs.
@@ -236,6 +237,8 @@ refuses_bad_paths(#{top := Top}) ->
         {<<"src/../../outside.bt">>, parent},
         {<<"src\\..\\..\\outside.bt">>, parent},
         {<<"..">>, parent},
+        {<<".">>, whole_tree},
+        {<<"./">>, whole_tree},
         {<<>>, empty},
         {<<"src/a", 0, "b.bt">>, nul},
         {5, type},
@@ -263,6 +266,18 @@ refuses_bad_paths(#{top := Top}) ->
             )
         end,
         Ops
+    ),
+    %% A write refuses a directory spelling; `git-revert-file` of `src/` would
+    %% discard every change under it.
+    lists:foreach(
+        fun(Op) ->
+            ?assertMatch(
+                {error, #beamtalk_error{kind = invalid_argument}},
+                request(Op, #{<<"path">> => <<"src/">>})
+            ),
+            ?assertEqual(<<"modified\n">>, read(Top))
+        end,
+        [<<"git-stage">>, <<"git-unstage">>, <<"git-revert-file">>]
     ),
     %% A missing path is the same refusal.
     lists:foreach(
