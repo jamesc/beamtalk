@@ -267,7 +267,7 @@ pub fn compute_project_diagnostics_with_analysis(
     );
 
     // Near-miss `// === Name ===` section-divider comments (typoed
-    // `=` run lengths, too-short runs, or a `///`/`/* */` comment where the
+    // `=` run lengths, too-short runs, or a `///` comment where the
     // divider convention requires a plain `//` line) get no signal anywhere
     // today — they silently fall back to an ordinary comment and the
     // methods below are mis-categorized with no diagnostic. Unlike every

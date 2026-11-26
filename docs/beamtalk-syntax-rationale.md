@@ -80,7 +80,7 @@ array at: 1              // keyword
 
 ## What We Change (And Why)
 
-### Comments: `"..."` → `//` and `/* */`
+### Comments: `"..."` → `//`
 
 **Before (Smalltalk):**
 ```smalltalk
@@ -93,10 +93,8 @@ count := 0.  "inline comment"
 // This is a comment
 count := 0  // inline comment
 
-/*
-  Multi-line comment
-  for longer explanations
-*/
+// A longer explanation is a run of
+// `//` lines. There are no block comments.
 ```
 
 **Why change:**
@@ -428,7 +426,6 @@ self store: (st withWebsock: websock
 | Feature | Syntax | Example |
 |---------|--------|---------|
 | Comment (line) | `//` | `// this is a comment` |
-| Comment (block) | `/* */` | `/* multi-line */` |
 | Assignment | `:=` | `x := 5` |
 | Field access | `self.field` | `self.value` |
 | Return (early) | `^` | `^self` (only for early returns) |

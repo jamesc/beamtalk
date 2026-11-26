@@ -26,7 +26,7 @@
 //!
 //! # Divider format (locked down here for every consumer)
 //!
-//! A leading `//` line comment (not `///`, not `/* */`) is a divider when its
+//! A leading `//` line comment (not `///`) is a divider when its
 //! text, trimmed, has the shape:
 //!
 //! ```text
@@ -81,7 +81,7 @@
 //!   this is almost certainly a source mistake the author would notice by
 //!   reading their own file.
 //! - **A near-miss divider is not diagnosed.** `=== Name ====` (mismatched
-//!   run lengths), `== Name ==` (too short), or a `///`/`/* */` divider-
+//!   run lengths), `== Name ==` (too short), or a `///` divider-
 //!   shaped comment all silently fail to parse as a divider and fall back to
 //!   an ordinary leading comment — so the run of methods below it is
 //!   silently absorbed into whatever category was already open, with no
@@ -207,7 +207,7 @@ pub fn parse_divider_name(content: &str) -> Option<&str> {
 /// Returns the divider name from a method's leading comments, if any.
 ///
 /// Only [`CommentKind::Line`] comments are considered (never `///` doc
-/// comments or `/* */` block comments). When more than one divider-shaped
+/// comments). When more than one divider-shaped
 /// line comment precedes the same method — unusual, but not prevented by the
 /// grammar — the one nearest the method (last in source order) wins, matching
 /// the natural reading that the closest heading is the current one.

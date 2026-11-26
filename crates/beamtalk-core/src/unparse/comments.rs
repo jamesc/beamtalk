@@ -10,8 +10,7 @@ use super::{Comment, CommentAttachment, CommentKind, Document, docvec, leaf, lin
 
 /// Builds a [`Document`] for a single [`Comment`].
 ///
-/// Line comments become `// content`, block comments become `/* content */`,
-/// doc-style leading comments become `/// content`.
+/// Line comments become `// content`, doc-style leading comments become `/// content`.
 pub(super) fn unparse_comment(comment: &Comment) -> Document<'static> {
     match comment.kind {
         CommentKind::Line => {
@@ -20,9 +19,6 @@ pub(super) fn unparse_comment(comment: &Comment) -> Document<'static> {
             } else {
                 docvec!["// ", leaf::raw_text(&comment.content)]
             }
-        }
-        CommentKind::Block => {
-            docvec!["/* ", leaf::raw_text(&comment.content), " */"]
         }
         CommentKind::Doc => {
             if comment.content.is_empty() {

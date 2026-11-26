@@ -333,9 +333,7 @@ fn lexical_edge_cases_are_decided_by_the_real_grammar() {
     // statement boundary.
     multiple("alpha := 1 // (see below\nbeta := 2");
     multiple("alpha := 1 // says \"hi\" here\nbeta := 2");
-    multiple("alpha := 1 /* { unbalanced */\nbeta := 2");
     single("alpha := 1 // says \"hi\" here", "alpha");
-    single("alpha := 1 /* note */", "alpha");
 
     // Continuation lines of one assignment are not new statements.
     single("result :=\n  42", "result");
