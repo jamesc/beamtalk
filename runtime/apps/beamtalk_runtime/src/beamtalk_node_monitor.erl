@@ -238,7 +238,9 @@ handle_cast({skew_detected, Node, Gen, Stamp, ClassName}, State) ->
     {noreply, record_result(Node, Gen, Stamp, ClassName, true, State)};
 handle_cast({skew_cleared, Node, Gen, Stamp, ClassName}, State) ->
     {noreply, record_result(Node, Gen, Stamp, ClassName, false, State)};
-handle_cast({peer_class_checked, PeerNode, ClassName, PeerEntry, Seq}, #state{skew = Skew} = State) when
+handle_cast(
+    {peer_class_checked, PeerNode, ClassName, PeerEntry, Seq}, #state{skew = Skew} = State
+) when
     is_atom(PeerNode), is_atom(ClassName), is_map(PeerEntry), is_integer(Seq)
 ->
     %% `PeerNode` reloaded `ClassName` (BT-5232): compare its new entry with
