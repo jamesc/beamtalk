@@ -476,3 +476,17 @@ fn bignum_in_a_float_segment_lowers_as_a_float() {
         "expected a float literal in the binary pattern in\n{code}"
     );
 }
+
+#[test]
+fn bignum_float_segment_rounds_like_the_beam() {
+    // 2^70 + 2^17 + 1 has more than 53 significant bits; the BEAM's
+    // `float/1` rounds to the nearest float: the bytes 68,80,0,0,0,0,0,1
+    // (checked with `erl`).
+    let code = compile_body("<<1180591620717411434497/float>>");
+    let bytes: Vec<&str> = construction(&code)
+        .split("#<")
+        .skip(1)
+        .filter_map(|b| b.split('>').next())
+        .collect();
+    assert_eq!(bytes, ["68", "80", "0", "0", "0", "0", "0", "1"]);
+}

@@ -206,7 +206,8 @@ fn abbreviate_digits(digits: &str) -> String {
         return digits.to_string();
     }
     let (head, tail) = (&digits[..20], &digits[digits.len() - 10..]);
-    format!("{head}...{tail} ({} digits)", digits.len())
+    let count = digits.strip_prefix('-').unwrap_or(digits).len();
+    format!("{head}...{tail} ({count} digits)")
 }
 
 /// The bit length of the magnitude of a decimal integer's `digits` (leading
@@ -386,8 +387,15 @@ impl Parser {
                             abbreviate_digits(digits)
                         )
                     };
-                    self.diagnostics.push(Diagnostic::error(message, *span));
-                    return None;
+                    let span = *span;
+                    self.diagnostics
+                        .push(Diagnostic::error(message.clone(), span));
+                    // Keep a size in the tree, so the value is not checked
+                    // against the default 8 bits as well.
+                    return Some(Box::new(Expression::Error {
+                        message: message.into(),
+                        span,
+                    }));
                 }
                 match &expr {
                     Expression::Literal(Literal::Integer(_), _)

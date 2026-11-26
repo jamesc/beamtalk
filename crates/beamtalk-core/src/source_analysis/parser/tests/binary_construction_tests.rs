@@ -920,3 +920,15 @@ fn bignum_too_large_for_a_float_segment_warns() {
     // A bignum that an f64 holds is clean.
     assert!(diagnostics_of(&format!("<<{BIG}/float>>")).is_empty());
 }
+
+#[test]
+fn rejected_bignum_size_does_not_add_a_fit_warning() {
+    let diagnostics = diagnostics_of(&format!("<<1000:{BIG}>>"));
+    assert_eq!(
+        diagnostics,
+        vec![(
+            Severity::Error,
+            format!("binary segment size {BIG} is too large")
+        )]
+    );
+}
