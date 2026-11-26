@@ -909,33 +909,17 @@ defmodule BtAttachWeb.Live.ClassModals do
 
   defp dispatch_new_class(socket, name, superclass, source, path) do
     case Facade.dispatch(:new_class, %{source: source, path: path}, RequestContext.build(socket)) do
-      {:ok, created_path} ->
-        socket
-        |> SystemBrowser.assign_browser_classes()
-        |> WorkspaceLive.assign_changes()
-        # Open + select the NEW class (`name`), not the superclass: the def tab
-        # focuses it and the tree highlights it (BT-2645). `open_definition`
-        # re-syncs the active-tab editor assigns (clearing `save_result`), so the
-        # success status is assigned *after* it — otherwise the "Created …" banner
-        # would be wiped by the very tab it opens.
-        |> MethodEditor.open_definition(name)
-        |> assign(
-          selected_class: name,
-          selected_protocol: nil,
-          save_result: "Created new class — #{created_path}",
-          save_error: nil,
-          flush_result: nil,
-          flush_error: nil,
-          new_class_open: false,
-          new_class_error: nil
+      {:ok, created_path, warnings} ->
+        # The class is live but its ChangeLog entry was not recorded, so `flush`
+        # will not write the file: say so beside the success status.
+        socket = created_class(socket, name, created_path)
+
+        assign(socket,
+          save_result: socket.assigns.save_result <> " — " <> Enum.join(warnings, "; ")
         )
-        # BT-2586/BT-2590: a new class only writes its `.bt` file to disk when
-        # autoflush is on (it is otherwise a durable in-memory ChangeLog entry,
-        # written at the next flush — `maybe_autoflush(durable)` in
-        # beamtalk_repl_loader). So reflect it in the git panel only when autoflush
-        # is on, matching the save path; with autoflush off the working tree is
-        # unchanged and the shell-out is skipped.
-        |> WorkspaceLive.maybe_refresh_git_after_save()
+
+      {:ok, created_path} ->
+        created_class(socket, name, created_path)
 
       {:error, reason} ->
         # Route a failed create to the in-modal error (keep fields + modal open),
@@ -947,6 +931,35 @@ defmodule BtAttachWeb.Live.ClassModals do
           new_class_error: FacadeError.render(reason)
         )
     end
+  end
+
+  defp created_class(socket, name, created_path) do
+    socket
+    |> SystemBrowser.assign_browser_classes()
+    |> WorkspaceLive.assign_changes()
+    # Open + select the NEW class (`name`), not the superclass: the def tab
+    # focuses it and the tree highlights it (BT-2645). `open_definition`
+    # re-syncs the active-tab editor assigns (clearing `save_result`), so the
+    # success status is assigned *after* it — otherwise the "Created …" banner
+    # would be wiped by the very tab it opens.
+    |> MethodEditor.open_definition(name)
+    |> assign(
+      selected_class: name,
+      selected_protocol: nil,
+      save_result: "Created new class — #{created_path}",
+      save_error: nil,
+      flush_result: nil,
+      flush_error: nil,
+      new_class_open: false,
+      new_class_error: nil
+    )
+    # BT-2586/BT-2590: a new class only writes its `.bt` file to disk when
+    # autoflush is on (it is otherwise a durable in-memory ChangeLog entry,
+    # written at the next flush — `maybe_autoflush(durable)` in
+    # beamtalk_repl_loader). So reflect it in the git panel only when autoflush
+    # is on, matching the save path; with autoflush off the working tree is
+    # unchanged and the shell-out is skipped.
+    |> WorkspaceLive.maybe_refresh_git_after_save()
   end
 
   # Derive the in-project `.bt` path for a new class from its name (BT-2293,

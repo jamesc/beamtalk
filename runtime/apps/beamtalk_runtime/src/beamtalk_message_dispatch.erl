@@ -163,7 +163,9 @@ send(Receiver, Selector, Args) ->
             %% as regular actor instances.
             beamtalk_primitive:send(Receiver, Selector, Args);
         {class, ClassPid} ->
-            beamtalk_object_class:class_send(ClassPid, Selector, Args);
+            beamtalk_object_class:class_send(
+                local_class_pid(Receiver, ClassPid, Selector), Selector, Args
+            );
         {actor, Ref, ActorClass} ->
             %% ADR 0043: sync-by-default — use gen_server:call so the send
             %% returns the value directly, not a Future. The record's class
@@ -201,7 +203,9 @@ send(Receiver, Selector, Args, Timeout) ->
         metaclass ->
             beamtalk_primitive:send(Receiver, Selector, Args);
         {class, ClassPid} ->
-            beamtalk_object_class:class_send(ClassPid, Selector, Args, Timeout);
+            beamtalk_object_class:class_send(
+                local_class_pid(Receiver, ClassPid, Selector), Selector, Args, Timeout
+            );
         {actor, Ref, ActorClass} ->
             beamtalk_actor:sync_send_known(Ref, ActorClass, Selector, Args, Timeout);
         {dead, ClassName} ->
@@ -369,6 +373,25 @@ classify_receiver(Receiver) ->
                     end
             end
     end.
+
+-doc """
+The class process a send to the class object `Receiver` goes to (BT-5274).
+
+A class object reached this node through the wire is already this node's
+(`beamtalk_wire:decode/1`), but one that skipped the wire (a raw FFI or
+`rpc`/`erpc` result, a raw message, a ref nested in either) can still carry a
+peer's class pid. Such a ref is resolved by name to this node's class
+(`beamtalk_wire:localise_class_object/1`, ADR 0126 §5.1/§5.5), so the send never
+reaches the peer's class process; a class not registered here raises
+`class_not_found`. A local pid (the common case) costs one `node/1` test.
+""".
+-spec local_class_pid(#beamtalk_object{}, term(), atom()) -> term().
+local_class_pid(_Receiver, ClassPid, _Selector) when
+    not is_pid(ClassPid); node(ClassPid) =:= node()
+->
+    ClassPid;
+local_class_pid(Receiver, _ClassPid, Selector) ->
+    (beamtalk_wire:ensure_local_class_object(Receiver, Selector))#beamtalk_object.pid.
 
 -doc """
 Raise the structured `actor_dead` error, shared by send/3 and send/4 so

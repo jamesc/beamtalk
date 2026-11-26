@@ -18,8 +18,6 @@ defmodule BtAttach.FacadeParityTest do
   # The reserved set when BT-5201 landed, with the issue that retires each. Delete
   # entries as those issues land; never add one.
   @reserved_ceiling [
-    # BT-5203
-    :load_source,
     # BT-5204
     :info,
     # BT-5205

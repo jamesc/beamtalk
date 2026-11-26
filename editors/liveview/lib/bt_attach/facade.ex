@@ -33,7 +33,7 @@ defmodule BtAttach.Facade do
   # The authorized op vocabulary and its capability class (ADR 0091 Decision 3/4).
   # `eval`/`load_source`/`save`/`flush`/`reload` inject or run code (execute);
   # the read ops trigger no user code; `kill`/`rotate_cookie` are admin.
-  # `info`, `load_source`, `rotate_cookie` and `subscribe_actors` are declared
+  # `info`, `rotate_cookie` and `subscribe_actors` are declared
   # here (the ADR 0091 RBAC vocabulary) but have no `invoke/3` clause yet: they
   # are kept as reserved vocabulary and answer `{:error, {:unsupported_op, op}}`
   # once authorized. `kill`, `actors` and `sessions` dispatch the wire
@@ -244,8 +244,6 @@ defmodule BtAttach.Facade do
   # ceiling. Each entry is implemented by dispatch, or removed from `@ops`, by the
   # issue named beside it; `rotate_cookie` is decided in BT-5206.
   @reserved_ops [
-    # BT-5203: implemented by dispatch (the load-source operation) or removed.
-    :load_source,
     # BT-5204: answers version, node, workspace id and settings through `info`.
     :info,
     # BT-5205: the actor-list push stream; implemented by dispatch or removed.
@@ -312,6 +310,16 @@ defmodule BtAttach.Facade do
   # no UI binding yet return `:unsupported_op` rather than silently no-op'ing.
   defp invoke(:eval, %{session_pid: pid, code: code}, _ctx), do: client().eval(pid, code)
   defp invoke(:interrupt, %{session_pid: pid}, _ctx), do: client().interrupt(pid)
+
+  # BT-5203: compile source into the live image through the `load-source`
+  # operation, in the caller's session. The source is a value, never spliced
+  # into an expression.
+  defp invoke(:load_source, %{session_pid: pid, source: source}, _ctx) do
+    if is_binary(source),
+      do: client().load_source(pid, source),
+      else: {:error, :invalid_params}
+  end
+
   defp invoke(:inspect, %{term: term}, _ctx), do: client().inspect_value(term)
   defp invoke(:bindings, %{session_pid: pid}, _ctx), do: client().list_bindings(pid)
   defp invoke(:changes, _params, _ctx), do: client().change_history()
