@@ -13,6 +13,7 @@ type ShippingSpeed = #standard | #express | #overnight
 /// - **Constructor patterns** (`Result ok: v`) read a `Result` in `describe:`.
 /// - **`matchExhaustive:`** prices a `ShippingSpeed`. Add a speed to the
 ///   `type` above and `priceFor:weight:` stops compiling until it is handled.
+///   Values from tuples are unchecked, so `quote:` validates the speed first.
 ///
 /// ## Examples
 /// ```beamtalk
@@ -27,8 +28,7 @@ Value subclass: Shipping
 
   /// Price in cents for `speed` and a weight in grams.
   ///
-  /// `matchExhaustive:` makes a missing speed a compile error, not a
-  /// runtime `pattern_mismatch`.
+  /// `matchExhaustive:` makes a speed missing from the arms a compile error.
   class priceFor: speed :: ShippingSpeed weight: grams :: Integer -> Integer =>
     speed matchExhaustive: [
       #standard -> 500 + ((grams div: 1000) * 100);
@@ -36,10 +36,16 @@ Value subclass: Shipping
       #overnight -> 1500 + ((grams div: 1000) * 500)
     ]
 
+  /// True if `speed` is one of the `ShippingSpeed` symbols. Tuples come
+  /// from outside the type checker's view, so `quote:` checks them here.
+  class isSpeed: speed => #(#standard, #express, #overnight) includes: speed
+
   /// Quote a `{#parcel, speed, grams}` order as a `Result`.
   class quote: order :: Tuple -> Result(Integer, String) =>
     order match: [
-      {#parcel, speed, grams} when: [grams > 0] -> Result ok: (self priceFor: speed weight: grams);
+      {#parcel, speed, grams} when: [grams > 0] -> (self isSpeed: speed) ifTrue: [
+        Result ok: (self priceFor: speed weight: grams)
+      ] ifFalse: [Result error: "unknown speed"];
       {#parcel, _, _} -> Result error: "weight must be positive";
       _ -> Result error: "not a parcel order"
     ]

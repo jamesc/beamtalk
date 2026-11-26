@@ -29,3 +29,6 @@ TestCase subclass: ShippingTest
     {total, rejected} := Shipping totalFor: orders
     self assert: total equals: 1700
     self assert: rejected equals: 1
+
+  testQuoteRejectsUnknownSpeed =>
+    self assert: (Shipping quote: {#parcel, #sameday, 500}) equals: (Result error: "unknown speed")

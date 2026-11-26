@@ -59,7 +59,7 @@ Result ok: 1500
 
 ### report.bt — Bounded type parameter
 
-`Report(T :: Printable)` accepts only elements that answer `asString`.
+`Report(T :: Printable)` declares that its elements answer `asString`.
 
 ## Running Tests
 

@@ -46,7 +46,6 @@
 ///       |> mapField: #title
 /// ```
 Protocol define: JsonMappable
-  extending: JsonRepresentable
   /// Required — the wire schema for instances of the using class.
   class jsonMapping -> JsonMapping
 

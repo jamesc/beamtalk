@@ -3,8 +3,8 @@
 
 /// A printable report of items, one per line.
 ///
-/// `T :: Printable` bounds the element type: only values that answer
-/// `asString` can be added, and `render` may rely on it.
+/// `T :: Printable` declares that elements answer `asString`, which
+/// `render` relies on.
 ///
 /// ```beamtalk
 /// > (Report withAll: #(700, 1500)) render
