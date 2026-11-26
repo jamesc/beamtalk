@@ -675,9 +675,7 @@ dnu_provider(Class) ->
 %% on the pure send. The class-side tables exclude the `ProtoObject` default.
 -spec class_dnu_provider(atom()) -> dnu | none.
 class_dnu_provider(Name) ->
-    case
-        beamtalk_class_dispatch:class_understands_class_selector(Name, 'doesNotUnderstand:args:')
-    of
+    case beamtalk_class_dispatch:class_dnu_override(Name) of
         true -> dnu;
         false -> none
     end.

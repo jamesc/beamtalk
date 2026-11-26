@@ -9,3 +9,5 @@
 Object subclass: Bt5270ClassDnuProxy
 
   class doesNotUnderstand: selector args: _arguments => selector
+
+  class selfZork => self zork

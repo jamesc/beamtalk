@@ -49,6 +49,15 @@ TestCase subclass: WritingFoldClassDnuOverrideTest
   testInheritedOverrideReachesSubclass =>
     self assert: (self sendUnary: Bt5270ClassDnuProxySub) equals: #zork
 
+  testSelfSendInsideClassMethodReachesOverride =>
+    self assert: Bt5270ClassDnuProxy selfZork equals: #zork
+    self assert: Bt5270ClassDnuProxySub selfZork equals: #zork
+
+  // A class-side `super` never consults the receiving class itself, so it does
+  // not forward to the receiver's override (which could re-enter itself).
+  testSuperSendDoesNotForward =>
+    self should: [Bt5270ClassDnuProxySub superZork] raise: #does_not_understand
+
   testPureCollectReachesOverride =>
     self assert: (Bt5270ClassDnuProxy collect: [:e | e]) equals: #collect:
 

@@ -41,6 +41,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     handle_class_method_call/5,
     handle_async_dispatch/5,
     class_understands_class_selector/2,
+    class_dnu_override/1,
     class_object_understands/2,
     find_class_method_from_class/2,
     in_caller_owner/2,
@@ -55,6 +56,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 -export([
     apply_class_method_in_context/6,
     class_side_dispatch_found/5,
+    class_side_dispatch_found/6,
     find_class_side_method_from_class/2,
     handle_class_self_call/2,
     try_class_chain_fallthrough/3
@@ -741,7 +743,7 @@ class_super_dispatch(ClassName, Selector, Args, #beamtalk_object{} = ClassSelf) 
     is_list(Args)
 ->
     class_side_dispatch_found(
-        ClassName, Selector, Args, find_class_super_method(Selector, ClassName), ClassSelf
+        ClassName, Selector, Args, find_class_super_method(Selector, ClassName), ClassSelf, false
     ).
 
 -doc """
@@ -775,13 +777,23 @@ protocol there.
 -spec class_side_dispatch_found(
     class_name(), selector(), list(), class_side_found(), #beamtalk_object{}
 ) -> term() | no_return().
-class_side_dispatch_found(ClassName, Selector, Args, {method, Owner, Module}, ClassSelf) ->
+class_side_dispatch_found(ClassName, Selector, Args, Found, ClassSelf) ->
+    class_side_dispatch_found(ClassName, Selector, Args, Found, ClassSelf, true).
+
+-doc """
+`class_side_dispatch_found/5` with `Forward` (BT-5270), see
+`beamtalk_class_dispatch_self:class_self_dispatch_chain/6`.
+""".
+-spec class_side_dispatch_found(
+    class_name(), selector(), list(), class_side_found(), #beamtalk_object{}, boolean()
+) -> term() | no_return().
+class_side_dispatch_found(ClassName, Selector, Args, {method, Owner, Module}, ClassSelf, Forward) ->
     beamtalk_class_dispatch_self:class_self_dispatch_chain(
-        ClassName, Selector, Args, {ok, Owner, Module}, ClassSelf
+        ClassName, Selector, Args, {ok, Owner, Module}, ClassSelf, Forward
     );
-class_side_dispatch_found(ClassName, Selector, Args, not_found, ClassSelf) ->
+class_side_dispatch_found(ClassName, Selector, Args, not_found, ClassSelf, Forward) ->
     beamtalk_class_dispatch_self:class_self_dispatch_chain(
-        ClassName, Selector, Args, not_found, ClassSelf
+        ClassName, Selector, Args, not_found, ClassSelf, Forward
     ).
 
 -doc """
@@ -1027,7 +1039,7 @@ class_chain_send(ClassPid, ClassName, Module, Selector, Args) ->
         {ok, Result} ->
             Result;
         not_found ->
-            case class_dnu_override(ClassName) of
+            case Selector =/= 'doesNotUnderstand:args:' andalso class_dnu_override(ClassName) of
                 true ->
                     %% BT-5270: the class (or a superclass's class side) defines
                     %% `class doesNotUnderstand:args:`; the unknown message goes

@@ -2217,7 +2217,13 @@ class_chain_skip_test_() ->
         {"ADR 0153: class-side fieldAt:/fieldAt:put:/hasField:/clearField: raise DNU, class survives",
             fun test_class_field_reflection_is_dnu/0},
         {"an unknown selector still raises does_not_understand on the class",
-            fun test_class_chain_skip_dnu/0}
+            fun test_class_chain_skip_dnu/0},
+        {"BT-5270: an unknown selector reaches a class-side doesNotUnderstand:args:",
+            fun test_class_side_dnu_override_receives_unknown/0},
+        {"BT-5270: a subclass inherits the class-side doesNotUnderstand:args:",
+            fun test_class_side_dnu_override_inherited/0},
+        {"BT-5270: the instance-side ProtoObject default is not a class-side override",
+            fun test_class_side_dnu_default_is_not_override/0}
     ]}.
 
 test_class_chain_send_makes_no_gen_call() ->
@@ -2318,6 +2324,55 @@ test_class_chain_skip_dnu() ->
             )
         end),
         ?assertEqual([], GenCalls)
+    after
+        stop_quietly(Pid)
+    end.
+
+%% BT-5270: an unknown message to a class object goes to the class-side
+%% `doesNotUnderstand:args:` (a runtime-installed fun stands in for it).
+test_class_side_dnu_override_receives_unknown() ->
+    Pid = start_bt4073_class('BT5270Dnu', none, #{}),
+    try
+        ok = beamtalk_object_class:put_class_method(
+            Pid, 'doesNotUnderstand:args:', fun(_Self, Selector, Args) -> {got, Selector, Args} end
+        ),
+        ?assertEqual(
+            {got, bt5270Nope, []}, beamtalk_class_dispatch:class_send(Pid, bt5270Nope, [])
+        ),
+        ?assertEqual(
+            {got, 'bt5270Nope:', [1]}, beamtalk_class_dispatch:class_send(Pid, 'bt5270Nope:', [1])
+        )
+    after
+        stop_quietly(Pid)
+    end.
+
+test_class_side_dnu_override_inherited() ->
+    Parent = start_bt4073_class('BT5270DnuParent', none, #{}),
+    Child = start_bt4073_class('BT5270DnuChild', 'BT5270DnuParent', #{}),
+    try
+        ok = beamtalk_object_class:put_class_method(
+            Parent, 'doesNotUnderstand:args:', fun(_Self, Selector, _Args) -> {got, Selector} end
+        ),
+        ?assertEqual({got, bt5270Nope}, beamtalk_class_dispatch:class_send(Child, bt5270Nope, []))
+    after
+        stop_quietly(Child),
+        stop_quietly(Parent)
+    end.
+
+test_class_side_dnu_default_is_not_override() ->
+    Pid = start_bt4073_class('BT5270NoDnu', none, #{}),
+    try
+        ?assertNot(
+            beamtalk_class_dispatch:class_understands_class_selector(
+                'BT5270NoDnu', 'doesNotUnderstand:args:'
+            )
+        ),
+        ?assertBtError(
+            does_not_understand,
+            'BT5270NoDnu',
+            bt5270Nope,
+            beamtalk_class_dispatch:class_send(Pid, bt5270Nope, [])
+        )
     after
         stop_quietly(Pid)
     end.

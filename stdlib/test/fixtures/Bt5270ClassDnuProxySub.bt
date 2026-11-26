@@ -4,3 +4,5 @@
 // BT-5270: inherits the class-side `doesNotUnderstand:args:` override of its superclass.
 
 Bt5270ClassDnuProxy subclass: Bt5270ClassDnuProxySub
+
+  class superZork => super zork
