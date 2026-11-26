@@ -860,6 +860,13 @@ this table drifts from the fixture. To refresh it after editing the op table:
 | `flush` | — | `class`, `file`, `kind`, `confirm_destructive` | `workspace` | `beamtalk_repl_ops_state` |
 | `changes` | — | — | `always` | `beamtalk_repl_ops_state` |
 | `info` | — | — | `always` | `beamtalk_repl_ops_state` |
+| `git-status` | — | — | `always` | `beamtalk_repl_ops_git` |
+| `git-diff` | `path` | — | `always` | `beamtalk_repl_ops_git` |
+| `git-log` | — | `count` | `always` | `beamtalk_repl_ops_git` |
+| `git-stage` | `path` | — | `workspace` | `beamtalk_repl_ops_git` |
+| `git-unstage` | `path` | — | `workspace` | `beamtalk_repl_ops_git` |
+| `git-commit` | `message` | — | `workspace` | `beamtalk_repl_ops_git` |
+| `git-revert-file` | `path` | — | `workspace` | `beamtalk_repl_ops_git` |
 | `sessions` | — | — | `always` | `beamtalk_repl_ops_session` |
 | `close` | — | — | `always` | `beamtalk_repl_ops_session` |
 | `health` | — | — | `always` | `beamtalk_repl_ops_session` |
@@ -868,6 +875,8 @@ this table drifts from the fixture. To refresh it after editing the op table:
 | `inspect` | `actor` | — | `always` | `beamtalk_repl_ops_actors` |
 | `kill` | `actor` | — | `always` | `beamtalk_repl_ops_actors` |
 | `pid-stats` | `actor` | — | `always` | `beamtalk_repl_ops_watch` |
+| `children` | `supervisor` | — | `always` | `beamtalk_repl_ops_process` |
+| `process-info` | `pid` | — | `always` | `beamtalk_repl_ops_process` |
 | `describe` | — | — | `always` | `beamtalk_repl_ops_dev` |
 | `methods` | `class` | — | `always` | `beamtalk_repl_ops_dev` |
 | `inherited-methods` | `class` | — | `always` | `beamtalk_repl_ops_dev` |
