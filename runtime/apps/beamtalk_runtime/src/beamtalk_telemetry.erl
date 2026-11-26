@@ -342,9 +342,21 @@ metadata map built at all. With them on it also emits
 `class`, `selector`, `mode`, plus `outcome` on stop) and, while trace capture
 is enabled, sets the causal span id (and the trace id, for a root span) in
 the process dictionary and records a trace event.
+
+A send to a node-qualified registered ref that addresses `{Name, Node}`
+directly has no pid (BT-5271). Such a send is only made while dispatch
+events are off (`beamtalk_actor_send:direct_registered_send/3` resolves the
+pid while they are on), so it records the aggregate only. If the events are
+turned on mid-send it still emits none: the events' `pid` is always a pid, so
+a handler that treats it as one cannot raise on it (and `telemetry`
+permanently detaches a handler that raises).
 """.
--spec dispatch_span(pid(), atom(), atom(), sync | async | cast, fun(() -> {term(), atom()})) ->
+-spec dispatch_span(
+    pid() | {atom(), node()}, atom(), atom(), sync | async | cast, fun(() -> {term(), atom()})
+) ->
     term().
+dispatch_span(Pid, Class, Selector, Mode, Fun) when not is_pid(Pid) ->
+    run_recorded(Pid, Class, Selector, Mode, Fun);
 dispatch_span(Pid, Class, Selector, Mode, Fun) ->
     case dispatch_events_enabled() andalso erlang:function_exported(telemetry, execute, 3) of
         false ->

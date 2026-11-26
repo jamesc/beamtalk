@@ -307,14 +307,20 @@ rather than silently re-resolving against the receiver's registry. The
 `pid` field type widens to
 `pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()}`.
 
-*As built (BT-5192):* a send to a `{registered, Name, Node}` ref does not
-address `{Name, Node}` directly. It first resolves the name on `Node` with an
-`erpc` `erlang:whereis/1` (bounded by the 5000 ms remote-call timeout), then
-sends to the pid it gets back through the ordinary pid send path, so a remote
-named send costs two round trips. That path is what answers the lifecycle
-selectors, the class hint and the `no_such_process` / `node_down` split of
-§7.1 for a ref, so sending to `{Name, Node}` directly needs those moved onto
-the ref path first; that is tracked as BT-5271.
+A sync send to a `{registered, Name, Node}` ref on another node is one
+network round trip, a `gen_server:call({Name, Node}, …)` with the wire
+envelope, and a cast is a single one-way message to `{Name, Node}`
+(BT-5271). The call's own exit gives the §7.1 errors: `noproc` is
+`no_such_process` and a lost connection is `node_down`. A node that has gone
+silent without dropping the connection is a `timeout` once the call's
+timeout runs out, as for a remote pid. `isRegistered` and `registeredName`
+are answered by the ref alone. `isAlive` and the selectors answered from the
+pid in the caller (`kill`, `pid`, `monitor`, `onExit:`, `stop`, `stopWith:`,
+`isRemote`, …) still resolve the name on `Node` first, as does a sync send
+made inside a call chain that already holds a pid on `Node`, so the
+call-stack deadlock check still sees its target, and any send while actor
+dispatch events are on (ADR 0069; `Tracing enable` turns them on), so it is
+observed with the actor's pid like any other send.
 
 ### 4. Cluster-unique names (opt-in `global`)
 

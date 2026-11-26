@@ -31,12 +31,18 @@ them, so the send path costs the same number of calls as before the split.
     resolve_proxy_or_error/2,
     sync_send_pid/4,
     sync_send_pid/5,
-    sync_send_proxy/4
+    sync_send_proxy/5,
+    cast_send_registered/3
 ]).
 
 %% Driven directly on a `$bt_nlr` result by the unit tests.
 -ifdef(TEST).
--export([unwrap_dispatch_result/1, spawn_future_watcher/3]).
+-export([
+    unwrap_dispatch_result/1,
+    spawn_future_watcher/3,
+    needs_resolved_pid/1,
+    cast_needs_resolved_pid/1
+]).
 -endif.
 
 %% BT-4265: the helpers an actor send runs every time are inlined, so a send
@@ -52,6 +58,7 @@ them, so the send path costs the same number of calls as before the split.
         get_otel_ctx/0,
         check_call_stack/2,
         wire_sync_call/5,
+        unwrap_call_reply/3,
         local_call/3
     ]}
 ).
@@ -340,32 +347,38 @@ cast_send_pid(ActorPid, Selector, Args, ClassHint) ->
         PropCtx = get_propagated_ctx(),
         case node(ActorPid) =/= node() of
             true ->
-                case beamtalk_wire:encode(Args) of
-                    {ok, WireArgs} ->
-                        gen_server:cast(
-                            ActorPid,
-                            {?BT_WIRE_TAG, ?BT_WIRE_VERSION, cast, Selector, WireArgs, PropCtx}
-                        ),
-                        {ok, cast};
-                    {error, Error} ->
-                        %% Fire-and-forget: no caller to tell (mirrors
-                        %% the receiver-side cast-skew handling, ADR
-                        %% 0126 §5.2) — log and drop, matching Erlang's
-                        %% fire-and-forget semantics.
-                        ?LOG_WARNING("Cast argument not serialisable for remote send", #{
-                            selector => Selector,
-                            pid => ActorPid,
-                            error => Error,
-                            domain => [beamtalk, runtime, dist]
-                        }),
-                        {ok, cast}
-                end;
+                ok = remote_cast(ActorPid, Selector, Args, PropCtx),
+                {ok, cast};
             false ->
                 gen_server:cast(ActorPid, {cast, Selector, Args, PropCtx}),
                 {ok, cast}
         end
     end),
     ok.
+
+-doc """
+A cast to an actor on another node (ADR 0126 §5.1), addressed by remote pid
+or by `{Name, Node}`: the wire-encoded envelope, sent with
+`gen_server:cast/2`. An argument that cannot be encoded has no caller to
+tell (mirrors the receiver-side cast-skew handling, ADR 0126 §5.2), so it is
+logged and the cast dropped, matching Erlang's fire-and-forget semantics.
+""".
+-spec remote_cast(pid() | {atom(), node()}, atom(), list(), map()) -> ok.
+remote_cast(Dest, Selector, Args, PropCtx) ->
+    case beamtalk_wire:encode(Args) of
+        {ok, WireArgs} ->
+            gen_server:cast(
+                Dest, {?BT_WIRE_TAG, ?BT_WIRE_VERSION, cast, Selector, WireArgs, PropCtx}
+            );
+        {error, Error} ->
+            ?LOG_WARNING("Cast argument not serialisable for remote send", #{
+                selector => Selector,
+                dest => Dest,
+                error => Error,
+                domain => [beamtalk, runtime, dist]
+            }),
+            ok
+    end.
 
 -doc """
 The class to report for a send to `Pid`: the caller's `ClassHint` when it
@@ -467,13 +480,8 @@ No liveness pre-check (BT-4113): `gen_server:call` to a dead actor exits
 clauses below already map to `actor_dead` — without the snapshot race a
 pre-check had.
 
-Generated handle_call/3 wraps replies as {ok, Result} or {error, Error}, and
-the reply is unwrapped here so callers receive the value directly. The
-{error, Error} case has three sub-forms due to the safe_dispatch layer:
-  1. Error = {ErlType, Value, Stacktrace} — with captured stacktrace
-  2. Error = {ErlType, Value} — backward compat: without stacktrace
-  3. Error = other term — e.g. #beamtalk_error{} from dispatch_user_method
-All forms are re-raised as Erlang exceptions so the caller sees them.
+The reply is unwrapped by `unwrap_call_reply/3`, so callers receive the
+value directly, and a failed call's exit is mapped by `raise_call_exit/5`.
 """.
 -spec sync_call(pid(), atom(), list(), default | timeout(), atom()) -> term().
 sync_call(ActorPid, Selector, Args, CallTimeout, Class) ->
@@ -483,63 +491,117 @@ sync_call(ActorPid, Selector, Args, CallTimeout, Class) ->
             %% Layer 2: Check for transitive cycles before gen_server:call.
             %% If ActorPid is already in the call stack, this send would deadlock.
             check_call_stack(ActorPid, Selector),
-            case wire_sync_call(ActorPid, Selector, Args, PropCtx, CallTimeout) of
-                {ok, Result} ->
-                    {Result, ok};
-                {error, {ErlType, ErrorValue, Stacktrace}} ->
-                    %% safe_dispatch caught an Erlang exception with stacktrace;
-                    %% re-raise with full type/stacktrace context, attaching the
-                    %% active selector/class breadcrumb so a raw error escaping
-                    %% the method is classified *and* located.
-                    beamtalk_exception_handler:reraise(ErlType, ErrorValue, Stacktrace, #{
-                        selector => Selector, class => Class
-                    });
-                {error, {ErlType, ErrorValue}} ->
-                    %% Backward compat: safe_dispatch without stacktrace —
-                    %% still pass exception class to preserve error kind
-                    beamtalk_exception_handler:reraise(ErlType, ErrorValue, []);
-                {error, Nlr} when ?IS_NLR(Nlr) ->
-                    %% A `^` inside a block invoked on ActorPid on our
-                    %% behalf (BT-3582). The matching catch frame is in
-                    %% *our* process — ActorPid had no frame holding
-                    %% that token, so its reply is the only way the
-                    %% signal gets back here. Re-throw so the enclosing
-                    %% method unwinds as it would have without the
-                    %% process hop — same relay shape as
-                    %% beamtalk_class_dispatch.erl's class-method hops.
-                    %% The block was away from home in ActorPid, which
-                    %% `rethrow_from_away/1` tells the test-build commit
-                    %% check (BT-4536).
-                    beamtalk_actor_state:rethrow_from_away(Nlr);
-                {error, Error} ->
-                    beamtalk_exception_handler:reraise(Error);
-                DirectValue ->
-                    %% Backward compat: a hand-written gen_server that answers with an
-                    %% unwrapped value.
-                    {DirectValue, ok}
-            end
+            Reply = wire_sync_call(ActorPid, Selector, Args, PropCtx, CallTimeout),
+            {unwrap_call_reply(Reply, Selector, Class), ok}
         end)
     catch
         exit:Reason:Stack ->
-            %% BT-4676: classification lives in beamtalk_call_failure. ADR 0126
-            %% §7.1: a partitioned or never-connected node is `node_down` (the
-            %% actor may be alive on the far side), not `actor_dead`.
-            case beamtalk_call_failure:classify(exit, Reason) of
-                dead ->
-                    raise_actor_dead(Selector);
-                timeout ->
-                    raise_timeout(Selector);
-                {unreachable, _Why} ->
-                    raise_node_down(
-                        beamtalk_call_failure:unreachable_node(Reason, node(ActorPid)), Selector
-                    );
-                other when is_tuple(Reason), tuple_size(Reason) =:= 2 ->
-                    %% `{normal, _}`, `{shutdown, _}`, `{killed, _}`, custom stop
-                    %% reasons: the actor died mid-call, so it is unavailable.
-                    raise_actor_dead(Selector);
-                other ->
-                    erlang:raise(exit, Reason, Stack)
-            end
+            %% ADR 0126 §7.1: a partitioned or never-connected node is
+            %% `node_down` (the actor may be alive on the far side), not
+            %% `actor_dead`; a `noproc` from a pid is `actor_dead`.
+            raise_call_exit(Reason, Stack, Selector, node(ActorPid), actor_dead)
+    end.
+
+-doc """
+BT-5271 / ADR 0126 §3: a sync send to a `{registered, Name, Node}` ref on
+another node, addressed to `{Name, Node}` directly — one network round trip,
+the native `gen_server` form. The name is not resolved first, so the call's
+own exit answers what the resolve used to: `noproc` (nothing registered as
+`Name` on a live `Node`) is `no_such_process`, an unreachable `Node` is
+`node_down`, and an actor that dies mid-call is `actor_dead` (ADR 0126 §7.1).
+
+The class of a remote ref is not known on this node (ADR 0126 §7.3), so the
+send is recorded and its reply unwrapped as `unknown`, as the resolved remote
+pid's was. The dispatch span is given `{Name, Node}`: with no pid, it records
+the class aggregate and emits no dispatch events (`beamtalk_telemetry:dispatch_span/5`).
+
+A node that has gone silent without dropping the connection (a partition
+the net tick has not noticed yet) is a `timeout` once the call's timeout
+runs out, as for a sync send to a remote pid; the send is `node_down` once
+the connection is gone.
+""".
+-spec sync_call_registered(atom(), node(), atom(), list(), default | timeout()) -> term().
+sync_call_registered(Name, Node, Selector, Args, CallTimeout) ->
+    Dest = {Name, Node},
+    try
+        beamtalk_telemetry:dispatch_span(Dest, unknown, Selector, sync, fun() ->
+            PropCtx = get_sync_propagated_ctx(),
+            Reply = remote_wire_call(Dest, Selector, Args, PropCtx, CallTimeout),
+            {unwrap_call_reply(Reply, Selector, unknown), ok}
+        end)
+    catch
+        exit:Reason:Stack ->
+            raise_call_exit(Reason, Stack, Selector, Node, {no_such_process, Name})
+    end.
+
+-doc """
+Unwrap a `gen_server:call` reply from a compiled actor's `handle_call/3`.
+
+Generated handle_call/3 wraps replies as {ok, Result} or {error, Error}, and
+the reply is unwrapped here so callers receive the value directly. The
+{error, Error} case has three sub-forms due to the safe_dispatch layer:
+  1. Error = {ErlType, Value, Stacktrace} — with captured stacktrace
+  2. Error = {ErlType, Value} — backward compat: without stacktrace
+  3. Error = other term — e.g. #beamtalk_error{} from dispatch_user_method
+All forms are re-raised as Erlang exceptions so the caller sees them.
+""".
+-spec unwrap_call_reply(term(), atom(), atom()) -> term().
+unwrap_call_reply({ok, Result}, _Selector, _Class) ->
+    Result;
+unwrap_call_reply({error, {ErlType, ErrorValue, Stacktrace}}, Selector, Class) ->
+    %% safe_dispatch caught an Erlang exception with stacktrace; re-raise with
+    %% full type/stacktrace context, attaching the active selector/class
+    %% breadcrumb so a raw error escaping the method is classified *and* located.
+    beamtalk_exception_handler:reraise(ErlType, ErrorValue, Stacktrace, #{
+        selector => Selector, class => Class
+    });
+unwrap_call_reply({error, {ErlType, ErrorValue}}, _Selector, _Class) ->
+    %% Backward compat: safe_dispatch without stacktrace — still pass
+    %% exception class to preserve error kind
+    beamtalk_exception_handler:reraise(ErlType, ErrorValue, []);
+unwrap_call_reply({error, Nlr}, _Selector, _Class) when ?IS_NLR(Nlr) ->
+    %% A `^` inside a block invoked on the actor on our behalf (BT-3582). The
+    %% matching catch frame is in *our* process — the actor had no frame
+    %% holding that token, so its reply is the only way the signal gets back
+    %% here. Re-throw so the enclosing method unwinds as it would have
+    %% without the process hop — same relay shape as
+    %% beamtalk_class_dispatch.erl's class-method hops. The block was away
+    %% from home in the actor, which `rethrow_from_away/1` tells the
+    %% test-build commit check (BT-4536).
+    beamtalk_actor_state:rethrow_from_away(Nlr);
+unwrap_call_reply({error, Error}, _Selector, _Class) ->
+    beamtalk_exception_handler:reraise(Error);
+unwrap_call_reply(DirectValue, _Selector, _Class) ->
+    %% Backward compat: a hand-written gen_server that answers with an
+    %% unwrapped value.
+    DirectValue.
+
+-doc """
+Map the exit of a failed `gen_server:call` to its structured error (BT-4676:
+classification lives in `beamtalk_call_failure`). `Node` is the target's
+node, named by `node_down` when the exit reason carries none. `NoProc` is
+what a `noproc` means for this target: `actor_dead` for a pid,
+`{no_such_process, Name}` for a registered name.
+""".
+-spec raise_call_exit(term(), list(), atom(), node(), actor_dead | {no_such_process, atom()}) ->
+    no_return().
+raise_call_exit(Reason, Stack, Selector, Node, NoProc) ->
+    case beamtalk_call_failure:classify(exit, Reason) of
+        dead when NoProc =:= actor_dead ->
+            raise_actor_dead(Selector);
+        dead ->
+            {no_such_process, Name} = NoProc,
+            beamtalk_exception_handler:reraise(no_such_process_error_record(Name, Selector));
+        timeout ->
+            raise_timeout(Selector);
+        {unreachable, _Why} ->
+            raise_node_down(beamtalk_call_failure:unreachable_node(Reason, Node), Selector);
+        other when is_tuple(Reason), tuple_size(Reason) =:= 2 ->
+            %% `{normal, _}`, `{shutdown, _}`, `{killed, _}`, custom stop
+            %% reasons: the actor died mid-call, so it is unavailable.
+            raise_actor_dead(Selector);
+        other ->
+            erlang:raise(exit, Reason, Stack)
     end.
 
 -doc """
@@ -550,32 +612,43 @@ non-negative integer millisecond timeout — mirroring the two call shapes the
 two callers already had before this helper existed.
 
 Remote is decided by `node(ActorPid) =/= node()` — one comparison, the only
-added cost for a local call (ADR 0126 §5.1 constraint 2). A remote call
-wire-encodes `Args` and tags the message so the receiver's `handle_call`
-prelude recognises it, then decodes the raw reply that comes back through
-the ordinary `gen_server:call` reply path — `decode_call_result/2` reraises
-on a reply-direction decode failure (§5.2) rather than returning a
-half-decoded term. An encode failure on `Args` is a request-direction
-failure (§5.2): it never reaches the network, and is raised here in the
-caller, exactly as `beamtalk_wire:encode/1`'s own doc promises.
+added cost for a local call (ADR 0126 §5.1 constraint 2); a remote call goes
+through `remote_wire_call/5`.
 """.
 -spec wire_sync_call(pid(), atom(), list(), map(), default | timeout()) -> term().
 wire_sync_call(ActorPid, Selector, Args, PropCtx, CallTimeout) ->
     case node(ActorPid) =/= node() of
         true ->
-            case beamtalk_wire:encode(Args) of
-                {ok, WireArgs} ->
-                    Msg = {?BT_WIRE_TAG, ?BT_WIRE_VERSION, call, Selector, WireArgs, PropCtx},
-                    RawResult = local_call(ActorPid, Msg, CallTimeout),
-                    decode_call_result(RawResult, Selector);
-                {error, EncErr} ->
-                    beamtalk_exception_handler:reraise(EncErr#beamtalk_error{selector = Selector})
-            end;
+            remote_wire_call(ActorPid, Selector, Args, PropCtx, CallTimeout);
         false ->
             local_call(ActorPid, {Selector, Args, PropCtx}, CallTimeout)
     end.
 
--spec local_call(pid(), term(), default | timeout()) -> term().
+-doc """
+A `gen_server:call` to an actor on another node (ADR 0126 §5.1), addressed
+by remote pid or by `{Name, Node}`. Wire-encodes `Args` and tags the message
+so the receiver's `handle_call` prelude recognises it, then decodes the raw
+reply that comes back through the ordinary `gen_server:call` reply path —
+`decode_call_result/2` reraises on a reply-direction decode failure (§5.2)
+rather than returning a half-decoded term. An encode failure on `Args` is a
+request-direction failure (§5.2): it never reaches the network, and is
+raised here in the caller, exactly as `beamtalk_wire:encode/1`'s own doc
+promises.
+""".
+-spec remote_wire_call(
+    pid() | {atom(), node()}, atom(), list(), map(), default | timeout()
+) -> term().
+remote_wire_call(Dest, Selector, Args, PropCtx, CallTimeout) ->
+    case beamtalk_wire:encode(Args) of
+        {ok, WireArgs} ->
+            Msg = {?BT_WIRE_TAG, ?BT_WIRE_VERSION, call, Selector, WireArgs, PropCtx},
+            RawResult = local_call(Dest, Msg, CallTimeout),
+            decode_call_result(RawResult, Selector);
+        {error, EncErr} ->
+            beamtalk_exception_handler:reraise(EncErr#beamtalk_error{selector = Selector})
+    end.
+
+-spec local_call(pid() | {atom(), node()}, term(), default | timeout()) -> term().
 
 local_call(ActorPid, Msg, default) ->
     gen_server:call(ActorPid, Msg);
@@ -994,15 +1067,148 @@ resolve_or_error(Ref, Selector) ->
         {node_down, Node} -> {error, node_down_error_record(Node, Selector)}
     end.
 
--doc "Sync half of `proxy_route/3`: answer, raise, or continue with the resolved pid.".
--spec sync_send_proxy(proxy_ref(), atom(), list(), fun((pid()) -> term())) -> term().
+-doc """
+Sync half of `proxy_route/3`: answer, raise, or continue with the resolved
+pid. `SendTimeout` is `default` for `sync_send/3`, or `{timeout, Timeout}`
+with `sync_send/4`'s caller-given (still unchecked) timeout.
 
-sync_send_proxy(Ref, Selector, Args, WithPid) ->
-    case proxy_route(Ref, Selector, Args) of
-        {answer, Value} -> Value;
-        {pid, Pid} -> WithPid(Pid);
-        {error, Error} -> beamtalk_exception_handler:reraise(Error)
+A `{registered, Name, Node}` ref on another node skips the resolve when the
+send can go to `{Name, Node}` directly (`direct_registered_send/3`, BT-5271):
+one round trip instead of an `erpc` `whereis` and then the call.
+""".
+-spec sync_send_proxy(
+    proxy_ref(), atom(), list(), default | {timeout, term()}, fun((pid()) -> term())
+) ->
+    term().
+
+sync_send_proxy(Ref, Selector, Args, SendTimeout, WithPid) ->
+    case direct_registered_send(Ref, Selector, SendTimeout) of
+        {true, Name, Node, CallTimeout} ->
+            sync_call_registered(Name, Node, Selector, Args, CallTimeout);
+        false ->
+            case proxy_route(Ref, Selector, Args) of
+                {answer, Value} -> Value;
+                {pid, Pid} -> WithPid(Pid);
+                {error, Error} -> beamtalk_exception_handler:reraise(Error)
+            end
     end.
+
+-doc """
+Whether a sync send to `Ref` goes to `{Name, Node}` directly (BT-5271, ADR
+0126 §3) rather than resolving the name to a pid first. It does when `Ref`
+is a `{registered, Name, Node}` ref on another node (the caller's own node
+resolves with a local `whereis`, no network hop) and nothing about the send
+needs the pid:
+
+- the proxy's own answers (`isAlive`, `isRegistered`, `registeredName`) and
+  the selectors answered from the pid in the caller (`kill`, `pid`,
+  `monitor`, `onExit:`, `delegate`, `isRemote`, `stop`, `stopWith:`,
+  `stopWith:timeout:`, `continueWith:`, `continueWith:withArguments:`) keep
+  the `proxy_route/3` path, so their answers are unchanged;
+- a timeout that is not a valid `gen_server:call` timeout keeps the pid
+  path's `type_error`;
+- a send made inside a sync call chain that already holds a pid on `Node`
+  resolves, so the Layer 2 call-stack check (`check_call_stack/2`) still sees
+  the target and raises `deadlock_detected` instead of waiting out the call;
+- while dispatch events are on (`beamtalk_telemetry:dispatch_events_enabled/0`,
+  which `Tracing enable` also turns on) the send resolves, so it is observed
+  like any other send: its events carry the actor's pid, and trace capture
+  gets its span and trace event. Only the default (events off) pays one
+  round trip.
+""".
+-spec direct_registered_send(proxy_ref(), atom(), default | {timeout, term()}) ->
+    {true, atom(), node(), default | timeout()} | false.
+direct_registered_send({registered, Name, Node}, Selector, SendTimeout) when
+    Node =/= node()
+->
+    case call_timeout(SendTimeout) of
+        {ok, CallTimeout} ->
+            case
+                needs_resolved_pid(Selector) orelse call_stack_has_node(Node) orelse
+                    beamtalk_telemetry:dispatch_events_enabled()
+            of
+                false -> {true, Name, Node, CallTimeout};
+                true -> false
+            end;
+        error ->
+            false
+    end;
+direct_registered_send(_Ref, _Selector, _SendTimeout) ->
+    false.
+
+%% Selectors a proxy ref answers itself or answers from the resolved pid in
+%% the caller (see direct_registered_send/3). Matched by name only, whatever
+%% the arity, so a wrong-arity send also keeps today's path.
+%% beamtalk_actor_send_selector_tests checks that every selector the sync pid
+%% send paths (`sync_send_pid/4,5`) special-case is listed here.
+-spec needs_resolved_pid(atom()) -> boolean().
+needs_resolved_pid(isAlive) -> true;
+needs_resolved_pid(isRegistered) -> true;
+needs_resolved_pid(registeredName) -> true;
+needs_resolved_pid(kill) -> true;
+needs_resolved_pid(delegate) -> true;
+needs_resolved_pid(pid) -> true;
+needs_resolved_pid(monitor) -> true;
+needs_resolved_pid('onExit:') -> true;
+needs_resolved_pid(isRemote) -> true;
+needs_resolved_pid(stop) -> true;
+needs_resolved_pid('stopWith:') -> true;
+needs_resolved_pid('stopWith:timeout:') -> true;
+needs_resolved_pid('continueWith:') -> true;
+needs_resolved_pid('continueWith:withArguments:') -> true;
+needs_resolved_pid(_Selector) -> false.
+
+%% The `gen_server:call` timeout a send's timeout asks for, or `error` for one
+%% the pid path rejects with `type_error` (see sync_send_pid/5).
+-spec call_timeout(default | {timeout, term()}) -> {ok, default | timeout()} | error.
+call_timeout(default) -> {ok, default};
+call_timeout({timeout, infinity}) -> {ok, infinity};
+call_timeout({timeout, T}) when is_integer(T), T >= 0 -> {ok, T};
+call_timeout({timeout, _Invalid}) -> error.
+
+%% Whether this process's sync call chain holds a pid on `Node`.
+-spec call_stack_has_node(node()) -> boolean().
+call_stack_has_node(Node) ->
+    case get(?BT_CALL_STACK_KEY) of
+        undefined -> false;
+        CallStack -> lists:any(fun(P) -> is_pid(P) andalso node(P) =:= Node end, CallStack)
+    end.
+
+-doc """
+BT-5271: a cast to a `{registered, Name, Node}` ref on another node, sent to
+`{Name, Node}` directly — no `erpc` `whereis` first. `gen_server:cast/2` to
+a name that is not registered, or to an unreachable node, never raises,
+which is the cast's fire-and-forget contract (`beamtalk_actor:cast_send/3`).
+As for a cast to a remote pid, distribution may buffer a cast sent while the
+connection is still being set up and deliver it if the node comes back.
+Returns `false` for any other ref, or for a selector a cast answers from the
+resolved pid (`continueWith:`, `continueWith:withArguments:`), which keeps the
+resolving path, as does any cast while dispatch events are on (see
+`direct_registered_send/3`). The dispatch span is given `{Name, Node}`, as in
+`sync_call_registered/5`.
+""".
+-spec cast_send_registered(proxy_ref(), atom(), list()) -> ok | false.
+cast_send_registered({registered, Name, Node}, Selector, Args) when Node =/= node() ->
+    case cast_needs_resolved_pid(Selector) orelse beamtalk_telemetry:dispatch_events_enabled() of
+        true ->
+            false;
+        false ->
+            Dest = {Name, Node},
+            beamtalk_telemetry:dispatch_span(Dest, unknown, Selector, cast, fun() ->
+                ok = remote_cast(Dest, Selector, Args, get_propagated_ctx()),
+                {ok, cast}
+            end)
+    end;
+cast_send_registered(_Ref, _Selector, _Args) ->
+    false.
+
+%% Selectors a cast answers from the resolved pid in the caller (see
+%% cast_send_registered/3). beamtalk_actor_send_selector_tests checks that
+%% every selector `cast_send_pid/4` special-cases is listed here.
+-spec cast_needs_resolved_pid(atom()) -> boolean().
+cast_needs_resolved_pid('continueWith:') -> true;
+cast_needs_resolved_pid('continueWith:withArguments:') -> true;
+cast_needs_resolved_pid(_Selector) -> false.
 
 -doc "Construct a structured `no_such_process` error for the given proxy ref.".
 -spec no_such_process_error(
