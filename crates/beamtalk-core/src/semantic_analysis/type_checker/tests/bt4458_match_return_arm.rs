@@ -270,3 +270,39 @@ fn escaping_block_return_counts_as_method_return() {
         "`^x` in an escaping block must be checked as a method return: {diags:?}"
     );
 }
+
+// BT-5283 review: an early `^` must not hide a tail mismatch in an untyped
+// class (the union check only runs for `typed` classes).
+#[test]
+fn untyped_class_early_return_does_not_hide_tail_mismatch() {
+    let diags = type_messages(
+        r#"Object subclass: ZzUntyped
+  class bar: x -> Integer =>
+    x ifTrue: [^nil]
+    "oops"
+"#,
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|m| m.contains("declares return type Integer") && m.contains("String")),
+        "tail mismatch must still be reported: {diags:?}"
+    );
+}
+
+#[test]
+fn shape_early_return_is_checked() {
+    let diags = type_messages(
+        r"typed Object subclass: ZzShape
+  class bar: x :: Integer -> Integer =>
+    x < 1 ifTrue: [^#{#a => 1}]
+    x
+",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|m| m.contains("declares return type Integer")),
+        "a shape early `^` must be checked: {diags:?}"
+    );
+}

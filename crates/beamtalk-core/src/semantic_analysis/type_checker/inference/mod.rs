@@ -433,35 +433,36 @@ impl TypeChecker {
         } else {
             body_type
         };
-        let body_type = {
-            let mut returned = self.tail_match_return_types(&method.body);
-            // BT-5283: only a declared return type is checked against these;
-            // an undeclared method's inferred (cached) type is unchanged.
-            // Only fully-`Known` return types join the union: a `Dynamic` or
-            // Negation/Intersection member would collapse or skip the whole
-            // union check and hide a real mismatch on the tail.
-            if method.return_type.is_some() {
-                returned.extend(collected_returns.into_iter().filter(|t| {
-                    match t {
-                        InferredType::Known { .. } => true,
-                        InferredType::Union { members, .. } => members
-                            .iter()
-                            .all(|m| matches!(m, InferredType::Known { .. })),
-                        _ => false,
-                    }
-                }));
-            }
-            if returned.is_empty() {
-                body_type
-            } else {
-                let mut all = vec![body_type];
-                all.extend(returned);
-                InferredType::union_of(&all)
-            }
+        let tail_returned = self.tail_match_return_types(&method.body);
+        let body_type = if tail_returned.is_empty() {
+            body_type
+        } else {
+            let mut all = vec![body_type];
+            all.extend(tail_returned.iter().cloned());
+            InferredType::union_of(&all)
         };
         let body_type =
             self.resolve_self_delegate_return_type(method, body_type, class_name, hierarchy);
         self.check_return_type(method, &body_type, class_name, hierarchy);
+        // BT-5283: every other `^` (early return, non-local return in a block,
+        // match arm) answers the method too, so each distinct type is checked
+        // against the declared return type on its own — not unioned into the
+        // tail type, which would route the tail through the typed-class-only
+        // union check and hide a mismatch it reports today. `Dynamic` is
+        // skipped (an untyped `^x` says nothing); only a declared return type
+        // is checked, so an undeclared method's inferred type is unchanged.
+        if method.return_type.is_some() {
+            let mut seen: Vec<InferredType> = tail_returned;
+            for ty in collected_returns {
+                if matches!(ty, InferredType::Dynamic(_) | InferredType::Never)
+                    || seen.contains(&ty)
+                {
+                    continue;
+                }
+                self.check_return_type(method, &ty, class_name, hierarchy);
+                seen.push(ty);
+            }
+        }
         if check_override {
             self.check_override_param_compatibility(method, class_name, is_class_method, hierarchy);
             self.check_override_return_compatibility(
