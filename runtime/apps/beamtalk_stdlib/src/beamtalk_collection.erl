@@ -104,10 +104,12 @@ maximum(Self) ->
     case to_list(Self) of
         [] ->
             raise_empty('max');
-        [First | Rest] = List when is_number(First) ->
-            case num_max(Rest, First) of
-                {ok, Max} -> Max;
-                not_numbers -> extreme(List, '>')
+        [First | _] = List when is_number(First) ->
+            %% Every non-number sorts above every number in term order, so a
+            %% number answer proves the whole list is numbers (BT-5266).
+            case lists:max(List) of
+                Max when is_number(Max) -> Max;
+                _ -> extreme(List, '>')
             end;
         List ->
             extreme(List, '>')
@@ -135,19 +137,15 @@ minimum(Self) ->
             extreme(List, '<')
     end.
 
-%% All-number fast path: one pass that tracks the extreme and gives up at the
-%% first non-number. Same tie behaviour as `lists:max/1` / `lists:min/1`
-%% (first of equal elements wins), so all-number answers are unchanged.
--spec num_max(list(), number()) -> {ok, number()} | not_numbers.
-num_max([], Acc) -> {ok, Acc};
-num_max([H | T], Acc) when is_number(H), H > Acc -> num_max(T, H);
-num_max([H | T], Acc) when is_number(H) -> num_max(T, Acc);
-num_max(_, _) -> not_numbers.
-
+%% All-number fast path for `min`: one pass that tracks the minimum and gives
+%% up at the first non-number. Non-numbers sort above numbers, so unlike `max`
+%% `lists:min/1` cannot prove the list is all numbers. The comparison comes
+%% before `is_number/1` in each guard, so the check rides along with the one
+%% compare per element. First of equal elements wins, as in `lists:min/1`.
 -spec num_min(list(), number()) -> {ok, number()} | not_numbers.
+num_min([H | T], Acc) when H < Acc, is_number(H) -> num_min(T, H);
+num_min([H | T], Acc) when H >= Acc, is_number(H) -> num_min(T, Acc);
 num_min([], Acc) -> {ok, Acc};
-num_min([H | T], Acc) when is_number(H), H < Acc -> num_min(T, H);
-num_min([H | T], Acc) when is_number(H) -> num_min(T, Acc);
 num_min(_, _) -> not_numbers.
 
 %% Strings (all binaries) and Symbols (all atoms) keep native term order;
