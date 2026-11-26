@@ -206,12 +206,14 @@ bind every agent and human working in the repository:
 ### 3. Per-target artifacts and the trigger
 
 **Targets.** These are the bundle targets `release.yml` builds today, each tested
-on the runner image that built it:
+on the runner image that built it. `edge.yml` gains a `macos-arm64` build (owner
+decision 3), so macOS-only regressions like BT-5264 surface within the hour
+rather than the next night. The macOS edge leg runs the **fast set** (§ 10):
 
 | Target | Runner | Edge | Nightly | Tag |
 |--------|--------|:----:|:-------:|:---:|
 | `linux-x86_64` | `ubuntu-24.04` | ✓ | ✓ | ✓ |
-| `macos-arm64` | `macos-14` | — | ✓ | ✓ |
+| `macos-arm64` | `macos-14` | ✓ (fast set) | ✓ | ✓ |
 | `macos-x86_64` | `macos-15-intel` | — | ✓ | ✓ |
 | `windows-x86_64` | `windows-2022` | — | ✓ | ✓ |
 
@@ -483,7 +485,7 @@ breach blocks promotion like any other red (§ 10).
 
 | Trigger | Artifact | Layers | Targets | Blocks |
 |---------|----------|--------|---------|--------|
-| `edge` publish (every merge to `main`) | edge bundle | contracts, J1 to J4, J6, J9, adversarial (fast subset) | linux-x86_64 | Nothing. Posts a `uat-edge` status on the merged commit; a red files a Bug within the hour. |
+| `edge` publish (every merge to `main`) | edge bundles | linux: contracts, J1 to J4, J6, J9, adversarial fast subset. macos-arm64: the fast set (contracts, J1, J2, J4 including TLS, adversarial fast subset) | linux-x86_64, macos-arm64 | Nothing. Posts a `uat-edge` status on the merged commit; a red files a Bug within the hour. |
 | `nightly` publish | nightly bundles | all four layers (perf in report-and-file mode) | all 4 | Nothing. Reds file Bugs. |
 | Tagged release candidate | `vX.Y.Z` pre-release bundles, IDE archives, `.vsix` | all four layers | all 4 | **Promotion to stable and every distribution channel.** |
 | Weekly | `latest` | all four layers | all 4 | Nothing. Catches drift in OS images, the registry and GitHub. |
@@ -505,8 +507,13 @@ the bundle before uat reports. Under this ADR:
    - attaches the IDE archives and pushes `ghcr.io/jamesc/beamtalk-ide:<version>`;
    - runs the desktop release.
 
-   These are the steps that today hang off `release: published` or
-   `workflow_call` from `release.yml`.
+   These steps hang off `release: published` or a `workflow_call` from
+   `release.yml` today. Owner decision 2 moves the triggers of
+   `release-vscode.yml`, `liveview-release.yml`, `liveview-docker.yml` and
+   `desktop-release.yml` to the `promote` job. Editors and the IDE then ship
+   only after uat passes. Building the `.vsix` and IDE archives still happens
+   before uat, as pre-release assets, so J6 and J7 can test them. Only their
+   *publication* waits for promote.
 5. On red, the release stays a pre-release, Bugs are filed, and the fix is a new
    tag. An owner can promote by hand with a recorded waiver in the release notes.
    No agent may.
@@ -516,9 +523,16 @@ the bundle before uat reports. Under this ADR:
 - any red in contracts, journeys or adversarial tests on a target the test
   declares;
 - any p75 over its threshold × multiplier;
-- a J9 red on a package's latest **tag**, unless triage classifies it
-  `downstream` and the owner waives it. A red only on a package's default branch
-  is filed but does not block.
+- a J9 red on any registry package's latest **tag** (owner decision 1). A
+  released package is code users already depend on, so a toolchain release that
+  breaks it does not ship. The way out is a toolchain fix, or a package
+  release that triage classifies `downstream`, followed by a re-run. The
+  owner's manual waiver in step 5 remains the only override. A red only on a
+  package's default branch is filed but does not block.
+- a red on a target the test declares as best-effort does **not** block until
+  it graduates. J5 on Windows starts best-effort and becomes blocking after
+  about two weeks of consecutive green nightlies (owner decision 5). The owner
+  approves the graduation as a governance-rule-2 change.
 
 **What never blocks:** `infra` failures. These get one job re-run, then go to
 the owner.
@@ -547,6 +561,13 @@ on an open `BT` issue carrying that fingerprint, or creates a Bug with:
 - the repro line;
 - the artifact link.
 
+**Secrets (owner decision 4).** beamtalk-uat holds its own Linear API key and
+Claude OAuth secret, scoped to that repository and used only by `triage.yml`.
+As in beamtalk's `ci-triage.yml`, they are exposed only to the triage job, and
+only for runs of uat's own `main` or schedule, never for PR or fork runs. The
+triage agent's tools are read-only plus Linear, and it treats logs as untrusted
+data.
+
 There are no automatic retries inside a run. A test that fails and then passes
 on a rerun is filed as `flaky`: in a shipped toolchain that is a user-visible
 defect until shown to be harness noise.
@@ -559,7 +580,7 @@ defect until shown to be harness noise.
 | J1 Install, J2 Lifecycle | ✓ | ✓ | ✓ | ✓ | 5 min |
 | J3 Registry + HTTP | ✓ | ✓ | ✓ | ✓ | 6 min |
 | J4 Releases | ✓ | ✓ | ✓ | ✓ (TLS later) | 5 min |
-| J5 Cluster | ✓ | ✓ | ✓ | best effort | 5 min |
+| J5 Cluster | ✓ | ✓ | ✓ | best effort, blocking after ~2 weeks green | 5 min |
 | J6 Live dev | ✓ | ✓ | ✓ | ✓ (ConPTY) | 6 min |
 | J7 LiveView | ✓ | ✓ | ✓ | — (ADR 0091) | 7 min |
 | J8 Upgrade | ✓ | ✓ | ✓ | ✓ | 7 min |
@@ -571,7 +592,7 @@ macOS and Windows runners are slower: budget 1.5× and 2×.
 
 | Run | Runner-minutes | Wall time | Notes |
 |-----|---------------:|----------:|-------|
-| Per edge publish | ≈ 45 | ≈ 12 min (4 shards) | Linux only; after merge, so no PR wall time. Of this, ≈ 30 is journeys + J9 and ≈ 15 is contracts + fast adversarial. |
+| Per edge publish | ≈ 70 | ≈ 12 min (4 Linux shards, 1 macOS leg in parallel) | After merge, so no PR wall time. Linux ≈ 45 (≈ 30 journeys + J9, ≈ 15 contracts + fast adversarial). macos-arm64 fast set ≈ 25 (≈ 16 Linux-equivalent × 1.5). Plus the macOS edge *build* in beamtalk's `edge.yml`, ≈ 15 to 25 with a warm cache. |
 | Nightly | ≈ 330 | ≈ 60 min | ≈ 200 for functional layers; ≈ 50 Linux + 75 macOS×2 + 40 Windows ≈ 130 for perf (the most expensive line, because of macOS). |
 | Release candidate | ≈ 330 | ≈ 60 min to promotion | Same as nightly, blocking. |
 | Weekly on `latest` | ≈ 330 | ≈ 60 min | Includes J9 on macOS and Windows. |
@@ -773,9 +794,13 @@ Each is steelmanned above:
 - Real-network tests depend on GitHub. `infra` classification limits the damage
   but cannot remove it.
 - Ongoing cost is about 330 runner-minutes per nightly, weekly and
-  release-candidate run, with macOS perf the largest line.
+  release-candidate run, with macOS perf the largest line. Each edge publish
+  costs about 70 runner-minutes, plus a macOS edge build in beamtalk.
 - Releases are delayed by about 60 minutes, longer when red. Waivers are
   owner-only.
+- Because canaries block promotion, a released satellite package that breaks
+  under a correct toolchain change holds up the toolchain release. Its maintainer
+  then has to ship a package release, or the owner has to waive.
 - Strict governance slows legitimate contract changes: each needs the owner's
   explicit approval.
 - Official client libraries can't see a framing bug every real client
@@ -785,7 +810,8 @@ Each is steelmanned above:
 - `cross-repo.yml` is retired in favour of J9.
 - `release.yml` moves from "publish then notify" to "pre-release, gate, promote",
   and the VS Code, IDE, Docker and desktop publishes move behind `promote`.
-- `edge.yml` and `nightly.yml` gain a dispatch.
+- `edge.yml` gains a `macos-arm64` build. `edge.yml` and `nightly.yml` gain a
+  dispatch.
 - Micro and dispatch benchmarks and coverage stay in beamtalk, unchanged.
 
 ## Implementation
@@ -795,21 +821,24 @@ and ships independently.
 
 | Phase | Scope | Size | Why this order |
 |-------|-------|------|----------------|
-| **0. Skeleton and governance** | In beamtalk-uat: Playwright Test project; `env`, `toolchain`, `proc` and `artifacts` libraries; Zod `schemas/`; teardown and leak checks; failure bundle; 4-target workflow; new `CLAUDE.md` rules; CODEOWNERS; `governance.yml`. **J1**, **J2**, and Layer 1 for the 7 commands today's scenarios cover. Delete the Rust harness. In beamtalk: `edge.yml` and `nightly.yml` dispatch with the § 3 payload. | M | Everything builds on it, and governance must exist before the suite grows. |
+| **0. Skeleton and governance** | In beamtalk-uat: Playwright Test project; `env`, `toolchain`, `proc` and `artifacts` libraries; Zod `schemas/`; teardown and leak checks; failure bundle; 4-target workflow; new `CLAUDE.md` rules; CODEOWNERS; `governance.yml`. **J1**, **J2**, and Layer 1 for the 7 commands today's scenarios cover. Delete the Rust harness. In beamtalk: `edge.yml` builds `macos-arm64` as well as linux, and `edge.yml` and `nightly.yml` dispatch with the § 3 payload. uat: repo-scoped Linear and Claude secrets. | M | Everything builds on it, and governance must exist before the suite grows. |
 | **1. Canaries on edge, and triage** | **J9** sharded over the registry index; `uat-edge` status; `triage.yml` with fingerprints and classes. Retire `cross-repo.yml`. Permanent tests for BT-5283 (in J9) and BT-5264 (a macOS J4 step). | M | Highest value per effort: J9 would have caught BT-5283 within the hour. |
 | **2. All command contracts; registry and releases** | Layer 1 for the remaining 14 commands. **J3** (buccaneer from the real registry) and **J4** (verbs, TLS on Linux and macOS, `--upgrade-from`, `.cmd` launchers). | M | Covers the newcomer's first-service path and the BT-5264 class. |
 | **3. Adversarial layer** | Layer 3, all eight categories (§ 7), with the fast subset on edge. | M | Cheap once Phase 2's release and node handles exist. Security findings are high-severity. |
 | **4. Performance gates** | `lib/bench.ts` (2 warmup + 5 measured, p50/p75/p95, multiplier); the 14 measurements of § 8 on dedicated jobs; 10 nightly report-only runs; owner sets `thresholds.toml`; gating turned on. | M | Calibration needs real nightly data, so it starts early enough to finish before Phase 7. |
 | **5. Live development** | **J6**: REPL through a pty (ConPTY on Windows) with hot reload of a running actor; MCP flow through the SDK; LSP in workspace mode. | M | Interactive-first is principle #1. |
 | **6. Cluster, upgrade, LiveView** | **J5**, **J8**; beamtalk publishes IDE archives on `nightly` (S); `ide.ts` and **J7** with Playwright, plus the Docker variant. | L (+S in beamtalk) | The most harness work, and J7 needs the pipeline change. |
-| **7. Blocking promotion** | beamtalk: tags publish a pre-release; `promote` job on `uat-gate: success` marks it latest and runs the Marketplace, IDE, ghcr and desktop publishes; owner waiver path. `ci:uat` label calling uat's reusable workflow with a PR-built bundle. | M | Blocking only after phases 0 to 6 have a few weeks of measured flake rate and calibrated thresholds. |
+| **7. Blocking promotion** | beamtalk: tags publish a pre-release; `promote` job on `uat-gate: success` marks it latest; the triggers of `release-vscode.yml`, `liveview-release.yml`, `liveview-docker.yml` and `desktop-release.yml` move from `release: published` to `promote`; owner waiver path. J5 on Windows graduates to blocking once two weeks green. `ci:uat` label calling uat's reusable workflow with a PR-built bundle. | M | Blocking only after phases 0 to 6 have a few weeks of measured flake rate and calibrated thresholds. |
 
 **Affected components:**
 
 - **beamtalk-uat:** everything.
 - **beamtalk:**
-  - `edge.yml`, `nightly.yml` (dispatch; IDE archives on nightly);
-  - `release.yml` and the channel workflows (pre-release, then promote);
+  - `edge.yml` (a `macos-arm64` build; dispatch), `nightly.yml` (dispatch; IDE
+    archives on nightly);
+  - `release.yml` (pre-release, then promote) and `release-vscode.yml`,
+    `liveview-release.yml`, `liveview-docker.yml`, `desktop-release.yml`
+    (publication triggered from `promote`);
   - `cross-repo.yml` (removed);
   - `docs/development/testing-strategy.md` (new § "Acceptance gate
     (beamtalk-uat)"; Cross-Repo section replaced);
@@ -832,23 +861,27 @@ There are no user-facing changes. For maintainers:
 - Perf gates run report-only until thresholds are calibrated (Phase 4), so
   turning them on cannot block a release on day one.
 
-## Open Questions for the Owner
+## Owner Decisions (2026-11-26)
 
-1. **Canary blocking.** Should a J9 red on a package's latest *tag* block
-   promotion (proposed), or only file bugs? Blocking means one stale satellite
-   package can hold up a toolchain release until it is waived.
-2. **Pre-release promotion.** Is changing `release.yml` to publish a pre-release
-   and then promote acceptable? The CHANGELOG, the VS Code extension release and
-   the IDE release currently fire on `release: published`, so they would need to
-   follow the promote step instead.
-3. **Edge on macOS.** edge is Linux-only, so macOS and Windows regressions reach
-   uat only nightly. Is a macOS edge build worth its runner cost, given that
-   BT-5264 was macOS-only?
-4. **Linear automation identity.** `triage.yml` needs a Linear API key and,
-   like `ci-triage.yml`, possibly a Claude OAuth secret in beamtalk-uat. Are the
-   same secrets acceptable there?
-5. **J5 on Windows.** Should Windows multi-node be a supported target (blocking)
-   or stay best-effort?
+These were raised as open questions in the first draft and settled by the owner.
+They are folded into the Decision sections above:
+
+1. **Canary blocking:** yes. A J9 red on a package's latest tag blocks
+   promotion (§ 10).
+2. **Pre-release, then promote:** yes. `release-vscode.yml`,
+   `liveview-release.yml`, `liveview-docker.yml` and `desktop-release.yml`
+   publish from the `promote` job, not on `release: published`. Editors and the
+   IDE ship only after uat passes (§ 10, Phase 7).
+3. **Edge on macOS:** yes. `edge.yml` also builds `macos-arm64`, and uat runs the
+   fast set on it for every edge publish (§ 3, § 10, § 12).
+4. **Triage secrets:** beamtalk-uat holds its own Linear and Claude secrets,
+   scoped to that repository and to the triage job (§ 11).
+5. **J5 on Windows:** best-effort at first. It becomes blocking after about two
+   weeks of green nightlies, with owner approval (§ 10, § 12).
+
+The user-level performance gates (§ 8) and the split that leaves micro and
+dispatch benchmarks and coverage in beamtalk are also owner decisions
+(§ Context, Constraints).
 
 ## References
 
