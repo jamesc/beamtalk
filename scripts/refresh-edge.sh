@@ -130,10 +130,11 @@ build_identity() {
   return 0
 }
 
-# The edge release is built for linux-x86_64 only.
+# Only linux-x86_64 is refreshed (cloud sessions). The edge release also has a
+# macos-arm64 build (BT-5307); install it there with `install.sh --edge`.
 case "$(uname -s)-$(uname -m)" in
   Linux-x86_64) ;;
-  *) warn "edge builds exist for linux-x86_64 only; skipping"; exit 0 ;;
+  *) warn "refresh-edge only refreshes linux-x86_64 installs; skipping"; exit 0 ;;
 esac
 
 ASSET="beamtalk-edge-linux-x86_64.tar.gz"

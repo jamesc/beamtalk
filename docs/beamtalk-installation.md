@@ -38,10 +38,10 @@ For CI or development against the latest unreleased code:
 
 ```
 curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --nightly   # last nightly build
-curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --edge      # latest main commit (linux-x86_64 only)
+curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --edge      # latest main commit (linux-x86_64, macos-arm64)
 ```
 
-The `--edge` channel (`BEAMTALK_EDGE=1` environment equivalent) installs the rolling build of the latest `main` commit, so downstream package CI can test against the current tip without waiting for a nightly.
+The `--edge` channel (`BEAMTALK_EDGE=1` environment equivalent) installs the rolling build of the latest `main` commit, so downstream package CI can test against the current tip without waiting for a nightly. Edge is built for linux-x86_64 and macos-arm64 only; on any other target (macos-x86_64, Windows) the installer stops with "edge is not built for <target>", so use `--nightly` there.
 
 The installer verifies the archive's SHA-256 against the `.sha256` file published with each release and stops if that file cannot be fetched or does not match. Pass `--insecure-skip-checksum` only if you accept installing an unverified archive. Each install replaces the previous one, so files a newer release dropped do not linger, and `--uninstall` (with the same `--prefix`) removes it:
 

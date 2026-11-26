@@ -3,22 +3,47 @@
 #
 # Edge Build — rolling per-merge distribution
 # ===========================================
-# Publishes a Linux x86_64 distribution bundle to a rolling `edge` GitHub
-# pre-release on every merge to `main`. This is the artifact the beamtalk-uat
-# acceptance gate consumes for its per-PR end-to-end run (BEAMTALK_UAT_VERSION=
-# edge), so the gate always tests the *current* tip rather than the up-to-24h-old
-# `nightly` or a stale tagged release.
+# Publishes distribution bundles to a rolling `edge` GitHub pre-release on every
+# merge to `main`, for linux-x86_64 and macos-arm64 (BT-5307, ADR 0154 § 3). This
+# is the artifact the beamtalk-uat acceptance gate consumes (BEAMTALK_UAT_VERSION=
+# edge), and that downstream package CI installs with `install.sh --edge`, so they
+# test the *current* tip rather than the up-to-24h-old `nightly` or a tag.
 #
 # Scope is deliberately narrow vs nightly.yml:
-#   * Linux x86_64 only — the UAT PR e2e job runs a single Linux leg. The full
-#     cross-platform matrix stays in nightly.yml (daily) and release.yml (tags).
-#   * No extra test matrix — every push to `main` already passed ci.yml. This
-#     job only builds, smoke-tests the install, packages, and publishes.
+#   * linux-x86_64 and macos-arm64 only. macOS is here so macOS-only regressions
+#     (BT-5264) surface within the hour, not the next night. macos-x86_64 and
+#     Windows stay in nightly.yml (daily) and release.yml (tags).
+#   * No extra test matrix — every push to `main` already passed ci.yml. Each
+#     `build` leg only builds, smoke-tests the install and packages, with the
+#     same scripts/ci/package-release.sh nightly uses.
+#   * Runner images are pinned (ubuntu-24.04, macos-15), not `*-latest`: uat
+#     tests each target on the image that built it (ADR 0154 § 3).
 #
-# The `edge` release is updated in place each run (assets first, then the tag is
-# moved), so it always points at the latest `main` commit and a failed publish
-# leaves the previous release. `nightly` (cross-platform, daily) and tagged
-# releases are untouched. Only runs on `main` publish.
+# One commit per release, never a mix (BT-5307). The `build` legs only upload
+# workflow artifacts; a single `edge` job then publishes every asset of this
+# commit in one scripts/ci/publish-rolling-release.sh call. That script uploads
+# all the assets first (each archive followed by its own checksum), deletes any
+# asset this run does not ship, and only then moves the `edge` tag and updates
+# the release title and notes. So:
+#   * The release is updated last; a failed publish leaves the previous one.
+#   * The linux and macOS assets of one commit are never left next to another
+#     commit's. If the macOS leg fails, linux still publishes (downstream CI is
+#     linux and must not go stale on a macOS flake) and the previous commit's
+#     macOS asset is removed rather than kept, so `install.sh --edge` on macOS
+#     fails with a download error instead of installing an older commit. The
+#     run is still red, because the macOS leg failed.
+#   * Runs are serialized (concurrency group `edge`), so two publishes never
+#     interleave their uploads. While one publish is uploading (seconds), a
+#     client can still see the new archive of one target next to the old
+#     archive of the other, and, for one small upload, a new archive next to
+#     its old `.sha256` (install.sh then refuses it); GitHub has no atomic
+#     multi-asset replace. uat pins the exact hashes of one commit after the
+#     publish, so it never mixes them.
+#   * The price is that linux publishes when the slower leg is done, not when
+#     linux is: a warm macOS build is about as fast as linux (ADR 0154 § 12
+#     budgets ≈ 7 min), and its timeout bounds a hung leg.
+# A run started from a branch (workflow_dispatch) builds both legs but never
+# publishes. `nightly` and tagged releases are untouched.
 
 name: Edge
 
@@ -34,14 +59,18 @@ on:
 concurrency:
   # Serialize edge publishes: a newer merge waits for the in-flight publish
   # instead of cancelling it; only the newest pending run is kept (older pending
-  # runs are replaced). A ~15 min build must be able to finish during a burst of
-  # merges, otherwise each run is cancelled by the next one and nothing publishes.
-  # The release still catches up to the latest main within one extra build.
-  group: edge
+  # runs are replaced). A ~15-20 min run (both legs, then publish) must be able
+  # to finish during a burst of merges, otherwise each run is cancelled by the
+  # next one and nothing publishes. The release still catches up to the latest
+  # main within one extra build. main keeps the group `edge`; a branch run
+  # (workflow_dispatch, never publishes) gets its own group, so it can neither
+  # delay main's publish nor replace a pending one.
+  group: ${{ github.ref == 'refs/heads/main' && 'edge' || format('edge-{0}', github.ref) }}
   cancel-in-progress: false
 
+# Read-only by default: only the `edge` job writes the release.
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -51,11 +80,25 @@ env:
   BEAMTALK_BUILD_CHANNEL: edge
 
 jobs:
-  edge:
-    name: Build & publish edge (linux-x86_64)
-    # Pinned, not floating: uat tests each target on the image that built it (ADR 0154 § 3).
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+  build:
+    name: Build edge (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      # Each leg publishes on its own merit: a macOS failure must not stop linux.
+      fail-fast: false
+      matrix:
+        include:
+          # The `platform:` values are the edge targets; scripts/install.sh's
+          # EDGE_PLATFORMS must list the same ones (scripts/ci/test-install.sh).
+          # Pinned, not floating: uat tests each target on the image that built it (ADR 0154 § 3).
+          - platform: linux-x86_64
+            runner: ubuntu-24.04
+            timeout: 30
+          # Cold Rust + OTP build; release.yml's macos-arm64 job is ~25 min.
+          - platform: macos-arm64
+            runner: macos-15
+            timeout: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -85,10 +128,88 @@ jobs:
 
       - name: Package tarball
         id: package
-        run: scripts/ci/package-release.sh edge linux-x86_64
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: scripts/ci/package-release.sh edge "${PLATFORM}"
+
+      - name: Upload package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: beamtalk-edge-${{ matrix.platform }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  edge:
+    name: Publish edge
+    needs: [build]
+    # Publish whenever linux built, even if macOS did not (see the header).
+    # The job decides from the artifacts present, since `needs.build.result` is
+    # one result for the whole matrix.
+    if: ${{ !cancelled() }}
+    # Pinned, not floating: ADR 0154 § 3.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # The only job that writes the `edge` release.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Only the platform packages, not any other artifact of the run.
+      - name: Download platform packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          path: dist-artifacts
+          pattern: beamtalk-edge-*
+          merge-multiple: true
+
+      # The asset list is whatever the `build` legs produced (the matrix is the
+      # one list of edge targets). linux is required: nothing is published
+      # without it. A leg that failed contributes nothing, so its previous
+      # asset is removed by the publish. Each archive needs its checksum.
+      - name: Assemble the asset list
+        id: assets
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          list=()
+          platforms=()
+          for a in dist-artifacts/beamtalk-edge-*.tar.gz; do
+            if [ ! -f "${a}.sha256" ]; then
+              echo "::error::${a} has no .sha256; not publishing"
+              exit 1
+            fi
+            list+=("${a}" "${a}.sha256")
+            plat="${a##*/beamtalk-edge-}"
+            platforms+=("${plat%.tar.gz}")
+          done
+          if [ ! -f dist-artifacts/beamtalk-edge-linux-x86_64.tar.gz ]; then
+            echo "::error::the linux-x86_64 build did not produce a package; not publishing"
+            exit 1
+          fi
+          if [ "${BUILD_RESULT}" != success ]; then
+            echo "::warning::a build leg failed; publishing only ${platforms[*]} and removing the other targets' previous assets"
+          fi
+          expected="$(printf '%s\n' "${list[@]##*/}" | sort)"
+          actual="$(find dist-artifacts -type f -printf '%f\n' | sort)"
+          if [ "${actual}" != "${expected}" ]; then
+            echo "::error::unexpected files in the edge packages"
+            diff <(echo "${expected}") <(echo "${actual}") || true
+            exit 1
+          fi
+          printf '%s\n' "${list[@]}" > edge-assets.txt
+          cat edge-assets.txt
+          echo "platforms=$(printf '%s, ' "${platforms[@]}" | sed 's/, $//')" >> "$GITHUB_OUTPUT"
 
       # workflow_dispatch can start this from any branch; only main may become
-      # `edge` (BT-5094). The build above still runs, so a branch can be timed.
+      # `edge` (BT-5094). The builds above still run, so a branch can be timed.
       - name: Skip publishing from a branch other than main
         if: github.ref != 'refs/heads/main'
         run: |
@@ -96,14 +217,16 @@ jobs:
 
       - name: Publish rolling edge release
         if: github.ref == 'refs/heads/main'
+        # The only step that writes the `edge` release.
         env:
           GH_TOKEN: ${{ github.token }}
-          ARCHIVE: ${{ steps.package.outputs.archive }}
+          PLATFORMS: ${{ steps.assets.outputs.platforms }}
         run: |
+          set -euo pipefail
           SHORT_SHA="$(git rev-parse --short HEAD)"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-          # Publish the installer from this commit next to the tarball, with a
+          # Publish the installer from this commit next to the tarballs, with a
           # checksum, so scripts/refresh-edge.sh can verify it before running
           # it (BT-4833).
           mkdir -p dist-installer
@@ -119,15 +242,16 @@ jobs:
           > [!WARNING]
           > Edge builds track the development tip. They are consumed by the
           > beamtalk-uat acceptance gate and by downstream package CI via
-          > \`install.sh --edge\` (linux-x86_64 only). For general use, prefer
-          > a tagged release or \`--nightly\`.
+          > \`install.sh --edge\`. This build has: ${PLATFORMS}. For general
+          > use, prefer a tagged release or \`--nightly\`.
           NOTES
 
-          # Update in place so a failed publish leaves the previous edge release
-          # (scripts/ci/publish-rolling-release.sh, BT-5094).
+          mapfile -t ASSETS < edge-assets.txt
+          # Assets first, then the tag and release (scripts/ci/publish-rolling-release.sh,
+          # BT-5094; see the header for why one commit's assets never mix).
           scripts/ci/publish-rolling-release.sh edge "${GITHUB_SHA}" \
             "Edge Build (${SHORT_SHA})" edge-notes.md \
-            "${ARCHIVE}" "${ARCHIVE}.sha256" \
+            "${ASSETS[@]}" \
             dist-installer/install.sh dist-installer/install.sh.sha256
 
   # ─── uat dispatch (ADR 0154 § 3, BT-5306) ───────────────────────────
@@ -136,7 +260,9 @@ jobs:
   # rebuilding or re-publishing the release.
   notify-uat:
     needs: [edge]
-    if: github.ref == 'refs/heads/main'
+    # Also after a publish whose macOS leg failed (linux-only assets): an
+    # implicit success() would skip it, since a `build` leg upstream failed.
+    if: ${{ !cancelled() && needs.edge.result == 'success' && github.ref == 'refs/heads/main' }}
     # Pinned, not floating: ADR 0154 § 3.
     runs-on: ubuntu-24.04
     timeout-minutes: 10

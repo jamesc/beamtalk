@@ -228,15 +228,7 @@ impl CoreErlangGenerator {
         let outer_doc = self.generate_pattern(outer)?;
 
         let mut inner = match guard_doc {
-            Some(guard_doc) => docvec![
-                "case 'true' of <'true'> when ",
-                guard_doc,
-                " -> ",
-                body_doc,
-                " <'true'> when 'true' -> ",
-                rest_doc.clone(),
-                " end"
-            ],
+            Some(guard_doc) => Self::guarded_success_doc(guard_doc, body_doc, &rest_doc),
             None => body_doc,
         };
         for (var, class) in hoisted.iter().rev() {
@@ -244,19 +236,42 @@ impl CoreErlangGenerator {
         }
 
         let fallthrough = self.fresh_temp_var("NoMatch");
-        Ok(shared.bind_around(docvec![
-            "case ",
+        Ok(shared.bind_around(form::case_of(
             leaf::var(match_var.to_string()),
-            " of <",
-            outer_doc,
-            "> when 'true' -> ",
-            inner,
-            " <",
-            leaf::var(fallthrough),
-            "> when 'true' -> ",
-            rest_doc,
-            " end"
-        ]))
+            [
+                form::clause([outer_doc], None, inner, form::Layout::Flat),
+                form::clause([leaf::var(fallthrough)], None, rest_doc, form::Layout::Flat),
+            ],
+            form::Layout::Flat,
+        )))
+    }
+
+    /// `case 'true' of <'true'> when GUARD -> body <'true'> when 'true' ->
+    /// rest end`: the guard sits in Core Erlang guard position, so a guard
+    /// that raises fails silently and falls through to `rest`.
+    fn guarded_success_doc(
+        guard_doc: Document<'static>,
+        body_doc: Document<'static>,
+        rest_doc: &Document<'static>,
+    ) -> Document<'static> {
+        form::case_of(
+            leaf::atom("true"),
+            [
+                form::clause(
+                    [leaf::atom("true")],
+                    Some(guard_doc),
+                    body_doc,
+                    form::Layout::Flat,
+                ),
+                form::clause(
+                    [leaf::atom("true")],
+                    None,
+                    rest_doc.clone(),
+                    form::Layout::Flat,
+                ),
+            ],
+            form::Layout::Flat,
+        )
     }
 }
 
@@ -352,7 +367,9 @@ impl CoreErlangGenerator {
         // ordering rationale as `generate_array_match_arm`.
         self.push_scope();
         let core_binding = Self::to_core_erlang_var(&binding.name);
-        self.bind_var(&binding.name, &core_binding);
+        if binding.name != "_" {
+            self.bind_var(&binding.name, &core_binding);
+        }
         let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
         self.pop_scope();
 
@@ -369,30 +386,24 @@ impl CoreErlangGenerator {
         // its own optional guard.
         let success_doc = if let Some(guard) = &arm.guard {
             let guard_doc = self.generate_guard_expression(guard)?;
-            docvec![
-                "case 'true' of ",
-                "<'true'> when ",
-                guard_doc,
-                " -> ",
-                body_doc,
-                " <'true'> when 'true' -> ",
-                rest_doc.clone(),
-                " end"
-            ]
+            Self::guarded_success_doc(guard_doc, body_doc, &rest_doc)
         } else {
             body_doc
         };
 
         // `binding` denotes the whole matched value — not a decomposed
-        // field, unlike `Pattern::Array`'s per-element extraction.
-        let bound_success = docvec![
-            "let ",
-            leaf::var(core_binding),
-            " = ",
-            leaf::var(match_var.to_string()),
-            " in ",
+        // field, unlike `Pattern::Array`'s per-element extraction. `_ :: T`
+        // (BT-5332) binds nothing, so it emits no `let`.
+        let bound_success = if binding.name == "_" {
             success_doc
-        ];
+        } else {
+            form::let_in(
+                leaf::var(core_binding),
+                leaf::var(match_var.to_string()),
+                success_doc,
+                form::Layout::Flat,
+            )
+        };
 
         let test_doc =
             self.dispatch_type_pattern_strategy(match_var, &class.name, bound_success, &rest_doc);

@@ -4,10 +4,12 @@
 #
 # Tests for scripts/install.sh (BT-5087): the checksum is mandatory unless
 # --insecure-skip-checksum is given, an install replaces the previous one
-# instead of extracting over it, and --uninstall removes it.
+# instead of extracting over it, and --uninstall removes it. BT-5307: --edge
+# installs on every target edge.yml builds, and only on those.
 #
 # install.sh downloads with `curl --proto '=https'`, so the tests put a fake
-# `curl` first on PATH that serves a local fixture directory.
+# `curl` first on PATH that serves a local fixture directory. The --edge tests
+# also put a fake `uname` first, so every target's detection runs on any host.
 set -u
 
 SCRIPT="$(cd "$(dirname "$0")/../.." && pwd)/scripts/install.sh"
@@ -17,6 +19,13 @@ FAILED=0
 
 check() { # name, exit-status-of-the-assertion (0 = pass)
     if [ "$2" -eq 0 ]; then echo "ok   - $1"; else echo "FAIL - $1"; FAILED=1; fi
+}
+
+no_entries() { # dir, name-prefix: true when no entry of dir starts with the prefix
+    for e in "$1"/"$2"*; do
+        if [ -e "$e" ] || [ -L "$e" ]; then return 1; fi
+    done
+    return 0
 }
 
 # ── fixture release: beamtalk-9.9.9-<platform>.tar.gz ──
@@ -95,7 +104,7 @@ echo keep > "$P/lib/other/keep.txt"
 run_install "$P"; rc=$?
 [ $rc -eq 0 ] && [ -x "$P/bin/beamtalk" ] && [ -f "$P/lib/beamtalk/lib/new.beam" ] \
     && [ ! -e "$P/lib/beamtalk/lib/stale.beam" ] && [ -f "$P/lib/other/keep.txt" ] \
-    && [ -z "$(ls -A "$P" | grep '^\.beamtalk-stage')" ]
+    && no_entries "$P" .beamtalk-stage
 check "good checksum installs, replaces stale files, keeps unrelated ones" $?
 
 P4="$P"
@@ -122,7 +131,7 @@ for unit in share/beamtalk bin/beamtalk; do
         sh "$SCRIPT" --version 9.9.9 >"$T/out" 2>&1; rc=$?
     [ $rc -ne 0 ] && [ -f "$P/lib/beamtalk/old.txt" ] && [ ! -e "$P/lib/beamtalk/lib/new.beam" ] \
         && [ -f "$P/share/beamtalk/old.txt" ] && [ "$(cat "$P/bin/beamtalk")" = oldbin ] \
-        && [ -z "$(ls -A "$P" | grep '^\.beamtalk-')" ]
+        && no_entries "$P" .beamtalk-
     check "failure while swapping $unit restores the whole previous install" $?
 done
 
@@ -131,7 +140,7 @@ P="$T/p4d"
 mkdir -p "$P/bin/beamtalk" "$P/lib/beamtalk"
 echo old > "$P/lib/beamtalk/old.txt"
 run_install "$P"; rc=$?
-[ $rc -ne 0 ] && [ -f "$P/lib/beamtalk/old.txt" ] && [ -z "$(ls -A "$P" | grep '^\.beamtalk-')" ]
+[ $rc -ne 0 ] && [ -f "$P/lib/beamtalk/old.txt" ] && no_entries "$P" .beamtalk-
 check "a directory in place of a binary is refused before any change" $?
 
 # 5. uninstall removes beamtalk, keeps unrelated files, needs no network
@@ -220,5 +229,81 @@ printf 'legacy\n' > "$P/.beamtalk-installed"
 run_install "$P" && PATH="$T/fakebin:$PATH" BEAMTALK_PREFIX="$P" sh "$SCRIPT" --uninstall >/dev/null 2>&1
 [ ! -e "$P/legacy/old.txt" ]
 check "--uninstall removes what a legacy bare manifest entry installed" $?
+
+# 13. BT-5307: --edge (and BEAMTALK_EDGE=1) installs on exactly the targets
+# edge.yml builds. The list is read from the workflow's matrix, so a target
+# added there and not to install.sh (or the reverse) fails here.
+EDGE_YML="$(dirname "$SCRIPT")/../.github/workflows/edge.yml"
+EDGE_TARGETS="$(sed -n 's/^ *- platform: *\([a-z0-9_-]*\).*/\1/p' "$EDGE_YML")"
+[ -n "$EDGE_TARGETS" ] && echo "$EDGE_TARGETS" | grep -qx linux-x86_64 \
+    && echo "$EDGE_TARGETS" | grep -qx macos-arm64; rc=$?
+check "edge.yml builds linux-x86_64 and macos-arm64 (read: $(echo "$EDGE_TARGETS" | tr '\n' ' '))" $rc
+
+mkdir -p "$T/unamebin"
+cat > "$T/unamebin/uname" <<'FAKEUNAME'
+#!/bin/sh
+case "$1" in
+    -s) echo "$FAKE_UNAME_S" ;;
+    -m) echo "$FAKE_UNAME_M" ;;
+    *) echo "$FAKE_UNAME_S" ;;
+esac
+FAKEUNAME
+chmod +x "$T/unamebin/uname"
+
+uname_for() { # platform -> "S M" as uname reports them
+    case "$1" in
+        linux-x86_64) echo "Linux x86_64" ;;
+        macos-arm64) echo "Darwin arm64" ;;
+        macos-x86_64) echo "Darwin x86_64" ;;
+        windows-x86_64) echo "MINGW64_NT-10.0 x86_64" ;;
+        *) return 1 ;;
+    esac
+}
+
+# An edge fixture per target: beamtalk-edge-<platform>.tar.gz plus its checksum.
+mkdir -p "$T/edge"
+for plat in linux-x86_64 macos-arm64 macos-x86_64; do
+    rm -rf "$T/stage/beamtalk-edge"
+    cp -r "$T/stage/beamtalk-9.9.9" "$T/stage/beamtalk-edge"
+    a="beamtalk-edge-${plat}.tar.gz"
+    (cd "$T/stage" && tar -czf "$T/edge/$a" beamtalk-edge)
+    if command -v sha256sum >/dev/null 2>&1; then s="$(sha256sum "$T/edge/$a" | awk '{print $1}')"
+    else s="$(shasum -a 256 "$T/edge/$a" | awk '{print $1}')"; fi
+    echo "$s  $a" > "$T/edge/$a.sha256"
+done
+
+run_edge() { # platform, prefix, extra args... ($EDGE_ENV is passed as BEAMTALK_EDGE)
+    plat="$1"; prefix="$2"; shift 2
+    read -r s m <<<"$(uname_for "$plat")"
+    : > "$T/edge-curl.log"
+    PATH="$T/unamebin:$T/fakebin:$PATH" FAKE_UNAME_S="$s" FAKE_UNAME_M="$m" \
+        FAKE_RELEASE_DIR="$T/edge" FAKE_CURL_LOG="$T/edge-curl.log" \
+        BEAMTALK_PREFIX="$prefix" BEAMTALK_EDGE="${EDGE_ENV:-}" sh "$SCRIPT" "$@" >"$T/out" 2>&1
+}
+
+for plat in $EDGE_TARGETS; do
+    P="$T/p13-$plat"
+    run_edge "$plat" "$P" --edge; rc=$?
+    [ $rc -eq 0 ] && [ -x "$P/bin/beamtalk" ] \
+        && grep -q "/releases/download/edge/beamtalk-edge-${plat}.tar.gz " "$T/edge-curl.log" \
+        && grep -q "  beamtalk-edge-${plat}.tar.gz\$" "$P/.beamtalk-build.sha256"
+    check "--edge installs beamtalk-edge-${plat}.tar.gz on ${plat}" $?
+done
+
+P="$T/p13-env"
+EDGE_ENV=1 run_edge macos-arm64 "$P"; rc=$?
+[ $rc -eq 0 ] && [ -x "$P/bin/beamtalk" ] \
+    && grep -q "/releases/download/edge/beamtalk-edge-macos-arm64.tar.gz " "$T/edge-curl.log"
+check "BEAMTALK_EDGE=1 installs the edge build on macos-arm64" $?
+
+for plat in macos-x86_64 windows-x86_64; do
+    if echo "$EDGE_TARGETS" | grep -qx "$plat"; then continue; fi
+    P="$T/p13-no-$plat"
+    run_edge "$plat" "$P" --edge; rc=$?
+    [ $rc -ne 0 ] && [ ! -e "$P/bin/beamtalk" ] && [ ! -s "$T/edge-curl.log" ] \
+        && grep -q "edge is not built for ${plat}" "$T/out" \
+        && grep -q "covers: linux-x86_64, macos-arm64" "$T/out"
+    check "--edge on ${plat} is a clear error before any download" $?
+done
 
 exit $FAILED

@@ -693,3 +693,54 @@ fn test_match_wildcard_type_pattern_lowers() {
         &["'erlang':'is_integer'", "'beamtalk_string'"],
     );
 }
+
+#[test]
+fn test_match_top_level_wildcard_type_pattern_emits_no_binding() {
+    // BT-5332: a top-level `_ :: T` tests the class and binds nothing, so
+    // the arm has no `let _ = Match` (the binding was dead).
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      _ :: Integer -> 1;\n      _ -> 0\n    ]\n";
+    let code = codegen_named(src, "foo");
+    assert_has(
+        "the class test is still emitted",
+        &code,
+        &["'erlang':'is_integer'"],
+    );
+    assert_lacks(
+        "`_ :: T` must not bind the scrutinee",
+        &code,
+        &["let _ = ", "let _Match = ", "let __ = "],
+    );
+}
+
+#[test]
+fn test_match_top_level_named_type_pattern_still_binds() {
+    // BT-5332: only the discard drops its binding; `n :: T` still binds `n`.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      n :: Integer -> n;\n      _ -> 0\n    ]\n";
+    let code = codegen_named(src, "foo");
+    assert!(
+        code.contains("let N@ = _Match@"),
+        "named binding kept. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_guarded_type_patterns_use_guard_position_case() {
+    // BT-5332: the guard wrapper shared by the top-level and the nested type
+    // arm is `case 'true' of <'true'> when GUARD -> body <'true'> when 'true'
+    // -> rest end`, so a guard that raises falls through to the next arm.
+    for pattern in [
+        "n :: Integer",
+        "{_, n :: Integer}",
+        "{_ :: Atom, n :: Integer}",
+    ] {
+        let src = format!(
+            "Object subclass: Foo\n  test: x =>\n    x match: [\n      {pattern} when: [n > 5] -> n;\n      _ -> 0\n    ]\n"
+        );
+        let code = codegen_named(&src, "foo");
+        assert_has(
+            "guard sits in guard position with a fallthrough clause",
+            &code,
+            &["case 'true' of <'true'> when ", "<'true'> when 'true' -> "],
+        );
+    }
+}
