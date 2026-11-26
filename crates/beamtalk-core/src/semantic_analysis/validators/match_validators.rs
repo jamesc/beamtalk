@@ -45,7 +45,7 @@ pub(crate) fn check_match_exhaustiveness(module: &Module, diagnostics: &mut Vec<
 
 /// Returns all constructor selectors for a sealed stdlib type, or `None` if the
 /// type is not a known sealed type (exhaustiveness check does not apply).
-fn sealed_type_all_constructors(class: &str) -> Option<&'static [&'static str]> {
+pub(crate) fn sealed_type_all_constructors(class: &str) -> Option<&'static [&'static str]> {
     match class {
         "Result" => Some(&["ok:", "error:"]),
         _ => None,

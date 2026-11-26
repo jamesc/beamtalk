@@ -86,7 +86,7 @@ pub(crate) use match_arm_block_validators::check_match_arm_block;
 pub use match_validators::STATIC_ONLY_HANDLE_CLASSES;
 pub(crate) use match_validators::{
     check_match_exhaustiveness, check_type_pattern_classes, is_concrete_leaf_class,
-    warn_assignment_in_match_arms,
+    sealed_type_all_constructors, warn_assignment_in_match_arms,
 };
 pub(crate) use native_validators::{
     check_native_actor_instance_method_bodies, check_native_delegate_reserved_word,

@@ -394,11 +394,7 @@ impl TypeChecker {
             Self::nil_or_type_match_residual(scrutinee_ty, arms, hierarchy)
         } else if Self::is_result_constructor_match(scrutinee_ty, arms) {
             // BT-5278: `Result(T, E)` is a closed pair (`ok:` / `error:`).
-            // Missing variants are reported by the pattern-based
-            // `check_match_exhaustiveness` validator, which keys on the same
-            // `sealed_type_all_constructors` table; here we only accept the
-            // scrutinee as provable and flag a redundant wildcard.
-            self.warn_unreachable_result_wildcard(arms);
+            self.check_result_asserted(arms, match_span);
             return;
         } else {
             let ty_display = scrutinee_ty.display_for_diagnostic().unwrap_or_default();
@@ -464,32 +460,89 @@ impl TypeChecker {
             })
     }
 
-    /// BT-5278: an unguarded wildcard/variable arm after unguarded, irrefutable
-    /// `ok:` and `error:` arms can never run.
-    fn warn_unreachable_result_wildcard(&mut self, arms: &[MatchArm]) {
-        let covers = |sel: &str| {
-            arms.iter().any(|a| {
-                a.guard.is_none()
-                    && matches!(&a.pattern, Pattern::Constructor { keywords, .. }
-                        if keywords.len() == 1
-                            && keywords[0].0.name.as_str() == sel
-                            && matches!(keywords[0].1, Pattern::Variable(_) | Pattern::Wildcard(_)))
-            })
-        };
-        if !(covers("ok:") && covers("error:")) {
+    /// BT-5278: `matchExhaustive:` over a closed `Result` pair.
+    ///
+    /// Walks the arms in order tracking which of `ok:` / `error:` are covered
+    /// by an *unguarded, irrefutable* arm (variable or `_` sub-pattern), or
+    /// whether an unguarded catch-all already covers everything. An arm seen
+    /// after full coverage is flagged unreachable. If a variant is still
+    /// uncovered, an `Error` is reported when it has refutable unguarded arms
+    /// (`Result ok: {a, b}` cannot be proven total). A variant with no
+    /// unguarded arm at all is left to the pattern-based
+    /// `check_match_exhaustiveness` validator, which already reports it, so
+    /// the user does not see the same error twice.
+    fn check_result_asserted(&mut self, arms: &[MatchArm], match_span: Span) {
+        let all = crate::semantic_analysis::validators::sealed_type_all_constructors("Result")
+            .unwrap_or(&[]);
+        let mut covered: Vec<&str> = Vec::new();
+        let mut full = false;
+        for arm in arms {
+            if full {
+                self.diagnostics.push(
+                    Diagnostic::warning(
+                        "unreachable arm: `ok:` and `error:` already cover every `Result`",
+                        arm.pattern.span(),
+                    )
+                    .with_category(DiagnosticCategory::Type),
+                );
+                continue;
+            }
+            if arm.guard.is_some() {
+                continue;
+            }
+            match &arm.pattern {
+                Pattern::Wildcard(_) | Pattern::Variable(_) => full = true,
+                Pattern::Constructor { keywords, .. }
+                    if keywords.len() == 1
+                        && matches!(keywords[0].1, Pattern::Variable(_) | Pattern::Wildcard(_)) =>
+                {
+                    let sel = keywords[0].0.name.as_str();
+                    if !covered.contains(&sel) {
+                        covered.push(sel);
+                    }
+                    full = all.iter().all(|s| covered.contains(s));
+                }
+                _ => {}
+            }
+        }
+        if full {
             return;
         }
-        if let Some(arm) = arms.iter().find(|a| {
-            a.guard.is_none() && matches!(a.pattern, Pattern::Wildcard(_) | Pattern::Variable(_))
-        }) {
-            self.diagnostics.push(
-                Diagnostic::warning(
-                    "unreachable arm: `ok:` and `error:` already cover every `Result`",
-                    arm.pattern.span(),
-                )
-                .with_category(DiagnosticCategory::Type),
-            );
+        let refutable_only: Vec<&str> = all
+            .iter()
+            .copied()
+            .filter(|s| !covered.contains(s))
+            .filter(|s| {
+                arms.iter().any(|a| {
+                    a.guard.is_none()
+                        && matches!(&a.pattern, Pattern::Constructor { keywords, .. }
+                            if keywords.len() == 1 && keywords[0].0.name.as_str() == *s)
+                })
+            })
+            .collect();
+        if refutable_only.is_empty() {
+            return;
         }
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "non-exhaustive matchExhaustive: `Result` {} {} only matched by a nested \
+                     pattern that may not match every value",
+                    if refutable_only.len() == 1 {
+                        "variant"
+                    } else {
+                        "variants"
+                    },
+                    refutable_only.join(", ")
+                ),
+                match_span,
+            )
+            .with_hint(
+                "Add an arm that binds the whole value (`Result ok: v`) or a `_ ->` wildcard."
+                    .to_string(),
+            )
+            .with_category(DiagnosticCategory::Type),
+        );
     }
 
     /// Shared residual computation for both the advisory and

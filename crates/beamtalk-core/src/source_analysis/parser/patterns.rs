@@ -655,6 +655,14 @@ impl Parser {
             let kw_span = self.current_token().span();
             self.advance(); // consume keyword
             let binding = self.parse_constructor_binding();
+            if let Some(bad) = Self::unsupported_nested_pattern(&binding) {
+                self.diagnostics.push(Diagnostic::error(
+                    "array and binary patterns cannot be nested inside a constructor pattern \
+                     (bind the value and destructure it in the arm body instead)"
+                        .to_string(),
+                    bad,
+                ));
+            }
             end_span = binding.span();
             keywords.push((Identifier::new(kw_name, kw_span), binding));
         }
@@ -676,10 +684,26 @@ impl Parser {
         }
     }
 
+    /// Span of the first array/binary sub-pattern nested anywhere inside a
+    /// constructor binding (codegen cannot lower these inside a composite
+    /// native pattern), or `None`.
+    fn unsupported_nested_pattern(pattern: &Pattern) -> Option<Span> {
+        match pattern {
+            Pattern::Array { span, .. } | Pattern::Binary { span, .. } => Some(*span),
+            Pattern::Tuple { elements, .. } => {
+                elements.iter().find_map(Self::unsupported_nested_pattern)
+            }
+            Pattern::Map { pairs, .. } => pairs
+                .iter()
+                .find_map(|p| Self::unsupported_nested_pattern(&p.value)),
+            _ => None,
+        }
+    }
+
     /// Parses the binding position of a constructor pattern argument.
     ///
     /// Accepts: wildcard `_`, variable identifier, `nil` (the `Pattern::Nil`
-    /// literal), or a literal (integer, float, string, symbol, or
+    /// literal), a nested tuple `{...}` or map `#{...}` pattern (BT-5277), or a literal (integer, float, string, symbol, or
     /// negative number like `-1`). Bare `true`/`false` are rejected with a
     /// diagnostic rather than parsed as a variable binding — see
     /// the dedicated match arm below for why. A trailing `:: ClassName` on
@@ -798,7 +822,7 @@ impl Parser {
             // accepted: codegen cannot lower them inside a composite native
             // pattern (see `generate_pattern`), so reject them here.
             //
-            // Literals:
+            // Literals and nested tuple/map patterns:
             TokenKind::Integer(_)
             | TokenKind::Float(_)
             | TokenKind::String(_)

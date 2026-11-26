@@ -344,3 +344,54 @@ fn result_scrutinee_with_redundant_wildcard_warns_unreachable() {
     assert_eq!(diags[0].severity, Severity::Warning);
     assert!(diags[0].message.contains("unreachable"), "{diags:?}");
 }
+
+#[test]
+fn result_refutable_ok_arm_alone_errors() {
+    // `Result ok: {a, b}` cannot be proven total (BT-5278 review).
+    let tuple = Pattern::Tuple {
+        elements: vec![
+            Pattern::Variable(Identifier::new("a", span())),
+            Pattern::Variable(Identifier::new("b", span())),
+        ],
+        span: span(),
+    };
+    let diags = asserted_diagnostics(
+        result_type(),
+        vec![
+            result_arm("ok:", tuple, str_lit("a")),
+            result_arm("error:", Pattern::Wildcard(span()), str_lit("b")),
+        ],
+    );
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+    assert_eq!(diags[0].severity, Severity::Error);
+    assert!(diags[0].message.contains("ok:"), "{diags:?}");
+}
+
+#[test]
+fn result_leading_wildcard_marks_later_arms_unreachable() {
+    let diags = asserted_diagnostics(
+        result_type(),
+        vec![
+            wildcard_arm(str_lit("c")),
+            result_arm("ok:", Pattern::Wildcard(span()), str_lit("a")),
+        ],
+    );
+    assert_eq!(diags.len(), 1, "got: {diags:?}");
+    assert_eq!(diags[0].severity, Severity::Warning);
+}
+
+#[test]
+fn result_variable_catch_all_after_ok_is_accepted() {
+    let diags = asserted_diagnostics(
+        result_type(),
+        vec![
+            result_arm("ok:", Pattern::Wildcard(span()), str_lit("a")),
+            MatchArm::new(
+                Pattern::Variable(Identifier::new("other", span())),
+                str_lit("b"),
+                span(),
+            ),
+        ],
+    );
+    assert!(diags.is_empty(), "got: {diags:?}");
+}

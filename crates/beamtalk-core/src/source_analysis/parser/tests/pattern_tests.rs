@@ -857,3 +857,12 @@ fn parse_constructor_binding_nested_array_still_rejected() {
         "array sub-pattern has no codegen; must be a parse error"
     );
 }
+
+#[test]
+fn parse_constructor_binding_array_nested_in_tuple_rejected() {
+    let (_module, diags) = parse_source("r match: [Result ok: {#[x, y], z} -> x; _ -> 0]");
+    assert!(
+        diags.iter().any(|d| d.message.contains("cannot be nested")),
+        "got: {diags:?}"
+    );
+}

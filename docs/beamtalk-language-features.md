@@ -5577,7 +5577,7 @@ x matchExhaustive: [#ok -> 1; _ -> 0]
 //    concrete leaf classes
 ```
 
-**`Result` is a closed pair (BT-5278).** A `Result(T, E)` scrutinee is accepted when the arms are `Result ok:` / `Result error:` constructor patterns: `ok:` and `error:` are the two variants, exactly as for plain `match:`. A missing variant is the usual compile error (`Non-exhaustive match: on sealed type \`Result\``), and a `_` arm after both variants is flagged as unreachable:
+**`Result` is a closed pair (BT-5278).** A `Result(T, E)` scrutinee is accepted when the arms are `Result ok:` / `Result error:` constructor patterns: `ok:` and `error:` are the two variants, exactly as for plain `match:`. A missing variant is the usual compile error (`Non-exhaustive match: on sealed type \`Result\``), an arm after both variants are covered is flagged as unreachable, and a variant matched only by a refutable nested pattern (`Result ok: {a, b}`) is an error because the checker cannot prove it total — add `Result ok: v` or a `_` arm:
 
 ```beamtalk
 r matchExhaustive: [
