@@ -758,6 +758,15 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&erl, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // A fake `epmd` beside it, so no test asks the host's real one
+        // (`launcher.sh` probes with `epmd -names`; BT-5264).
+        let epmd = fake.join("epmd");
+        std::fs::write(
+            &epmd,
+            "#!/bin/sh\n[ \"$1\" = -names ] || exit 3\nexit \"${FAKE_EPMD_RC:-1}\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&epmd, std::fs::Permissions::from_mode(0o755)).unwrap();
         format!("{}:{}", fake.display(), std::env::var("PATH").unwrap())
     }
 
@@ -840,6 +849,79 @@ mod tests {
                 assert!(args.contains(&"web1@node1.example.com"), "{verb}: {args:?}");
             }
         }
+    }
+
+    /// BT-5264: a client verb must not start an epmd while one already
+    /// answers on the port (on macOS a second, loopback epmd would shadow a
+    /// wildcard TLS node's). `launcher.sh` asks `epmd -names`, faked here
+    /// beside the fake `erl`, and passes `-start_epmd false` only on an
+    /// answer. Linux cannot show the shadowing itself (it refuses the second
+    /// bind), so this checks the argument; the macOS end-to-end test in
+    /// `cli_release.rs` shows the effect.
+    #[cfg(unix)]
+    #[test]
+    fn launcher_sh_client_verbs_do_not_start_epmd_when_one_answers() {
+        let temp = TempDir::new().unwrap();
+        let base = Utf8PathBuf::from_path_buf(temp.path().join("rel")).unwrap();
+        write_launcher_scripts(&base, "orders", "1.0.0", "14.0", false).unwrap();
+        let path = fake_tls_erl(temp.path());
+        let run = |verb: &str, epmd_rc: &str| {
+            let out = std::process::Command::new("sh")
+                .arg(base.join("bin/orders").as_std_path())
+                .args([verb, "Smoke run"])
+                .env("PATH", &path)
+                .env("FAKE_EPMD_RC", epmd_rc)
+                .env_remove("RELEASE_DISTRIBUTION")
+                .env_remove("RELEASE_COOKIE")
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{verb}: {out:?}");
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+        for verb in ["stop", "ping", "remote_console", "rpc"] {
+            let answering = run(verb, "0");
+            let args: Vec<&str> = answering
+                .lines()
+                .filter_map(|l| l.strip_prefix("ARG[")?.strip_suffix(']'))
+                .collect();
+            let at = args.iter().position(|a| *a == "-start_epmd");
+            assert_eq!(
+                at.and_then(|i| args.get(i + 1)),
+                Some(&"false"),
+                "{verb}: an answering epmd must not be started again: {args:?}"
+            );
+            let silent = run(verb, "1");
+            assert!(
+                !silent.contains("-start_epmd"),
+                "{verb}: with no epmd answering, erl must start one: {silent}"
+            );
+        }
+        // `foreground` is the node itself: it starts epmd for the others.
+        assert!(!run("foreground", "0").contains("-start_epmd"));
+    }
+
+    /// BT-5264: `launcher.cmd` makes the same check for the same four verbs.
+    /// Text inspection only: there is no Windows runner in this suite.
+    #[test]
+    fn launcher_cmd_client_verbs_do_not_start_epmd_when_one_answers() {
+        let (root, _temp) = write_scripts(true);
+        let cmd = std::fs::read_to_string(root.join("bin/orders.cmd").as_std_path()).unwrap();
+        let sh = std::fs::read_to_string(root.join("bin/orders").as_std_path()).unwrap();
+        let sh_verbs = sh.matches("$(client_epmd_args)").count();
+        assert_eq!(sh_verbs, 4, "{sh}");
+        assert_eq!(
+            cmd.matches("call :client_epmd_args").count(),
+            sh_verbs,
+            "launcher.cmd must guard the same verbs as launcher.sh: {cmd}"
+        );
+        assert_eq!(
+            cmd.matches("set \"DIST_ARGS=!DIST_ARGS!!EPMD_ARGS!\"")
+                .count(),
+            4,
+            "{cmd}"
+        );
+        assert!(cmd.contains("-start_epmd false"), "{cmd}");
+        assert!(cmd.contains("-names"), "{cmd}");
     }
 
     /// BT-5233: for interface `0.0.0.0`/`::` the check prints `tls-epmd=all`

@@ -10,6 +10,7 @@ use beamtalk_core::build_layout::BuildLayout;
 
 #[test]
 fn build_succeeds_with_a_path_dependency_that_has_unknown_manifest_keys() {
+    crate::commands::test_support::register_unknown_key_callsite();
     let temp = TempDir::new().unwrap();
     let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
 
@@ -74,6 +75,8 @@ fn unknown_key_warning_is_emitted_once_per_dependency_per_build() {
             Ok(())
         }
     }
+
+    crate::commands::test_support::register_unknown_key_callsite();
 
     let temp = TempDir::new().unwrap();
     let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();

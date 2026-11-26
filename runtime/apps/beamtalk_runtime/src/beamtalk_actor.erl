@@ -706,11 +706,18 @@ there is no liveness pre-check (BT-4113).
 %% send paths (BT-4676): the name-only selectors (`isAlive`, `isRegistered`,
 %% `registeredName`) are NOT answered locally — a cast has no reply to carry
 %% an answer, so they are forwarded like any other selector.
+%% BT-5271: a node-qualified ref on another node is cast to `{Name, Node}`
+%% directly, with no resolve first.
 cast_send(Ref, Selector, Args) when ?IS_PROXY_REF(Ref) ->
-    case beamtalk_actor_send:resolve_proxy(Ref) of
-        {ok, Pid} -> cast_send(Pid, Selector, Args);
-        undefined -> ok;
-        {node_down, _Node} -> ok
+    case beamtalk_actor_send:cast_send_registered(Ref, Selector, Args) of
+        ok ->
+            ok;
+        false ->
+            case beamtalk_actor_send:resolve_proxy(Ref) of
+                {ok, Pid} -> cast_send(Pid, Selector, Args);
+                undefined -> ok;
+                {node_down, _Node} -> ok
+            end
     end;
 cast_send(ActorPid, Selector, Args) ->
     beamtalk_actor_send:cast_send_pid(ActorPid, Selector, Args, undefined).
@@ -757,9 +764,10 @@ All other messages go via gen_server:call and the result is unwrapped:
     term().
 %% ADR 0079: name-resolving proxy fan-out. Name-only methods answer from the
 %% proxy itself; other methods resolve to the currently-registered pid,
-%% raising `no_such_process` if the name has vanished.
+%% raising `no_such_process` if the name has vanished. A node-qualified ref
+%% on another node calls `{Name, Node}` directly instead (BT-5271).
 sync_send(Ref, Selector, Args) when ?IS_PROXY_REF(Ref) ->
-    beamtalk_actor_send:sync_send_proxy(Ref, Selector, Args, fun(Pid) ->
+    beamtalk_actor_send:sync_send_proxy(Ref, Selector, Args, default, fun(Pid) ->
         sync_send(Pid, Selector, Args)
     end);
 sync_send(ActorPid, Selector, Args) ->
@@ -815,7 +823,7 @@ Used by TimeoutProxy to forward messages with a custom timeout.
 %% ADR 0079: name-resolving proxy fan-out for the explicit-timeout path;
 %% shares one body with sync_send/3 (BT-4676).
 sync_send(Ref, Selector, Args, Timeout) when ?IS_PROXY_REF(Ref) ->
-    beamtalk_actor_send:sync_send_proxy(Ref, Selector, Args, fun(Pid) ->
+    beamtalk_actor_send:sync_send_proxy(Ref, Selector, Args, {timeout, Timeout}, fun(Pid) ->
         sync_send(Pid, Selector, Args, Timeout)
     end);
 sync_send(ActorPid, Selector, Args, Timeout) ->
