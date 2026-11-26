@@ -266,7 +266,12 @@ sever(Peer, PeerNode) ->
     true = erlang:disconnect_node(PeerNode),
     ok = beamtalk_test_wait:until(fun() ->
         not lists:member(node(), peer:call(Peer, erlang, nodes, []))
-    end).
+    end),
+    %% `nodes()` updates when the link drops; `global_name_server` handles its
+    %% own `nodedown` message later from its mailbox. A synchronous call to it
+    %% queues behind that message, so once it answers the nodedown is handled.
+    _ = peer:call(Peer, sys, get_state, [global_name_server]),
+    ok.
 
 %% Subscribe self() to ActorStopped, forwarding matching events back as
 %% plain messages — mirrors beamtalk_system_announcements_tests.erl's

@@ -713,10 +713,14 @@ mod tests {
             .stderr(Stdio::null());
         home.apply(&mut cmd);
         let mut child = cmd.spawn().expect("spawn erl");
-        let checked = std::panic::catch_unwind(|| {
+        let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             // Readiness: the node is up and parked in its first `-eval`.
             let deadline = std::time::Instant::now() + std::time::Duration::from_mins(2);
             while !ready.exists() {
+                assert!(
+                    child.try_wait().expect("poll erl").is_none(),
+                    "erl exited before reaching its first -eval"
+                );
                 assert!(
                     std::time::Instant::now() < deadline,
                     "the node never reached its first -eval"
@@ -725,14 +729,28 @@ mod tests {
             }
             // The node has exec'd into the VM by now, so its argv is final.
             let argv = argv_cookies(child.id());
-            // One probe per cookie, no retry loop: with the node ready, a
-            // probe with the right cookie must answer.
-            let answered: Vec<String> = argv
-                .iter()
-                .chain(std::iter::once(&cookie))
-                .filter(|c| ping_with(&node, c) == "pong")
-                .cloned()
-                .collect();
+            // The real cookie must answer: retry it, since `ready` only says
+            // the first -eval is running, not that epmd registration is
+            // visible to a probe yet. Only a positive result is retried; a
+            // wrong cookie must never answer, so each argv cookie is probed
+            // once, after the node is known to accept connections.
+            let mut real_answers = false;
+            for _ in 0..60 {
+                if ping_with(&node, &cookie) == "pong" {
+                    real_answers = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            let mut answered: Vec<String> = Vec::new();
+            if real_answers {
+                answered.push(cookie.clone());
+            }
+            answered.extend(
+                argv.iter()
+                    .filter(|c| ping_with(&node, c) == "pong")
+                    .cloned(),
+            );
             for argv_cookie in &argv {
                 assert!(
                     !answered.contains(argv_cookie),
@@ -743,7 +761,7 @@ mod tests {
                 answered.contains(&cookie),
                 "the booting node never answered to the real cookie"
             );
-        });
+        }));
         let _ = child.kill();
         let _ = child.wait();
         let _ = std::fs::remove_file(&ready);
