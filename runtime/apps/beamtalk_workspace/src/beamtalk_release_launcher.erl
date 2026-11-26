@@ -43,6 +43,34 @@ WebSocket `run-entry` op and these launcher verbs — never a second one.
 %% is reported before the outer limit kills the client.
 -define(RPC_CALL_TIMEOUT_MS, 120000).
 
+%% The flags erlexec handles itself, and so never hands to `init` (the `+`
+%% emulator flags are matched by their lead character). Words after one join
+%% the flag before it in `init:get_argument/1`, a rule the vm.args reader
+%% cannot place exactly, so it refuses (BT-5260). From erlexec's own flag table;
+%% flags it passes through (`-sname`, `-name`, `-noshell`, `-epmd` ...) end the
+%% words as any other.
+-define(ERLEXEC_CONSUMED_FLAGS, [
+    "-env",
+    "-emu_type",
+    "-emu_flavor",
+    "-emu_args",
+    "-emu_args_exit",
+    "-emu_name_exit",
+    "-emu_qouted_cmd_exit",
+    "-keep_window",
+    "-detached",
+    "-start_epmd",
+    "-no_epmd",
+    "-bindir",
+    "-root",
+    "-configfd",
+    "-smpdisable",
+    "-make",
+    "-compile",
+    "-version",
+    "-man"
+]).
+
 -export([
     eval_main/0,
     rpc_entry/3,
@@ -448,23 +476,30 @@ vm_args_collect(["-args_file", File | _], _, Acc) ->
     );
 vm_args_collect(["-proto_dist" | T], _, Acc) ->
     vm_args_collect(T, proto_dist, Acc);
-vm_args_collect([[$+ | _] | T], Flag, Acc) when Flag =:= none; element(1, Flag) =:= after_plus ->
-    vm_args_collect(T, Flag, Acc);
-vm_args_collect([[$+ | _] | T], Flag, Acc) ->
-    %% erlexec takes a `+emulator` flag (and its value, as in `+K true`) out of the
-    %% argument list, so a plain word after it joins the dist flag before it.
-    vm_args_collect(T, {after_plus, Flag}, Acc);
-vm_args_collect([[$- | _] | T], _, Acc) ->
-    vm_args_collect(T, none, Acc);
+vm_args_collect([Word = [Lead | _] | T], Flag, Acc) when Lead =:= $+; Lead =:= $- ->
+    case Lead =:= $+ orelse lists:member(Word, ?ERLEXEC_CONSUMED_FLAGS) of
+        true when Flag =:= none ->
+            vm_args_collect(T, Flag, Acc);
+        true when is_tuple(Flag) ->
+            vm_args_collect(T, Flag, Acc);
+        true ->
+            %% erlexec takes this flag (and its operands, as in `+K true` or
+            %% `-env VAR VALUE`) out of the argument list before `init` reads it, so a
+            %% plain word after it joins the distribution flag before it.
+            vm_args_collect(T, {after_plus, Flag}, Acc);
+        false ->
+            vm_args_collect(T, none, Acc)
+    end;
 vm_args_collect([_ | T], none, Acc) ->
     vm_args_collect(T, none, Acc);
 vm_args_collect([_ | _], {after_plus, Flag}, Acc) ->
     problem(
         io_lib:format(
-            "has a + emulator flag in the middle of the words of -~ts: the check cannot tell "
-            "which of the words after it the node reads as options; move the + flag "
-            "to its own line before or after",
-            [Flag]
+            "has a flag that erlexec handles itself (a + flag, -env, -detached ...) in the "
+            "middle of the words of -~ts: the check cannot tell which of the words after it "
+            "the node reads as options; move it before the -~ts flag, or after a flag that "
+            "is not -ssl_dist_opt, -ssl_dist_optfile or -proto_dist",
+            [Flag, Flag]
         ),
         Acc
     );

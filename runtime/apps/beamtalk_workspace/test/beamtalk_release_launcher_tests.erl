@@ -271,15 +271,22 @@ vm_args_dist_flags_test_() ->
             Flags("-env OWNER O'Brien\n-ssl_dist_opt server_verify verify_none\n")
         ),
         ?_assertMatch(
-            #{
-                problems := [
-                    "has a + emulator flag in the middle of the words of -ssl_dist_opt" ++ _
-                ]
-            },
+            #{problems := ["has a flag that erlexec handles itself" ++ _]},
             Flags(
                 "-ssl_dist_opt server_verify verify_peer +K true server_fail_if_no_peer_cert false\n"
             )
         ),
+        %% `-env` and the other erlexec-handled flags are refused the same way.
+        [
+            ?_assertMatch(
+                #{problems := ["has a flag that erlexec handles itself" ++ _]},
+                Flags(
+                    "-ssl_dist_opt server_verify verify_peer " ++ F ++
+                        " X Y client_verify verify_none\n"
+                )
+            )
+         || F <- ["-env", "-detached", "-emu_args", "-keep_window", "-emu_type"]
+        ],
         ?_assertMatch(
             #{problems := []},
             Flags("-ssl_dist_opt a b\n+A30\n-sname x\n+K true\n-ssl_dist_opt c d\n")
@@ -310,8 +317,28 @@ vm_args_matches_erl_test_() ->
                             ours_dist_words(Text)
                         )
                      || {N, Text} <- lists:enumerate(Cases)
-                    ]
+                    ] ++
+                        %% Why the reader refuses these: erl hands the words after an
+                        %% erlexec-handled flag to the flag before it.
+                        [
+                            ?_assertEqual(
+                                [
+                                    {ssl_dist_opt, ["a", "b"]},
+                                    {ssl_dist_optfile, []},
+                                    {proto_dist, []}
+                                ],
+                                erl_dist_words(Erl, Dir, 100 + N, "-ssl_dist_opt a " ++ F ++ " b\n")
+                            )
+                         || {N, F} <- lists:enumerate(["-emu_args", "-keep_window", "+A30"])
+                        ]
                 end}
+    end.
+
+collect_port(Port, Acc) ->
+    receive
+        {Port, {data, Data}} -> collect_port(Port, [Acc, Data]);
+        {Port, {exit_status, _}} -> lists:flatten(io_lib:format("~ts", [Acc]))
+    after 30000 -> error(erl_timeout)
     end.
 
 ours_dist_words(Text) ->
@@ -325,7 +352,11 @@ erl_dist_words(Erl, Dir, N, Text) ->
     Eval =
         "io:format(\"~w.\", [[{K, case init:get_argument(K) of {ok, L} -> lists:append(L); "
         "error -> [] end} || K <- [ssl_dist_opt, ssl_dist_optfile, proto_dist]]]), halt().",
-    Out = os:cmd(Erl ++ " -noshell -args_file \"" ++ File ++ "\" -eval '" ++ Eval ++ "'"),
+    Port = open_port(
+        {spawn_executable, Erl},
+        [{args, ["-noshell", "-args_file", File, "-eval", Eval]}, exit_status, stderr_to_stdout]
+    ),
+    Out = collect_port(Port, []),
     {ok, Tokens, _} = erl_scan:string(Out),
     {ok, Words} = erl_parse:parse_term(Tokens),
     Words.
