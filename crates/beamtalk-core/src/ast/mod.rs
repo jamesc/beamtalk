@@ -356,7 +356,7 @@ pub struct Comment {
     pub content: EcoString,
     /// Source location of the comment.
     pub span: Span,
-    /// Whether this is a block comment (`/* */`) or line comment (`//`).
+    /// Whether this is a line comment (`//`) or a `///` doc-style comment.
     pub kind: CommentKind,
     /// Whether this comment was preceded by a blank line in the source.
     pub preceding_blank_line: bool,
@@ -370,17 +370,6 @@ impl Comment {
             content: content.into(),
             span,
             kind: CommentKind::Line,
-            preceding_blank_line: false,
-        }
-    }
-
-    /// Creates a block comment (`/* text */`).
-    #[must_use]
-    pub fn block(content: impl Into<EcoString>, span: Span) -> Self {
-        Self {
-            content: content.into(),
-            span,
-            kind: CommentKind::Block,
             preceding_blank_line: false,
         }
     }
@@ -409,8 +398,6 @@ impl Comment {
 pub enum CommentKind {
     /// A line comment (`// text`).
     Line,
-    /// A block comment (`/* text */`).
-    Block,
     /// A `///` doc-style line comment that isn't attached to any
     /// declaration's `doc_comment` field — e.g. an earlier block
     /// that a blank line broke away from the declaration it precedes.
@@ -1270,9 +1257,9 @@ mod tests {
         assert_eq!(line.kind, CommentKind::Line);
         assert_eq!(line.content, "hello");
 
-        let block = Comment::block("world", Span::new(0, 9));
-        assert_eq!(block.kind, CommentKind::Block);
-        assert_eq!(block.content, "world");
+        let doc = Comment::doc("world", Span::new(0, 9));
+        assert_eq!(doc.kind, CommentKind::Doc);
+        assert_eq!(doc.content, "world");
     }
 
     #[test]

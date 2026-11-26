@@ -313,7 +313,7 @@ pub fn parse_method(tokens: Vec<Token>) -> (Option<crate::ast::MethodDefinition>
 /// It returns `false` (incomplete) when:
 ///
 /// - Delimiters are unclosed: `[`, `(`, `{`, `#{`, `#(`, `#[`
-/// - A string or block comment is unterminated
+/// - A string is unterminated
 /// - The last token is a keyword (`at:`), binary operator (`+`), assignment
 ///   (`:=`), cascade (`;`), return (`^`), or pipeline (`|>`) — all of which
 ///   expect a following expression
@@ -349,17 +349,6 @@ pub fn is_input_complete(source: &str) -> bool {
 
     for token in &tokens {
         let kind = token.kind();
-
-        // Check for unterminated block comments in the EOF token's leading trivia
-        if kind.is_eof() {
-            for trivia in token.leading_trivia() {
-                if let Trivia::BlockComment(text) = trivia
-                    && !text.ends_with("*/")
-                {
-                    return false;
-                }
-            }
-        }
 
         match kind {
             // Error tokens from unterminated literals (e.g., `"hello` without
@@ -510,16 +499,6 @@ pub fn needs_blank_line_to_complete(source: &str) -> bool {
     for token in &tokens {
         let kind = token.kind();
 
-        if kind.is_eof() {
-            for trivia in token.leading_trivia() {
-                if let Trivia::BlockComment(text) = trivia
-                    && !text.ends_with("*/")
-                {
-                    return false;
-                }
-            }
-        }
-
         match kind {
             TokenKind::Error(msg) if !is_diagnostic_error(msg) => {
                 return false;
@@ -567,7 +546,7 @@ pub fn needs_blank_line_to_complete(source: &str) -> bool {
 ///
 /// Diagnostic errors are English sentences that start with a lowercase letter
 /// (e.g., "single-quoted strings are no longer supported..."). An
-/// unterminated string or block comment is also reported as a sentence
+/// unterminated string is also reported as a sentence
 /// (`unterminated string literal starting at ...`, BT-5182) but more input
 /// can close it, so it is not complete. Other incomplete-input errors carry
 /// the raw source text (e.g., `$` at end of input), which starts with a
@@ -1200,7 +1179,7 @@ pub(super) struct Parser {
 }
 
 /// The [`Comment`] one trivia item holds, with its delimiters stripped
-/// (`// `, `/* … */`, `/// `), or `None` for whitespace. `span` is the span
+/// (`// `, `/// `), or `None` for whitespace. `span` is the span
 /// recorded on the comment (its token's).
 pub(super) fn comment_from_trivia(trivia: &Trivia, span: Span) -> Option<Comment> {
     match trivia {
@@ -1212,15 +1191,6 @@ pub(super) fn comment_from_trivia(trivia: &Trivia, span: Span) -> Option<Comment
                 .or_else(|| s.strip_prefix("//"))
                 .unwrap_or(s);
             Some(Comment::line(content, span))
-        }
-        Trivia::BlockComment(text) => {
-            let s = text.as_str();
-            let content = s
-                .strip_prefix("/* ")
-                .and_then(|s| s.strip_suffix(" */"))
-                .or_else(|| s.strip_prefix("/*").and_then(|s| s.strip_suffix("*/")))
-                .unwrap_or(s);
-            Some(Comment::block(content, span))
         }
         Trivia::DocComment(text) => {
             let s = text.as_str();
@@ -1492,7 +1462,7 @@ impl Parser {
 
     /// Extracts regular (non-doc) comments from the current token's leading trivia.
     ///
-    /// Collects `//` line comments and `/* */` block comments into
+    /// Collects `//` line comments into
     /// [`CommentAttachment::leading`].  `///` doc comments are intentionally
     /// **skipped** — they are handled by [`collect_doc_comment`] and must not
     /// be duplicated here.  Call this *after* [`collect_doc_comment`] so both
@@ -1534,7 +1504,7 @@ impl Parser {
             .map(|(_, positions)| positions);
         for (pos, trivia) in self.current_token().leading_trivia().iter().enumerate() {
             match trivia {
-                super::Trivia::LineComment(_) | super::Trivia::BlockComment(_) => {
+                super::Trivia::LineComment(_) => {
                     if let Some(mut comment) = comment_from_trivia(trivia, token_span) {
                         comment.preceding_blank_line = saw_blank_line;
                         leading.push(comment);
@@ -1650,8 +1620,7 @@ impl Parser {
     /// checking the previously-consumed token is sufficient — no look-ahead needed.
     ///
     /// `//` line comments and `///` comments are considered (a `///` after
-    /// code on its line is an end-of-line comment, BT-5183); block comments
-    /// (`/* */`) are not.
+    /// code on its line is an end-of-line comment, BT-5183).
     pub(super) fn collect_trailing_comment(&self) -> Option<Comment> {
         if self.current == 0 {
             return None;

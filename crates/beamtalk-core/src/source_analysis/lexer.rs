@@ -85,6 +85,11 @@ type SavedPosition<'src> = (usize, Peekable<CharIndices<'src>>);
 /// incomplete and asks for another line; see [`is_unterminated_error`].
 const UNTERMINATED_PREFIX: &str = "unterminated ";
 
+/// The diagnostic for a `/*` in source: block comments were removed from the
+/// language (BT-5229).
+pub(crate) const BLOCK_COMMENT_MESSAGE: &str =
+    "block comments are not supported; use `//` on each line";
+
 /// `true` if a [`TokenKind::Error`] carries a human-readable message (an
 /// English sentence starting with a lowercase letter, e.g. "single-quoted
 /// strings are no longer supported...") rather than a raw source fragment
@@ -95,7 +100,7 @@ pub(crate) fn is_message_error(text: &str) -> bool {
 }
 
 /// `true` if a [`TokenKind::Error`] message reports an unterminated string
-/// literal or block comment, the one family of lexer errors that more input
+/// literal, the one family of lexer errors that more input
 /// can fix.
 #[must_use]
 pub(crate) fn is_unterminated_error(message: &str) -> bool {
@@ -131,7 +136,7 @@ const BYTE_ORDER_MARK: char = '\u{FEFF}';
 /// package-qualified, `json@Parser`, and with type arguments, `Collection(E)`),
 /// then `subclass:`; or `Protocol define:`. The textual twin of the parser's
 /// `is_at_class_definition` / `is_at_protocol_definition`, used where no
-/// tokens exist yet: an unterminated string or block comment stops at such a
+/// tokens exist yet: an unterminated string stops at such a
 /// line so the definitions after it still parse (BT-5182). Only a header at
 /// column 1 counts, which is where every definition in a file starts.
 /// `parser::tests::lexer_recovery_tests::definition_header_agrees_with_parser`
@@ -403,11 +408,9 @@ impl<'src> Lexer<'src> {
                     self.lex_line_comment();
                 }
                 Some('/') if self.peek_char_n(1) == Some('*') => {
-                    if self.lex_block_comment() {
-                        // Unterminated block comment — break out of trivia loop
-                        // so the error token we pushed gets returned.
-                        break;
-                    }
+                    // Return to `lex_token` so the error token is emitted.
+                    self.lex_block_comment_opener();
+                    break;
                 }
                 _ => break,
             }
@@ -441,60 +444,21 @@ impl<'src> Lexer<'src> {
             .push(Trivia::DocComment(EcoString::from(text)));
     }
 
-    /// Lexes a block comment: `/* ... */`
-    ///
-    /// Returns `true` if the comment was unterminated (hit EOF). An
-    /// unterminated comment becomes an error token that ends before the next
-    /// definition-header line (see [`is_definition_header`]), or at end of
-    /// input when there is none, so the definitions after it still parse
-    /// (BT-5182).
-    fn lex_block_comment(&mut self) -> bool {
+    /// Handles a stray `/*`: block comments are not part of the language
+    /// (BT-5229). Emits one error token covering the `/*` to the end of its
+    /// line and resumes on the next line, so one stray opener cannot swallow
+    /// the definitions after it.
+    fn lex_block_comment_opener(&mut self) {
         let start = self.current_position();
-        let at_start = self.save_position();
-        self.advance(); // /
-        self.advance(); // *
-
-        let mut unterminated = false;
-        loop {
-            match self.peek_char() {
-                None => {
-                    unterminated = true;
-                    break;
-                }
-                Some('*') if self.peek_char_n(1) == Some('/') => {
-                    self.advance(); // *
-                    self.advance(); // /
-                    break;
-                }
-                _ => {
-                    self.advance();
-                }
-            }
-        }
-
-        if unterminated {
-            // Rewind and stop before the next definition header, leaving the
-            // blank lines before it as that header's leading trivia.
-            if let Some(header) = self.next_definition_header_after(start as usize) {
-                let body = &self.source[start as usize..header];
-                let end = start as usize + body.trim_end_matches([' ', '\t', '\r', '\n']).len();
-                self.restore_position(at_start);
-                while self.position < end {
-                    self.advance();
-                }
-            }
-            let span = self.span_from(start);
-            let kind = self.unterminated_error("block comment", start, "*/");
-            let leading_trivia = std::mem::take(&mut self.pending_trivia);
-            self.pending_tokens
-                .push(Token::with_trivia(kind, span, leading_trivia, Vec::new()));
-        } else {
-            let text = self.text_for(self.span_from(start));
-            self.pending_trivia
-                .push(Trivia::BlockComment(EcoString::from(text)));
-        }
-
-        unterminated
+        self.advance_to_line_end();
+        let span = self.span_from(start);
+        let leading_trivia = std::mem::take(&mut self.pending_trivia);
+        self.pending_tokens.push(Token::with_trivia(
+            TokenKind::Error(EcoString::from(BLOCK_COMMENT_MESSAGE)),
+            span,
+            leading_trivia,
+            Vec::new(),
+        ));
     }
 
     /// Lexes the next token.
@@ -506,8 +470,7 @@ impl<'src> Lexer<'src> {
 
         self.skip_trivia();
 
-        // Check again after skip_trivia — an unterminated block comment
-        // may have pushed an error token.
+        // Check again after skip_trivia — a stray `/*` pushes an error token.
         if let Some(token) = self.pending_tokens.pop() {
             return token;
         }
@@ -1070,24 +1033,6 @@ impl<'src> Lexer<'src> {
                     // Line comment — skip to newline
                     while self.peek_char().is_some_and(|c| c != '\n') {
                         self.advance();
-                    }
-                }
-                Some('/') if self.peek_char_n(1) == Some('*') => {
-                    // Block comment — skip to closing */
-                    self.advance(); // /
-                    self.advance(); // *
-                    loop {
-                        match self.peek_char() {
-                            None => return Err(self.unterminated_string()),
-                            Some('*') if self.peek_char_n(1) == Some('/') => {
-                                self.advance(); // *
-                                self.advance(); // /
-                                break;
-                            }
-                            _ => {
-                                self.advance();
-                            }
-                        }
                     }
                 }
                 Some('$') => {
@@ -2224,18 +2169,15 @@ mod tests {
     }
 
     #[test]
-    fn lex_string_interpolation_block_comment_with_brace() {
-        // Block comment containing } should not close the interpolation
-        let kinds = lex_kinds("\"val: {x /* } */ + 1}\"");
-        assert_eq!(
-            kinds,
-            vec![
-                TokenKind::StringStart("val: ".into()),
-                TokenKind::Identifier("x".into()),
-                TokenKind::BinarySelector("+".into()),
-                TokenKind::Integer("1".into()),
-                TokenKind::StringEnd("".into()),
-            ]
+    fn lex_string_interpolation_block_comment_is_error() {
+        // `/*` inside an interpolation is the same diagnostic as anywhere else
+        // (BT-5229); the interpolation still closes.
+        let kinds = lex_kinds("\"val: {x /* y}\"");
+        assert!(
+            kinds
+                .iter()
+                .any(|k| matches!(k, TokenKind::Error(m) if m == BLOCK_COMMENT_MESSAGE)),
+            "expected block-comment diagnostic, got: {kinds:?}"
         );
     }
 
@@ -2606,30 +2548,33 @@ mod tests {
     }
 
     #[test]
-    fn lex_block_comment_as_trivia() {
-        let tokens = lex("/* comment */ x");
-        assert_eq!(tokens.len(), 1);
-        assert!(tokens[0].has_leading_comment());
+    fn lex_block_comment_opener_is_one_diagnostic() {
+        // BT-5229: `/*` is an error token covering the rest of its line,
+        // never trivia; lexing resumes on the next line.
+        let kinds = lex_kinds("/* comment */ x\ny");
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Error(BLOCK_COMMENT_MESSAGE.into()),
+                TokenKind::Identifier("y".into()),
+            ]
+        );
     }
 
     #[test]
     fn lex_unterminated_block_comment_is_error() {
-        // Unterminated block comment at top level must produce an error token,
-        // not silently vanish as trivia.
-        let kinds = lex_kinds("/*");
-        assert_eq!(kinds.len(), 1);
-        assert!(matches!(kinds[0], TokenKind::Error(_)));
-
-        // Also with content inside
-        let kinds = lex_kinds("/* hello world");
-        assert_eq!(kinds.len(), 1);
-        assert!(matches!(kinds[0], TokenKind::Error(_)));
-
-        // Code before the unterminated comment should still lex
-        let kinds = lex_kinds("x /*");
-        assert_eq!(kinds.len(), 2);
-        assert!(matches!(kinds[0], TokenKind::Identifier(_)));
-        assert!(matches!(kinds[1], TokenKind::Error(_)));
+        // A stray `/*` skips only its own line, never the rest of the file.
+        let diag = TokenKind::Error(BLOCK_COMMENT_MESSAGE.into());
+        assert_eq!(lex_kinds("/*"), vec![diag.clone()]);
+        assert_eq!(lex_kinds("/* hello world"), vec![diag.clone()]);
+        assert_eq!(
+            lex_kinds("x /*\ny"),
+            vec![
+                TokenKind::Identifier("x".into()),
+                diag,
+                TokenKind::Identifier("y".into()),
+            ]
+        );
     }
 
     #[test]
@@ -3269,8 +3214,8 @@ mod tests {
     }
 
     /// `beamtalk_repl_editor_context`'s hover scanner has a hand-rolled Erlang
-    /// mirror of `lex_line_comment`/`lex_block_comment`'s span computation
-    /// (`skip_line_comment/1`/`skip_block_comment/1`), for the same
+    /// mirror of `lex_line_comment`'s span computation
+    /// (`skip_line_comment/1`), for the same
     /// cross-crate-dependency reason as the string/character mirror above. A
     /// shared corpus fixture
     /// (`runtime/apps/beamtalk_workspace/test/fixtures/comment_span_corpus.json`)
@@ -3303,20 +3248,6 @@ mod tests {
                 !tokens.is_empty(),
                 "expected at least an EOF token for {source:?} ({why})"
             );
-            if kind == "unterminated_block_comment" {
-                // The comment is an error token, the first token (BT-5182).
-                assert!(
-                    matches!(tokens[0].kind(), TokenKind::Error(m) if is_unterminated_error(m)),
-                    "expected an unterminated block comment for {source:?}, got {:?} ({why})",
-                    tokens[0].kind()
-                );
-                assert_eq!(
-                    u64::from(tokens[0].span().end()),
-                    expected_end,
-                    "span-end mismatch for {source:?} ({why})"
-                );
-                continue;
-            }
             let leading = tokens[0].leading_trivia();
             assert!(
                 !leading.is_empty(),
@@ -3324,11 +3255,7 @@ mod tests {
             );
             let comment = &leading[0];
             assert!(
-                matches!(
-                    (kind, comment),
-                    ("line_comment", Trivia::LineComment(_))
-                        | ("block_comment", Trivia::BlockComment(_))
-                ),
+                matches!((kind, comment), ("line_comment", Trivia::LineComment(_))),
                 "expected a {kind} for {source:?}, got {comment:?} ({why})"
             );
             assert_eq!(

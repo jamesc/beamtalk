@@ -231,9 +231,9 @@ proptest! {
     /// does a leading byte-order mark, which the lexer skips (BT-5182).
     #[test]
     fn nonempty_input_produces_tokens(input in "[^ \t\n\r]{1,100}") {
-        // Skip inputs that are purely comments (line or block), after any BOM
+        // Skip inputs that are purely line comments, after any BOM
         let program = input.strip_prefix('\u{FEFF}').unwrap_or(&input);
-        if program.is_empty() || program.starts_with("//") || program.starts_with("/*") {
+        if program.is_empty() || program.starts_with("//") {
             return Ok(());
         }
         let tokens = lex(&input);

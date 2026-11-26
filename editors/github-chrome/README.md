@@ -44,7 +44,7 @@ rebuild and press the reload button on the extension card.
 
 ## Limitations
 
-- Diff lines are tokenized one at a time, so a block comment or string spanning
+- Diff lines are tokenized one at a time, so a string spanning
   several lines in a diff is only coloured on its first line.
 - Very large files that GitHub virtualizes are tokenized from the lines
   currently rendered.

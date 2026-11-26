@@ -26,7 +26,7 @@ load_fixture(Name) ->
 %% Lexeme skippers
 %%====================================================================
 
-%% An interpolation (or a block comment inside one) left open leaves the
+%% An interpolation left open leaves the
 %% string unterminated, which ends at the end of its opening line, as the
 %% lexer recovers (BT-5182). A nested string left open is `unsupported`.
 skip_string_literal_unterminated_interpolation_test() ->
@@ -77,9 +77,9 @@ assert_literal_span_case(#{
 
 %% (Per AGENTS.md Essential Rules: a "mirrors" claim across the
 %% Rust/Erlang boundary needs a shared conformance fixture, not just a
-%% comment): `skip_line_comment/1`/`skip_block_comment/1` are hand-rolled
+%% comment): `skip_line_comment/1`/`skip_block_comment_opener/1` are hand-rolled
 %% Erlang mirrors of the Rust lexer's `lex_line_comment/0`/
-%% `lex_block_comment/0` span computation. Both sides run the exact same
+%% `lex_block_comment_opener/0` span computation. Both sides run the exact same
 %% cases from `test/fixtures/comment_span_corpus.json` — see
 %% `source_analysis::lexer::tests::comment_span_matches_shared_corpus` for
 %% the Rust side.
@@ -99,11 +99,9 @@ assert_comment_span_case(#{
         case Kind of
             <<"line_comment">> ->
                 beamtalk_repl_editor_context:skip_line_comment(Source);
-            <<"block_comment">> ->
-                beamtalk_repl_editor_context:skip_block_comment(Source);
-            <<"unterminated_block_comment">> ->
-                %% BT-5182: ends before the next definition header.
-                beamtalk_repl_editor_context:skip_block_comment(Source)
+            <<"block_comment_opener">> ->
+                %% BT-5229: a stray `/*` skips to the end of its line.
+                beamtalk_repl_editor_context:skip_block_comment_opener(Source)
         end,
     Consumed = length(Source) - length(Remaining),
     ?assertEqual(

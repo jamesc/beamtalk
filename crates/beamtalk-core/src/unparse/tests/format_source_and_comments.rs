@@ -234,9 +234,9 @@ fn line_comment_document() {
 }
 
 #[test]
-fn block_comment_document() {
-    let c = Comment::block("block text", span());
-    assert_eq!(unparse_comment(&c).to_pretty_string(), "/* block text */");
+fn doc_comment_document() {
+    let c = Comment::doc("doc text", span());
+    assert_eq!(unparse_comment(&c).to_pretty_string(), "/// doc text");
 }
 
 // --- Expression statement with comments ---
@@ -520,14 +520,6 @@ fn literal_comments_list_array_map() {
     assert_literal_formats(
         "m := #{\n  #a => 1, // a\n  // b next\n  #b => 2\n}\n",
         "m := #{\n  #a => 1, // a\n  // b next\n  #b => 2\n}\n",
-    );
-}
-
-#[test]
-fn literal_comments_block_comments_kept() {
-    assert_literal_formats(
-        "t := {\n  /* first */\n  #a,\n  #b\n  /* end */\n}\n",
-        "t := {\n  /* first */\n  #a,\n  #b\n  /* end */\n}\n",
     );
 }
 

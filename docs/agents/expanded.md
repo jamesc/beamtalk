@@ -665,7 +665,7 @@ Do **not** add license headers to `.md` files. The repo `LICENSE` file covers al
 
 - **Implicit returns**: Use `^` ONLY for early returns, never on last expression
 - **No periods**: Newlines separate statements, not `.`
-- **Comments**: Use `//` and `/* */`, not Smalltalk's `"..."`
+- **Comments**: Use `//` (there are no block comments), not Smalltalk's `"..."`
 
 ### Blocks Passed Into Class Methods
 

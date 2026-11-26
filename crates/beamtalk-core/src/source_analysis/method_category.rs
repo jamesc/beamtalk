@@ -207,7 +207,7 @@ pub fn parse_divider_name(content: &str) -> Option<&str> {
 /// Returns the divider name from a method's leading comments, if any.
 ///
 /// Only [`CommentKind::Line`] comments are considered (never `///` doc
-/// comments or `/* */` block comments). When more than one divider-shaped
+/// comments). When more than one divider-shaped
 /// line comment precedes the same method — unusual, but not prevented by the
 /// grammar — the one nearest the method (last in source order) wins, matching
 /// the natural reading that the closest heading is the current one.

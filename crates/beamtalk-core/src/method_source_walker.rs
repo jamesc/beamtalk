@@ -1405,31 +1405,6 @@ mod tests {
     }
 
     #[test]
-    fn block_comment_between_receiver_and_unary_selector_is_not_swallowed() {
-        // Review finding on PR #3529: a whitespace-only byte scan for the
-        // unary/binary selector's start treated a `/* ... */` block comment
-        // (legal BeamTalk lexer trivia between any two tokens on the same
-        // line) as part of the splice span, so a rewrite would silently
-        // delete the comment along with the old selector text.
-        // `first_token_span_after` fixes this by re-lexing rather than
-        // scanning bytes. (A `//` line comment can't occur in this position
-        // in the first place — verified independently: a bare newline
-        // between receiver and selector already splits them into two
-        // separate statements before any comment is involved, since
-        // BeamTalk newlines are significant statement terminators — so
-        // there is no reachable "line comment mid-send" case to cover.)
-        let src = "increment => self /* why */ bump";
-        let occurrences = find_selector_send_spans(src, "bump", "increase");
-        assert_eq!(occurrences.len(), 1, "got {occurrences:?}");
-        let hit = &occurrences[0][0];
-        assert_eq!(
-            slice(src, hit.span),
-            "bump",
-            "span should be JUST the selector token"
-        );
-    }
-
-    #[test]
     fn comment_between_receiver_and_binary_selector_is_not_swallowed() {
         let src = "combine: n => self /* why */ + n";
         let occurrences = find_selector_send_spans(src, "+", "plus");

@@ -394,9 +394,6 @@ pub enum Trivia {
     /// A line comment: `// comment text`
     LineComment(EcoString),
 
-    /// A block comment: `/* comment text */`
-    BlockComment(EcoString),
-
     /// A doc comment: `/// doc text`
     DocComment(EcoString),
 }
@@ -406,10 +403,7 @@ impl Trivia {
     #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
-            Self::Whitespace(s)
-            | Self::LineComment(s)
-            | Self::BlockComment(s)
-            | Self::DocComment(s) => s,
+            Self::Whitespace(s) | Self::LineComment(s) | Self::DocComment(s) => s,
         }
     }
 
@@ -428,10 +422,7 @@ impl Trivia {
     /// Returns `true` if this is a comment.
     #[must_use]
     pub const fn is_comment(&self) -> bool {
-        matches!(
-            self,
-            Self::LineComment(_) | Self::BlockComment(_) | Self::DocComment(_)
-        )
+        matches!(self, Self::LineComment(_) | Self::DocComment(_))
     }
 
     /// Returns `true` if this is a doc comment.
@@ -814,12 +805,12 @@ mod tests {
             Span::new(0, 1),
             vec![
                 Trivia::Whitespace("\n  ".into()),
-                Trivia::BlockComment("/*note*/".into()),
+                Trivia::LineComment("// note".into()),
             ],
             vec![],
         );
         assert_ne!(with_comment.indentation_after_newline(), Some(0));
-        assert_eq!(with_comment.indentation_after_newline(), Some(10)); // 2 spaces + 8 char comment
+        assert_eq!(with_comment.indentation_after_newline(), Some(9)); // 2 spaces + 7 char comment
     }
 
     #[test]
