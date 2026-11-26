@@ -149,6 +149,18 @@ TestCase subclass: BinaryPatternsTest
       _ -> Binary fromBytes: #()
     ]
 
+  testPaddedPayloadSizeFromBoundVariable =>
+    // BT-5285: a pattern size cannot contain a message send (`p size` is a
+    // compile error there), so the send is bound to a variable first.
+    // HTTP/2 padded frame: pad length, body, then pad bytes.
+    p := Binary fromBytes: #(2, 10, 20, 30, 0, 0)
+    room := p size - 1
+    result := p match: [
+      <<pad:8, body:(room - pad)/binary, _tail:pad/binary>> -> body toBytes;
+      _ -> nil
+    ]
+    self assert: result equals: #(10, 20, 30)
+
   testMatchMultipleWildcardsInBinary =>
     // BT-4098: every _ in one pattern is a fresh anonymous variable
     result := (Binary fromBytes: #(1)) match: [
