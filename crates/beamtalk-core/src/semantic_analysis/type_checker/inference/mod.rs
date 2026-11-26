@@ -463,8 +463,9 @@ impl TypeChecker {
             seen.push(body_type.clone());
             // BT-5292: when the union tail check already reported, its
             // diagnostic names every member of the union, so an early `^` of
-            // one of those types is not reported a second time. (A silent tail check — untyped class
-            // — leaves them to the early-`^` check.)
+            // one of those types is not reported a second time. (A silent
+            // tail check — untyped class — leaves them to the early-`^`
+            // check.)
             // A union with a class-object member reports that member and
             // stops before judging the instance members, so only a union of
             // instance members counts as fully judged by the tail check.
@@ -493,6 +494,7 @@ impl TypeChecker {
                 {
                     continue;
                 }
+                let before = self.diagnostics.len();
                 self.check_return_type(
                     method,
                     &ty,
@@ -500,7 +502,11 @@ impl TypeChecker {
                     hierarchy,
                     ReturnSite::Early(returned.span),
                 );
-                seen_spans.push(returned.span);
+                // Only a reported `^` is final: a later inference of the same
+                // `^` under different narrowing is still checked otherwise.
+                if self.diagnostics.len() > before {
+                    seen_spans.push(returned.span);
+                }
             }
         }
         if check_override {
