@@ -76,3 +76,21 @@ fn an_eager_read_beside_one_late_read_stays_in_place() {
         "an eager read and a single late read do not race:\n{code}"
     );
 }
+
+/// A self-send's argument list is built in place (`capture_argument_list_doc`),
+/// so `sequence_children` must hoist every racing child, not only `late`
+/// reads: two divisions that may raise, and a `late` read nested in a compound
+/// argument, evaluate in source order.
+#[test]
+fn self_send_arguments_that_may_raise_are_sequenced() {
+    for body in [
+        "m => self pair: self.count / 0 with: self.count / 1",
+        "m => self pair: self.first + 1 with: self.second + 1",
+        "m => self pair: self.count / 0 with: self.first + 1",
+    ] {
+        let src = format!(
+            "typed Actor subclass: SelfArgs\n  late state: first :: Integer\n  late state: second :: Integer\n  state: count :: Integer = 0\n\n  pair: a :: Object with: b :: Object -> Object => a\n\n  {body}\n"
+        );
+        assert_eq!(verifier_report(&src, None), None, "{body}");
+    }
+}

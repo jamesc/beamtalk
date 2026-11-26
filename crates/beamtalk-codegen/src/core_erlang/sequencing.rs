@@ -575,32 +575,6 @@ impl CoreErlangGenerator {
         receiver.is_self() && self.is_late_state_field(&self.class_name(), field.name.as_str())
     }
 
-    /// The hoisting point [`Self::sequence_children`] extends to when a child
-    /// needs no prelude yet races with a sibling that runs code: the last
-    /// racing operand ([`Self::last_racing_operand`]), or `None` when no such
-    /// child exists. Without it `sequence_children` hoists only to the last
-    /// child that needs a prelude, and a parent that compiles its operands in
-    /// place (a self-send's argument list, `capture_argument_list_doc`) lets
-    /// erlc evaluate them last-first. Two kinds of child:
-    ///
-    /// * BT-4722: a block literal whose capture reads live state.
-    /// * BT-5339: a `late` field read, which raises while its slot is
-    ///   unassigned ([`Self::field_read_may_raise`]):
-    ///   `self pair: self.a with: self.b` must raise for `a`.
-    pub(super) fn last_racing_in_place_child(&self, children: &[&Expression]) -> Option<usize> {
-        let racing = self.last_racing_operand(children)?;
-        children
-            .iter()
-            .any(|c| match c.unwrap_parens() {
-                Expression::Block(b) => self.block_capture_reads_live_state(b),
-                Expression::FieldAccess {
-                    receiver, field, ..
-                } => self.field_read_may_raise(receiver, field),
-                _ => false,
-            })
-            .then_some(racing)
-    }
-
     /// BT-4722: whether creating `block` here reads live mutable state: a
     /// block nested in an actor closure binds `beamtalk_actor_state:capture`
     /// (a live cell read) when it touches the actor state or carries it out

@@ -10,8 +10,8 @@
 //! field read may raise (`uninitialized_state_error`, ADR 0124 §3). The grid is
 //! operand builder (list, map, tuple, actor send, self send, cascade, binary
 //! operator, FFI call) x operand pair (each ordered pair of a `late` read, an
-//! eager read, a send, a local and a raising division, with at least one
-//! `late` read) x scope
+//! eager read, a send, a local, a raising division and compound operands
+//! holding a `late` read or a division, with at least one `late` read) x scope
 //! (method root, conditional arm, evaluated block, `collect:` body, `on:do:`
 //! body, `ensure:` body, actor closure). Every cell compiles clean under the
 //! debug verifier (`operand_order_check`'s `RacingOperands`, the `ThreadedIr`
@@ -19,7 +19,7 @@
 //! map, send and self-send cell holding two `late` reads outside a
 //! cell-reading scope is reported, so the grid fails on the bug.
 
-use super::verifier_report;
+use super::{assert_parses, verifier_report};
 use crate::core_erlang::fault::Fault;
 
 const HEADER: &str = "typed Actor subclass: LateGrid
@@ -51,7 +51,9 @@ const OPERANDS: &[(&str, &str, bool)] = &[
     ("eager", "self.count", false),
     ("send", "(s n)", false),
     ("local", "s", false),
-    ("div", "(self.count // 0)", false),
+    ("div", "(self.count / 0)", false),
+    ("lateplus", "(self.first + 1)", true),
+    ("divplus", "(self.count / 1)", false),
 ];
 
 /// Scopes, `{E}` the expression. The flag is whether `{E}` reads fields
@@ -100,6 +102,7 @@ fn late_operand_grid_compiles_clean() {
         .iter()
         .filter_map(|(name, method, _)| {
             let src = format!("{HEADER}\n{method}");
+            assert_parses(&src);
             verifier_report(&src, None).map(|r| format!("{name}: {r}"))
         })
         .collect();
