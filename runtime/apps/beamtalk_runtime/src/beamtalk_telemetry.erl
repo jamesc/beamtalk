@@ -338,16 +338,22 @@ non-local return counts as a normal exit.
 With dispatch events off (the default, see the module doc) that is all it
 does: two monotonic clock reads around `Fun` and the aggregate, with no
 metadata map built at all. With them on it also emits
-`[beamtalk, actor, dispatch, start | stop | exception]` (metadata `pid` (a
-pid, or `{Name, Node}` for a send to a node-qualified registered ref,
-BT-5271), `class`, `selector`, `mode`, plus `outcome` on stop) and, while trace capture
+`[beamtalk, actor, dispatch, start | stop | exception]` (metadata `pid`,
+`class`, `selector`, `mode`, plus `outcome` on stop) and, while trace capture
 is enabled, sets the causal span id (and the trace id, for a root span) in
 the process dictionary and records a trace event.
+
+A send to a node-qualified registered ref addresses `{Name, Node}` directly
+and has no pid (BT-5271). It records the aggregate only and emits no events,
+so the events' `pid` is always a pid: a handler that treats it as one cannot
+raise on it (and `telemetry` permanently detaches a handler that raises).
 """.
 -spec dispatch_span(
     pid() | {atom(), node()}, atom(), atom(), sync | async | cast, fun(() -> {term(), atom()})
 ) ->
     term().
+dispatch_span(Pid, Class, Selector, Mode, Fun) when not is_pid(Pid) ->
+    run_recorded(Pid, Class, Selector, Mode, Fun);
 dispatch_span(Pid, Class, Selector, Mode, Fun) ->
     case dispatch_events_enabled() andalso erlang:function_exported(telemetry, execute, 3) of
         false ->

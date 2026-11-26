@@ -512,8 +512,8 @@ own exit answers what the resolve used to: `noproc` (nothing registered as
 
 The class of a remote ref is not known on this node (ADR 0126 §7.3), so the
 send is recorded and its reply unwrapped as `unknown`, as the resolved remote
-pid's was. The dispatch span names `{Name, Node}` as its target: there is no
-pid, and the trace store keeps only the class aggregate for it.
+pid's was. The dispatch span is given `{Name, Node}`: with no pid, it records
+the class aggregate and emits no dispatch events (`beamtalk_telemetry:dispatch_span/5`).
 
 A node that has gone silent without dropping the connection (a partition
 the net tick has not noticed yet) is a `timeout` once the call's timeout
@@ -1175,7 +1175,7 @@ As for a cast to a remote pid, distribution may buffer a cast sent while the
 connection is still being set up and deliver it if the node comes back.
 Returns `false` for any other ref, or for a selector a cast answers from the
 resolved pid (`continueWith:`, `continueWith:withArguments:`), which keeps the
-resolving path. The dispatch span names `{Name, Node}`, as in
+resolving path. The dispatch span is given `{Name, Node}`, as in
 `sync_call_registered/5`.
 """.
 -spec cast_send_registered(proxy_ref(), atom(), list()) -> ok | false.

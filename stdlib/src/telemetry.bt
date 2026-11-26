@@ -25,10 +25,10 @@
 /// **opt-in** (ADR 0069, amended by BT-4113): every actor send would pay
 /// for them otherwise. Attaching a handler here to one of them turns them on,
 /// and detaching the last such handler turns them off again; so do
-/// `Tracing enable` / `Tracing disable`. Their `#pid` metadata is the target
-/// actor's pid, except for a send to a node-qualified registered ref (one
-/// from `named:on:`), which addresses the name on that node directly: there
-/// `#pid` is the `{Name, Node}` tuple and `#class` is `#unknown` (BT-5271).
+/// `Tracing enable` / `Tracing disable`. A send to a node-qualified
+/// registered ref (one from `named:on:`) addresses the name on that node
+/// directly and has no pid, so it emits none of these events; it still counts
+/// in `Tracing`'s per-class stats, under class `unknown` (BT-5271).
 /// Erlang or Elixir code attaching with
 /// `telemetry:attach/4` sets the `beamtalk_runtime` app env
 /// `dispatch_telemetry` to `true` or calls

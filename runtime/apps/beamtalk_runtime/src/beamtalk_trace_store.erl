@@ -290,8 +290,8 @@ record_dispatch(_Pid, Selector, _Duration, _Outcome, _Mode, Class) when
     %% event): a non-atom class or selector would poison the stats readers.
     %% Drop the sample.
     ok;
-record_dispatch(Pid, _Selector, _Duration, _Outcome, _Mode, _Class) when
-    not is_pid(Pid), not ?IS_REMOTE_NAME_DEST(Pid)
+record_dispatch(Target, _Selector, _Duration, _Outcome, _Mode, _Class) when
+    not is_pid(Target), not ?IS_REMOTE_NAME_DEST(Target)
 ->
     %% A target that is neither a pid nor a `{Name, Node}` send to a
     %% node-qualified ref (BT-5271): per-actor rows are keyed by pid, so
@@ -375,9 +375,7 @@ telemetry handler, which `telemetry` detaches if it raises. A missing table
 (the gen_server mid-restart, a hot upgrade before `code_change/3`, a partial
 harness) drops the event, the same way `record_dispatch/6` drops a sample.
 """.
--spec record_trace_event(
-    pid() | {atom(), node()}, atom(), atom(), atom(), non_neg_integer(), atom(), map(), atom()
-) ->
+-spec record_trace_event(pid(), atom(), atom(), atom(), non_neg_integer(), atom(), map(), atom()) ->
     ok.
 record_trace_event(Pid, Class, Selector, Mode, Duration, Outcome, Metadata, _Phase) ->
     case is_enabled() of
@@ -1645,7 +1643,7 @@ trace_event_to_map({
     S = fun(Bin) -> beamtalk_primitive:string_from_binary(Bin) end,
     Base = #{
         S(<<"timestamp_us">>) => WallClockUs,
-        S(<<"actor">>) => S(actor_text(Pid)),
+        S(<<"actor">>) => S(list_to_binary(pid_to_list(Pid))),
         S(<<"class">>) => S(atom_to_binary(Class, utf8)),
         S(<<"selector">>) => S(atom_to_binary(Selector, utf8)),
         S(<<"mode">>) => S(atom_to_binary(Mode, utf8)),
@@ -1664,7 +1662,7 @@ trace_event_to_map({
     S = fun(Bin) -> beamtalk_primitive:string_from_binary(Bin) end,
     Base = #{
         S(<<"timestamp_us">>) => MonotonicNs div 1000,
-        S(<<"actor">>) => S(actor_text(Pid)),
+        S(<<"actor">>) => S(list_to_binary(pid_to_list(Pid))),
         S(<<"class">>) => S(atom_to_binary(Class, utf8)),
         S(<<"selector">>) => S(atom_to_binary(Selector, utf8)),
         S(<<"mode">>) => S(atom_to_binary(Mode, utf8)),
@@ -1676,12 +1674,6 @@ trace_event_to_map({
         %% Base wins on key collisions (metadata cannot override core fields)
         _ -> maps:merge(tag_metadata_keys(sanitize_metadata(Metadata)), Base)
     end.
-
-%% A trace event's target as text: a pid, or the `{Name, Node}` a send to a
-%% node-qualified registered ref addresses (BT-5271).
--spec actor_text(pid() | {atom(), node()}) -> binary().
-actor_text(Pid) when is_pid(Pid) -> list_to_binary(pid_to_list(Pid));
-actor_text(Dest) -> beamtalk_error:chars_to_binary(io_lib:format("~tp", [Dest])).
 
 -doc """
 Sanitize metadata map values for JSON serialization.

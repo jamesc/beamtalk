@@ -2177,16 +2177,6 @@ remote_name_dest_test_() ->
                 ?assertMatch(
                     #{{beamtalk_string, <<"calls">>} := 1},
                     maps:get({beamtalk_string, <<"increment">>}, Methods)
-                ),
-                %% Its trace event names the target.
-                ok = beamtalk_trace_store:enable(),
-                ok = beamtalk_trace_store:record_trace_event(
-                    Dest, unknown, increment, sync, 1000, ok, #{}, stop
-                ),
-                [Event] = beamtalk_trace_store:get_traces(),
-                ?assertEqual(
-                    {beamtalk_string, <<"{bt5271_some_name,bt5271_peer@localhost}">>},
-                    maps:get({beamtalk_string, <<"actor">>}, Event)
                 )
             end)}
     ]}.
