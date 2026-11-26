@@ -82,6 +82,12 @@ NOTE: This function only handles the two-element tagged tuple form.
 - Multi-value tuples like `{ok, V1, V2}` must be normalized before calling.
 - Functions that crash on failure (raising exceptions) should use `tryDo:`.
 
+A class object from another node as the ok payload (BT-5274) is resolved by
+name to this node's class, as `beamtalk_wire:decode/1` resolves one. When the
+class is not registered on this node, this raises `class_not_found`, the same
+error the FFI boundary raises for a bare class result, so an FFI answer fails
+the same way whether or not it is `{ok, _}`-wrapped.
+
 ## Examples (Erlang)
 ```erlang
 beamtalk_result:from_tagged_tuple({ok, 42})
@@ -93,10 +99,6 @@ beamtalk_result:from_tagged_tuple({error, enoent})
 ```
 """.
 -spec from_tagged_tuple({ok, term()} | {error, term()}) -> t().
-%% Raises `class_not_found` (BT-5274) when the ok payload is a class object
-%% from another node whose class is not registered on this node: the same error
-%% the FFI boundary and `beamtalk_wire:decode/1` raise for such a class, so an
-%% FFI answer fails the same way whether or not it is `{ok, _}`-wrapped.
 from_tagged_tuple({ok, #beamtalk_object{pid = Pid} = Value}) when
     is_pid(Pid), node(Pid) =/= node()
 ->
