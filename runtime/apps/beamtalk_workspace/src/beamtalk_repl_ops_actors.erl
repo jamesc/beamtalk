@@ -136,8 +136,19 @@ handle_term(<<"interrupt">>, _Params, Msg, SessionPid) ->
         ok = beamtalk_repl_shell:interrupt(TargetPid),
         {status, ok}
     catch
-        exit:{noproc, _} ->
-            {status, ok}
+        exit:{Reason, _} when Reason =:= noproc; Reason =:= normal; Reason =:= shutdown ->
+            %% Gone before, or while, the call was in flight: nothing to interrupt.
+            {status, ok};
+        exit:{timeout, _} ->
+            %% The shell did not answer in 5 s: it is alive but wedged. Say so
+            %% rather than letting the exit crash the caller.
+            {error,
+                beamtalk_repl_errors:make(
+                    session_busy,
+                    'REPL',
+                    <<"Session did not answer">>,
+                    <<"The session is busy; try again.">>
+                )}
     end.
 
 %% BT-5199: reply only once the actor is gone, so a client that reads `actors`

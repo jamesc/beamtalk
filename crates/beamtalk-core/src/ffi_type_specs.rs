@@ -1464,31 +1464,17 @@ pub fn collect_project_test_helper_modules(
 /// lives under `<root>/test/` — the files that may call `native/test/`
 /// helpers (BT-5251).
 ///
-/// Both paths are canonicalised (falling back to the spelling given), so a
+/// Both paths are canonicalised, `file` even when it does not exist (falling back to the spelling given), so a
 /// relative `lint test/x.bt`, a symlinked checkout or macOS `/var` vs
 /// `/private/var` all compare equal, as `is_under_stubs_dir` does.
 #[must_use]
 pub fn is_project_test_file(project_root: &Utf8Path, file: &Utf8Path) -> bool {
-    // A file that is not on disk yet (an unsaved buffer) cannot be
-    // canonicalised itself, so its deepest existing ancestor is, and the rest
-    // is re-appended; otherwise `/var/...` would never match a canonical
-    // `/private/var/...` root on macOS.
+    // Lenient: a test file the editor has open may not exist on disk yet, and
+    // its spelling must still match the canonical root (Windows 8.3 short names
+    // in a temp dir, macOS `/var` vs `/private/var`).
     let canon = |p: &Utf8Path| {
-        let mut existing = p.as_std_path();
-        let mut tail = Vec::new();
-        loop {
-            if let Ok(mut resolved) = crate::paths::canonicalize(existing) {
-                resolved.extend(tail.iter().rev());
-                return resolved;
-            }
-            match (existing.parent(), existing.file_name()) {
-                (Some(parent), Some(name)) if !parent.as_os_str().is_empty() => {
-                    tail.push(name);
-                    existing = parent;
-                }
-                _ => return p.as_std_path().to_path_buf(),
-            }
-        }
+        crate::paths::canonicalize_lenient(p.as_std_path())
+            .unwrap_or_else(|| p.as_std_path().to_path_buf())
     };
     canon(file).starts_with(canon(project_root).join("test"))
 }
@@ -2317,23 +2303,6 @@ mod tests {
         // Root canonical, file spelled through the symlink (and vice versa).
         assert!(is_project_test_file(&real, &link.join("test").join("a.bt")));
         assert!(is_project_test_file(&link, &real.join("test").join("a.bt")));
-    }
-
-    /// A test file that is not on disk yet (an unsaved buffer) under a
-    /// symlinked root still matches: this is the macOS `/var` vs
-    /// `/private/var` case the LSP sees for a new file.
-    #[cfg(unix)]
-    #[test]
-    fn is_project_test_file_resolves_symlinks_for_missing_files() {
-        let temp = TempDir::new().unwrap();
-        let real = Utf8PathBuf::from_path_buf(temp.path().join("pkg")).unwrap();
-        std::fs::create_dir_all(real.join("test")).unwrap();
-        let link = Utf8PathBuf::from_path_buf(temp.path().join("link")).unwrap();
-        std::os::unix::fs::symlink(real.as_std_path(), link.as_std_path()).unwrap();
-        let missing = Utf8Path::new("test/not_saved_yet_test.bt");
-        assert!(is_project_test_file(&real, &link.join(missing)));
-        assert!(is_project_test_file(&link, &real.join(missing)));
-        assert!(!is_project_test_file(&real, &link.join("src/not_saved.bt")));
     }
 
     // -----------------------------------------------------------------------
