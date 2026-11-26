@@ -992,9 +992,39 @@ Spawn a monitored worker process to run a test class.
 Uses spawn_monitor so the runner detects worker crashes (OOM, kill,
 etc.) that bypass the try/catch. Returns {Pid, MonitorRef}.
 The worker still catches trapped exceptions to produce friendly errors.
+
+A worker never outlives its runner (BT-5189): a watcher kills it when the
+runner dies first. A cancelled run — the LiveView IDE's test-run Stop kills
+the runner — would otherwise leave every in-flight class running to the end,
+mutating the image behind a pane that says the run stopped.
 """.
 -spec spawn_class_worker(atom(), pid(), reference()) -> {pid(), reference()}.
 spawn_class_worker(ClassName, Parent, Ref) ->
+    {Pid, MonRef} = spawn_class_worker_process(ClassName, Parent, Ref),
+    _ = spawn(fun() -> kill_with_runner(Parent, Pid) end),
+    {Pid, MonRef}.
+
+-doc """
+Kill `Worker` if `Runner` dies before it; return once either is gone. A
+process already gone when monitored yields an immediate `noproc` `DOWN`, so
+neither ordering race leaves the worker running or this watcher waiting.
+""".
+-spec kill_with_runner(pid(), pid()) -> ok.
+kill_with_runner(Runner, Worker) ->
+    RunnerRef = erlang:monitor(process, Runner),
+    WorkerRef = erlang:monitor(process, Worker),
+    receive
+        {'DOWN', WorkerRef, process, Worker, _} ->
+            erlang:demonitor(RunnerRef, [flush]),
+            ok;
+        {'DOWN', RunnerRef, process, Runner, _} ->
+            exit(Worker, kill),
+            erlang:demonitor(WorkerRef, [flush]),
+            ok
+    end.
+
+-spec spawn_class_worker_process(atom(), pid(), reference()) -> {pid(), reference()}.
+spawn_class_worker_process(ClassName, Parent, Ref) ->
     spawn_monitor(fun() ->
         Result =
             try

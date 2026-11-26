@@ -119,6 +119,16 @@ non-loopback interface (epmd is a shared per-user daemon — loopback is not
 automatic). If you see that warning, stop the stray epmd (`epmd -kill` when no
 other Erlang nodes need it) and restart the workspace.
 
+Every node the tooling starts is also pinned to loopback for its distribution
+listener (`-kernel inet_dist_use_interface '{127,0,0,1}'`): the `beamtalk`
+CLI's client nodes, the release launcher's `stop`/`ping`/`rpc`/`remote_console`
+nodes, and this LiveView front. The front's `mix release` boots with
+`RELEASE_DISTRIBUTION=none` (`rel/env.sh.eex`, and the Docker image) and starts
+distribution lazily, pinned. **Multi-node opt-out:** exporting a non-loopback
+`ERL_EPMD_ADDRESS` (below) lifts the pin from the CLI and the LiveView front
+alike; release nodes keep the `vm.args` loopback pin unless you override it in
+your own `vm.args`.
+
 ### Same trusted private network / VPC
 
 Bind distribution and epmd to the **private interface**, never `0.0.0.0`:

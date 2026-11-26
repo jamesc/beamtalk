@@ -86,10 +86,6 @@ DispatchDifferentialCase subclass: SealedDirectDispatchDifferentialTest
     @expect dnu
     w noSuch: 1 selector: 2
 
-  directExtended: w :: SealedDirectDiffWidget => w diffExtended
-
-  directBaseExtended: w :: SealedDirectDiffWidget => w diffBaseExtended
-
   directAdd: w :: SealedDirectDiffWidget from: c => w add: c increment
 
   countedWidget: c -> SealedDirectDiffWidget =>
@@ -122,10 +118,6 @@ DispatchDifferentialCase subclass: SealedDirectDispatchDifferentialTest
   dynUnknown: w => w noSuchSelector
 
   dynUnknownKeyword: w => w noSuch: 1 selector: 2
-
-  dynExtended: w => w diffExtended
-
-  dynBaseExtended: w => w diffBaseExtended
 
   dynAdd: w from: c => w add: c increment
 
@@ -201,21 +193,6 @@ DispatchDifferentialCase subclass: SealedDirectDispatchDifferentialTest
     ] as: [self dynPrintString: w]
     self assert: (outcome at: 1) equals: #returned
 
-  // === Extension-registry selectors ===
-  testExtensionOnSealedClass =>
-    w := self widget
-    self assert: (self assertSameOutcome: [
-      self directExtended: w
-    ] as: [self dynExtended: w]) equals: #(#returned, 70)
-
-  testExtensionOnSuperclass =>
-    w := self widget
-    self
-      assert: (self assertSameOutcome: [
-        self directBaseExtended: w
-      ] as: [self dynBaseExtended: w])
-      equals: #(#returned, #baseExtended)
-
   // === Errors: DNU and errors raised inside the method ===
   testUnknownUnarySelector =>
     w := self widget
@@ -263,9 +240,6 @@ DispatchDifferentialCase subclass: SealedDirectDispatchDifferentialTest
 
   testPerformArmReachesInheritedSelector =>
     self assert: (self armOutcome: #perform: args: #(#baseOnly)) equals: #(#returned, #fromBase)
-
-  testPerformArmReachesExtensionSelector =>
-    self assert: (self armOutcome: #perform: args: #(#diffExtended)) equals: #(#returned, 70)
 
   testPerformArmUnknownSelector =>
     outcome := self armOutcome: #perform: args: #(#noSuchSelector)
@@ -400,8 +374,3 @@ DispatchDifferentialCase subclass: SealedDirectDispatchDifferentialTest
     self assert: (self directSumOfCounted: c) equals: 7
     self assert: c getValue equals: 1
     c stop
-
-// Extension-registry selectors (ADR 0066): resolved by the runtime's
-// extension lookup inside `dispatch/3`, on the class itself and on its parent.
-SealedDirectDiffWidget >> diffExtended -> Integer => self sum * 10
-SealedDirectDiffBase >> diffBaseExtended -> Symbol => #baseExtended

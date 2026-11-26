@@ -6,7 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 
 use crate::core_erlang::binary_segments::{
-    SegmentDirection, expand_utf_string_literals, int_to_f64, segment_spec_tail,
+    SegmentDirection, expand_utf_string_literals, float_segment_value, segment_spec_tail,
 };
 use crate::core_erlang::util::index_lit;
 use crate::core_erlang::{CodeGenError, CoreErlangGenerator, Result};
@@ -16,6 +16,7 @@ use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{
     BinarySegment, BinarySegmentType, Expression, Identifier, Literal, MatchArm, Pattern,
+    binary_size_vars, first_invalid_pattern_size_expr,
 };
 use beamtalk_core::source_analysis::Span;
 use std::collections::HashSet;
@@ -477,7 +478,10 @@ impl CoreErlangGenerator {
                 parts.push(Document::Str(","));
             }
             if let Some(size) = &seg.size
-                && let Some(name) = size_vars(size).iter().find(|v| bound_here.contains(*v))
+                && let Some(name) = binary_size_vars(size)
+                    .into_iter()
+                    .map(|id| id.name.as_str())
+                    .find(|v| bound_here.contains(v))
             {
                 self.pop_scope();
                 return Err(CodeGenError::UnsupportedFeature {
@@ -502,10 +506,10 @@ impl CoreErlangGenerator {
     /// Generates a Core Erlang binary segment size (BT-4096, BT-4097).
     ///
     /// A size is a guard position in Core Erlang: only literals, bound
-    /// variables, and arithmetic/comparison expressions are valid. Anything
-    /// else — a field read, a message send, a variable bound only later in
-    /// the pattern — would compile to Core Erlang that `erlc` rejects, so
-    /// it is a clean compile error here instead.
+    /// variables, and integer arithmetic over them are valid (see
+    /// [`first_invalid_pattern_size_expr`]). The parser already reports any
+    /// other size at its span (BT-5285); [`Self::check_binary_size`] repeats
+    /// that check as a backstop and adds the bound-variable check.
     fn generate_binary_size(&mut self, size: &Expression) -> Result<Document<'static>> {
         self.check_binary_size(size)?;
         self.generate_guard_expression(size)
@@ -522,45 +526,31 @@ impl CoreErlangGenerator {
 
     /// Validates a segment size before [`Self::generate_binary_size`] lowers it.
     ///
-    /// Every identifier must already be bound (an earlier segment's value, a
-    /// parameter, or a local); anything that is not a literal, a variable, or
-    /// a message send is rejected outright (operator validity is left to the
-    /// guard lowering, which rephrases the error with size context).
+    /// The size must be a valid pattern size — the parser's rule,
+    /// [`first_invalid_pattern_size_expr`] — and every variable it names
+    /// must already be bound (an earlier segment's value, a parameter, or a
+    /// local).
     fn check_binary_size(&self, size: &Expression) -> Result<()> {
-        match size {
-            Expression::Literal(..) => Ok(()),
-            Expression::Identifier(id) => {
-                if self.lookup_var(id.name.as_str()).is_none() {
-                    Err(CodeGenError::UnsupportedFeature {
-                        feature: format!(
-                            "variable '{}' cannot be used as a binary segment size here: it is not bound to a value. \
-                             A size may name a variable bound by an earlier segment of the same binary pattern, \
-                             a method parameter, or a local variable (assign a field to a local first)",
-                            id.name
-                        ),
-                        span: Some(id.span),
-                    })
-                } else {
-                    Ok(())
-                }
-            }
-            Expression::Parenthesized { expression, .. } => self.check_binary_size(expression),
-            Expression::MessageSend {
-                receiver,
-                arguments,
-                ..
-            } => {
-                self.check_binary_size(receiver)?;
-                for arg in arguments {
-                    self.check_binary_size(arg)?;
-                }
-                Ok(())
-            }
-            other => Err(CodeGenError::UnsupportedFeature {
-                feature: "only literals, variables, and arithmetic/comparison expressions are supported in a binary segment size".to_string(),
-                span: Some(other.span()),
-            }),
+        if let Some(bad) = first_invalid_pattern_size_expr(size) {
+            return Err(CodeGenError::UnsupportedFeature {
+                feature: "only literals, variables, and `+`, `-`, `*` over them are supported in a binary pattern segment size".to_string(),
+                span: Some(bad.span()),
+            });
         }
+        for id in binary_size_vars(size) {
+            let name = id.name.as_str();
+            if self.lookup_var(name).is_none() {
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: format!(
+                        "variable '{name}' cannot be used as a binary segment size here: it is not bound to a value. \
+                         A size may name a variable bound by an earlier segment of the same binary pattern, \
+                         a method parameter, or a local variable (assign a field to a local first)"
+                    ),
+                    span: Some(id.span),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Generates a Core Erlang binary segment: `#<Value>(Size,Unit,Type,Flags)`.
@@ -589,14 +579,19 @@ impl CoreErlangGenerator {
         // `#<1.0e0>(64,1,'float',…)`, while an integer value there is a
         // clause that can never match.
         let seg_type = seg.segment_type.unwrap_or(BinarySegmentType::Integer);
-        let value_doc = match (&seg.value, seg_type) {
+        let float = match (&seg.value, seg_type) {
+            (
+                Pattern::Literal(
+                    lit @ (Literal::Integer(_) | Literal::BigInteger(_) | Literal::Character(_)),
+                    _,
+                ),
+                BinarySegmentType::Float,
+            ) => float_segment_value(lit),
+            _ => None,
+        };
+        let value_doc = match (&seg.value, float) {
             (Pattern::Literal(Literal::String(s), _), _) => binary_string_folded_value(s),
-            (Pattern::Literal(Literal::Integer(v), _), BinarySegmentType::Float) => {
-                leaf::float_lit(int_to_f64(*v))
-            }
-            (Pattern::Literal(Literal::Character(c), _), BinarySegmentType::Float) => {
-                leaf::float_lit(f64::from(u32::from(*c)))
-            }
+            (_, Some(f)) => leaf::float_lit(f),
             _ => self.generate_pattern(&seg.value)?,
         };
 
@@ -652,7 +647,10 @@ pub(in crate::core_erlang) fn plan_binary_split(
     let mut bound_in_chunk: HashSet<&str> = HashSet::new();
     for (i, seg) in segments.iter().enumerate() {
         if let Some(size) = &seg.size {
-            if size_vars(size).iter().any(|v| bound_in_chunk.contains(*v)) {
+            if binary_size_vars(size)
+                .iter()
+                .any(|id| bound_in_chunk.contains(id.name.as_str()))
+            {
                 chunks.push(BinaryChunkPlan {
                     start: chunk_start,
                     end: i,
@@ -706,30 +704,6 @@ fn is_trivial_size(size: &Expression) -> bool {
         Expression::Parenthesized { expression, .. } => is_trivial_size(expression),
         _ => false,
     }
-}
-
-/// Collects every variable named in a segment size expression.
-fn size_vars(size: &Expression) -> Vec<&str> {
-    fn inner<'a>(size: &'a Expression, vars: &mut Vec<&'a str>) {
-        match size {
-            Expression::Identifier(id) => vars.push(id.name.as_str()),
-            Expression::Parenthesized { expression, .. } => inner(expression, vars),
-            Expression::MessageSend {
-                receiver,
-                arguments,
-                ..
-            } => {
-                inner(receiver, vars);
-                for arg in arguments {
-                    inner(arg, vars);
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut vars = Vec::new();
-    inner(size, &mut vars);
-    vars
 }
 
 /// Whether `pattern` is, or nests inside a composite pattern, a binary

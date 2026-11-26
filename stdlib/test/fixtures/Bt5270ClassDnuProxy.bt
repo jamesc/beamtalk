@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5270: a class whose class side overrides `doesNotUnderstand:args:`. It
+// answers neither the collection messages nor `to:do:`, so the pure send reaches
+// the override. An inlined writing fold or counted loop would raise
+// `does_not_understand` instead, so it raises `stateful_block_dispatch`.
+
+Object subclass: Bt5270ClassDnuProxy
+
+  class doesNotUnderstand: selector args: _arguments => selector
+
+  class selfZork => self zork

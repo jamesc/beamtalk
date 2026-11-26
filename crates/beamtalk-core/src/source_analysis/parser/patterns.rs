@@ -28,15 +28,22 @@ impl Parser {
     /// Bare `true`/`false` are rejected with a diagnostic rather
     /// than parsed as a variable binding — use `x :: True`/`x :: False`/
     /// `x :: Boolean` instead.
-    #[allow(clippy::too_many_lines)] // one arm per pattern kind
     pub(super) fn parse_pattern(&mut self) -> Pattern {
-        // Guard against stack overflow from deeply nested tuple patterns
+        // Guard against stack overflow from deeply nested patterns. Past the
+        // limit a bracketed pattern is skipped whole, so its contents are
+        // not reparsed as the enclosing pattern's elements.
         let span = self.current_token().span();
-        if self.enter_nesting(span).is_err() {
-            return Pattern::Wildcard(span);
-        }
+        self.with_nesting(
+            span,
+            |p| Pattern::Wildcard(span.merge(p.skip_bracketed_group())),
+            Self::parse_pattern_unguarded,
+        )
+    }
 
-        let result = match self.current_kind() {
+    /// [`Self::parse_pattern`] without the nesting guard.
+    #[allow(clippy::too_many_lines)] // one arm per pattern kind
+    fn parse_pattern_unguarded(&mut self) -> Pattern {
+        match self.current_kind() {
             // Wildcard: `_`
             TokenKind::Identifier(name) if name.as_str() == "_" => {
                 let span = self.advance().span();
@@ -123,67 +130,7 @@ impl Parser {
                 let name = name.clone();
                 let token = self.advance();
                 let span = token.span();
-                let binding = Identifier::new(name, span);
-
-                if matches!(self.current_kind(), TokenKind::DoubleColon) {
-                    self.advance(); // consume '::'
-                    if let TokenKind::Identifier(class_name) = self.current_kind() {
-                        let class_name = class_name.clone();
-                        let class_span = self.advance().span();
-
-                        // Generic type arguments in a type pattern, e.g.
-                        // `items :: List(Printable)`, are rejected with a
-                        // single explicit diagnostic (ADR 0107
-                        // Decision, 2026-07-13) rather than silently checking
-                        // only the base class. `Pattern::Type` intentionally
-                        // scopes `class` to a bare identifier, and
-                        // per ADR 0068 type erasure there is no reified
-                        // generic tag to verify at runtime regardless — so
-                        // silently discarding `(Printable)` would be the one
-                        // place in the language where a generic-looking
-                        // annotation silently means less than it appears to.
-                        if matches!(self.current_kind(), TokenKind::LeftParen) {
-                            let args_span = self.skip_parenthesized_for_recovery();
-                            let full_span = span.merge(args_span);
-                            self.diagnostics.push(Diagnostic::error(
-                                "generic type arguments are not supported in a type pattern yet",
-                                full_span,
-                            ));
-                            Pattern::Wildcard(full_span)
-                        } else {
-                            let full_span = span.merge(class_span);
-                            Pattern::Type {
-                                binding,
-                                class: Identifier::new(class_name, class_span),
-                                span: full_span,
-                            }
-                        }
-                    } else {
-                        let bad_span = self.current_token().span();
-                        self.diagnostics.push(Diagnostic::error(
-                            "Expected a class name after '::' in a type pattern",
-                            bad_span,
-                        ));
-                        // Consume the offending token so this single
-                        // diagnostic doesn't cascade into a second "Expected
-                        // '->' after pattern in match arm" error —
-                        // but only when it plausibly stands alone as a
-                        // mistyped type name (a literal, e.g. `x :: 5`).
-                        // A type pattern can nest inside a tuple/array/map
-                        // pattern (`{x :: 5, y}`), so anything else — a `,`
-                        // element separator, a closing delimiter, `when:`,
-                        // the arrow itself, ... — is deliberately left alone
-                        // for the *enclosing* pattern parser to consume
-                        // correctly, even at the cost of a second cascaded
-                        // diagnostic.
-                        if Self::looks_like_malformed_type_pattern_token(self.current_kind()) {
-                            self.advance();
-                        }
-                        Pattern::Wildcard(span.merge(bad_span))
-                    }
-                } else {
-                    Pattern::Variable(binding)
-                }
+                self.finish_variable_or_type_pattern(Identifier::new(name, span), span)
             }
 
             // Literal patterns: integer, float, string, character
@@ -222,12 +169,7 @@ impl Parser {
                         if let Expression::Literal(lit, _) = expr {
                             // `parse_literal` already rejects non-finite floats, so
                             // negating `f` here cannot produce `inf`/`NaN`.
-                            let neg_lit = match lit {
-                                Literal::Integer(n) => Literal::Integer(-n),
-                                Literal::Float(f) => Literal::Float(-f),
-                                other => other,
-                            };
-                            Pattern::Literal(neg_lit, span)
+                            Pattern::Literal(lit.negated(), span)
                         } else {
                             Pattern::Wildcard(span)
                         }
@@ -263,10 +205,7 @@ impl Parser {
                 ));
                 Pattern::Wildcard(span)
             }
-        };
-
-        self.leave_nesting();
-        result
+        }
     }
 
     /// Consumes the malformed token(s) following an errant `::` in a `nil`
@@ -353,6 +292,72 @@ impl Parser {
                 | TokenKind::Character(_)
                 | TokenKind::Symbol(_)
         )
+    }
+
+    /// Finishes a pattern that began with the identifier `binding`: a plain
+    /// variable, or a type pattern `binding :: ClassName` (ADR 0107 Phase A).
+    /// Shared by [`Self::parse_pattern`] and map-pattern values (BT-5284) so
+    /// every position gives the same diagnostics.
+    fn finish_variable_or_type_pattern(&mut self, binding: Identifier, span: Span) -> Pattern {
+        if matches!(self.current_kind(), TokenKind::DoubleColon) {
+            self.advance(); // consume '::'
+            if let TokenKind::Identifier(class_name) = self.current_kind() {
+                let class_name = class_name.clone();
+                let class_span = self.advance().span();
+
+                // Generic type arguments in a type pattern, e.g.
+                // `items :: List(Printable)`, are rejected with a
+                // single explicit diagnostic (ADR 0107
+                // Decision, 2026-07-13) rather than silently checking
+                // only the base class. `Pattern::Type` intentionally
+                // scopes `class` to a bare identifier, and
+                // per ADR 0068 type erasure there is no reified
+                // generic tag to verify at runtime regardless — so
+                // silently discarding `(Printable)` would be the one
+                // place in the language where a generic-looking
+                // annotation silently means less than it appears to.
+                if matches!(self.current_kind(), TokenKind::LeftParen) {
+                    let args_span = self.skip_parenthesized_for_recovery();
+                    let full_span = span.merge(args_span);
+                    self.diagnostics.push(Diagnostic::error(
+                        "generic type arguments are not supported in a type pattern yet",
+                        full_span,
+                    ));
+                    Pattern::Wildcard(full_span)
+                } else {
+                    let full_span = span.merge(class_span);
+                    Pattern::Type {
+                        binding,
+                        class: Identifier::new(class_name, class_span),
+                        span: full_span,
+                    }
+                }
+            } else {
+                let bad_span = self.current_token().span();
+                self.diagnostics.push(Diagnostic::error(
+                    "Expected a class name after '::' in a type pattern",
+                    bad_span,
+                ));
+                // Consume the offending token so this single
+                // diagnostic doesn't cascade into a second "Expected
+                // '->' after pattern in match arm" error —
+                // but only when it plausibly stands alone as a
+                // mistyped type name (a literal, e.g. `x :: 5`).
+                // A type pattern can nest inside a tuple/array/map
+                // pattern (`{x :: 5, y}`), so anything else — a `,`
+                // element separator, a closing delimiter, `when:`,
+                // the arrow itself, ... — is deliberately left alone
+                // for the *enclosing* pattern parser to consume
+                // correctly, even at the cost of a second cascaded
+                // diagnostic.
+                if Self::looks_like_malformed_type_pattern_token(self.current_kind()) {
+                    self.advance();
+                }
+                Pattern::Wildcard(span.merge(bad_span))
+            }
+        } else {
+            Pattern::Variable(binding)
+        }
     }
 
     /// Parses a tuple pattern: `{p1, p2, ...}`
@@ -512,7 +517,7 @@ impl Parser {
                 let TokenKind::Identifier(name) = token.into_kind() else {
                     unreachable!()
                 };
-                Pattern::Variable(Identifier::new(name, span))
+                self.finish_variable_or_type_pattern(Identifier::new(name, span), span)
             }
             TokenKind::String(_)
             | TokenKind::Integer(_)
@@ -537,12 +542,7 @@ impl Parser {
                         if let Expression::Literal(lit, _) = expr {
                             // `parse_literal` already rejects non-finite floats, so
                             // negating `f` here cannot produce `inf`/`NaN`.
-                            let neg_lit = match lit {
-                                Literal::Integer(n) => Literal::Integer(-n),
-                                Literal::Float(f) => Literal::Float(-f),
-                                other => other,
-                            };
-                            Pattern::Literal(neg_lit, span)
+                            Pattern::Literal(lit.negated(), span)
                         } else {
                             Pattern::Wildcard(span)
                         }
@@ -637,8 +637,9 @@ impl Parser {
     /// Example: `Result ok: v`, `Result error: _`, `Result ok: 42`
     ///
     /// The class identifier must start with an uppercase letter. Each `keyword: binding`
-    /// pair names one constructor argument. The binding is a simple variable, wildcard,
-    /// or literal — not an arbitrary expression.
+    /// pair names one constructor argument. The binding is a variable, wildcard,
+    /// literal, or a nested tuple / map pattern — not an
+    /// arbitrary expression.
     fn parse_constructor_pattern(&mut self) -> Pattern {
         let class_token = self.advance(); // consume uppercase class identifier
         let start = class_token.span();
@@ -660,6 +661,14 @@ impl Parser {
             let kw_span = self.current_token().span();
             self.advance(); // consume keyword
             let binding = self.parse_constructor_binding();
+            if let Some(bad) = Self::unsupported_nested_pattern(&binding) {
+                self.diagnostics.push(Diagnostic::error(
+                    "array and binary patterns cannot be nested inside a constructor pattern \
+                     (bind the value and destructure it in the arm body instead)"
+                        .to_string(),
+                    bad,
+                ));
+            }
             end_span = binding.span();
             keywords.push((Identifier::new(kw_name, kw_span), binding));
         }
@@ -681,10 +690,26 @@ impl Parser {
         }
     }
 
+    /// Span of the first array/binary sub-pattern nested anywhere inside a
+    /// constructor binding (codegen cannot lower these inside a composite
+    /// native pattern), or `None`.
+    fn unsupported_nested_pattern(pattern: &Pattern) -> Option<Span> {
+        match pattern {
+            Pattern::Array { span, .. } | Pattern::Binary { span, .. } => Some(*span),
+            Pattern::Tuple { elements, .. } => {
+                elements.iter().find_map(Self::unsupported_nested_pattern)
+            }
+            Pattern::Map { pairs, .. } => pairs
+                .iter()
+                .find_map(|p| Self::unsupported_nested_pattern(&p.value)),
+            _ => None,
+        }
+    }
+
     /// Parses the binding position of a constructor pattern argument.
     ///
     /// Accepts: wildcard `_`, variable identifier, `nil` (the `Pattern::Nil`
-    /// literal), or a literal (integer, float, string, symbol, or
+    /// literal), a nested tuple `{...}` or map `#{...}` pattern (BT-5277), or a literal (integer, float, string, symbol, or
     /// negative number like `-1`). Bare `true`/`false` are rejected with a
     /// diagnostic rather than parsed as a variable binding — see
     /// the dedicated match arm below for why. A trailing `:: ClassName` on
@@ -796,17 +821,27 @@ impl Parser {
                     Pattern::Variable(Identifier::new(name, span))
                 }
             }
+            // Nested destructuring patterns (BT-5277): `Result ok: {a, b}`,
+            // `Result ok: #{#k => v}`. These are self-delimiting, so they
+            // cannot swallow the next constructor keyword or the arm's `->`.
+            // Array (`#[...]`) and binary (`<<...>>`) sub-patterns are not
+            // accepted: codegen cannot lower them inside a composite native
+            // pattern (see `generate_pattern`), so reject them here.
+            //
+            // Literals and nested tuple/map patterns:
             TokenKind::Integer(_)
             | TokenKind::Float(_)
             | TokenKind::String(_)
             | TokenKind::Character(_)
-            | TokenKind::Symbol(_) => self.parse_pattern(),
+            | TokenKind::Symbol(_)
+            | TokenKind::LeftBrace
+            | TokenKind::MapOpen => self.parse_pattern(),
             // Negative numeric literals: `-1`, `-3.14`
             TokenKind::BinarySelector(op) if op.as_str() == "-" => self.parse_pattern(),
             _ => {
                 let span = self.current_token().span();
                 self.diagnostics.push(Diagnostic::error(
-                    "Expected variable, '_', or literal after constructor keyword".to_string(),
+                    "Expected variable, '_', literal, or '{...}' or '#{...}' pattern after constructor keyword".to_string(),
                     span,
                 ));
                 Pattern::Wildcard(span)

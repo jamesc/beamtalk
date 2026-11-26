@@ -27,12 +27,12 @@ use super::node_state::{
     PID_DISCOVERY_INITIAL_DELAY_MS, PID_DISCOVERY_MAX_RETRIES, PID_DISCOVERY_RETRY_DELAY_MS,
     is_process_alive,
 };
-use super::startup_command::{build_detached_node_command, write_cookie_args_file};
+use super::startup_command::build_detached_node_command;
 
 use crate::beam_compiler::escape_erlang_string;
 use crate::commands::protocol::ProtocolClient;
 use beamtalk_repl_protocol::RequestBuilder;
-use miette::{Result, miette};
+use miette::{Context, IntoDiagnostic, Result, miette};
 
 /// Delay between port file read attempts in milliseconds.
 const PORT_DISCOVERY_DELAY_MS: u64 = 500;
@@ -288,13 +288,18 @@ pub fn start_detached_node(
 
     let (eval_cmd, project_path) = prepare_workspace_paths(workspace_id, config)?;
 
-    // Write cookie to args file (not visible in `ps aux`)
-    let cookie_args_file = write_cookie_args_file(workspace_id, &cookie)?;
+    // BT-5185: the node boots its cookie from this private directory; it
+    // removes the directory itself once up, and this guard removes whatever
+    // is left when start-up returns (the node read it at boot, before writing
+    // the PID file waited for below).
+    let cookie_home = crate::commands::cookie_env::CookieHome::new(&cookie)
+        .into_diagnostic()
+        .wrap_err("Failed to create the private cookie directory")?;
 
     // Start detached BEAM node
     let mut cmd = build_detached_node_command(
         &node_name,
-        &cookie_args_file,
+        &cookie_home,
         beam_paths,
         extra_code_paths,
         &eval_cmd,
@@ -352,8 +357,8 @@ pub fn start_detached_node(
         ));
     };
 
-    // Recorded on every platform `proc_start_time` supports (Linux, Windows);
-    // `None` elsewhere. Kill paths use it as the PID-identity check.
+    // Recorded on every platform `proc_start_time` supports (Linux, macOS,
+    // Windows); `None` elsewhere. Kill paths use it as the PID-identity check.
     let start_time = read_proc_start_time(pid);
 
     // Read actual port from port file (written by beamtalk_repl_server after binding).

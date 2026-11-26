@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5190: a non-Integer class that answers `timesRepeat:` with its own
+// method. An inlined writing loop on it would bypass it, so it raises
+// `stateful_block_dispatch`; a read-only block reaches the method.
+
+Value subclass: Bt5190CustomTimesRepeat
+
+  timesRepeat: _block => #custom

@@ -87,9 +87,10 @@ maps — return `false`. Used, for example, to tell a `Dictionary` (an
 untagged map) from a value-type instance (a tagged map).
 
 The comparison-operator codegen guard does *not* use this: it inlines a
-primitive-comparable test (`is_number` or `is_binary` → bare BIF, everything
-else → dispatch), so that non-object primitives such as `nil` raise
-`does_not_understand` instead of being silently term-ordered (BT-3924).
+kind test (`is_number` → bare BIF, everything else → dispatch; a declared
+`String` is tested with the `String` tag, BT-5261), so that non-object
+primitives such as `nil` or a raw binary raise `does_not_understand` instead
+of being silently term-ordered (BT-3924).
 
 Limitation (single-node assumption): the pid case delegates to
 `beamtalk_actor_registry:is_beamtalk_actor/1`, which reads `process_info(Pid,
@@ -734,7 +735,7 @@ Dispatch to an unaligned `Bitstring` (ADR 0141, BT-4139).
 A `Bitstring` deliberately does not understand the byte protocol of
 `Binary`/`Collection` (`size`, `do:`, `toBytes`, …). The send dispatches
 through the compiled class module as usual (its own methods, `Object`'s,
-the reflection arms, extensions); when the hierarchy walk ends in the
+the reflection arms); when the hierarchy walk ends in the
 `does_not_understand` for *this* selector on a `Bitstring`, the error is
 re-raised with a hint that names the bit size and the bit-level protocol
 instead of the generic spelling hint — the most likely cause is a
@@ -743,8 +744,6 @@ byte-level send to an unaligned tail.
 -spec send_bitstring(bitstring(), atom(), list()) -> term().
 send_bitstring(X, Selector, Args) ->
     Mod = module_for_value(X),
-    %% bt-catcher-audit: not-applicable-reraises - the only clause re-raises the
-    %% Bitstring DNU (with a hint) via raise_bitstring_dnu/2; nothing is swallowed.
     try
         Mod:dispatch(Selector, Args, X)
     catch
@@ -776,7 +775,7 @@ call, without the intermediate calls (~18 -> 9 calls per send).
 
 It reads the same per-process memo, under the same generation, as
 `tagged_class_dispatch/1`, so a hot reload, redefinition, reparenting, removal
-or extension change (each bumps the generation) turns it into a miss exactly
+(each bumps the generation) turns it into a miss exactly
 when it does there. Nothing here caches anything new.
 
 `erlang:function_exported(Module, dispatch, 3)` is true only for a module with
@@ -875,7 +874,7 @@ responds_to(#beamtalk_object{class = Tag} = Obj, Selector) ->
     %% Class objects (e.g., Counter as a value) are instances
     %% of 'Class', so fall back to the Class -> Behaviour -> Object hierarchy
     %% for generic protocol — but first check the class's OWN class-side
-    %% methods/extensions (class_understands_class_selector/2), since those
+    %% methods (class_understands_class_selector/2), since those
     %% are not reachable via the generic 'Class' walk (the metaclass tag is
     %% virtual, per class_object_tag/1's own doc comment).
     case beamtalk_class_registry:is_class_object(Obj) of
@@ -913,7 +912,7 @@ responds_to(X, Selector) ->
 
 -doc """
 `respondsTo:` on a class-object receiver — checks `ClassName`'s own
-class-side methods/extensions before falling back to the generic
+class-side methods before falling back to the generic
 `Class`/`Behaviour`/`Object` protocol.
 
 `respondsTo:` is a sealed compiler intrinsic (`object.bt`), so every call
@@ -921,15 +920,24 @@ site compiles directly to `beamtalk_primitive:responds_to/2` — it never
 reaches `beamtalk_dispatch:lookup/5` or a compiled class's own `dispatch/4`.
 Without this, a class object's `respondsTo:` would answer against the
 generic `'Class'` hierarchy only, so `SomeClass respondsTo: #foo`
-for a class method or class-side extension `SomeClass` itself defines
+for a class method `SomeClass` itself defines
 answered `false` even though `SomeClass foo` (or `self foo` from another of
 its class methods) would actually work.
 """.
 -spec class_responds_to(atom(), atom()) -> boolean().
 class_responds_to(ClassName, Selector) ->
     case beamtalk_class_dispatch:class_understands_class_selector(ClassName, Selector) of
-        true -> true;
-        false -> beamtalk_dispatch:responds_to(Selector, 'Class')
+        true ->
+            %% Includes a class method named `fieldAt:` etc., which a send
+            %% reaches (ADR 0153 decision 7).
+            true;
+        false ->
+            %% ADR 0153 decision 7 (BT-5155): the instance-field reflection
+            %% selectors are not part of a class object's protocol (a send
+            %% raises does_not_understand, `try_class_chain_fallthrough/3`),
+            %% although `Object` declares them for instances.
+            not beamtalk_object_class:is_field_reflection_selector(Selector) andalso
+                beamtalk_dispatch:responds_to(Selector, 'Class')
     end.
 
 -doc """
@@ -975,22 +983,17 @@ Map a runtime value to its stdlib dispatch module, selector-aware.
 Overload of `module_for_value/1` for the dynamic-dispatch call sites that
 already have the selector in hand (`dispatch_via_module/3`,
 `responds_via_module/2`). For a binary or String whose selector is in
-`is_string_binary_shared_selector/1` *and* has no `String` extension
-registered (ADR 0066), routes straight to `'bt@stdlib@binary'`: String
-and Binary agree on that selector's behaviour regardless of which one
+`is_string_binary_shared_selector/1`, routes straight to `'bt@stdlib@binary'`:
+String and Binary agree on that selector's behaviour regardless of which one
 the value is, so either module answers identically. Falls back to
-`module_for_value/1` for every other selector, and for a shared
-selector that a `String` extension has overridden — an unconditional
-fast path would skip a String-only extension on a `String` receiver.
+`module_for_value/1` for every other selector.
 
 Routes straight to `'bt@stdlib@binary'` rather than `'bt@stdlib@string'`:
-all 10 shared selectors are locally defined on `Binary`, and ADR
-0066 extensions cannot override a class-body-defined method, so `Binary`
-itself can never have a competing extension for one of them — only
-`String`'s extension registry needs checking (done above), and going
-straight to `'bt@stdlib@binary'` skips the redundant hop through
-`'bt@stdlib@string':dispatch/3`, which would otherwise re-check the
-extension registry itself before delegating to `'bt@stdlib@binary'` anyway.
+all shared selectors are locally defined on `Binary` and never redefined
+by `String` (stdlib classes are read-only, so nothing can add a competing
+`String` method later), and going straight to `'bt@stdlib@binary'` skips the
+redundant hop through `'bt@stdlib@string':dispatch/3`, which would otherwise
+delegate to `'bt@stdlib@binary'` anyway.
 """.
 -spec module_for_value(term(), atom()) -> atom() | undefined.
 module_for_value(X, Selector) when is_binary(X) ->
@@ -1003,10 +1006,7 @@ module_for_value(X, _Selector) ->
 -doc "Shared-selector fast path behind both `module_for_value/2` binary arms.".
 -spec binary_or_string_module(term(), atom()) -> atom().
 binary_or_string_module(X, Selector) ->
-    case
-        is_string_binary_shared_selector(Selector) andalso
-            not beamtalk_extensions:has('String', Selector)
-    of
+    case is_string_binary_shared_selector(Selector) of
         true -> 'bt@stdlib@binary';
         false -> module_for_value(X)
     end.
@@ -1045,15 +1045,7 @@ method *body*. If that delegation model ever changes (e.g. inherited
 primitives get inlined/duplicated per subclass for a future perf win), this
 list's safety would need re-deriving from semantics again, not just names.
 
-This function alone is *not* sufficient to pick the fast path, only a
-necessary precondition: since these selectors are locally defined on
-`Binary`, ADR 0066 forbids a competing `Binary` extension for any of them,
-but a `String` extension is legal (they're absent from `string.bt`) and
-would make the selector no longer "identical either way" — it would run
-String-only logic against a `Binary` receiver. Callers must additionally
-check `beamtalk_extensions:has/2` for a `String` override (see
-`module_for_value/2`, the only caller — call this function directly
-elsewhere only if you replicate that check too).
+`module_for_value/2` is the only caller.
 """.
 -spec is_string_binary_shared_selector(atom()) -> boolean().
 is_string_binary_shared_selector('byteAt:') -> true;

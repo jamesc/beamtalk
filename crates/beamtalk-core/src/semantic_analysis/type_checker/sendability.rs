@@ -496,7 +496,7 @@ mod tests {
             "typed Object subclass: PortBox native: pb\n  handleScope: #process",
         );
         let (module, _) = crate::source_analysis::parse(tokens);
-        let h = ClassHierarchy::build(&module).0.unwrap();
+        let h = ClassHierarchy::build(&module).0;
         assert_eq!(
             tier_of(&known("PortBox"), &h, None),
             Tier::HandleScoped(HandleScope::Process)
@@ -511,7 +511,7 @@ mod tests {
             "Actor subclass: MyActor\n  handleScope: #process",
         );
         let (module, _) = crate::source_analysis::parse(tokens);
-        let h = ClassHierarchy::build(&module).0.unwrap();
+        let h = ClassHierarchy::build(&module).0;
         assert_eq!(tier_of(&known("MyActor"), &h, None), Tier::SendableRef);
     }
 
@@ -537,7 +537,7 @@ mod tests {
             "typed Value subclass: Wrapper\n  field: p :: Port = nil",
         );
         let (module, _) = crate::source_analysis::parse(tokens);
-        let h = ClassHierarchy::build(&module).0.unwrap();
+        let h = ClassHierarchy::build(&module).0;
         assert_eq!(
             tier_of(&known("Wrapper"), &h, None),
             Tier::HandleScoped(HandleScope::Process)
@@ -554,7 +554,7 @@ mod tests {
             "typed Value subclass: Wrapper\n  field: ports :: List(Port) = nil",
         );
         let (module, _) = crate::source_analysis::parse(tokens);
-        let h = ClassHierarchy::build(&module).0.unwrap();
+        let h = ClassHierarchy::build(&module).0;
         assert_eq!(
             tier_of(&known("Wrapper"), &h, None),
             Tier::HandleScoped(HandleScope::Process)
@@ -569,7 +569,7 @@ mod tests {
             "typed Value subclass: IntBox\n  field: nums :: List(Integer) = nil",
         );
         let (module, _) = crate::source_analysis::parse(tokens);
-        let h = ClassHierarchy::build(&module).0.unwrap();
+        let h = ClassHierarchy::build(&module).0;
         assert_eq!(tier_of(&known("IntBox"), &h, None), Tier::Sendable);
     }
 
@@ -581,7 +581,7 @@ mod tests {
             "typed Value subclass: PortMap\n  field: byName :: Dictionary(String, Port) = nil",
         );
         let (module, _) = crate::source_analysis::parse(tokens);
-        let h = ClassHierarchy::build(&module).0.unwrap();
+        let h = ClassHierarchy::build(&module).0;
         assert_eq!(
             tier_of(&known("PortMap"), &h, None),
             Tier::HandleScoped(HandleScope::Process)
@@ -602,7 +602,7 @@ mod tests {
         );
         let (module, parse_diags) = crate::source_analysis::parse(tokens);
         assert!(parse_diags.is_empty(), "parse failed: {parse_diags:?}");
-        let h = ClassHierarchy::build(&module).0.unwrap();
+        let h = ClassHierarchy::build(&module).0;
         let protocol_registry = ProtocolRegistry::new();
         let mut registry = AliasRegistry::new();
         let diags = registry.register_module(&module, &h, &protocol_registry);
@@ -659,9 +659,7 @@ mod tests {
                 parse_diags.is_empty(),
                 "fixture {source_fixture} failed to parse: {parse_diags:?}"
             );
-            let hierarchy = ClassHierarchy::build(&module)
-                .0
-                .unwrap_or_else(|e| panic!("build ClassHierarchy for {source_fixture}: {e:?}"));
+            let hierarchy = ClassHierarchy::build(&module).0;
 
             let tier = tier_of(&known(class_name), &hierarchy, None);
             let actual_category = match tier {

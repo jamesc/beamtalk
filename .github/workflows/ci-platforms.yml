@@ -4,8 +4,9 @@
 # macOS / Windows / desktop CI, opt-in (BT-4209).
 #
 # ci.yml runs the Linux suite on every PR and push. The other platforms are off
-# there by default: they run here, on a daily schedule, on workflow_dispatch, and
-# on a PR carrying the `ci:all-platforms` label. This is a separate workflow so
+# there by default: they run here, on a daily schedule, on workflow_dispatch, on a
+# PR carrying the `ci:all-platforms` label, and (platform-check only, to warm the
+# Rust cache, BT-5273) on a push to main that changes the dependency set. This is a separate workflow so
 # that labelling a PR never re-triggers (or cancels) ci.yml, and so that none of
 # its job names can shadow a required check from ci.yml.
 # nightly.yml additionally runs the full test suite on macOS/Windows and builds
@@ -17,6 +18,15 @@ on:
   schedule:
     - cron: '30 7 * * *'
   workflow_dispatch:
+  # Warm main's Rust cache when the dependency set or toolchain changes (BT-5273),
+  # so a labelled PR restores a cache instead of building every dependency cold.
+  push:
+    branches: [main]
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/ci-platforms.yml'
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, labeled]
@@ -57,16 +67,15 @@ jobs:
         # Pin Windows to 2022: erlef/setup-beam@v1 doesn't support win25 (windows-2025) yet
         os: [macos-latest, windows-2022]
     runs-on: ${{ matrix.os }}
-    # 40, not 30: a run with a cold rust-cache (every Cargo.toml profile
-    # change) is ~28 min on Windows (11 min of dependency build alone), and a
-    # job the timeout cancels never reaches the post step that saves the
-    # cache, so it would stay cold on every rerun. Warm runs were 17-24.5 min
-    # on Windows, of which 4.6 min was cargo recompiling the whole workspace at
-    # the start of the test step and 1.5 min recompiling it again for the
-    # doctests; BT-3879 removed both (see the beamtalk-build profile in
-    # Cargo.toml, `test-rust-platform` in the Justfile, and
-    # emit_beamtalk_version in crates/beamtalk-build).
-    timeout-minutes: 40
+    # 60 (BT-5273). A cold Rust cache costs 12-15 min of dependency build on top of
+    # a ~20 min warm run, and the 40 min limit was being hit on Windows and macOS. A
+    # job the timeout cancels never reaches the post step that saves the cache, so
+    # main's cache stayed cold on every run and every PR started cold too (the
+    # daily schedule on main failed or was cancelled at 40 min for days). The build
+    # step has its own, shorter timeout below: a step timeout still lets the post
+    # steps run, so main saves what it built (`cache-on-failure`) and the next run
+    # restores it.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -93,6 +102,11 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: profile-${{ hashFiles('Cargo.toml') }}
+          # Only main saves. A cache saved from a PR is scoped to that PR's ref, so
+          # it never helps another PR and only crowds main's entries out (BT-4609).
+          # PR runs restore main's entry.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
 
       - name: Cache Erlang/rebar3 artifacts (Unix)
         if: runner.os != 'Windows'
@@ -126,6 +140,8 @@ jobs:
           "$TOOLCHAIN_CARGO" --version
 
       - name: Build, lint, and fast tests
+        # Well inside the job limit, which also covers setup and the cache save, so the post step still runs (BT-5273).
+        timeout-minutes: 45
         # build first so clippy and test-rust reuse its artifacts.
         # Full test-stdlib/test-bunit/test-runtime run only in the Linux-only 'test' job.
         # The full Rust suite (`test-rust`) runs on Linux only; macOS and Windows run
@@ -145,11 +161,9 @@ jobs:
         # retired injected-singleton names (see scripts/ci/lint-removed-facade-names.sh) out.
         # lint-nlr-tuple-matches (BT-3758) also no-ops on Windows; it rejects hand-rolled
         # `{'$bt_nlr', ...}` patterns in runtime sources (use the ?IS_NLR guard instead).
-        # lint-class-var-catchers (BT-3769, ADR 0130 §4) also no-ops on Windows; every
-        # runtime catch that applies a fun must use protect/1 or a bt-catcher-audit marker.
         # test-lint-stamp (BT-3926) also no-ops on Windows; the pre-push hook's lint
         # stamps must not depend on the cwd or the GIT_* variables a hook inherits.
-        run: just build clippy fmt-check test-rust-platform lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers test-grammar test-lint-stamp
+        run: just build clippy fmt-check test-rust-platform lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches test-grammar test-lint-stamp
 
       - name: Surface parity drift check (BT-2082)
         # Verifies REPL ops × CLI × MCP × LSP coverage matches
@@ -176,7 +190,8 @@ jobs:
   # ci.yml's `test-desktop` is the ubuntu-only leg for PRs touching the desktop
   # paths; both run the composite action .github/actions/test-desktop.
   platform-desktop:
-    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:all-platforms') && (github.event.action != 'labeled' || github.event.label.name == 'ci:all-platforms'))
+    # Not on a push to main: that trigger only warms platform-check's Rust cache.
+    if: github.event_name != 'push' && (github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:all-platforms') && (github.event.action != 'labeled' || github.event.label.name == 'ci:all-platforms')))
     strategy:
       fail-fast: false
       matrix:

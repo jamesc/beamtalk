@@ -31,7 +31,6 @@ fails. Each entry kind passes its own span resolver as a fun.
     emit_new_class_entry/3,
     emit_change_entry/1,
     emit_remove_change_entry/5,
-    emit_extension_remove_change_entry/7,
     capture_class_removal_snapshot/1,
     emit_remove_class_change_entry/4,
     %% Flushability classification, reused by the loader's own write paths
@@ -60,6 +59,7 @@ fails. Each entry kind passes its own span resolver as a fun.
 -endif.
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% Outcome of recording one ChangeLog entry: `ok`, or a user-visible warning
 %% when the live change was not recorded.
@@ -91,9 +91,6 @@ user instead of silent.
 """.
 -spec append_entry(string(), map(), fun(() -> map())) -> emit_result().
 append_entry(Label, Meta, BuildFun) ->
-    %% bt-catcher-audit: not-applicable-no-block - BuildFun is an Erlang closure
-    %% from this module's emit_* functions that builds the entry map; it never
-    %% runs a Beamtalk block.
     %% The append stays in the try body (not an `of` clause): a `noproc` exit
     %% while the ChangeLog server restarts must be caught too.
     try
@@ -106,7 +103,7 @@ append_entry(Label, Meta, BuildFun) ->
                     reason => AppendReason,
                     domain => [beamtalk, runtime]
                 }),
-                {warning, unrecorded_warning(Meta)}
+                {warning, append_failure_warning(AppendReason, Meta)}
         end
     catch
         Class:Reason:Stack ->
@@ -118,6 +115,18 @@ append_entry(Label, Meta, BuildFun) ->
             }),
             {warning, unrecorded_warning(Meta)}
     end.
+
+%% BT-5136: a timed-out append is unconfirmed, not failed: the server still
+%% completes every append it received, so the entry may be recorded after all.
+-spec append_failure_warning(term(), map()) -> binary().
+append_failure_warning(#beamtalk_error{details = #{reason := timeout}}, _Meta) ->
+    <<
+        "The change is live, but the ChangeLog write timed out and is unconfirmed: "
+        "the entry may still be recorded. Check `Workspace changes` before repeating "
+        "the change, or the entry may be recorded twice."
+    >>;
+append_failure_warning(_Reason, Meta) ->
+    unrecorded_warning(Meta).
 
 -spec unrecorded_warning(map()) -> binary().
 unrecorded_warning(_Meta) ->
@@ -1017,8 +1026,8 @@ span_error_entry(Base, _SourceFile, Reason) ->
 %%% ----------------------------------------------------------------------------
 
 -doc """
-Emit a `"remove-method"` ChangeLog entry for a just-completed LOCAL (non-
-extension) method removal.
+Emit a `"remove-method"` ChangeLog entry for a just-completed method
+removal.
 
 Called by `beamtalk_behaviour_intrinsics:remove_selector/2` (backing
 `Behaviour>>removeSelector:` / `removeSelector:ifAbsent:`) *after*
@@ -1110,87 +1119,9 @@ resolve_removal_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, Di
             span_error_entry(Base, SourceFile, Reason)
     end.
 
--doc """
-Emit a `"remove-method"` ChangeLog entry for a just-completed EXTENSION
-method removal (ADR 0066 open classes; ADR 0112 § Extension methods, §
-ChangeLog interaction).
-
-Unlike `emit_remove_change_entry/5` (a local class-body method, whose
-span/prev_source resolve against the target class's own on-disk file), an
-extension method's source lives in a *different* file than the extended
-class's — `beamtalk_extensions` tracks only the owning package/module atom
-(`Owner`, ADR 0070), not which file registered a given `{Class, Selector}`,
-so this attributes the entry the most it can honestly claim:
-
-  - `sourceFile` resolves iff `Owner` also happens to name a currently-loaded
-    class (the common case: a file with no explicit package declaration
-    registers under its own module-derived name) — reuses
-    `class_source_file/1`, the same resolver an ordinary class uses. Any
-    other `Owner` (a genuine multi-class package, or one that never loaded)
-    leaves `sourceFile` unset rather than guessing wrong.
-  - `span` is always `undefined` — locating a standalone `TargetClass >>
-    selector` definition's byte offsets inside an arbitrary owner file has no
-    resolver in this codebase (`beamtalk_compiler:resolve_method_span/4`
-    looks for a method *inside* a named class's own body, not a foreign
-    extension line); building one is out of this issue's scope.
-  - The entry is always `flushable: false, not_flushable_reason:
-    "extension"` — precise disk attribution/excise for extension removals is
-    unbuilt infrastructure (same boundary as every other
-    `remove-method` flush-excise case), not something invented here.
-
-`Owner` and `PrevBody` (the extension's stored source text) must be captured
-by the CALLER before unregistering — `beamtalk_extensions:unregister/3`
-deletes both the moment it returns, so by the time this function runs neither
-is recoverable from the registry itself. `PrevBody` becomes `prev_source` so
-the audit trail at least records what was removed, even though automated
-revert cannot yet act on it (reverting a `sourceFile`-less, `span`-less entry
-has nothing to re-install against).
-""".
--spec emit_extension_remove_change_entry(
-    binary(),
-    atom() | binary(),
-    instance | class,
-    atom() | undefined,
-    binary() | undefined,
-    binary(),
-    human | agent
-) -> emit_result().
-emit_extension_remove_change_entry(
-    ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
-) ->
-    append_entry(
-        "Failed to emit ChangeLog entry for extension removal (removal still installed)",
-        #{class => ClassNameBin, selector => Selector},
-        fun() ->
-            SelectorBin = method_selector_binary(Selector),
-            Base0 = #{
-                class => ClassNameBin,
-                selector => SelectorBin,
-                kind => 'remove-method',
-                side => Side,
-                intent => durable,
-                author => Author,
-                author_kind => AuthorKind,
-                flushable => false,
-                not_flushable_reason => <<"extension">>
-            },
-            Base1 = maybe_put_prev_source(Base0, PrevBody),
-            maybe_put_extension_source_file(Base1, Owner)
-        end
-    ).
-
 -spec maybe_put_prev_source(map(), binary() | undefined) -> map().
 maybe_put_prev_source(Base, undefined) -> Base;
 maybe_put_prev_source(Base, PrevBody) when is_binary(PrevBody) -> Base#{prev_source => PrevBody}.
-
--spec maybe_put_extension_source_file(map(), atom() | undefined) -> map().
-maybe_put_extension_source_file(Base, undefined) ->
-    Base;
-maybe_put_extension_source_file(Base, Owner) when is_atom(Owner) ->
-    case class_source_file(atom_to_binary(Owner, utf8)) of
-        nil -> Base;
-        SourceFile -> Base#{source_file => SourceFile}
-    end.
 
 %%% ----------------------------------------------------------------------------
 %%% Class-removal ChangeLog entry
@@ -1266,96 +1197,54 @@ reused verbatim: `side: null` for every kind but `"remove-method"`).
 """.
 -spec emit_remove_class_change_entry(binary(), map(), binary(), human | agent) -> emit_result().
 emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
-    case cancel_pending_new_class(ClassNameBin) of
-        cancelled ->
-            ok;
-        not_cancelled ->
-            append_remove_class_entry(ClassNameBin, Snapshot, Author, AuthorKind)
-    end.
-
--doc """
-A class created in this session and never flushed has no file on disk, so
-removing it leaves nothing to record (BT-5016): retire its still-pending
-entries (the `'new-class'` and any later `'class-def'`/method patches for the
-same class) instead of appending a `'remove-class'` entry. Otherwise plain
-`flush` would write the removed class to disk and `flushIncludingDestructive`
-would put the `'new-class'` and `'remove-class'` entries in one file group and
-fail with `mixed_new_class_and_splice`.
-
-Returns `not_cancelled` when there is no pending `'new-class'` for the class
-(the normal removal path) or the entries could not be retired, in which case
-the removal is recorded as usual.
-""".
--spec cancel_pending_new_class(binary()) -> cancelled | not_cancelled.
-cancel_pending_new_class(ClassNameBin) ->
+    %% BT-5190: one server call decides and acts (see
+    %% `beamtalk_workspace_changelog:retire_new_class_or_append/2`), so a call
+    %% that times out here still completes in order on the server.
+    Meta = #{class => ClassNameBin},
+    Label = "Failed to emit ChangeLog entry for class removal (removal still installed)",
     try
-        Pending = [
-            E
-         || E <- beamtalk_workspace_changelog:active_entries(),
-            beamtalk_workspace_changelog:entry_class(E) =:= ClassNameBin,
-            not lists:member(
-                beamtalk_workspace_changelog:entry_kind(E), ['rename-class', 'rename-method']
-            )
-        ],
-        case
-            lists:any(
-                fun(E) -> beamtalk_workspace_changelog:entry_kind(E) =:= 'new-class' end, Pending
-            )
-        of
-            false ->
-                not_cancelled;
-            true ->
-                Seqs = [beamtalk_workspace_changelog:entry_seq(E) || E <- Pending],
-                case beamtalk_workspace_changelog:retire_entries(Seqs) of
-                    ok ->
-                        cancelled;
-                    {error, Reason} ->
-                        ?LOG_ERROR(
-                            "Failed to retire pending entries of a removed new class",
-                            #{
-                                class => ClassNameBin,
-                                reason => Reason,
-                                domain => [beamtalk, runtime]
-                            }
-                        ),
-                        not_cancelled
-                end
+        Input = remove_class_input(ClassNameBin, Snapshot, Author, AuthorKind),
+        case beamtalk_workspace_changelog:retire_new_class_or_append(ClassNameBin, Input) of
+            {ok, _CancelledOrAppended} ->
+                ok;
+            {error, AppendReason} ->
+                ?LOG_ERROR(Label, Meta#{reason => AppendReason, domain => [beamtalk, runtime]}),
+                {warning, append_failure_warning(AppendReason, Meta)}
         end
     catch
-        %% BT-5084: any failure (not only an `exit` from a stopped server) falls
-        %% back to recording the removal; the caller must never see a raise.
-        ErrClass:ErrReason:Stack ->
+        exit:{timeout, _} = ErrReason:Stack ->
             ?LOG_WARNING(
-                "Could not retire pending entries of a removed new class",
-                #{
-                    class => ClassNameBin,
-                    error_class => ErrClass,
-                    reason => ErrReason,
-                    stack => Stack,
-                    domain => [beamtalk, runtime]
-                }
+                "Recording the removal of a class timed out",
+                Meta#{reason => ErrReason, stack => Stack, domain => [beamtalk, runtime]}
             ),
-            not_cancelled
+            {warning, <<
+                "The class was removed, but recording the removal in the ChangeLog timed "
+                "out and is unconfirmed: the server still completes it, either retiring "
+                "the class's pending entries or recording a `remove-class` entry. Check "
+                "`Workspace changes` before a `Workspace flush`."
+            >>};
+        Class:Reason:Stack ->
+            ?LOG_WARNING(Label, Meta#{
+                error_class => Class,
+                reason => Reason,
+                stack => Stack,
+                domain => [beamtalk, runtime]
+            }),
+            {warning, unrecorded_warning(Meta)}
     end.
 
--spec append_remove_class_entry(binary(), map(), binary(), human | agent) -> emit_result().
-append_remove_class_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
-    append_entry(
-        "Failed to emit ChangeLog entry for class removal (removal still installed)",
-        #{class => ClassNameBin},
-        fun() ->
-            Base = #{
-                class => ClassNameBin,
-                kind => 'remove-class',
-                intent => durable,
-                author => Author,
-                author_kind => AuthorKind
-            },
-            maps:merge(
-                Base,
-                maps:with([flushable, not_flushable_reason, source_file, prev_source], Snapshot)
-            )
-        end
+-spec remove_class_input(binary(), map(), binary(), human | agent) -> map().
+remove_class_input(ClassNameBin, Snapshot, Author, AuthorKind) ->
+    Base = #{
+        class => ClassNameBin,
+        kind => 'remove-class',
+        intent => durable,
+        author => Author,
+        author_kind => AuthorKind
+    },
+    maps:merge(
+        Base,
+        maps:with([flushable, not_flushable_reason, source_file, prev_source], Snapshot)
     ).
 
 %% Resolve the class's source file via the BEAM module attribute (the same

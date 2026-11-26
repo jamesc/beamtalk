@@ -109,7 +109,6 @@ fn dnu_spec_short_circuits_regardless_of_other_fields() {
         &["ignoredMethod".to_string()],
         &DispatchSpec {
             reflection: &["class"],
-            class_name: "Proxy",
             superclass: Some(SuperclassDelegation::Static("bt@stdlib@actor")),
             dnu: true,
             auto_slots: None,
@@ -129,7 +128,6 @@ fn root_class_with_no_superclass_falls_through_to_false() {
         &["increment".to_string()],
         &DispatchSpec {
             reflection: &["class", "respondsTo:"],
-            class_name: "Object",
             superclass: None,
             dnu: false,
             auto_slots: None,
@@ -155,7 +153,6 @@ fn subclass_delegates_to_superclass_module_on_false() {
         &["increment".to_string()],
         &DispatchSpec {
             reflection: &[],
-            class_name: "Counter",
             superclass: Some(SuperclassDelegation::Static("bt@stdlib@actor")),
             dnu: false,
             auto_slots: None,
@@ -179,7 +176,6 @@ fn subclass_delegates_dynamically_by_class_name_on_false() {
         &["shout".to_string()],
         &DispatchSpec {
             reflection: &[],
-            class_name: "Bt3467Child",
             superclass: Some(SuperclassDelegation::Dynamic("Bt3467Base")),
             dnu: false,
             auto_slots: None,
@@ -198,12 +194,11 @@ fn subclass_delegates_dynamically_by_class_name_on_false() {
 }
 
 #[test]
-fn always_checks_extension_registry_before_delegating() {
+fn never_probes_an_extension_registry() {
     let doc = generate_has_method_from_spec(
         &[],
         &DispatchSpec {
             reflection: &[],
-            class_name: "Counter",
             superclass: None,
             dnu: false,
             auto_slots: None,
@@ -212,8 +207,8 @@ fn always_checks_extension_registry_before_delegating() {
     );
     let output = doc.to_pretty_string();
     assert!(
-        output.contains("call 'beamtalk_extensions':'has'('Counter', Selector)"),
-        "Got:\n{output}"
+        !output.contains("beamtalk_extensions"),
+        "ADR 0152: has_method/1 consults no extension registry. Got:\n{output}"
     );
 }
 
@@ -228,7 +223,6 @@ fn auto_slot_getters_and_setters_are_listed() {
         &[],
         &DispatchSpec {
             reflection: &[],
-            class_name: "Point",
             superclass: None,
             dnu: false,
             auto_slots: Some(&auto),
@@ -254,7 +248,6 @@ fn local_probe_off_by_default_emits_only_has_method() {
         &["increment".to_string()],
         &DispatchSpec {
             reflection: &[],
-            class_name: "Counter",
             superclass: Some(SuperclassDelegation::Dynamic("Bt3467Base")),
             dnu: false,
             auto_slots: None,
@@ -278,7 +271,6 @@ fn local_probe_emits_has_method_local_that_never_delegates() {
         &["shout".to_string()],
         &DispatchSpec {
             reflection: &[],
-            class_name: "Bt3467Child",
             superclass: Some(SuperclassDelegation::Dynamic("Bt3467Base")),
             dnu: false,
             auto_slots: None,
@@ -299,10 +291,6 @@ fn local_probe_emits_has_method_local_that_never_delegates() {
         "local variant must still check own methods. Got:\n{local_fn}"
     );
     assert!(
-        local_fn.contains("call 'beamtalk_extensions':'has'('Bt3467Child', Selector)"),
-        "local variant must still check the extension registry. Got:\n{local_fn}"
-    );
-    assert!(
         !local_fn.contains("beamtalk_dispatch':'responds_to'"),
         "local variant must never delegate dynamically. Got:\n{local_fn}"
     );
@@ -321,7 +309,6 @@ fn local_probe_dnu_short_circuits_to_true_too() {
         &[],
         &DispatchSpec {
             reflection: &[],
-            class_name: "ErlangModule",
             superclass: Some(SuperclassDelegation::Dynamic("Object")),
             dnu: true,
             auto_slots: None,

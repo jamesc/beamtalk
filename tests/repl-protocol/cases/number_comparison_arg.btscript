@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0116 § Addendum → § Missing hook (BT-5176, BT-5211): a number on the
+// left of `<`, `<=`, `>` or `>=` sends a non-number right operand its
+// reflected comparison hook. A right operand without one raises
+// `does_not_understand` for the hook, hinted with the operator typed, rather
+// than answering by Erlang term order (`3 <= nil` used to be `true`).
+
+// @load stdlib/test/fixtures/money.bt
+
+// The error, then the hint (`format/1` renders it on the `Hint:` line). The
+// harness checks the first `// =>` line; the hint is checked below.
+3 <= nil
+// => ERROR: UndefinedObject does not understand 'lessOrEqualFromNumber:'
+// => ERROR: '<=' cannot order a number against UndefinedObject — the right operand must be a number, or a value whose class implements 'lessOrEqualFromNumber:'
+
+[3 <= nil] on: Error do: [:e | e hint]
+// => "'<=' cannot order a number against UndefinedObject — the right operand must be a number, or a value whose class implements 'lessOrEqualFromNumber:'"
+
+// A dynamic send reaches the `Integer` primitive body: the same error.
+3 perform: #'<=' withArguments: #(nil)
+// => ERROR: UndefinedObject does not understand 'lessOrEqualFromNumber:'
+
+aMoney := (Money new) withCents: 500
+// => _
+
+500 < aMoney
+// => false
+
+499 < aMoney
+// => true
+
+3 perform: #'<' withArguments: #(aMoney)
+// => true
+
+// Equality stays total.
+3 == nil
+// => false
+
+// Unchanged (BT-3924): `nil` has no `<`.
+nil < 3
+// => ERROR: UndefinedObject does not understand '<'

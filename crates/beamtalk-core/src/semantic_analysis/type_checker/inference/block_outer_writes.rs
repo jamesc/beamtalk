@@ -99,6 +99,108 @@ impl TypeChecker {
         }
     }
 
+    /// The environment a block literal's body is inferred in: a child of
+    /// `env` that, for BT-5290, forgets the `Result` error-variant fact of
+    /// every outer local the block may write. A block can run more than once
+    /// (a `do:` body), so a `^x` before the write in its text can still see
+    /// a value an earlier run rebound — the fact cannot hold anywhere in it.
+    /// The block's own narrowings are pushed after this, so the one-shot arm
+    /// of `x isError ifTrue: [^x. x := …]` keeps its fact.
+    pub(super) fn block_child_env(block: &crate::ast::Block, env: &TypeEnv) -> TypeEnv {
+        let mut block_env = env.child();
+        Self::forget_error_variants_written_by(block, &mut block_env);
+        block_env
+    }
+
+    /// BT-5290: forget the `Result` error-variant fact of every outer local
+    /// `block` may write.
+    fn forget_error_variants_written_by(block: &crate::ast::Block, env: &mut TypeEnv) {
+        if !env.has_result_error_variants() {
+            return;
+        }
+        let writes = crate::semantic_analysis::block_facts::outer_local_writes(block, &|name| {
+            env.get_local(name).is_some()
+        });
+        for write in writes {
+            if matches!(
+                write.kind,
+                crate::semantic_analysis::block_facts::WriteKind::Local
+            ) {
+                env.clear_result_error_variant(&EnvKey::local(write.name));
+            }
+        }
+    }
+
+    /// BT-5290: before a send's receiver and arguments are inferred, forget
+    /// the `Result` error-variant fact of every local any of its block
+    /// literals — the receiver or an argument — may write, when it has two
+    /// or more. One block can run between runs of another
+    /// (`do:separatedBy:`, `[...] whileTrue: [...]`, an `on:do:` handler
+    /// that retries), and argument-block writes are joined into `env` only
+    /// after every argument is inferred (BT-4636), so a `^x` in one may
+    /// return a value the other rebound. The two-armed conditionals run
+    /// exactly one arm, so their arms keep the fact.
+    ///
+    /// `receiver` is `None` where the receiver was already inferred (the
+    /// argument-only pass in `infer_send_arg_types`, which every message of
+    /// a cascade also runs; `infer_cascade` covers the cascade's target and
+    /// all its messages together beforehand). Clearing twice is harmless.
+    pub(in crate::semantic_analysis::type_checker) fn forget_error_variants_written_by_send_blocks(
+        receiver: Option<&Expression>,
+        selector: &crate::ast::MessageSelector,
+        arguments: &[Expression],
+        env: &mut TypeEnv,
+    ) {
+        if !env.has_result_error_variants()
+            || matches!(
+                selector.well_known(),
+                Some(
+                    WellKnownSelector::IfTrueIfFalse
+                        | WellKnownSelector::IfNilIfNotNil
+                        | WellKnownSelector::IfNotNilIfNil
+                )
+            )
+            || matches!(
+                selector.name().as_str(),
+                "ifFalse:ifTrue:" | "ifOk:ifError:"
+            )
+        {
+            return;
+        }
+        Self::forget_error_variants_written_by_sibling_blocks(
+            receiver.into_iter().chain(arguments),
+            env,
+        );
+    }
+
+    /// BT-5290: when `exprs` hold two or more block literals that may run
+    /// interleaved, forget the error-variant fact of every local any of them
+    /// writes. Shared by a send's pre-pass above and by a cascade, whose
+    /// target block and every message's block arguments run against one
+    /// another (`[...] whileTrue: [...]; yourself`).
+    pub(in crate::semantic_analysis::type_checker) fn forget_error_variants_written_by_sibling_blocks<
+        'a,
+    >(
+        exprs: impl Iterator<Item = &'a Expression>,
+        env: &mut TypeEnv,
+    ) {
+        if !env.has_result_error_variants() {
+            return;
+        }
+        let blocks: Vec<&crate::ast::Block> = exprs
+            .filter_map(|e| match e {
+                Expression::Block(block) => Some(block),
+                _ => None,
+            })
+            .collect();
+        if blocks.len() < 2 {
+            return;
+        }
+        for block in blocks {
+            Self::forget_error_variants_written_by(block, env);
+        }
+    }
+
     /// Join each deferred block write into `env`: the local's current type
     /// joined with every type the send's arms left it with.
     pub(in crate::semantic_analysis::type_checker) fn apply_deferred_block_widenings(
@@ -139,6 +241,10 @@ impl TypeChecker {
             let mut arms = vec![before.clone()];
             arms.extend(writes.iter().map(|w| w.ty.clone()));
             if arms.iter().skip(1).all(|ty| *ty == before) {
+                // BT-5290: the block may have rebound the local, so it is no
+                // longer known to be a `Result`'s error variant, even though
+                // its type is unchanged.
+                env.clear_result_error_variant(&key);
                 match remote {
                     Some(remote) => env.mark_known_remote(key, remote),
                     None => env.clear_known_remote(&key),

@@ -579,6 +579,22 @@
         }
       }
     },
+    "reload-file": {
+      "op": "reload-file",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "classes": [
+            "Counter",
+            "Greeter"
+          ]
+        }
+      }
+    },
     "reload-findings": {
       "op": "reload-findings",
       "response": {
@@ -608,6 +624,47 @@
               "start": 10
             }
           ]
+        }
+      }
+    },
+    "revert-method": {
+      "op": "revert-method",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "class": "Counter",
+          "selector": "increment"
+        }
+      }
+    },
+    "save-class": {
+      "op": "save-class",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "path": "src/Greeter.bt"
+        }
+      }
+    },
+    "save-method": {
+      "op": "save-method",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "class": "Counter",
+          "selector": "increment"
         }
       }
     },
@@ -674,6 +731,234 @@
           "test-error"
         ]
       }
+    },
+    "flush": {
+      "op": "flush",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "flushed": 1,
+          "files": [
+            "src/counter.bt"
+          ],
+          "newClasses": 0,
+          "removedClasses": 0,
+          "skipped": [
+            {
+              "seq": 2,
+              "class": "Gone",
+              "reason": "destructive"
+            }
+          ],
+          "conflicts": []
+        }
+      }
+    },
+    "changes": {
+      "op": "changes",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "entries": [
+            {
+              "seq": 1,
+              "className": "Counter",
+              "selector": "increment",
+              "kind": "instance",
+              "side": "instance",
+              "intent": "durable",
+              "flushable": true,
+              "authorKind": "human",
+              "sourceFile": "src/counter.bt",
+              "orphan": false,
+              "priorEpoch": false,
+              "flushed": false,
+              "active": true,
+              "shadowed": false,
+              "clean": false,
+              "diff": "-  increment => 1\n+  increment => 2\n",
+              "oldClass": null,
+              "oldSelector": null
+            }
+          ]
+        }
+      }
+    },
+    "info": {
+      "op": "info",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "version": {
+            "runtime_version": "0.6.0",
+            "protocol_version": "2.0",
+            "otp_release": "27",
+            "erts_version": "15.0"
+          },
+          "node": "beamtalk_workspace_ab12@localhost",
+          "workspace_id": "ws-ab12",
+          "settings": {
+            "autoflush": false
+          }
+        }
+      }
+    },
+    "children": {
+      "op": "children",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "children": [
+            {
+              "label": "Counter",
+              "className": "Counter",
+              "kind": "beamtalkActor",
+              "pid": "<0.201.0>",
+              "registeredName": null,
+              "childCount": 0,
+              "isSupervisor": false,
+              "handle": {
+                "class": "Counter",
+                "kind": "actor",
+                "pid": "<0.201.0>"
+              }
+            },
+            {
+              "label": "process",
+              "className": null,
+              "kind": "otpProcess",
+              "pid": "<0.202.0>",
+              "registeredName": null,
+              "childCount": 0,
+              "isSupervisor": false,
+              "handle": null
+            }
+          ],
+          "truncated": false
+        }
+      }
+    },
+    "git-commit": {
+      "op": "git-commit",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "committed": true
+        }
+      }
+    },
+    "git-diff": {
+      "op": "git-diff",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "path": "src/counter.bt",
+          "worktree": "@@ -1 +1 @@\n-value => 0\n+value => 1\n",
+          "staged": "",
+          "truncated": false
+        }
+      }
+    },
+    "git-log": {
+      "op": "git-log",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "commits": [
+            {
+              "sha": "0123456789abcdef0123456789abcdef01234567",
+              "short_sha": "0123456",
+              "subject": "Add Counter",
+              "author": "Ada",
+              "ts": "2026-11-26T10:00:00+00:00"
+            }
+          ],
+          "limit": 20
+        }
+      }
+    },
+    "git-stage": {
+      "op": "git-stage",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "path": "src/counter.bt"
+        }
+      }
+    },
+    "git-status": {
+      "op": "git-status",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "branch": "main",
+          "upstream": "origin/main",
+          "ahead": 1,
+          "behind": 0,
+          "files": [
+            {
+              "path": "src/counter.bt",
+              "index": "unmodified",
+              "worktree": "modified"
+            }
+          ],
+          "truncated": false
+        }
+      }
+    },
+    "process-info": {
+      "op": "process-info",
+      "response": {
+        "id": "msg-1",
+        "session": "sess-1",
+        "status": [
+          "done"
+        ],
+        "value": {
+          "pid": "<0.201.0>",
+          "alive": true,
+          "status": "waiting",
+          "message_queue_len": 0,
+          "memory": 2688,
+          "reductions": 4021
+        }
+      }
     }
   },
   "unpinned": {
@@ -683,11 +968,12 @@
     "browse-method-source": "`{value, Map}` of scalars and one text field; no nested rows.",
     "browse-native-modules": "`{value, [NativeModuleRow]}`, the same row convention as `browse-type-aliases`.",
     "browse-native-source": "`{value, Map}` of scalars and one text field; no nested rows.",
-    "clone": "Reaches no wire client (the dist-attached surface calls it). Over the WebSocket the new session id would arrive as the quoted printString of a string, like every `ok` value.",
     "disable-tracing": "Replies `{status, ok}` (`\"value\": \"ok\"`), the wire form pinned by the `close` payload.",
     "enable-tracing": "Replies `{status, ok}` (`\"value\": \"ok\"`), the wire form pinned by the `close` payload.",
     "erlang-complete": "Same `{completions, [binary()]}` encoder as `complete`.",
     "export-traces": "`{value, Map}` carrying the written path and a count; no nested rows.",
+    "git-revert-file": "Same `{value, #{path}}` reply as `git-stage`, which pins it.",
+    "git-unstage": "Same `{value, #{path}}` reply as `git-stage`, which pins it.",
     "hover": "Same `{docs, binary()}` encoder as `erlang-help`.",
     "interrupt": "Replies `{status, ok}` (`\"value\": \"ok\"`), the wire form pinned by the `close` payload.",
     "kill": "Replies `{status, ok}` (`\"value\": \"ok\"`), the wire form pinned by the `close` payload.",

@@ -35,16 +35,17 @@ fn code_list(items: &[String]) -> String {
 
 fn render(table: &[serde_json::Value]) -> String {
     let mut out = String::new();
-    out.push_str("| Op | Params | Optional | Capability | Handler |\n");
-    out.push_str("|----|--------|----------|------------|---------|\n");
+    out.push_str("| Op | Params | Optional | Capability | Access | Handler |\n");
+    out.push_str("|----|--------|----------|------------|--------|---------|\n");
     for entry in table {
         let op = entry["op"].as_str().expect("op");
         let _ = writeln!(
             out,
-            "| `{op}` | {} | {} | `{}` | `{}` |",
+            "| `{op}` | {} | {} | `{}` | `{}` | `{}` |",
             code_list(&strings(entry, "params")),
             code_list(&strings(entry, "optional")),
             entry["capability"].as_str().expect("capability"),
+            entry["access"].as_str().expect("access"),
             entry["handler"].as_str().expect("handler"),
         );
     }
@@ -78,10 +79,4 @@ fn repl_protocol_doc_lists_every_op_in_the_table() {
             );
         }
     }
-
-    // The `info` op was documented but never existed on the server.
-    assert!(
-        !table.iter().any(|e| e["op"] == "info"),
-        "`info` is not a server op"
-    );
 }

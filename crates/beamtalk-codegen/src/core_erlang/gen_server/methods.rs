@@ -19,7 +19,6 @@ use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::{Document, INDENT, join, leaf, nest};
 use beamtalk_core::ast::{
     Block, CascadeMessage, ClassDefinition, Expression, MessageSelector, MethodDefinition,
-    MethodKind,
 };
 use beamtalk_core::source_analysis::Span;
 use ecow::EcoString;
@@ -102,10 +101,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let mut docs = Vec::new();
         for method in &class.methods {
-            // Only generate dispatch for primary methods for now
-            if method.kind == MethodKind::Primary {
-                docs.push(self.generate_method_dispatch(method, indent_level)?);
-            }
+            docs.push(self.generate_method_dispatch(method, indent_level)?);
         }
         Ok(Document::Vec(docs))
     }
@@ -212,7 +208,7 @@ impl CoreErlangGenerator {
     /// its last caller migrated off it), returning the raw `Vec<ThreadedStmt>`
     /// instead of rendering it. Used by [`Self::generate_method_dispatch`]
     /// and the other Actor-boundary NLR call sites (sealed
-    /// methods, actor extension funs), all of which need the IR itself so
+    /// methods), all of which need the IR itself so
     /// they can prepend a real `NlrCatch` stmt (token already minted, in
     /// production's real mint position) before the single `verify()` +
     /// `render()` pass — rather than rendering the body first and wrapping
@@ -267,7 +263,7 @@ impl CoreErlangGenerator {
     /// parameter of the same name: `true` when the try/catch would otherwise
     /// nest inside a `case` arm (dispatch clauses — BEAM validator
     /// `ambiguous_catch_try_state`), `false` for standalone functions (sealed
-    /// methods, extension funs) that don't need the extra function frame. No
+    /// methods) that don't need the extra function frame. No
     /// letrec is emitted when `nlr_token_var` is `None` regardless of
     /// `needs_letrec` — there is no try/catch to isolate.
     pub(in crate::core_erlang) fn prepend_nlr_catch_and_render(
@@ -1971,7 +1967,7 @@ impl CoreErlangGenerator {
     /// `self.method_return_types_written_back` (keyed by
     /// `(class_name, selector, is_class_method)` — the caller's own
     /// knowledge of which method list `method` came from, rather than
-    /// `method.is_class_method`, which a standalone extension method
+    /// `method.is_class_method`, which a standalone method
     /// (`Target class >> sel`) does not reliably carry). When present, the
     /// return-type writeback pass — not the user — wrote `method.return_type`,
     /// so this unparses a throwaway clone with `return_type` reset to `None`

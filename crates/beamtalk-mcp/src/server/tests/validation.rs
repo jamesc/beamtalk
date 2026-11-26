@@ -232,6 +232,31 @@ fn path_policy_refuses_symlink_escaping_the_root() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn path_policy_refuses_dangling_symlink() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = beamtalk_core::paths::canonicalize(tmp.path()).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let target = outside.path().join("file");
+    std::os::unix::fs::symlink(&target, root.join("out.json")).unwrap();
+    let policy = PathPolicy::Confined(root.clone());
+    assert!(
+        policy
+            .check(root.join("out.json").to_str().unwrap())
+            .is_err()
+    );
+    // A symlink loop (ELOOP) is not "not found" either.
+    std::os::unix::fs::symlink(root.join("loop"), root.join("loop")).unwrap();
+    assert!(policy.check(root.join("loop").to_str().unwrap()).is_err());
+    // A genuinely absent tail is still fine.
+    assert!(
+        policy
+            .check(root.join("new/x.json").to_str().unwrap())
+            .is_ok()
+    );
+}
+
 #[tokio::test]
 async fn confined_tools_refuse_paths_outside_the_project_root() {
     let tmp = tempfile::tempdir().unwrap();
@@ -261,4 +286,43 @@ async fn confined_tools_refuse_paths_outside_the_project_root() {
         .await
         .unwrap();
     assert_eq!(r.is_error, Some(true));
+}
+
+// --- BT-5174: no confinement to $HOME or `/` ---
+
+#[test]
+fn confine_to_root_refuses_home_and_filesystem_root() {
+    let home = tempfile::tempdir().unwrap();
+    let err = PathPolicy::confine_to_root(home.path(), Some(home.path()), false).unwrap_err();
+    assert!(
+        err.to_string().contains("no beamtalk project found"),
+        "{err}"
+    );
+    assert!(PathPolicy::confine_to_root(std::path::Path::new("/"), None, true).is_err());
+
+    // A project below home, or any directory when HOME is unset, is fine.
+    let project = home.path().join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    assert!(PathPolicy::confine_to_root(&project, Some(home.path()), false).is_ok());
+    assert!(PathPolicy::confine_to_root(home.path(), None, false).is_ok());
+}
+
+/// BT-5185: a directory *above* home (`/home`, `/Users`, `C:\Users`) holds
+/// every user's home, so it is refused like home itself.
+#[test]
+fn confine_to_root_refuses_a_directory_containing_home() {
+    let base = tempfile::tempdir().unwrap();
+    let home = base.path().join("users").join("alice");
+    std::fs::create_dir_all(&home).unwrap();
+    let users = base.path().join("users");
+    let err = PathPolicy::confine_to_root(&users, Some(&home), false).unwrap_err();
+    assert!(
+        err.to_string().contains("no beamtalk project found"),
+        "{err}"
+    );
+    assert!(PathPolicy::confine_to_root(base.path(), Some(&home), false).is_err());
+    // A real project (it has a marker) that contains a hermetic home is fine;
+    // home itself never is.
+    assert!(PathPolicy::confine_to_root(&users, Some(&home), true).is_ok());
+    assert!(PathPolicy::confine_to_root(&home, Some(&home), true).is_err());
 }

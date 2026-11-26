@@ -1255,6 +1255,22 @@ impl ReplClient {
         Ok(response)
     }
 
+    /// Send the `flush` operation and return its summary as the REPL shows it.
+    fn flush_op(
+        &mut self,
+        scope: beamtalk_repl_protocol::FlushScope<'_>,
+        confirm_destructive: bool,
+    ) -> Result<String, String> {
+        let response = self.send_op(&RequestBuilder::flush(scope, confirm_destructive))?;
+        let value = response.value.unwrap_or(serde_json::Value::Null);
+        let report = beamtalk_repl_protocol::format::format_flush_result(&value);
+        if report.has_conflicts {
+            Err(report.text)
+        } else {
+            Ok(report.text)
+        }
+    }
+
     /// Clear the session's local bindings and return "ok".
     ///
     /// ADR 0081 Phase 6: the `clear` op was removed; this evaluates
@@ -1850,16 +1866,16 @@ fn run_test_file_opts(
             let code = case.expression.strip_prefix(":complete ").unwrap();
             client.get_completions(code)
         } else if case.expression == ":flush" {
-            // ADR 0082 Phase 3: `:flush` → `Workspace flush`.
-            client.eval("Workspace flush")
+            // ADR 0082 Phase 3: `:flush` sends the `flush` operation (BT-5206),
+            // as the real REPL dispatch does.
+            client.flush_op(beamtalk_repl_protocol::FlushScope::All, false)
         } else if case.expression.starts_with(":flush ") {
-            // ADR 0082 Phase 3: `:flush <sel>` → `Workspace flush: <sel>`,
-            // via the same `flush_expr_for` the real REPL dispatch calls
-            // (`beamtalk_cli::repl_meta_exprs`) — not a hand-copied mirror,
-            // so this harness can't drift from production behavior.
+            // `:flush <scope>`, via the same `flush_scope_for` the real REPL
+            // dispatch calls (`beamtalk_cli::repl_meta_exprs`) — not a
+            // hand-copied mirror, so this harness can't drift from production.
             let selector = case.expression.strip_prefix(":flush ").unwrap();
-            match beamtalk_cli::repl_meta_exprs::flush_expr_for(selector) {
-                Some(expr) => client.eval(&expr),
+            match beamtalk_cli::repl_meta_exprs::flush_scope_for(selector) {
+                Some(scope) => client.flush_op(scope.as_scope(), false),
                 None => Err("Usage: :flush [<Class>|#kind|#{ #file => \"path\" }]".to_string()),
             }
         } else if case.expression == ":changes" {
@@ -1897,17 +1913,15 @@ fn run_test_file_opts(
                 None => Err("Usage: :remove-class <Class>".to_string()),
             }
         } else if case.expression == ":flush-destructive" {
-            // ADR 0113 Phase 4: bare `:flush-destructive` →
-            // `Workspace flushIncludingDestructive`.
-            client.eval(beamtalk_cli::repl_meta_exprs::FLUSH_INCLUDING_DESTRUCTIVE_EXPR)
+            // ADR 0113 Phase 4: bare `:flush-destructive` → the unscoped `flush`
+            // operation with `confirm_destructive`.
+            client.flush_op(beamtalk_repl_protocol::FlushScope::All, true)
         } else if case.expression.starts_with(":flush-destructive ") {
-            // ADR 0113 Phase 4: `:flush-destructive <selector>` →
-            // `Workspace flush: <selector> confirmDestructive: true`, via
-            // the same `flush_destructive_expr_for` the real REPL dispatch
-            // calls.
+            // `:flush-destructive <scope>`, via the same `flush_scope_for` the
+            // real REPL dispatch calls.
             let selector = case.expression.strip_prefix(":flush-destructive ").unwrap();
-            match beamtalk_cli::repl_meta_exprs::flush_destructive_expr_for(selector) {
-                Some(expr) => client.eval(&expr),
+            match beamtalk_cli::repl_meta_exprs::flush_scope_for(selector) {
+                Some(scope) => client.flush_op(scope.as_scope(), true),
                 None => Err(
                     "Usage: :flush-destructive [<Class>|#kind|#{ #file => \"path\" }]".to_string(),
                 ),

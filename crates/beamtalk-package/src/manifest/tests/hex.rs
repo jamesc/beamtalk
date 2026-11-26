@@ -72,7 +72,7 @@ fn test_validate_hex_constraint_invalid() {
     let invalid = [
         ("", "empty"),
         ("abc", "non-numeric"),
-        ("1.2.3.4", "too many segments"),
+        ("1.2.3.4.5", "too many segments"),
         ("~> 2", "major.minor"),
         ("~>", "must be followed"),
         (">=", "must be followed"),

@@ -29,7 +29,7 @@
 // is a Lezer grammar, not TextMate.
 //
 // The whole document is tokenized on each change (these are small buffers), so
-// multi-line tokens (block comments, strings) match correctly in one pass.
+// multi-line tokens (strings) match correctly in one pass.
 
 import { RangeSetBuilder } from "@codemirror/state"
 import { Decoration, ViewPlugin } from "@codemirror/view"
@@ -42,7 +42,6 @@ const RESERVED = new Set(["self", "super", "nil", "true", "false", "thisContext"
 // special post-classification in `tokenize` below.
 const RULES = [
   { cls: "comment", re: /^\/\/[^\n]*/ }, // // line comment
-  { cls: "comment", re: /^\/\*[\s\S]*?\*\// }, // /* block comment */
   { cls: "_string", re: /^"(?:\\.|[^"\\])*"/ }, // "double quoted string"
   {
     cls: "symbol",

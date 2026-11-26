@@ -15,7 +15,8 @@ The Beamtalk REPL uses a JSON-based message protocol over WebSocket for communic
 1. **TCP connect** to `127.0.0.1:{port}`
 2. **WebSocket upgrade** to `ws://127.0.0.1:{port}/ws`
 3. **Read auth-required** — server sends `{"op":"auth-required"}` (no session yet)
-4. **Send auth** — client sends `{"type":"auth","cookie":"<cookie>",...}` as first message (fields below)
+   - **Optional: identity check (BT-5188)** — a client that knows the workspace's port-file nonce (the second line of `~/.beamtalk/workspaces/<id>/port`) sends `{"type":"identify","challenge":"<16-256 bytes, fresh random hex>"}` first. The server replies `{"type":"identity","proof":"<hex>"}`, where `proof` is the lowercase hex SHA-256 of `beamtalk-workspace-identity\n<nonce>\n<challenge>`, and the connection stays unauthenticated. The client sends its cookie only if the proof matches. This way a process that took over a dead workspace's port never receives the cookie. The MCP server does this whenever it connects to a workspace by id or through auto-discovery, and its liveness probe ends the check without authenticating. The proof vector is pinned in `ws_auth_handshake_wire_corpus.json` for both the Erlang and the Rust implementation.
+4. **Send auth** — client sends `{"type":"auth","cookie":"<cookie>",...}` as first message (or right after the identity check; fields below)
 5. **Read auth response** — server replies `{"type":"auth_ok"}` on success, or `{"type":"auth_error","message":"..."}` + connection close on failure. A stale toolchain is rejected here (see Version lock).
 6. **Read session-started** — after auth_ok, server sends `{"op":"session-started","session":"<id>"}`
 7. **Version check** — client sends `{"op":"describe"}`, waits for the reply echoing its request `id` (actor-snapshot pushes may arrive first — correlate on `id`, do not trust the first frame), and refuses a version mismatch. Skipped only by `workspace stop`, which compiles nothing.
@@ -340,27 +341,18 @@ List all active REPL sessions in the workspace.
 {"id": "msg-012", "sessions": [{"id": "session_1234_5678"}, {"id": "session_2345_6789"}], "status": ["done"]}
 ```
 
-#### `clone` — Clone Session
-
-Create a new session (returns the new session ID).
-
-**Request:**
-```json
-{"op": "clone", "id": "msg-013"}
-```
-
-**Response:**
-```json
-{"id": "msg-013", "value": "session_1234_5678", "status": ["done"]}
-```
-
 #### `close` — Close Session
 
 Close the current session. Terminates the shell process, removes the session from the workspace, and closes the WebSocket connection (close code 1000). Detached sessions that are not resumed within the idle timeout (default 4 hours) are automatically cleaned up.
 
+With a `session` field, `close` ends that session instead of the sender's own (BT-5199). VS Code uses this to end the session of a REPL terminal it started once the terminal is gone; the sender's own connection stays open. An unknown `session` closes nothing and still answers `ok` — it never falls back to the sender's session. Like `interrupt` with a `session` field, this gives every client that holds the workspace cookie authority over every session of that workspace (`sessions` lists their ids); the cookie is the workspace's single trust boundary.
+
+Senders: the CLI REPL on `:exit` / Ctrl-D, VS Code when its workspace client is disposed (its own session) and when its REPL terminal ends (that REPL's session), and the LiveView IDE when a tab's session is torn down (dispatched through `beamtalk_repl_ops:dispatch/4` with the session as its SessionPid).
+
 **Request:**
 ```json
 {"op": "close", "id": "msg-014"}
+{"op": "close", "id": "msg-015", "session": "session_1234_5678"}
 ```
 
 **Response:**
@@ -429,7 +421,9 @@ Get the internal state of an actor process.
 
 #### `kill` — Kill Actor
 
-Terminate an actor process.
+Terminate an actor process. The reply comes once the process has exited. A system actor (one the runtime started, such as `Transcript`) is refused with a `system_actor` error; a pid that is not a live actor is refused (`unknown_actor` from the `actor` param check, or `actor_not_alive` / `not_an_actor` if it stopped or was never an actor by the time the kill runs).
+
+Senders: the "Kill Actor" action in the VS Code inspector and the "Kill actor" button in the LiveView Inspector (Owner role only), each after a confirmation and followed by a fresh actor list (BT-5199).
 
 **Request:**
 ```json
@@ -830,7 +824,12 @@ Every op the server understands, generated from the one Erlang op table
 give the wire examples for the commonly used ops; this table is the complete
 list. *Capability* is the node class from ADR 0125 §1.5: `compiler` ops need a
 compiler on the node, `workspace` ops need a working tree, and `always` ops run
-everywhere. *Handler* names the Erlang module that serves the op.
+everywhere. *Access* is who may call the op (ADR 0091 Decisions 3 and 4, BT-5206):
+`read` runs no user code, so an Observer may call it; `execute` runs or loads code
+or changes the image, the ChangeLog, the working tree or history, so it is
+Owner-only; `admin` stops actors or the workspace. Every op has one, and
+LiveView's `BtAttach.Facade` is tested against it. *Handler* names the Erlang
+module that serves the op.
 
 A fast test (`crates/beamtalk-repl-protocol/tests/op_table_doc.rs`) fails when
 this table drifts from the fixture. To refresh it after editing the op table:
@@ -838,59 +837,74 @@ this table drifts from the fixture. To refresh it after editing the op table:
 `BEAMTALK_BLESS_OP_TABLE_DOC=1 cargo test -p beamtalk-repl-protocol --test op_table_doc`.
 
 <!-- op-table:begin -->
-| Op | Params | Optional | Capability | Handler |
-|----|--------|----------|------------|---------|
-| `eval` | `code` | `trace` | `compiler` | `beamtalk_repl_ops_eval` |
-| `stdin` | `value` | — | `always` | `beamtalk_ws_handler` |
-| `run-entry` | `class`, `selector` | `args` | `always` | `beamtalk_ws_handler` |
-| `interrupt` | — | — | `always` | `beamtalk_repl_ops_actors` |
-| `complete` | `code` | `cursor` | `always` | `beamtalk_repl_ops_dev` |
-| `hover` | `code` | `before`, `suffix`, `class`, `side` | `always` | `beamtalk_repl_ops_dev` |
-| `diagnostics` | `code` | `mode`, `source_path` | `compiler` | `beamtalk_repl_ops_dev` |
-| `show-codegen` | — | `code`, `class`, `selector` | `compiler` | `beamtalk_repl_ops_dev` |
-| `erlang-help` | `module` | `function` | `always` | `beamtalk_repl_ops_dev` |
-| `erlang-complete` | — | `prefix`, `module` | `always` | `beamtalk_repl_ops_dev` |
-| `test` | — | `class`, `file` | `always` | `beamtalk_repl_ops_dev` |
-| `test-all` | — | — | `always` | `beamtalk_repl_ops_dev` |
-| `list-tests` | — | — | `always` | `beamtalk_repl_ops_dev` |
-| `load-tests` | — | — | `compiler` | `beamtalk_repl_ops_dev` |
-| `load-source` | `source` | — | `compiler` | `beamtalk_repl_ops_load` |
-| `load-project` | — | `path`, `include_tests`, `force`, `package_name` | `compiler` | `beamtalk_repl_ops_load` |
-| `unload` | `module` | — | `workspace` | `beamtalk_repl_ops_load` |
-| `save-native-source` | `module`, `source` | — | `workspace` | `beamtalk_repl_ops_load` |
-| `save-section` | `class`, `new_name` | `old_name`, `before_selector`, `before_side` | `workspace` | `beamtalk_repl_ops_load` |
-| `sessions` | — | — | `always` | `beamtalk_repl_ops_session` |
-| `clone` | — | — | `always` | `beamtalk_repl_ops_session` |
-| `close` | — | — | `always` | `beamtalk_repl_ops_session` |
-| `health` | — | — | `always` | `beamtalk_repl_ops_session` |
-| `shutdown` | `cookie` | — | `always` | `beamtalk_repl_ops_session` |
-| `actors` | — | — | `always` | `beamtalk_repl_ops_actors` |
-| `inspect` | `actor` | — | `always` | `beamtalk_repl_ops_actors` |
-| `kill` | `actor` | — | `always` | `beamtalk_repl_ops_actors` |
-| `pid-stats` | `actor` | — | `always` | `beamtalk_repl_ops_watch` |
-| `describe` | — | — | `always` | `beamtalk_repl_ops_dev` |
-| `methods` | `class` | — | `always` | `beamtalk_repl_ops_dev` |
-| `inherited-methods` | `class` | — | `always` | `beamtalk_repl_ops_dev` |
-| `list-classes` | — | `filter` | `always` | `beamtalk_repl_ops_dev` |
-| `reload-findings` | — | — | `always` | `beamtalk_repl_ops_dev` |
-| `nav-query` | `kind` | `selector`, `class`, `module`, `code`, `before`, `suffix` | `always` | `beamtalk_repl_ops_nav` |
-| `nav-symbols` | — | `scope` | `always` | `beamtalk_repl_ops_nav_symbols` |
-| `enable-tracing` | — | — | `always` | `beamtalk_repl_ops_perf` |
-| `disable-tracing` | — | — | `always` | `beamtalk_repl_ops_perf` |
-| `get-traces` | — | `actor`, `selector`, `class`, `outcome`, `min_duration_ns`, `limit` | `always` | `beamtalk_repl_ops_perf` |
-| `actor-stats` | — | `actor` | `always` | `beamtalk_repl_ops_perf` |
-| `export-traces` | — | `path`, `actor`, `selector`, `class`, `outcome`, `min_duration_ns`, `limit` | `always` | `beamtalk_repl_ops_perf` |
-| `browse-classes` | — | — | `always` | `beamtalk_repl_ops_browse` |
-| `browse-protocols` | `class`, `side` | — | `always` | `beamtalk_repl_ops_browse` |
-| `browse-method-source` | `class`, `side`, `selector` | — | `always` | `beamtalk_repl_ops_browse` |
-| `browse-class-definition` | `class` | — | `always` | `beamtalk_repl_ops_browse` |
-| `browse-categories` | `class` | — | `always` | `beamtalk_repl_ops_browse` |
-| `browse-native-source` | — | `class`, `module`, `selector` | `always` | `beamtalk_repl_ops_browse` |
-| `browse-native-modules` | — | — | `always` | `beamtalk_repl_ops_browse` |
-| `browse-type-aliases` | — | — | `always` | `beamtalk_repl_ops_browse` |
-| `browse-alias-source` | `name` | `package` | `always` | `beamtalk_repl_ops_browse` |
-| `subscribe-logs` | — | `level` | `always` | `beamtalk_ws_handler` |
-| `unsubscribe-logs` | — | — | `always` | `beamtalk_ws_handler` |
+| Op | Params | Optional | Capability | Access | Handler |
+|----|--------|----------|------------|--------|---------|
+| `eval` | `code` | `trace` | `compiler` | `execute` | `beamtalk_repl_ops_eval` |
+| `stdin` | `value` | — | `always` | `execute` | `beamtalk_ws_handler` |
+| `run-entry` | `class`, `selector` | `args` | `always` | `execute` | `beamtalk_ws_handler` |
+| `interrupt` | — | — | `always` | `execute` | `beamtalk_repl_ops_actors` |
+| `complete` | `code` | `cursor` | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `hover` | `code` | `before`, `suffix`, `class`, `side` | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `diagnostics` | `code` | `mode`, `source_path` | `compiler` | `read` | `beamtalk_repl_ops_dev` |
+| `show-codegen` | — | `code`, `class`, `selector` | `compiler` | `read` | `beamtalk_repl_ops_dev` |
+| `erlang-help` | `module` | `function` | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `erlang-complete` | — | `prefix`, `module` | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `test` | — | `class`, `file` | `always` | `execute` | `beamtalk_repl_ops_dev` |
+| `test-all` | — | — | `always` | `execute` | `beamtalk_repl_ops_dev` |
+| `list-tests` | — | — | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `load-tests` | — | — | `compiler` | `execute` | `beamtalk_repl_ops_dev` |
+| `load-source` | `source` | — | `compiler` | `execute` | `beamtalk_repl_ops_load` |
+| `load-project` | — | `path`, `include_tests`, `force`, `package_name` | `compiler` | `execute` | `beamtalk_repl_ops_load` |
+| `unload` | `module` | — | `workspace` | `execute` | `beamtalk_repl_ops_load` |
+| `save-native-source` | `module`, `source` | — | `workspace` | `execute` | `beamtalk_repl_ops_load` |
+| `save-section` | `class`, `new_name` | `old_name`, `before_selector`, `before_side` | `workspace` | `execute` | `beamtalk_repl_ops_load` |
+| `save-method` | `class`, `selector`, `source` | `author`, `author_kind` | `compiler` | `execute` | `beamtalk_repl_ops_edit` |
+| `save-class` | `source`, `path` | `author`, `author_kind` | `compiler` | `execute` | `beamtalk_repl_ops_edit` |
+| `revert-method` | `class`, `selector` | `side` | `workspace` | `execute` | `beamtalk_repl_ops_edit` |
+| `reload-file` | `path` | — | `compiler` | `execute` | `beamtalk_repl_ops_edit` |
+| `flush` | — | `class`, `file`, `kind`, `selector`, `confirm_destructive` | `workspace` | `execute` | `beamtalk_repl_ops_state` |
+| `changes` | — | — | `always` | `read` | `beamtalk_repl_ops_state` |
+| `info` | — | — | `always` | `read` | `beamtalk_repl_ops_state` |
+| `git-status` | — | — | `always` | `read` | `beamtalk_repl_ops_git` |
+| `git-diff` | `path` | — | `always` | `read` | `beamtalk_repl_ops_git` |
+| `git-log` | — | `count` | `always` | `read` | `beamtalk_repl_ops_git` |
+| `git-stage` | `path` | — | `workspace` | `execute` | `beamtalk_repl_ops_git` |
+| `git-unstage` | `path` | — | `workspace` | `execute` | `beamtalk_repl_ops_git` |
+| `git-commit` | `message` | — | `workspace` | `execute` | `beamtalk_repl_ops_git` |
+| `git-revert-file` | `path` | — | `workspace` | `execute` | `beamtalk_repl_ops_git` |
+| `sessions` | — | — | `always` | `read` | `beamtalk_repl_ops_session` |
+| `close` | — | — | `always` | `execute` | `beamtalk_repl_ops_session` |
+| `health` | — | — | `always` | `read` | `beamtalk_repl_ops_session` |
+| `shutdown` | `cookie` | — | `always` | `admin` | `beamtalk_repl_ops_session` |
+| `actors` | — | — | `always` | `read` | `beamtalk_repl_ops_actors` |
+| `inspect` | `actor` | — | `always` | `read` | `beamtalk_repl_ops_actors` |
+| `kill` | `actor` | — | `always` | `admin` | `beamtalk_repl_ops_actors` |
+| `pid-stats` | `actor` | — | `always` | `read` | `beamtalk_repl_ops_watch` |
+| `children` | `supervisor` | — | `always` | `read` | `beamtalk_repl_ops_process` |
+| `process-info` | `pid` | — | `always` | `read` | `beamtalk_repl_ops_process` |
+| `describe` | — | — | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `methods` | `class` | — | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `inherited-methods` | `class` | — | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `list-classes` | — | `filter` | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `reload-findings` | — | — | `always` | `read` | `beamtalk_repl_ops_dev` |
+| `nav-query` | `kind` | `selector`, `class`, `module`, `code`, `before`, `suffix` | `always` | `read` | `beamtalk_repl_ops_nav` |
+| `nav-symbols` | — | `scope` | `always` | `read` | `beamtalk_repl_ops_nav_symbols` |
+| `enable-tracing` | — | — | `always` | `execute` | `beamtalk_repl_ops_perf` |
+| `disable-tracing` | — | — | `always` | `execute` | `beamtalk_repl_ops_perf` |
+| `get-traces` | — | `actor`, `selector`, `class`, `outcome`, `min_duration_ns`, `limit` | `always` | `read` | `beamtalk_repl_ops_perf` |
+| `actor-stats` | — | `actor` | `always` | `read` | `beamtalk_repl_ops_perf` |
+| `export-traces` | — | `path`, `actor`, `selector`, `class`, `outcome`, `min_duration_ns`, `limit` | `always` | `execute` | `beamtalk_repl_ops_perf` |
+| `browse-classes` | — | — | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `browse-protocols` | `class`, `side` | — | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `browse-method-source` | `class`, `side`, `selector` | — | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `browse-class-definition` | `class` | — | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `browse-categories` | `class` | — | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `browse-native-source` | — | `class`, `module`, `selector` | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `browse-native-modules` | — | — | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `browse-type-aliases` | — | — | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `browse-alias-source` | `name` | `package` | `always` | `read` | `beamtalk_repl_ops_browse` |
+| `subscribe-logs` | — | `level` | `always` | `read` | `beamtalk_ws_handler` |
+| `unsubscribe-logs` | — | — | `always` | `read` | `beamtalk_ws_handler` |
 <!-- op-table:end -->
 
 ### Example Payloads
@@ -914,6 +928,151 @@ failure message of `payload_examples_match_fixture_test` prints the new JSON to
 paste into the fixture. Push frames (the `push` channels below) are not op
 replies and are not in the fixture.
 
+## Operation-layer term contract
+
+The WebSocket protocol above is one transport over the operation layer,
+`beamtalk_repl_ops`. A caller that is itself a BEAM node attached over Erlang
+distribution (the Phoenix LiveView IDE, ADR 0091; runtime-attached tooling) calls
+that layer directly and gets Erlang **terms** back, not JSON. This section is
+the contract such a caller may rely on. `docs/development/repl-op-term-contract.md`
+gives the history and the porting notes; the shapes are pinned by
+`runtime/apps/beamtalk_workspace/test/beamtalk_repl_op_term_contract_tests.erl`.
+
+**JSON is produced at the WebSocket edge only.** `beamtalk_repl_ops:encode/2`
+turns an `op_result()` into the frames above, and it is reached from
+`beamtalk_repl_server` (op replies, through the per-op `handle/4` wrappers) and
+`beamtalk_ws_handler` (push frames and the ops that transport serves itself). A
+distribution-attached caller never calls it and never sees JSON.
+
+### Entry points
+
+| Function | Use |
+|----------|-----|
+| `beamtalk_repl_ops:request(Op, Params, SessionPid)` | **The entry point for a distribution-attached caller.** Builds the request and dispatches it; returns an `op_result()`. |
+| `beamtalk_repl_ops:dispatch(Op, Params, Msg, SessionPid)` | What `request/3` calls, and what the WebSocket handlers call with the `protocol_msg()` they decoded from a frame. Not for a remote caller: it needs the `protocol_msg()` record. |
+| `beamtalk_repl_ops:start_session(SessionId, Meta)` | **Start a session** (BT-5202): the one implementation behind a WebSocket auth and a LiveView mount. Starts the shell under `beamtalk_session_sup` and registers the id; returns `{ok, SessionPid}` or `{error, #beamtalk_error{}}`. A session is not an op: it exists before any op can run in it. |
+| `beamtalk_repl_ops:attach_session(SessionPid, OwnerPid)` | **Attach an owner** (BT-5202): the shell monitors `OwnerPid` and never idles out while one is attached. Returns `ok`, `gone` (the shell stopped first) or `timeout` (a busy shell did not answer in 5 s; it is alive, keep it). |
+| `beamtalk_repl_ops:session_bindings(SessionPid)` | **Read the live bindings** (BT-5202): `{ok, #{atom() => term()}}` or `{error, #beamtalk_error{}}`. A term-only API, not a wire op (BT-2369 removed the `bindings` op; other surfaces read them with `eval`). |
+| `beamtalk_repl_ops:render(Kind, Term)` | The one rendering function: display text for a live term or an error (see below). |
+| `beamtalk_repl_subscriptions:*` | Push streams (see Push Messages). |
+
+`request/3` takes:
+
+* `Op`, the operation name as a binary (`<<"eval">>`);
+* `Params`, a **flat** map with binary keys, one key per op parameter exactly as
+  the op's frame carries them (`#{<<"code">> => <<"1 + 2">>}`), never nested
+  under a `<<"params">>` key. Values have the wire shape a decoded frame has:
+  binaries, numbers, booleans, `null`, lists and maps with binary keys. The frame
+  envelope keys `op`, `id` and `session` are not parameters and are dropped;
+* `SessionPid`, the session the op runs in. Ops that read no session state
+  (`actors`, `inspect`, the browse ops, …) ignore it; the caller passes `self()`.
+
+A handler cannot tell `request/3` from a WebSocket frame: it is `dispatch/4` with
+the `protocol_msg()` built on the workspace node. The client therefore never
+needs the record's definition, and does not call `beamtalk_repl_protocol:decode/1`
+or `get_params/1`. A client written in Elixir passes its params through the OTP
+`json` module once (`:json.decode(:json.encode(params))`) so atoms take the shape
+JSON would give them (`nil` becomes the string `"nil"`, so omit an absent param).
+
+*Design note (BT-5201).* The request entry point is `request(Op, Params,
+SessionPid)`: the simplest signature that serves every current caller. Evals,
+completion and `close` need the session, and the other ops ignore it, so a
+separate sessionless variant would only add a second function. The alternative
+the LiveView front used before, sending JSON text through `decode/1` and
+`get_params/1` and then `dispatch/4`, cost three round-trips per call and tied
+the client to the `protocol_msg()` record. It is gone.
+
+### Result shapes
+
+`flush` takes at most one of `class`, `file` or `kind` (two is `invalid_argument`), or a `selector` (a method selector such as `increment` or `at:put:`, with or without a leading `#`) that scopes the flush to that method's entries in every class, or in one class when combined with `class` (BT-5297); a `selector` with `file` or `kind` is `invalid_argument`. It also takes `confirm_destructive`; the destructive tier is applied only for a boolean `true`, and any other value is `invalid_argument`. A scope param must be a non-empty String: `""` is `invalid_argument`, never read as "no scope" (BT-5206). `kind` is one of five `ChangeEntry` kinds: `new-class`, `remove-method`, `remove-class`, `rename-class` or `rename-method` (a leading `#` and quotes, as in `#'new-class'`, are accepted); any other name is `invalid_argument`. The result is a `FlushResult` summary (`flushed`, `files`, `skipped`, `conflicts`): a client that gets a non-empty `conflicts` list shows the conflicts, not a success, because those files were not written. The CLI REPL's `:flush [<Class>|#kind|#selector|<Class>>>#selector|#{ #file => "path" }]` and `:flush-destructive` send this operation, as the MCP `flush` tool and the LiveView "Save All to Disk" button do. `save-method` and `save-class` take optional `author` and `author_kind` (`human` | `agent`) for the ChangeLog audit trail (ADR 0082); the MCP tools send `agent`, and a request that names none is recorded as the connection's own (`repl`, `human`). The `{value, Map}` of both also carries `warnings` (a list of texts) when the change went live but its ChangeLog entry could not be recorded, so `flush` will not write it.
+
+**Git ops (BT-5205).** `git-status`, `git-diff`, `git-log`, `git-stage`, `git-unstage`, `git-commit` and `git-revert-file` run system `git` in the project's repository (never through a shell; pathspecs are literal). A `path` must be relative to the project root, with no `..` segment, no NUL byte, and not empty; anything else is `invalid_argument` and git is not started. `git-status` answers `{branch, upstream, ahead, behind, files: [{path, index, worktree}], truncated}` (at most 5000 files); `git-diff` `{path, worktree, staged, truncated}` (at most 1 MiB per side, valid UTF-8); `git-log` takes an optional positive `count` (default 20, capped at 500) and answers `{commits: [{sha, short_sha, subject, author, ts}], limit}`; `git-stage`, `git-unstage` and `git-revert-file` answer `{path}`; `git-commit` takes `message` (a String, at most 64 KiB) and answers `{committed: true}`.
+
+**Process navigation (BT-5205).** `children` takes `supervisor` and answers `{children: [Row], truncated}` (at most 500 rows); a row is `{label, className, kind, pid, registeredName, childCount, isSupervisor, handle}`, where `handle` is `null` for a foreign or restarting child and otherwise `{kind: "supervisor" | "actor", class, pid}` on the wire (a client attached over Erlang distribution receives the live `{beamtalk_supervisor | beamtalk_object, Class, Module, Pid}` term instead). `process-info` takes `pid` and answers `{pid, alive, status, message_queue_len, memory, reductions}`; a dead pid is `{pid, alive: false}`. A pid param (`supervisor`, `pid`, and `actor` for `inspect`, `kill`, `pid-stats`) is the node-local text `<0.123.0>` or, over distribution, the live pid.
+
+Every op returns one of these tagged terms. The tag and the arity are the
+contract; the table gives the shape per operation family.
+
+| Family | Operations | Success term |
+|--------|------------|--------------|
+| Evaluation | `eval` | `{ok, Value, Output, Warnings}` · `{trace, Steps, Output, Warnings}` · `{script_exit, Code, Output, Warnings}` |
+| Evaluation (other) | `unload`, tracing read ops | `{ok, Value, Output, Warnings}` |
+| Actors | `actors`, `inspect`, `kill`, `interrupt`, `pid-stats` | `{actors, [ActorMeta]}` (over distribution each also has `pid_text`; the wire does not) · `{inspect, FieldMap \| binary()}` · `{status, ok}` · `{value, StatsMap}` |
+| Sessions | `sessions`, `close`, `health`, `shutdown` | `{sessions, [SessionMeta]}` (`#{id, pid}`; the wire carries `id`) · `{status, ok}` · `{health, WorkspaceId, Nonce}` |
+| Loading | `load-source`, `load-project`, `save-section`, `save-native-source`, `save-method`, `save-class`, `revert-method`, `reload-file` | `{loaded, Classes, Warnings}` · `{load_project, Classes, Errors, Summary, Warnings}` · `{value, Map}` |
+| Workspace state | `flush`, `changes`, `info` | `{value, Map}`: a `FlushResult` summary · `#{entries}` · `#{version, node, workspace_id, settings}`, wire-shaped (binary keys, `null` for absent) |
+| Git | `git-status`, `git-diff`, `git-log`, `git-stage`, `git-unstage`, `git-commit`, `git-revert-file` | `{value, Map}`, wire-shaped: a status, a diff pair, a commit list, or the path / `committed` echoed back |
+| Process navigation | `children`, `process-info` | `{children, #{children, truncated}}` (rows keep a live `handle` over distribution; `encode/2` sends its stable id) · `{value, #{pid, alive, ...}}` |
+| Developer reads | `complete`, `erlang-complete`, `hover`, `erlang-help`, `diagnostics`, `describe`, `methods`, `inherited-methods`, `list-classes`, `show-codegen`, `test`, `test-all`, `list-tests`, `load-tests` | `{completions, [binary()]}` · `{docs, binary()}` · `{diagnostics, [map()]}` · `{describe, Ops, Versions}` · `{methods, Methods, StateVars}` · `{inherited_methods, Methods}` · `{class_list, [ClassInfo]}` · `{codegen, CoreErlang, Warnings}` · `{test_results, map()}` · `{value, JsonValue}` |
+| Browse and navigation | `browse-*`, `nav-query`, `nav-symbols`, `reload-findings`, `export-traces` | `{value, JsonValue}` |
+
+The complete tag table is in `beamtalk_repl_ops`'s module doc and `op_result()`
+type. Three rules hold across families:
+
+* `Value` in `{ok, Value, …}` and the `inspect` field map are **live terms**: a
+  `{beamtalk_object, Class, Module, Pid}` keeps its real, messageable pid. Only
+  `encode/2` flattens them.
+* The `value` tag carries an already wire-shaped value (maps with binary keys,
+  lists, binaries, numbers, booleans, `null`); it is the same value the WebSocket
+  frame carries, with no inspect-string round trip.
+* `Output` is captured stdout as a `binary()`; `Warnings` is a list.
+
+### Errors
+
+A failure is `{error, #beamtalk_error{}}`, or `{error, #beamtalk_error{}, Output,
+Warnings}` from `eval` and `show-codegen`, which also owe the caller the captured
+output. Handlers **return** user-facing errors; they never raise them across this
+seam. An unknown operation is `{error, #beamtalk_error{kind = unknown_op}}`.
+
+The record is a plain tuple tagged `beamtalk_error`, so a client matches it
+without the `.hrl`: `{:beamtalk_error, kind, class, selector, message, hint,
+details}` in Elixir.
+
+| Field | Type | Stable? |
+|-------|------|---------|
+| `kind` | atom: the error category (`does_not_understand`, `empty_expression`, `unknown_op`, `invalid_argument`, …) | **Stable discriminator.** Match on the kinds you know and treat any other kind generically: the set grows. |
+| `class` | atom: the class the error is about (`'Integer'`, `'REPL'`) | Stable position and type. |
+| `selector` | atom or `undefined`: the failing selector | Stable position and type. |
+| `message` | `{beamtalk_string, binary()}`: the human-readable text | Stable position and type; the wording is not. |
+| `hint` | `{beamtalk_string, binary()}` or `undefined` | Stable position and type; the wording is not. |
+| `details` | map: extra context for that `kind` | **Internal.** Keys differ per kind and may change; display it, do not match on it. |
+
+Render an error for display with `beamtalk_error:format/1`, or
+`beamtalk_repl_ops:render(error, Reason)`. A crash inside a handler is a bug, not
+an `{error, _}`: it reaches a remote caller as an exception (`{badrpc, _}` /
+`erpc` error), and the WebSocket edge logs it.
+
+### Rendering
+
+A client keeps the live term and renders it on its own side. When it wants the
+workspace's own text, so that it matches the CLI, MCP and browser byte for byte,
+it calls `beamtalk_repl_ops:render/2`, the one rendering function:
+
+| Call | Result |
+|------|--------|
+| `render(value, Term)` | The display value of one term, the JSON-ready value the WebSocket would send (`beamtalk_repl_json:term_to_json/1`). |
+| `render(values, Terms)` | The same for a list, in order, in one round-trip. |
+| `render(error, Reason)` | `{Structured, Message}`: the `#beamtalk_error{}` for any error reason (a structured one passes through) and its message text. |
+
+The remote helpers LiveView used before (`beamtalk_repl_protocol:decode/get_params`,
+`beamtalk_repl_json:term_to_json/format_error_message`,
+`beamtalk_repl_errors:ensure_structured_error`) are not part of this contract.
+
+### What is stable and what is internal
+
+**Stable:** the `request/3` signature and its flat-params rule; the result tags and
+arities above; the `#beamtalk_error{}` tag, field order and the `kind`
+discriminator; the `render/2` modes; the live-pid guarantee for `Value` and
+`inspect`.
+
+**Internal, do not depend on it:** `dispatch/4`'s `protocol_msg()` argument; the
+op handler modules (`beamtalk_repl_ops_*`) and their `handle_term/4`; `details`
+and the wording of `message` and `hint`; the keys of a live `FieldMap` beyond the
+object's own fields (bookkeeping keys are filtered and may change); any tag not in
+`op_result()`; every other runtime module. A distribution-attached caller can
+still call any function (ADR 0091 Decision 3); this contract is what one
+implementation of each capability behind `request/3` promises to keep stable.
+
 ## Push Messages
 
 Push messages are server-initiated messages sent to clients without a preceding request. They are used for real-time notifications.
@@ -930,7 +1089,7 @@ Text that is not valid UTF-8 (for example from `asStringUnchecked`) is pushed as
 
 ### Logs Channel
 
-Live OTP log events, started by `subscribe-logs` (optional `level`: `emergency`, `alert`, `critical`, `error`, `warning`, `notice`, `info` or `debug`; default `debug`) and stopped by `unsubscribe-logs`. Sending `subscribe-logs` again changes the level. An unknown `level` is answered with an `invalid_argument` error and leaves any existing subscription unchanged.
+Live OTP log events, started by `subscribe-logs` (optional `level`: `emergency`, `alert`, `critical`, `error`, `warning`, `notice`, `info` or `debug`; default `debug`) and stopped by `unsubscribe-logs`. Sending `subscribe-logs` again changes the level. VS Code sends `unsubscribe-logs` when `beamtalk.logs.level` is set to `off` and before it disconnects (BT-5199). An unknown `level` is answered with an `invalid_argument` error and leaves any existing subscription unchanged.
 
 ```json
 {"type": "push", "channel": "logs", "event": "entry", "data": {"level": "info", "time": "...", "msg": "..."}}

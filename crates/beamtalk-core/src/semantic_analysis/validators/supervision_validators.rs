@@ -403,7 +403,6 @@ mod tests {
         let src = "Actor subclass: Worker\n  go => nil\nSupervisor subclass: MySup\n  childSpecs => #(Worker)";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_children_supervision_policy(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -425,7 +424,6 @@ mod tests {
         let src = "Actor subclass: Worker\n  class supervisionPolicy -> Symbol => #permanent\n  go => nil\nSupervisor subclass: MySup\n  childSpecs => #(Worker)";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_children_supervision_policy(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -487,7 +485,6 @@ mod tests {
         let src = "Supervisor subclass: MySup\n  other => 1";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_children_supervision_policy(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -507,7 +504,6 @@ mod tests {
         let src = "Actor subclass: Worker\n  go => nil\nObject subclass: Other\n  go2 => nil\nSupervisor subclass: MySup\n  go3 => nil\nMySup class >> classHelper => nil\nOther >> childSpecs => #(Worker)\nMySup >> notChildSpecs => #(Worker)\nMySup >> childSpecs => #(Worker)";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_children_supervision_policy(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -531,7 +527,6 @@ mod tests {
         let src = "Supervisor subclass: MySup\n  childSpecs => nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_children_supervision_policy(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -548,7 +543,6 @@ mod tests {
         let src = "Actor subclass: Worker\n  go => nil\nObject subclass: PlainClass\n  go => nil\nSupervisor subclass: MySup\n  childSpecs => #(1, worker, PlainClass, Worker)";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_children_supervision_policy(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -568,7 +562,6 @@ mod tests {
     fn class_side_config_diagnostics(src: &str) -> Vec<Diagnostic> {
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_class_side_supervisor_config(&module, &hierarchy, &mut diagnostics);
         diagnostics

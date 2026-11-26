@@ -582,6 +582,31 @@ defmodule BtAttachWeb.WorkspaceLivePanesTest do
     end
   end
 
+  describe "docked inspector on a supervisor (BT-5293)" do
+    test "a children list the runtime cut says so, with N taken from the rows", %{conn: conn} do
+      StubWorkspaceClient.put_bindings([
+        {"cutSup", {:beamtalk_supervisor, :CutSup, :"Elixir.CutSup", self()}}
+      ])
+
+      view = mount_cockpit(conn)
+      html = render_click(view, "inspect", %{"name" => "cutSup"})
+
+      assert html =~ "Showing the first 3 children; the list is cut."
+    end
+
+    test "a whole children list shows no notice", %{conn: conn} do
+      StubWorkspaceClient.put_bindings([
+        {"appSup", {:beamtalk_supervisor, :AppSup, :"Elixir.AppSup", self()}}
+      ])
+
+      view = mount_cockpit(conn)
+      html = render_click(view, "inspect", %{"name" => "appSup"})
+
+      assert html =~ "WorkerPool"
+      refute html =~ "the list is cut"
+    end
+  end
+
   describe "navigation popover" do
     test "the Senders query renders its own heading", %{conn: conn} do
       view = mount_cockpit(conn)

@@ -128,7 +128,8 @@ defmodule BtAttachWeb.Live.TestRunnerTest do
         "load_tests" => %{},
         "run_test_class" => %{"class" => "Counter"},
         "open_test_method" => %{"class" => "Counter", "selector" => "increment"},
-        "dismiss_notice" => %{"key" => "tests_error"}
+        "dismiss_notice" => %{"key" => "tests_error"},
+        "tests_stop" => %{}
       }
 
       for event <- TestRunner.__test_runner_events__() do
@@ -476,5 +477,48 @@ defmodule BtAttachWeb.Live.TestRunnerTest do
       assert TestRunner.test_status_label("weird") == "? weird"
       assert TestRunner.test_status_class("weird") == "st-skip"
     end
+  end
+
+  # BT-5189: Stop kills the workspace-side `:erpc` worker the run's task is
+  # waiting on — only processes on another node, never a local one.
+  test "kill_remote_workers leaves local processes the task monitors alone" do
+    local = spawn(fn -> Process.sleep(:infinity) end)
+    parent = self()
+
+    task =
+      spawn(fn ->
+        Process.monitor(local)
+        send(parent, :monitoring)
+        Process.sleep(:infinity)
+      end)
+
+    assert_receive :monitoring
+    assert :ok = TestRunner.kill_remote_workers(task)
+    assert Process.alive?(local)
+    Process.exit(task, :kill)
+    Process.exit(local, :kill)
+  end
+
+  test "kill_remote_workers is a no-op for a task that already exited" do
+    task = spawn(fn -> :ok end)
+    ref = Process.monitor(task)
+    assert_receive {:DOWN, ^ref, :process, ^task, _}
+    assert :ok = TestRunner.kill_remote_workers(task)
+  end
+
+  # BT-5189: a run's task waits for the LiveView's go-ahead before calling the
+  # workspace, so Stop either cancels it before it calls or finds its pid.
+  test "the current run's task gets the go-ahead and its pid is recorded; a stale one gets neither" do
+    token = make_ref()
+    socket = base_socket(%{tests_running: true, test_op_token: token, test_op_pid: nil})
+
+    {:noreply, socket} = TestRunner.handle_info({:test_op_task, token, self()}, socket)
+    assert_received {:test_op_go, ^token}
+    assert socket.assigns.test_op_pid == self()
+
+    stale = make_ref()
+    {:noreply, socket} = TestRunner.handle_info({:test_op_task, stale, self()}, socket)
+    refute_received {:test_op_go, ^stale}
+    assert socket.assigns.test_op_pid == self()
   end
 end

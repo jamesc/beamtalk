@@ -33,7 +33,7 @@ use super::{assert_compiles_through_erlc, assert_parses, codegen};
 use crate::core_erlang::fault::Fault;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-const HELPERS: &str = "  done => false
+pub(super) const HELPERS: &str = "  done => false
   isAlive: k => k > 0
   maybe: k => nil
   + k => k > 0
@@ -41,7 +41,7 @@ const HELPERS: &str = "  done => false
 
 /// Conditional receivers whose evaluation advances `State`: a unary, keyword
 /// and binary self-send, and a self-send as the operand of `and:` / `or:`.
-const RECEIVERS: &[&str] = &[
+pub(super) const RECEIVERS: &[&str] = &[
     "(self done)",
     "(self isAlive: n)",
     "(self + n)",
@@ -60,13 +60,13 @@ const CONDITIONALS: &[&str] = &[
 ];
 
 /// What the arm writes: nothing, an outer local, a field.
-const ARMS: &[&str] = &["Timer sleep: 0", "n := n - 1", "self.f := self.f + 1"];
+pub(super) const ARMS: &[&str] = &["Timer sleep: 0", "n := n - 1", "self.f := self.f + 1"];
 
 /// Where the conditional statement `{S}` runs: every `Letrec` loop kind
 /// (`LOOPS[..5]`), a fold body, the method root, a conditional arm, an
 /// `on:do:` body, an `ensure:` body, and a `Letrec` loop nested in a
 /// conditional arm.
-const LOOPS: &[&str] = &[
+pub(super) const LOOPS: &[&str] = &[
     "[n > 0] whileTrue: [{S}]",
     "[n <= 0] whileFalse: [{S}]",
     "3 timesRepeat: [{S}]",
@@ -82,7 +82,8 @@ const LOOPS: &[&str] = &[
 
 /// The actor contexts: a method whose first `State` version is the
 /// conditional's receiver, and one that advances `State` first.
-const PRELUDES: &[(&str, &str)] = &[("actor", ""), ("actor_field_write", "    self.f := 1\n")];
+pub(super) const PRELUDES: &[(&str, &str)] =
+    &[("actor", ""), ("actor_field_write", "    self.f := 1\n")];
 
 const HEADER: &str = "Actor subclass: LoopCondReceiverProbe\n  state: f = 0\n";
 
@@ -109,7 +110,7 @@ fn method(prelude: &str, i: usize, body: &str) -> String {
     format!("  probe{i} =>\n{prelude}    n := 3\n    {body}\n    n\n")
 }
 
-fn passes(src: &str) -> bool {
+pub(super) fn passes(src: &str) -> bool {
     catch_unwind(AssertUnwindSafe(|| {
         assert_compiles_through_erlc("test", &codegen(src));
     }))
@@ -150,7 +151,7 @@ fn loop_body_conditional_receiver_corpus_compiles() {
 
 /// Whether the ADR 0131/0133 Phase 0 check rejects `src` before codegen (an
 /// arm's outer-local write in an operand position no construct threads).
-fn phase0_rejects(src: &str) -> bool {
+pub(super) fn phase0_rejects(src: &str) -> bool {
     use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
     use beamtalk_core::source_analysis::{DiagnosticCategory, Severity};
     let (module, _) =
@@ -182,7 +183,7 @@ const VALUE_POSITIONS: &[&str] = &[
     "(n > 5) ifTrue: [^ {C}]",
     // The RHS of a field write and of a destructuring statement (`{P}` is the
     // conditional answering a two-element array): the arm's C6 -> C1 and C9
-    // reroutes (`is_conditional_with_sequenced_receiver`).
+    // reroutes (`is_construct_with_sequenced_operand`).
     "self.f := {C}",
     "#(a, b) := {P}. self.f := a + b",
 ];
@@ -545,11 +546,6 @@ const INSTANCE_HELPERS: &str = "  done => false
   + k => k > 0
 ";
 
-const CLASS_HELPERS: &str = "  class done => false
-  class isAlive: k => k > 0
-  class + k => k > 0
-";
-
 const SCOPE_CONTEXTS: &[ScopeContext] = &[
     ScopeContext {
         name: "value_field",
@@ -578,20 +574,6 @@ const SCOPE_CONTEXTS: &[ScopeContext] = &[
         helpers: INSTANCE_HELPERS,
         class_side: false,
         prelude: "    self.f := 1\n",
-    },
-    ScopeContext {
-        name: "object_class_side",
-        header: "Object subclass: FoldScopeProbe\n  classState: f = 0\n",
-        helpers: CLASS_HELPERS,
-        class_side: true,
-        prelude: "",
-    },
-    ScopeContext {
-        name: "actor_class_side",
-        header: "Actor subclass: FoldScopeProbe\n  classState: f = 0\n",
-        helpers: CLASS_HELPERS,
-        class_side: true,
-        prelude: "",
     },
 ];
 
@@ -666,8 +648,7 @@ fn scope_method(ctx: &ScopeContext, i: usize, body: &str) -> String {
 /// BT-4017: in every non-actor scope kind, every fold row passes the debug
 /// verifier, compiles through `erlc` and holds no raw-tuple unpack, except a
 /// row writing the field `f` inside the fold body in a value-type or `TestCase`
-/// method, which a language rule rejects with a structured error (class-side,
-/// `f` is a class variable written in place, and every row compiles).
+/// method, which a language rule rejects with a structured error.
 /// (One `erlc` module per context; bisected to the failing rows on failure.)
 #[test]
 fn fold_body_statements_in_every_scope_compile_without_a_raw_tuple_unpack() {

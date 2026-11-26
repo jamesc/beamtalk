@@ -1007,7 +1007,7 @@ agent must add each one.
 | `ci:corpus` | `corpus.yml` (Rust corpus tier, `just test-corpus`, two shards, about 33 runner-min) | Every merge | The PR changes state-threading lowering or its analysis, fixes a state-threading or `PIN-BUG` issue, or adds or changes a `*_corpus` / `*agreement*` test |
 | `ci:core-diff` | `core-diff.yml` (corpus `.core` diff vs the PR base) | Never | A codegen refactor should leave generated Core Erlang unchanged |
 | `core-diff:enforce` | `core-diff.yml`, failing on any diff | Never | As above, and any difference must fail the PR |
-| `ci:all-platforms` | `ci-platforms.yml` (macOS, Windows, desktop) | Nightly schedule | The PR is platform-sensitive (paths, processes, file system) |
+| `ci:all-platforms` | `ci-platforms.yml` (macOS, Windows, desktop) | Nightly schedule, and a push to `main` that changes `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml` or `ci-platforms.yml` (runs `platform-check` only, to warm the Rust cache, BT-5273) | The PR is platform-sensitive (paths, processes, file system) |
 
 Because `main` runs the corpus tier on every merge, and `ci-triage.yml` files
 an issue for a red `main` run, a PR that should have carried `ci:corpus` but
@@ -1035,6 +1035,73 @@ in `test-rust` and `test-runtime` on every PR, TypeScript in `test-vscode`.
 
 Coverage is not on the PR path at all: see § Code Coverage (`coverage.yml`,
 nightly).
+
+### Merge queue
+
+`main` is merged through a GitHub merge queue (BT-5247). Two PRs can each be
+green against their own base and still break `main` together (BT-5232 and
+BT-5154 did this on 2026-11-25). The queue catches that: it builds a test
+commit of each queued PR on top of `main` and every PR ahead of it, runs the
+required checks on that commit (the `merge_group` event), and merges only if
+they pass.
+
+**Merging a PR.** Enable auto-merge (squash) on the PR, from the PR page or
+with `gh pr merge <PR> --squash --auto`. When the PR's required checks are green it
+joins the queue, and GitHub merges it when the queue run passes. Don't merge
+directly: with the queue on, the merge button adds the PR to the queue instead.
+If the queue run fails, GitHub removes the PR from the queue; fix it, push, and
+it re-queues while auto-merge is still on.
+
+**Required checks** (Settings → Rules or Branches → `main`):
+
+| Check | Workflow | On `merge_group` |
+|-------|----------|------------------|
+| `ci-ok` | `ci.yml` | The full Linux suite, as on a push to `main`: every path gate true, every OTP in the window. Not the corpus tier: `corpus.yml` runs on `main` after the merge, and the queue run has only its fixture-reader subset |
+| `Claude BeamTalk Review` | `claude-review.yml` on the PR; `claude-review-queue.yml` on `merge_group` | Reports a pass without reviewing: the review already ran on the PR |
+
+No other check may be required. The other workflows a PR starts
+(`ci-platforms.yml`, `core-diff.yml`, `corpus.yml` and the LiveView ones) are
+label-gated or path-filtered, so they don't run on every PR. A required check
+that never starts stays pending, and the queue stalls.
+`scripts/ci/test_merge_queue.py` (run by `just test-ci-ok`) lists them with the
+reason for each. Adding a workflow that runs on `pull_request` fails that test
+until the workflow either gets a `merge_group` trigger or is added to that list.
+
+**Dependabot PRs (BT-5254).** `dependabot-auto.yml` approves a dependabot PR and
+enables squash auto-merge when every updated dependency is a patch or minor bump
+(read by `dependabot/fetch-metadata`); the merge queue then takes it once `ci-ok`
+is green. Majors, and anything without a semver type, are left for the weekly
+fold-in session. `Claude BeamTalk Review` needs no stand-in: `claude-review.yml`
+skips dependabot, and GitHub counts a skipped job as a passing required check.
+The workflow runs on `pull_request_target`, so it never checks out or runs PR
+code, and it runs only when both the PR author and the event's actor are
+`dependabot[bot]`. Because `main` no longer requires up-to-date branches, there is
+no branch-updater job. Two repo settings are needed: Settings → Actions → General →
+"Allow GitHub Actions to create and approve pull requests", and Settings →
+General → "Allow auto-merge". `ci-ok` is the only gate on a bump, so a 0.x minor
+or a GitHub Actions bump merges once CI is green. To check it, wait for
+the next Monday dependabot PR (or comment `@dependabot recreate` on one): a
+patch/minor PR gets an approval from `github-actions[bot]` and auto-merge enabled;
+a major PR gets neither. `scripts/ci/test_dependabot_auto.py` pins the rest.
+
+**Batch size.** 2–4 PRs per queue run (*Maximum pull requests to build*), with
+*Minimum pull requests to merge* at 1. A larger batch saves runner time but a
+failure costs every PR in it a re-run. A queue run is the full suite, as long as
+a run on `main`, so a batch of a few keeps the queue moving.
+
+The queue's "Claude BeamTalk Review" comes from its own workflow,
+`claude-review-queue.yml` (`merge_group` only, no permissions). It isn't a
+second job in `claude-review.yml`, for two reasons. claude-code-action refuses
+to review a PR that edits the workflow invoking it. And a same-named job
+skipped on `pull_request` would put a skipped check next to the running review,
+which branch protection can count as a pass.
+
+A queue run is keyed on its own commit in the `concurrency:` groups, so it is
+never cancelled by another queue entry or by a PR run.
+`main` still runs `ci.yml` and `corpus.yml` on every merge: the queue does not
+replace that run. A failed queue run files no issue: `ci-triage.yml` triages
+only runs whose head branch is `main`, and a queue run's branch is
+`gh-readonly-queue/main/…`.
 
 ### Testing Pyramid
 

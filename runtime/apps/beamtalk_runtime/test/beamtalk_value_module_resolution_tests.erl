@@ -115,8 +115,6 @@ untyped_value_send_test_() ->
             fun fast_reload_is_seen_by_next_send/0},
         {"BT-4984: re-registration under another module is seen by the next send",
             fun fast_reregistration_is_seen_by_next_send/0},
-        {"BT-4984: an extension added or removed at run time is seen by the next send",
-            fun fast_extension_change_is_seen_by_next_send/0},
         {"BT-4984: an inherited method follows a reload of the superclass module",
             fun fast_inherited_follows_superclass_reload/0},
         {"BT-4984: receivers that are not a tagged-map Value dispatch as before",
@@ -639,30 +637,6 @@ fast_reregistration_is_seen_by_next_send() ->
         beamtalk_test_proc:stop(Pid)
     end.
 
-fast_extension_change_is_seen_by_next_send() ->
-    Pid = beamtalk_test_class:start(?FCLASS, class_info(?FMOD)),
-    Self = #{'$beamtalk_class' => ?FCLASS, x => 7},
-    try
-        ok = fast_load(?FMOD, ?FCLASS, v1, [x], none),
-        ?assertEqual({v1, x}, fast_send(Self, x)),
-        ?assertMatch({bt_error, does_not_understand, ?FCLASS, ext, _}, fast_outcome(Self, ext)),
-        Gen0 = beamtalk_class_derived_cache:generation(),
-        ok = beamtalk_extensions:register(
-            ?FCLASS, ext, fun(Args, _Self) -> {ext, Args} end, zz_fast_owner
-        ),
-        ?assertNotEqual(Gen0, beamtalk_class_derived_cache:generation()),
-        ?assertEqual({ext, [1]}, fast_send(Self, ext, [1])),
-        ?assertEqual({v1, x}, fast_send(Self, x)),
-        Gen1 = beamtalk_class_derived_cache:generation(),
-        ok = beamtalk_extensions:unregister(?FCLASS, ext),
-        ?assertNotEqual(Gen1, beamtalk_class_derived_cache:generation()),
-        ?assertMatch({bt_error, does_not_understand, ?FCLASS, ext, _}, fast_outcome(Self, ext)),
-        ?assertEqual({v1, x}, fast_send(Self, x))
-    after
-        _ = beamtalk_extensions:unregister(?FCLASS, ext),
-        beamtalk_test_proc:stop(Pid)
-    end.
-
 fast_inherited_follows_superclass_reload() ->
     PPid = beamtalk_test_class:start(?FPARENT, class_info(?FPMOD, 'Object')),
     CPid = beamtalk_test_class:start(?FCLASS, class_info(?FMOD, ?FPARENT)),
@@ -840,19 +814,16 @@ fast_reload(Module, Class, Version, Selectors, Parent) ->
 
 %% Source of a throwaway Value class module in the shape of a compiled one:
 %% `dispatch/3` answers `{Version, Selector}` for its own selectors, then asks
-%% the extension table, then the parent module (or raises the DNU).
+%% the parent module (or raises the DNU).
 fast_source(Module, Class, Version, Selectors, Parent) ->
     Own = [io_lib:format("'~s' -> {~s, '~s'};~n", [S, Version, S]) || S <- Selectors],
     Fallback =
         case Parent of
             none ->
                 io_lib:format(
-                    "case beamtalk_extensions:lookup('~s', Sel) of~n"
-                    "  {ok, Fun, _} -> Fun(Args, Self);~n"
-                    "  not_found -> beamtalk_error:raise(beamtalk_error:new("
-                    "does_not_understand, '~s', Sel, <<\"fixture hint\">>))~n"
-                    "end",
-                    [Class, Class]
+                    "beamtalk_error:raise(beamtalk_error:new("
+                    "does_not_understand, '~s', Sel, <<\"fixture hint\">>))",
+                    [Class]
                 );
             _ ->
                 io_lib:format("'~s':dispatch(Sel, Args, Self)", [Parent])
@@ -877,7 +848,6 @@ class_info(Module, Superclass, Selectors) ->
     Base = #{
         superclass => Superclass,
         class_methods => #{},
-        class_state => #{},
         instance_methods => maps:from_list([{S, #{}} || S <- Selectors])
     },
     case Module of

@@ -9,8 +9,8 @@
 Whether an instance of a class runs `Object`'s own method for a selector.
 
 A primitive receiver's dynamic send walks its class's dispatch chain —
-`Binary` → `Collection` → `Value` → `Object`, with an extension-registry probe
-at every level — before it reaches an `Object` method. When nothing on that
+`Binary` → `Collection` → `Value` → `Object` — before it reaches an `Object`
+method. When nothing on that
 chain overrides the selector, a caller that already knows what `Object`'s
 method does can answer without the walk. `beamtalk_equality:primitive_equals/2`
 does this for `equals:` (BT-4416) and
@@ -19,12 +19,9 @@ does this for `equals:` (BT-4416) and
 `is_default/2` answers that question; `owner/2` is the walk behind it, for a
 caller that folds the answer into a derived-cache entry of its own.
 `overridden_anywhere/1` is the node-wide, one-read version for a watched
-selector: whether any class other than `Object` has ever defined it, compiled
-or as an extension. The walk
+selector: whether any class other than `Object` has ever defined it. The walk
 follows the order a compiled primitive `dispatch/3` resolves a selector in: at
-each class, its own methods first, then its extensions, then the superclass. A `sealed` method
-does not make the walk unnecessary: an extension may still define the
-selector on a subclass.
+each class, its own methods, then the superclass.
 """.
 
 -include("beamtalk.hrl").
@@ -45,13 +42,12 @@ selector on a subclass.
 
 -doc """
 True if an instance of `Class` runs `Object>>Selector`: nothing on its
-superclass chain below `Object` defines `Selector` or has it as an extension.
+superclass chain below `Object` defines `Selector`.
 
 The answer is memoised in `beamtalk_class_derived_cache`, and a `true` answer
 additionally in the calling process's dictionary, tagged with the cache
 generation read before computing it. A hot loop then costs a generation read
-and a `get/1` rather than an ETS read, and any class write or extension
-(un)registration bumps the generation, which turns every per-process memo into
+and a `get/1` rather than an ETS read, and any class write bumps the generation, which turns every per-process memo into
 a miss. Until every class on the chain has published its method records
 (early bootstrap, an unregistered class) the answer is `false`, so the caller
 sends.
@@ -80,32 +76,27 @@ is_default(Class, Selector) ->
     end.
 
 -doc """
-The class whose `Selector` an instance of `Class` runs, `{extension, C}` for
-an extension on `C`, `none` if the chain defines none, or `unpublished` while
+The class whose `Selector` an instance of `Class` runs, `none` if the chain
+defines none, or `unpublished` while
 some class on the chain has not published its method records. Not memoised:
 callers cache it in `beamtalk_class_derived_cache`, under a key of their own.
 """.
--spec owner(atom(), atom()) -> atom() | {extension, atom()} | unpublished.
+-spec owner(atom(), atom()) -> atom() | unpublished.
 owner(Class, Selector) ->
     StepFun = fun(Name, _Depth) ->
         case beamtalk_class_metadata:lookup_method_record(Name, instance, Selector) of
             {ok, _} ->
                 {found, Name};
             not_found ->
-                case beamtalk_extensions:has(Name, Selector) of
-                    true ->
-                        {found, {extension, Name}};
-                    false ->
-                        case
-                            {
-                                beamtalk_class_metadata:lookup_instance_methods(Name),
-                                beamtalk_class_metadata:lookup_superclass(Name)
-                            }
-                        of
-                            {{ok, _}, {ok, Root}} when Root =:= none; Root =:= nil -> not_found;
-                            {{ok, _}, {ok, Super}} -> {next, Super};
-                            _ -> {found, unpublished}
-                        end
+                case
+                    {
+                        beamtalk_class_metadata:lookup_instance_methods(Name),
+                        beamtalk_class_metadata:lookup_superclass(Name)
+                    }
+                of
+                    {{ok, _}, {ok, Root}} when Root =:= none; Root =:= nil -> not_found;
+                    {{ok, _}, {ok, Super}} -> {next, Super};
+                    _ -> {found, unpublished}
                 end
         end
     end,
@@ -121,17 +112,16 @@ owner(Class, Selector) ->
         not_found -> none;
         {max_depth_exceeded, _} -> unpublished
     catch
-        %% Extension or metadata table not created yet (early bootstrap).
+        %% Metadata table not created yet (early bootstrap).
         error:badarg -> unpublished
     end.
 
 -doc """
 Whether a watched selector (`isKindOf:`) has ever been defined on this node by
-a class other than `Object`, as a compiled instance method or as an extension
-on any class (BT-4473). One `persistent_term` read; `true` for a selector that
+a class other than `Object`, as a compiled instance method (BT-4473). One `persistent_term` read; `true` for a selector that
 is not watched.
 
-The flag is raised before the defining record or extension row is written
+The flag is raised before the defining record is written
 (`note_override/2`) and is never lowered: removing the override leaves it set.
 So `false` proves that every class's chain runs `Object`'s method for the
 selector; `true` only that one may not. A caller that answers `Object`'s
@@ -159,7 +149,7 @@ override_flag_key(Selector) ->
     {?MODULE, overridden, Selector}.
 
 -doc """
-Record that `Class` defines `Selector` (a compiled method or an extension):
+Record that `Class` defines `Selector` (a compiled method):
 raise `overridden_anywhere/1` for a watched selector, unless `Class` is
 `Object`. Called before the definition becomes visible. A watched selector's
 key is written once, so `persistent_term` sees at most one write per watched

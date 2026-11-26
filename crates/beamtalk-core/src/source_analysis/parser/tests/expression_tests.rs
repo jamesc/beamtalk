@@ -1211,6 +1211,112 @@ fn parse_binary_pattern_size_expression() {
     );
 }
 
+/// The one diagnostic a pattern-size source reports, and the source text
+/// its span covers (BT-5285).
+fn pattern_size_error(source: &str) -> (Diagnostic, String) {
+    let diagnostics = parse_err(source);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    let diag = diagnostics.into_iter().next().unwrap();
+    let start = diag.span.start() as usize;
+    let end = diag.span.end() as usize;
+    let covered = source[start..end].to_string();
+    (diag, covered)
+}
+
+#[test]
+fn binary_pattern_size_with_unary_send_is_a_located_error() {
+    // BT-5285: the issue's repro — BEAM only allows guard expressions in a
+    // pattern size, so `p size` is a parse error at the send, with a hint,
+    // not a code generation failure.
+    let source =
+        "p match: [<<pad:8, body:(p size - 1 - pad)/binary, _tail:pad/binary>> -> body; _ -> p]";
+    let (diag, covered) = pattern_size_error(source);
+    assert_eq!(diag.severity, Severity::Error);
+    assert_eq!(covered, "p size");
+    assert!(
+        diag.message
+            .contains("binary pattern segment size cannot contain a message send (`size`)"),
+        "{diag:?}"
+    );
+    assert!(
+        diag.hint.as_deref().is_some_and(
+            |h| h.contains("bind it to a variable") && h.contains("room := p size - 1")
+        ),
+        "{diag:?}"
+    );
+}
+
+#[test]
+fn binary_pattern_size_with_keyword_send_is_a_located_error() {
+    let (diag, covered) = pattern_size_error("x match: [<<a:(n max: 8), rest/binary>> -> a]");
+    assert_eq!(covered, "n max: 8");
+    assert!(diag.message.contains("a message send (`max:`)"), "{diag:?}");
+}
+
+#[test]
+fn binary_pattern_size_send_inside_arithmetic_on_the_right_is_located() {
+    let (_, covered) = pattern_size_error("x match: [<<a:(8 * (b bits)), rest/binary>> -> a]");
+    assert_eq!(covered, "b bits");
+}
+
+#[test]
+fn binary_pattern_size_with_non_guard_operator_is_a_located_error() {
+    // An operator with no guard lowering (`%` is not one of them).
+    let (diag, covered) = pattern_size_error("x match: [<<a:(n % 2), rest/binary>> -> a]");
+    assert_eq!(covered, "n % 2");
+    assert!(diag.message.contains("the operator `%`"), "{diag:?}");
+}
+
+#[test]
+fn binary_pattern_size_with_float_division_or_comparison_is_an_error() {
+    // Guard-safe, but `/` always answers a float and a comparison a
+    // boolean, so the arm could never match.
+    let (diag, covered) = pattern_size_error("x match: [<<a:(n / 2), rest/binary>> -> a]");
+    assert_eq!(covered, "n / 2");
+    assert!(diag.message.contains("the operator `/`"), "{diag:?}");
+    let (_, covered) = pattern_size_error("x match: [<<a:(n > 2), rest/binary>> -> a]");
+    assert_eq!(covered, "n > 2");
+}
+
+#[test]
+fn binary_pattern_size_with_field_read_names_it() {
+    let (diag, covered) = pattern_size_error("x match: [<<a:(self.len), rest/binary>> -> a]");
+    assert_eq!(covered, "self.len");
+    assert!(diag.message.contains("a field read (`len`)"), "{diag:?}");
+}
+
+#[test]
+fn binary_pattern_size_send_over_a_pattern_variable_hints_a_split_match() {
+    // `n` exists only during the match, so binding the size before the
+    // match is impossible: the hint says to split the match instead.
+    let (diag, covered) = pattern_size_error("x match: [<<n:8, body:(n max: 4)/binary>> -> body]");
+    assert_eq!(covered, "n max: 4");
+    let hint = diag.hint.as_deref().unwrap_or_default();
+    assert!(
+        hint.contains("`n` is bound by this pattern") && hint.contains("split the match"),
+        "{diag:?}"
+    );
+}
+
+#[test]
+fn every_invalid_pattern_size_is_reported() {
+    let diagnostics = parse_err("x match: [<<a:(p size), b:(q size)>> -> a]");
+    assert_eq!(diagnostics.len(), 2, "{diagnostics:?}");
+}
+
+#[test]
+fn binary_pattern_size_guard_expressions_are_accepted() {
+    // Literals, variables, and arithmetic over them stay valid.
+    parse_ok("x match: [<<a:(4 - q), b:(n * 8 + 1), c:k, rest/binary>> -> a]");
+}
+
+#[test]
+fn binary_construction_size_may_contain_a_send() {
+    // BT-5285: a construction size is evaluated before the binary is built,
+    // so it has no guard restriction.
+    parse_ok("<<p:(p size - 1)/binary, 7:(n max: 8)>>");
+}
+
 #[test]
 fn parse_binary_pattern_min_int_value() {
     // Review finding 2: <<-9223372036854775808:64/signed>> parses (i64::MIN).
@@ -1233,20 +1339,39 @@ fn parse_binary_pattern_min_int_value() {
 }
 
 #[test]
-fn parse_binary_pattern_double_negated_min_int_is_clean_error() {
-    // Review finding 2: <<- -9223372036854775808:64/signed>> exceeds
-    // i64::MAX — a clean diagnostic, never a panic (or release wrap).
+fn parse_binary_pattern_double_negated_min_int_is_a_bignum() {
+    // BT-5239 (was review finding 2): `- -9223372036854775808` is 2^63, a
+    // bignum — no longer an error. It does not fit a signed 64-bit segment,
+    // so the only diagnostic is the "can never match" warning.
+    use crate::ast::Pattern;
     use crate::source_analysis::Severity;
     let diagnostics = parse_err("x match: [<<- -9223372036854775808:64/signed>> -> 1]");
-    let errors: Vec<_> = diagnostics
-        .iter()
-        .filter(|d| d.severity == Severity::Error)
-        .collect();
-    assert_eq!(errors.len(), 1, "expected one error, got: {errors:?}");
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|d| (d.severity, d.message.to_string()))
+            .collect::<Vec<_>>(),
+        vec![(
+            Severity::Warning,
+            "this arm can never match because the value 9223372036854775808 will not fit in an 'signed' binary segment of size 64".to_string()
+        )]
+    );
+    let (module, _) = parse(lex_with_eof(
+        "x match: [<<- -9223372036854775808:64/signed>> -> 1]",
+    ));
+    let Expression::Match { arms, .. } = &module.expressions[0].expression else {
+        panic!("expected Expression::Match");
+    };
+    let Pattern::Binary { segments, .. } = &arms[0].pattern else {
+        panic!("expected Pattern::Binary");
+    };
     assert!(
-        errors[0].message.contains("out of range"),
-        "expected out-of-range error, got: {}",
-        errors[0].message
+        matches!(
+            &segments[0].value,
+            Pattern::Literal(Literal::BigInteger(d), _) if d.as_str() == "9223372036854775808"
+        ),
+        "expected a bignum literal, got: {:?}",
+        segments[0].value
     );
 }
 
@@ -1921,45 +2046,10 @@ fn class_state_after_methods() {
 }
 
 #[test]
-fn class_classstate_after_methods() {
-    // classState: fields should be allowed after method definitions
-    let module = parse_ok(
-        "Actor subclass: Counter
-  increment => self.count := self.count + 1
-  classState: instanceCount = 0
-  state: count = 0
-  getCount => ^self.count",
-    );
-    assert_eq!(module.classes.len(), 1, "Should find 1 class");
-    let class = &module.classes[0];
-    assert_eq!(
-        class.class_variables.len(),
-        1,
-        "Should have 1 classState field, got {}",
-        class.class_variables.len()
-    );
-    assert_eq!(class.class_variables[0].name.name.as_str(), "instanceCount");
-    assert_eq!(
-        class.state.len(),
-        1,
-        "Should have 1 state field, got {}",
-        class.state.len()
-    );
-    assert_eq!(
-        class.methods.len(),
-        2,
-        "Should have 2 methods, got {}",
-        class.methods.len()
-    );
-}
-
-#[test]
-fn class_members_fully_interleaved() {
-    // All member types interleaved: method, classState, method, state, method
+fn class_members_interleaved() {
     let module = parse_ok(
         "Actor subclass: Mixed
   first => 1
-  classState: cv = 0
   second => 2
   state: iv = 0
   third => 3",
@@ -1967,11 +2057,6 @@ fn class_members_fully_interleaved() {
     let class = &module.classes[0];
     assert_eq!(class.methods.len(), 3, "Should have 3 methods");
     assert_eq!(class.state.len(), 1, "Should have 1 state field");
-    assert_eq!(
-        class.class_variables.len(),
-        1,
-        "Should have 1 classState field"
-    );
 }
 
 #[test]
@@ -2058,23 +2143,6 @@ fn class_keyword_method_before_field_declarations() {
     assert_eq!(class.class_methods.len(), 1, "Should have 1 class method");
     assert_eq!(class.methods.len(), 1, "Should have 1 instance method");
     assert_eq!(class.state.len(), 1, "Should have 1 field");
-}
-
-#[test]
-fn class_method_before_classstate() {
-    // Class method before classState: declaration.
-    let module = parse_ok(
-        "Actor subclass: Foo
-  class serial -> Boolean => true
-  classState: count = 0
-  state: x = 0
-  doSomething => self.x",
-    );
-    let class = &module.classes[0];
-    assert_eq!(class.class_methods.len(), 1, "Should have 1 class method");
-    assert_eq!(class.methods.len(), 1, "Should have 1 instance method");
-    assert_eq!(class.class_variables.len(), 1, "Should have 1 classState");
-    assert_eq!(class.state.len(), 1, "Should have 1 state field");
 }
 
 #[test]

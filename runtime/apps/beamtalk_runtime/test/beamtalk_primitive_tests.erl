@@ -61,7 +61,7 @@ is_utf8_test() ->
 %%% ============================================================================
 
 send_shared_selector_on_non_utf8_binary_test_() ->
-    {foreach, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+    {foreach, fun() -> beamtalk_class_shadow_flags:mark_ready() end, fun(_) -> ok end, [
         fun() ->
             Bin = <<255, 254, 253, 0, 200>>,
             ?assertNot(beamtalk_primitive:is_utf8(Bin)),
@@ -128,39 +128,21 @@ send_shared_selector_on_non_utf8_binary_test_() ->
         end
     ]}.
 
-%% ADR 0066: extending a sealed primitive (`String >> byteAt: => ...`) is
-%% legal today for any selector `string.bt` doesn't locally define.
-%% `'bt@stdlib@string':dispatch/3` checks the extension registry *before*
-%% delegating to `'bt@stdlib@binary'`, so a bare binary must never route
-%% through it when a String extension shadows the selector — that would let
-%% String-only logic run against bytes `class_of/1` reports as Binary.
-send_shared_selector_with_string_extension_test_() ->
-    {foreach,
-        fun() ->
-            beamtalk_extensions:init(),
-            ExtFun = fun(_Args, _Self) -> string_extension_fired end,
-            ok = beamtalk_extensions:register('String', 'byteAt:', ExtFun, bt3033_test)
-        end,
-        fun(_) -> beamtalk_extensions:unregister('String', 'byteAt:') end, [
-            fun() ->
-                %% A genuine Binary must still hit Binary's own byteAt: primitive
-                %% — the String extension must not fire for it, even when the
-                %% bytes are valid UTF-8 (BT-4173: no sniffing).
-                NonUtf8 = <<255, 254, 253, 0, 200>>,
-                ?assertEqual('Binary', beamtalk_primitive:class_of(NonUtf8)),
-                ?assertEqual(255, beamtalk_primitive:send(NonUtf8, 'byteAt:', [0])),
-                Utf8Bin = <<"hello">>,
-                ?assertEqual('Binary', beamtalk_primitive:class_of(Utf8Bin)),
-                ?assertEqual(104, beamtalk_primitive:send(Utf8Bin, 'byteAt:', [0])),
-                %% A genuine (tagged) String is correctly still subject to
-                %% the extension it was registered on.
-                Utf8Str = {beamtalk_string, <<"hello">>},
-                ?assertEqual('String', beamtalk_primitive:class_of(Utf8Str)),
-                ?assertEqual(
-                    string_extension_fired, beamtalk_primitive:send(Utf8Str, 'byteAt:', [0])
-                )
-            end
-        ]}.
+%% `byteAt:` is one of the `is_string_binary_shared_selector/1` selectors:
+%% `module_for_value/2` routes a Binary or String straight to
+%% `'bt@stdlib@binary'`. A genuine Binary hits Binary's own `byteAt:` primitive
+%% for bytes that are not valid UTF-8, and for valid UTF-8 (BT-4173: no
+%% sniffing); a tagged String answers the same.
+send_shared_selector_binary_and_string_test() ->
+    NonUtf8 = <<255, 254, 253, 0, 200>>,
+    ?assertEqual('Binary', beamtalk_primitive:class_of(NonUtf8)),
+    ?assertEqual(255, beamtalk_primitive:send(NonUtf8, 'byteAt:', [0])),
+    Utf8Bin = <<"hello">>,
+    ?assertEqual('Binary', beamtalk_primitive:class_of(Utf8Bin)),
+    ?assertEqual(104, beamtalk_primitive:send(Utf8Bin, 'byteAt:', [0])),
+    Utf8Str = {beamtalk_string, <<"hello">>},
+    ?assertEqual('String', beamtalk_primitive:class_of(Utf8Str)),
+    ?assertEqual(104, beamtalk_primitive:send(Utf8Str, 'byteAt:', [0])).
 
 class_of_supervisor_tuple_test() ->
     Pid = spawn(fun() -> ok end),
@@ -298,7 +280,7 @@ responds_to_table_test_() ->
     Block = fun() -> ok end,
     Ref = make_ref(),
     %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+    {setup, fun() -> beamtalk_class_shadow_flags:mark_ready() end, fun(_) -> ok end, [
         {Label, ?_assertEqual(Expected, beamtalk_primitive:responds_to(Receiver, Selector))}
      || {Label, Expected, Receiver, Selector} <- [
             {"Integer responds to +", true, 42, '+'},
@@ -411,7 +393,7 @@ reflection_responds_to_test_() ->
         ]}
     ],
     %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+    {setup, fun() -> beamtalk_class_shadow_flags:mark_ready() end, fun(_) -> ok end, [
         {
             lists:flatten(io_lib:format("~s ~s ~p", [Name, verb(Expected), Selector])),
             ?_assertEqual(Expected, Mod:dispatch('respondsTo:', [Selector], Receiver))
@@ -918,7 +900,7 @@ display_string_float_test() ->
 %%% ============================================================================
 
 send_boolean_not_test_() ->
-    {foreach, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+    {foreach, fun() -> beamtalk_class_shadow_flags:mark_ready() end, fun(_) -> ok end, [
         fun() ->
             ?assertEqual(false, beamtalk_primitive:send(true, 'not', [])),
             ?assertEqual(true, beamtalk_primitive:send(false, 'not', []))
@@ -969,7 +951,7 @@ send_boolean_not_test_() ->
 %% Use valueWithArguments: or test directly via the block module exports instead.
 
 send_block_arity_test_() ->
-    {foreach, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+    {foreach, fun() -> beamtalk_class_shadow_flags:mark_ready() end, fun(_) -> ok end, [
         fun() ->
             Block = fun(X, Y) -> X + Y end,
             ?assertEqual(7, beamtalk_primitive:send(Block, 'valueWithArguments:', [[3, 4]]))
@@ -1065,7 +1047,7 @@ send_dnu_unknown_method_on_string_test() ->
     ).
 
 send_dnu_unknown_method_on_boolean_test_() ->
-    {foreach, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+    {foreach, fun() -> beamtalk_class_shadow_flags:mark_ready() end, fun(_) -> ok end, [
         fun() ->
             ?assertBtError(
                 does_not_understand,
@@ -1313,7 +1295,7 @@ responds_to_map_plain_dictionary_test() ->
     ?assertEqual(false, beamtalk_primitive:responds_to(#{}, 'nonexistentMethod99')).
 
 responds_to_port_test_() ->
-    {foreach, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+    {foreach, fun() -> beamtalk_class_shadow_flags:mark_ready() end, fun(_) -> ok end, [
         fun() ->
             {ok, Port} = gen_tcp:listen(0, []),
             try
@@ -1429,7 +1411,7 @@ dispatch_via_module_dnu_test() ->
 %%% ============================================================================
 
 send_list_class_test_() ->
-    {foreach, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+    {foreach, fun() -> beamtalk_class_shadow_flags:mark_ready() end, fun(_) -> ok end, [
         fun() ->
             ?assertEqual('List', beamtalk_primitive:send([1, 2, 3], 'class', []))
         end,
@@ -1980,7 +1962,7 @@ class_of_table_test_() ->
 %% printing tests).
 bootstrap_setup() ->
     beamtalk_test_boot:registry(),
-    beamtalk_extensions:init(),
+    beamtalk_class_shadow_flags:mark_ready(),
     {ok, _} = beamtalk_bootstrap:start_link(),
     beamtalk_test_boot:boot_real_stdlib('Integer'),
     ok.
@@ -1991,10 +1973,10 @@ runtime_setup() ->
     beamtalk_test_boot:boot_real_stdlib('Integer'),
     ok.
 
-%% As runtime_setup/0, plus an initialised extension registry.
+%% As runtime_setup/0, plus authoritative shadow flags.
 runtime_ext_setup() ->
     ok = runtime_setup(),
-    beamtalk_extensions:init(),
+    beamtalk_class_shadow_flags:mark_ready(),
     ok.
 
 noop_cleanup(_) ->

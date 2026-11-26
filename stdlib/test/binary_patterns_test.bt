@@ -149,6 +149,18 @@ TestCase subclass: BinaryPatternsTest
       _ -> Binary fromBytes: #()
     ]
 
+  testPaddedPayloadSizeFromBoundVariable =>
+    // BT-5285: a pattern size cannot contain a message send (`p size` is a
+    // compile error there), so the send is bound to a variable first.
+    // HTTP/2 padded frame: pad length, body, then pad bytes.
+    p := Binary fromBytes: #(2, 10, 20, 30, 0, 0)
+    room := p size - 1
+    result := p match: [
+      <<pad:8, body:(room - pad)/binary, _tail:pad/binary>> -> body toBytes;
+      _ -> nil
+    ]
+    self assert: result equals: #(10, 20, 30)
+
   testMatchMultipleWildcardsInBinary =>
     // BT-4098: every _ in one pattern is a fresh anonymous variable
     result := (Binary fromBytes: #(1)) match: [
@@ -160,18 +172,19 @@ TestCase subclass: BinaryPatternsTest
   testMatchRaisingSizeExpressionFallsThrough =>
     // Review finding 1: a raising size fails the arm, never crashes the
     // match — including against a non-binary scrutinee. A computed
-    // negative size simply never matches.
-    q := 0
+    // negative size simply never matches. (`q * 4` raises: q is not a
+    // number. `/` is not allowed in a pattern size, BT-5285.)
+    q := nil
     bin := Binary fromBytes: #(1, 2, 3)
     self
       assert: (bin match: [
-        <<a:(4 / q), rest/binary>> -> a;
+        <<a:(q * 4), rest/binary>> -> a;
         _ -> #fallback
       ])
       equals: #fallback
     self
       assert: (42 match: [
-        <<a:(4 / q), rest/binary>> -> a;
+        <<a:(q * 4), rest/binary>> -> a;
         _ -> #fallback
       ])
       equals: #fallback

@@ -1,0 +1,8 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Semantic errors (3):
+  - `self.total` in a class method: a class has no slots.
+  - `self.total` in a class method: a class has no slots.
+  - `self.total` in a class method: a class has no slots.

@@ -28,7 +28,7 @@ picks the compiler (its sysroot supplies the runtime and stdlib), as in
 | p4-p6 | plain sends | `Tuple at:` typed and untyped, `Dictionary at:` untyped |
 | p7 | plain sends | `Actor` sync call (gen_server round trip) |
 | s1-s4 | self sends | sealed Value (two forms), open Value, inside an actor method |
-| c1-c5 | class-side sends | `class sealed`, sealed class, open class, class with `classState:`, class held in a variable |
+| c1-c3, c5 | class-side sends | `class sealed`, sealed class, open class, class held in a variable |
 | f1-f6 | FFI | typed arguments (proved, direct call), untyped arguments (the `direct_call/4` proxy path) |
 | e1-e2 | exceptions | `on:do:` and `ensure:` with no raise |
 | r1-r5 | `^` in blocks | inlined `ifTrue:`, `do:` taken, `to:do:` taken, `do:` never taken, `^` in both branches of a tail `ifTrue:ifFalse:` (untyped receiver) |
@@ -58,7 +58,7 @@ picks the compiler (its sysroot supplies the runtime and stdlib), as in
   BT-4983 comment came from a shared 4-vCPU Xeon @ 2.1 GHz container.
 - `report`'s isolated costs are best-case (hot cache, tight loop). In a large
   program a `persistent_term:get` or an `ets:lookup` can cost more.
-- Actor rows (p7, s4) and the `classState:` row (c4) include a process round
+- Actor rows (p7, s4) include a process round
   trip; their `other` column is mostly scheduling and message passing.
 - Class methods that read or write the process (`put`, `erase`, `self()`) are
   rejected by the compiler in a stateless class, so the FFI rows use

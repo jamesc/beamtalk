@@ -354,7 +354,6 @@ fn test_generate_method_list_emits_return_type() {
     let methods = vec![MethodMeta {
         selector: "add:".to_string(),
         arity: 1,
-        kind: MethodKindMeta::Primary,
         is_sealed: false,
         is_internal: false,
         spawns_block: false,
@@ -382,7 +381,6 @@ fn test_generate_method_list_emits_none_return_type() {
     let methods = vec![MethodMeta {
         selector: "increment".to_string(),
         arity: 0,
-        kind: MethodKindMeta::Primary,
         is_sealed: false,
         is_internal: false,
         spawns_block: false,
@@ -410,7 +408,6 @@ fn test_generate_method_list_emits_spawns_block_true() {
     let methods = vec![MethodMeta {
         selector: "after:do:".to_string(),
         arity: 2,
-        kind: MethodKindMeta::Primary,
         is_sealed: false,
         is_internal: false,
         spawns_block: true,
@@ -437,7 +434,6 @@ fn test_generate_method_list_emits_is_internal_true() {
     let methods = vec![MethodMeta {
         selector: "xrefImplementorsOf:".to_string(),
         arity: 1,
-        kind: MethodKindMeta::Primary,
         is_sealed: false,
         is_internal: true,
         spawns_block: false,
@@ -538,20 +534,6 @@ fn test_generate_class_entry_multi_item_fields_use_separators() {
             ("second".to_string(), beamtalk_core::ast::SlotKind::Late),
         ],
         initialize_assigns: vec!["first".to_string()],
-        class_variables: vec![
-            ClassVarMeta {
-                name: "counterA".to_string(),
-                ty: Some(DeclaredType::simple("Integer")),
-                has_default: true,
-                kind: beamtalk_core::ast::SlotKind::Eager,
-            },
-            ClassVarMeta {
-                name: "counterB".to_string(),
-                ty: None,
-                has_default: false,
-                kind: beamtalk_core::ast::SlotKind::Late,
-            },
-        ],
         type_params: vec!["T".to_string(), "U".to_string()],
         superclass_type_args: vec![DeclaredType::simple("T"), DeclaredType::simple("Concrete")],
         ..ClassMeta::test("bt@stdlib@pair", "Pair", "Object")
@@ -570,9 +552,6 @@ fn test_generate_class_entry_multi_item_fields_use_separators() {
         r#"state_kinds: HashMap::from([("first".into(), SlotKind::Eager), ("second".into(), SlotKind::Late)])"#
     ));
     assert!(code.contains(r#"initialize_assigns: BTreeSet::from(["first".into()])"#));
-    assert!(code.contains(
-        r#"class_variables: vec![ClassVarInfo { name: "counterA".into(), ty: Some(DeclaredType::simple("Integer")), has_default: true, kind: SlotKind::Eager }, ClassVarInfo { name: "counterB".into(), ty: None, has_default: false, kind: SlotKind::Late }]"#
-    ));
     assert!(code.contains(r#"type_params: vec!["T".into(), "U".into()]"#));
     assert!(code.contains("type_param_bounds: vec![None, None]"));
     assert!(code.contains(
@@ -601,12 +580,6 @@ fn test_declared_type_to_rust_expr_covers_every_variant() {
             vec![DeclaredType::simple("Integer")]
         )),
         r#"DeclaredType::generic("List", vec![DeclaredType::simple("Integer")])"#
-    );
-    assert_eq!(
-        declared_type_to_rust_expr(&DeclaredType::FalseOr(Box::new(DeclaredType::simple(
-            "Integer"
-        )))),
-        r#"DeclaredType::FalseOr(Box::new(DeclaredType::simple("Integer")))"#
     );
     assert_eq!(
         declared_type_to_rust_expr(&DeclaredType::Difference {
@@ -643,7 +616,6 @@ fn test_generate_method_list_escapes_doc_special_characters() {
     let methods = vec![MethodMeta {
         selector: "help".to_string(),
         arity: 0,
-        kind: MethodKindMeta::Primary,
         is_sealed: false,
         is_internal: false,
         spawns_block: false,

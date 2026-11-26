@@ -70,10 +70,7 @@ Note: Block is a zero-argument Erlang fun in Core Erlang codegen.
 """.
 -spec should_raise(fun(() -> term()), atom()) -> 'nil'.
 should_raise(Block, ExpectedKind) when is_function(Block, 0), is_atom(ExpectedKind) ->
-    %% ADR 0130 §4: this catch swallows the block's error, so it is a catch
-    %% boundary; `protect/1` restores the class-variable map before we classify.
-    %% bt-catcher-audit: converted - the block runs under protect/1, which restores on error
-    try beamtalk_class_vars:protect(Block) of
+    try Block() of
         _ ->
             % Block completed without error
             NoRaiseErr0 = beamtalk_error:new(assertion_failed, 'TestCase'),
@@ -450,6 +447,10 @@ decode_beam_error(#{class := 'Exception', error := #beamtalk_error{message = Msg
     beamtalk_text:to_binary(Msg);
 decode_beam_error(#{?BT_CLASS_TAG_KEY := _, error := #beamtalk_error{message = Msg}}) ->
     beamtalk_text:to_binary(Msg);
+%% BT-5213: the raw term a String or Symbol ordering raises for a wrong-kind
+%% argument reads as the structured `type_error` wrap_raw/2 builds from it.
+decode_beam_error({?BT_ORDERING_TYPE_ERROR_TAG, _, _, _} = Reason) ->
+    decode_beam_error(beamtalk_exception_handler:wrap_raw(Reason));
 decode_beam_error({badkey, Key}) ->
     <<"key ", (beamtalk_primitive:print_string(Key))/binary, " not found in dictionary">>;
 decode_beam_error({badmap, Map}) ->
@@ -1087,8 +1088,6 @@ instance map after setUp, so test methods can access `self.suiteFixture`.
     | {fail, atom(), binary(), [map()]}
     | {skip, atom(), binary()}.
 run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
-    %% bt-catcher-audit: not-applicable-other-process - runs in the spawned test process or runner
-    %% worker, no home entry
     try
         Instance = Module:new(),
         {HasSetUp, HasTearDown} = check_lifecycle_methods(Module, FlatMethods),
@@ -1112,8 +1111,6 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
         %% Inject suite fixture so test methods can access self.suiteFixture
         SetUpInstance = inject_suite_fixture(SetUpInstance0, SuiteFixture),
         TestResult =
-            %% bt-catcher-audit: not-applicable-other-process - runs in the spawned test process
-            %% or runner worker, no home entry
             try
                 Module:dispatch(MethodName, [], SetUpInstance),
                 {pass, MethodName}
@@ -1157,8 +1154,6 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
             after
                 case HasTearDown of
                     true ->
-                        %% bt-catcher-audit: not-applicable-other-process - runs in the spawned
-                        %% test process or runner worker, no home entry
                         try
                             Module:dispatch(tearDown, [], SetUpInstance)
                             % Don't mask the original test failure
@@ -1268,8 +1263,6 @@ run_suite_lifecycle(_ClassName, Module, FlatMethods, TestMethods, TestFun) ->
             %% No suite lifecycle — skip overhead
             TestFun(nil);
         true ->
-            %% bt-catcher-audit: not-applicable-other-process - runs in the spawned test process
-            %% or runner worker, no home entry
             try
                 Fixture =
                     case HasSetUpOnce of
@@ -1301,8 +1294,6 @@ check_suite_lifecycle_methods(_Module, FlatMethods) when is_map(FlatMethods) ->
 -doc "Run tearDownOnce, swallowing errors to avoid masking test results.".
 -spec run_teardown_once(atom(), term(), boolean()) -> ok.
 run_teardown_once(Module, Fixture, true) ->
-    %% bt-catcher-audit: not-applicable-other-process - runs in the spawned test process or runner
-    %% worker, no home entry
     try
         Instance = Module:new(),
         WithFixture = inject_suite_fixture(Instance, Fixture),

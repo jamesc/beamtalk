@@ -1,6 +1,0 @@
-// Copyright 2026 James Casey
-// SPDX-License-Identifier: Apache-2.0
-
-// BT-5002: grandchild of Bt5002ActorBase (two levels below the owner).
-
-Bt5002ActorMid subclass: Bt5002ActorLeaf

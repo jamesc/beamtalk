@@ -1,0 +1,154 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5190: a block that assigns a variable of the enclosing method, sent to a
+// `Stream` with `collect:` / `select:` / `reject:` / `detect:` /
+// `detect:ifNone:` / `anySatisfy:`, is folded in place over the receiver's
+// `do:` for a `Collection`. A `Stream` defines those messages natively (lazy,
+// short-circuiting), so the fold would force it (never ending on an infinite
+// stream) and answer a List. It raises `stateful_block_dispatch` instead,
+// and does so before touching the stream. Exception (BT-5263): the eager
+// `inject:into:` folds a finite stream in place (it drains the stream before
+// the block runs, so an early `^` or an infinite stream is not supported).
+
+TestCase subclass: WritingFoldStreamReceiverTest
+
+  infinite => Stream from: 1
+
+  writingCollect: s =>
+    n := 0
+    s
+      collect: [:e |
+        n := n + 1
+        e
+      ]
+
+  writingSelect: s =>
+    n := 0
+    s
+      select: [:e |
+        n := n + 1
+        e > 1
+      ]
+
+  writingReject: s =>
+    n := 0
+    s
+      reject: [:e |
+        n := n + 1
+        e > 1
+      ]
+
+  writingDetect: s =>
+    n := 0
+    s
+      detect: [:e |
+        n := n + 1
+        e > 2
+      ]
+
+  writingDetectIfNone: s =>
+    n := 0
+    s
+      detect: [:e |
+        n := n + 1
+        e > 2
+      ]
+      ifNone: [0]
+
+  writingAnySatisfy: s =>
+    n := 0
+    s
+      anySatisfy: [:e |
+        n := n + 1
+        e > 2
+      ]
+
+  // BT-5263: `inject:into:` consumes the whole stream to answer one value, on
+  // the pure path as on the fold, so a writing block is allowed on a finite
+  // stream and answers what the pure block does.
+  writingInject: s =>
+    n := 0
+    s
+      inject: 0
+      into: [:acc :e |
+        n := n + 1
+        acc + e
+      ]
+
+  writingInjectCount: s =>
+    n := 0
+    s
+      inject: 0
+      into: [:acc :e |
+        n := n + 1
+        acc + e
+      ]
+    n
+
+  testInjectOnFiniteStreamFolds =>
+    self assert: (self writingInject: (Stream on: #(1, 2, 3))) equals: 6
+    self assert: (self writingInjectCount: (Stream on: #(1, 2, 3))) equals: 3
+
+  // `do:` on a Stream is eager too and was never guarded.
+  testDoOnFiniteStreamFolds =>
+    n := 0
+    (Stream on: #(1, 2, 3)) do: [:e | n := n + e]
+    self assert: n equals: 6
+
+  testInjectOnTakenStreamFolds =>
+    self assert: (self writingInject: (Stream on: (self infinite take: 4))) equals: 10
+
+  testCollectOnInfiniteStreamRefuses =>
+    self should: [
+      self writingCollect: self infinite
+    ] raise: #stateful_block_dispatch
+
+  testSelectOnInfiniteStreamRefuses =>
+    self should: [
+      self writingSelect: self infinite
+    ] raise: #stateful_block_dispatch
+
+  testRejectOnInfiniteStreamRefuses =>
+    self should: [
+      self writingReject: self infinite
+    ] raise: #stateful_block_dispatch
+
+  testDetectOnInfiniteStreamRefuses =>
+    self should: [
+      self writingDetect: self infinite
+    ] raise: #stateful_block_dispatch
+
+  testDetectIfNoneOnInfiniteStreamRefuses =>
+    self should: [
+      self writingDetectIfNone: self infinite
+    ] raise: #stateful_block_dispatch
+
+  testAnySatisfyOnInfiniteStreamRefuses =>
+    self should: [
+      self writingAnySatisfy: self infinite
+    ] raise: #stateful_block_dispatch
+
+  testCollectOnFiniteStreamRefuses =>
+    self should: [
+      self writingCollect: (Stream on: #(1, 2, 3))
+    ] raise: #stateful_block_dispatch
+
+  testSelectOnFiniteStreamRefuses =>
+    self should: [
+      self writingSelect: (Stream on: #(1, 2, 3))
+    ] raise: #stateful_block_dispatch
+
+  // The refused message names the selector and class.
+  testRefusalNamesTheClass =>
+    e := [self writingSelect: self infinite] on: Exception do: [:x | x]
+    self assert: e kind equals: #stateful_block_dispatch
+    self assert: (e message includesSubstring: "Stream")
+    self assert: e selector equals: #select:
+
+  // A Collection is still folded in place.
+  testListCollectStillFolds =>
+    self assert: (self writingCollect: #(1, 2, 3)) equals: #(1, 2, 3)
+
+  testListDetectStillFolds =>
+    self assert: (self writingDetect: #(1, 2, 3, 4)) equals: 3

@@ -797,13 +797,11 @@ fn incomplete_trailing_keyword() {
 }
 
 #[test]
-fn incomplete_unterminated_block_comment() {
-    assert!(!is_input_complete("/* unterminated comment"));
-    assert!(!is_input_complete("x := 1 /* still going"));
-}
-
-#[test]
-fn complete_block_comment() {
+fn stray_block_comment_opener_is_complete_but_invalid() {
+    // BT-5229: no later input can fix a `/*`, so the REPL reports it
+    // instead of showing a continuation prompt.
+    assert!(is_input_complete("/* unterminated comment"));
+    assert!(is_input_complete("x := 1 /* still going"));
     assert!(is_input_complete("/* comment */ x := 1"));
 }
 
@@ -1548,4 +1546,61 @@ fn literal_without_comments_has_no_record() {
     let (module, _) =
         crate::source_analysis::parse(crate::source_analysis::lex_with_eof("t := {#a, #b}\n"));
     assert!(module.literal_comments.is_empty());
+}
+
+// ---- BT-5284: `x :: T` elements in destructuring patterns ----
+
+#[test]
+fn parse_typed_tuple_destructure_elements() {
+    let expr = first_expr("{_, sid :: Integer, es :: Boolean} := t");
+    let Expression::DestructureAssignment {
+        pattern: Pattern::Tuple { elements, .. },
+        ..
+    } = expr
+    else {
+        panic!("expected tuple destructure");
+    };
+    assert!(matches!(elements[1], Pattern::Type { .. }));
+    assert!(matches!(elements[2], Pattern::Type { .. }));
+}
+
+#[test]
+fn parse_typed_array_destructure_elements() {
+    let expr = first_expr("#[a :: Integer, b] := xs");
+    let Expression::DestructureAssignment {
+        pattern: Pattern::Array { elements, .. },
+        ..
+    } = expr
+    else {
+        panic!("expected array destructure");
+    };
+    assert!(matches!(elements[0], Pattern::Type { .. }));
+    assert!(matches!(elements[1], Pattern::Variable(_)));
+}
+
+#[test]
+fn parse_typed_map_destructure_values() {
+    let expr = first_expr("#{#id => i :: Integer, #name => n} := m");
+    let Expression::DestructureAssignment {
+        pattern: Pattern::Map { pairs, .. },
+        ..
+    } = expr
+    else {
+        panic!("expected map destructure");
+    };
+    assert!(matches!(pairs[0].value, Pattern::Type { .. }));
+    assert!(matches!(pairs[1].value, Pattern::Variable(_)));
+}
+
+#[test]
+fn parse_typed_map_value_reports_generic_args_like_tuple_elements() {
+    // Map values share the tuple/array `x :: T` parsing, so they get the
+    // same targeted diagnostic (BT-5284).
+    let diagnostics = parse_err("#{#k => v :: List(Integer)} := m");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("generic type arguments")),
+        "{diagnostics:?}"
+    );
 }

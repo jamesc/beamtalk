@@ -51,6 +51,24 @@ defmodule BtAttachWeb.Live.Inspector.View do
     }
   end
 
+  # A supervisor head's target. When the runtime cut the children list
+  # (`truncated`), `children_cut` carries the number of rows actually shown,
+  # counted from the rows, never from a copy of the runtime's cap; the panes
+  # render the notice from it. `nil` means the list is whole.
+  @doc false
+  def supervisor_target_info(label, term, rows, truncated) do
+    info = target_info(label, term)
+    Map.put(info, :children_cut, if(truncated == true, do: length(rows), else: nil))
+  end
+
+  # The notice text for a cut children list, or `nil` when it is whole (or the
+  # target is not a supervisor head).
+  @doc false
+  def children_cut_notice(%{children_cut: n}) when is_integer(n),
+    do: "Showing the first #{n} #{pluralize_children(n)}; the list is cut."
+
+  def children_cut_notice(_target), do: nil
+
   # Turn an inspect fields map (live terms) into ordered display rows. Each
   # row keeps the live field `term` so a drill on an object-valued slot
   # follows the real reference; `drillable` marks the object-valued ones.
@@ -326,6 +344,9 @@ defmodule BtAttachWeb.Live.Inspector.View do
               Inspecting <strong>{@win.target.label}</strong>
               <span class="ps-header">{@win.target.header}</span>
             </div>
+            <p :if={children_cut_notice(@win.target)} class="muted-note children-truncated">
+              {children_cut_notice(@win.target)}
+            </p>
             <div class="proc-chips">
               <span class="chip">class <b>{@win.target.class_name}</b></span>
               <span :if={@win.target.pid} class="chip">

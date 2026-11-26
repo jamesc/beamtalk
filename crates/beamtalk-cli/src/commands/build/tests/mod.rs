@@ -15,6 +15,8 @@
 //!   (BT-4690)
 //! - [`cross_file_resolution`] — the class-module index and cross-file
 //!   class/alias resolution
+//! - [`dependency_manifests`] — dependency manifests are read leniently on
+//!   the whole build path (BT-5186)
 //! - [`flattened_provision_reporting`] — flattened-provision diagnostics are
 //!   reported once, in the protocol's file (ADR 0127 §3)
 //! - [`incremental_build`] — stale-artifact cleanup and `detect_changes`
@@ -49,8 +51,10 @@ pub(crate) fn default_options() -> beamtalk_core::CompilerOptions {
 
 mod build_basics;
 mod build_cache_keys;
+mod build_lock;
 mod consulted_surface;
 mod cross_file_resolution;
+mod dependency_manifests;
 mod flattened_provision_reporting;
 mod incremental_build;
 mod module_collisions;

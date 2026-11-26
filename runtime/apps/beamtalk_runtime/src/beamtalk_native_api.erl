@@ -33,12 +33,10 @@ Selectors are atoms spelled as in Beamtalk: `size`, `'at:'`,
 ## Where a class-side send runs
 
 A class-side send runs **in the caller** (the native code's own process, with
-no class-process hop and no timeout) when ADR 0142's rules hold: neither the
-class nor any ancestor declares class variables, nothing shadows the class
-method (no class-side extension, no runtime-installed method), and the
-selector is not process-bound (`new`, `spawn`, ...). The answer can change
-at run time (loading a class-side extension, or redefining the class with
-class variables), so a caller that must not time out passes a `send/4`
+no class-process hop and no timeout) when ADR 0142's rules hold: nothing
+shadows the class method (no runtime-installed method), and the selector is
+not process-bound (`new`, `spawn`, ...). The answer can change at run time
+(installing a runtime class method), so a caller that must not time out passes a `send/4`
 timeout either way.
 
 Otherwise the class method runs **in the class's process**, and the caller

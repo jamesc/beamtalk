@@ -35,7 +35,7 @@ use super::OutputFormat;
 mod changes;
 mod class_index;
 mod environment;
-mod native;
+pub(crate) mod native;
 mod outputs;
 mod sources;
 mod stubs;
@@ -120,18 +120,20 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     crate::commands::build_stamp::require_supported_otp()?;
     warn_if_otp_out_of_window();
 
-    let env = setup_build_environment(path)?;
-
     // Serialise package builds of one project across processes (BT-5075): the
     // build, dependency resolution and `beamtalk.lock` all write `_build/` and
-    // the lock. Held to the end of `build`; released on every exit path.
-    let _project_lock = if env.full_manifest.is_some() {
+    // the lock. Taken *before* the manifest and source list are read (BT-5133),
+    // so a build that waited on `deps add` sees the manifest it left behind.
+    // Held to the end of `build`; released on every exit path.
+    let _project_lock = if environment::is_package_build(path) {
         Some(crate::commands::dir_lock::lock_project_build(
-            &env.project_root,
+            &environment::project_root_of(path),
         )?)
     } else {
         None
     };
+
+    let env = setup_build_environment(path)?;
 
     let options = prepare_options(&env, path, options);
     let options = &options;
@@ -169,16 +171,9 @@ pub(crate) fn prepare_options(
     // a manifest-less directory build skips Pass 1 entirely — both keep the
     // conservative `ModuleOnly` default.
     let mut options = options.clone();
-    // Pre-WS3 dependency guard: until dependency extensions are loaded, a
-    // package with dependencies has no receiver whose method surface is
-    // provably complete. Start conservative (on whenever there are
-    // dependencies); analysis lifts it once Pass 1 has loaded every
-    // dependency's extensions (`ClassHierarchyContext::
-    // dependency_extensions_complete`; ADR 0070 WS3, BT-4608).
-    // Both flags come from the rule `lint`/`test` share.
+    // The scope comes from the rule `lint`/`test` share.
     let scope =
         beamtalk_package::manifest::PackageCheckerScope::for_manifest(env.full_manifest.as_ref());
-    options.dependency_extensions_unknown = scope.has_package_dependencies;
     // ADR 0070 Phase 2: a `pkg@Class` qualifier must name a declared
     // dependency, the package itself or the stdlib. `None` (no manifest)
     // skips the check.
@@ -275,8 +270,6 @@ pub(crate) fn new_compile_context<'a>(
             pre_loaded_protocol_defs: index.all_protocol_defs.clone(),
             pre_loaded_protocol_sources: index.all_protocol_sources.clone(),
             pre_loaded_aliases: index.all_alias_infos.clone(),
-            extension_index: index.extension_index.clone(),
-            dependency_extensions_complete: index.dependency_extensions_complete,
         },
         dep_registry: if index.dep_registry.is_empty() {
             None

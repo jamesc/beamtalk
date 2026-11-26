@@ -798,8 +798,7 @@ flatten_ancestor_map_tolerates_a_raising_reader_test() ->
     end).
 
 %%====================================================================
-%% class_var_kinds/1 (BT-3764) — the declared class-variable kinds
-%% beamtalk_class_vars and beamtalk_object_class share.
+%% Meta-module helpers
 %%====================================================================
 
 %% Compile and load a module whose `__beamtalk_meta/0` returns `Meta`.
@@ -808,64 +807,6 @@ load_meta_module(Mod, Meta) ->
 
 unload_module(Mod) ->
     beamtalk_test_module:unload(Mod).
-
-%% Own-only (BT-3801): an ancestor's kinds are not merged into a subclass's;
-%% inherited_class_var_kinds/1 is the diagnostic-only ancestor view, closer
-%% level winning, and a level with no `__beamtalk_meta/0` contributes nothing.
-class_var_kinds_is_own_only_test() ->
-    RootMod = load_meta_module(bt3764_cvk_root, #{class_field_kinds => #{a => eager, b => eager}}),
-    LeafMod = load_meta_module(bt3764_cvk_leaf, #{class_field_kinds => #{b => late, c => late}}),
-    try
-        with_clean_table(fun() ->
-            ok = beamtalk_class_metadata:insert('CvkRoot', RootMod, [], none, undefined),
-            ok = beamtalk_class_metadata:insert('CvkMid', no_meta_module, [], 'CvkRoot', undefined),
-            ok = beamtalk_class_metadata:insert('CvkLeaf', LeafMod, [], 'CvkMid', undefined),
-            ?assertEqual(
-                #{b => late, c => late},
-                beamtalk_class_metadata:class_var_kinds('CvkLeaf')
-            ),
-            ?assertEqual(#{}, beamtalk_class_metadata:class_var_kinds('CvkMid')),
-            ?assertEqual(
-                #{a => eager, b => eager},
-                beamtalk_class_metadata:inherited_class_var_kinds('CvkMid')
-            ),
-            ?assertEqual(
-                #{a => eager, b => eager},
-                beamtalk_class_metadata:inherited_class_var_kinds('CvkLeaf')
-            )
-        end)
-    after
-        unload_module(RootMod),
-        unload_module(LeafMod)
-    end.
-
-%% No metadata row (never registered, or removed): no declared kinds.
-class_var_kinds_unregistered_class_is_empty_test() ->
-    with_clean_table(fun() ->
-        ?assertEqual(#{}, beamtalk_class_metadata:class_var_kinds('CvkGhost'))
-    end).
-
-%% BT-3808: one read tells "unknown" (no row, or no readable meta) from "known
-%% empty" (readable meta declaring none) from the declared kinds.
-class_var_kinds_or_unknown_test() ->
-    DeclMod = load_meta_module(bt3808_cvku_decl, #{class_field_kinds => #{a => late}}),
-    EmptyMod = load_meta_module(bt3808_cvku_empty, #{}),
-    try
-        with_clean_table(fun() ->
-            ok = beamtalk_class_metadata:insert('CvkuDecl', DeclMod, [], none, undefined),
-            ok = beamtalk_class_metadata:insert('CvkuEmpty', EmptyMod, [], none, undefined),
-            ok = beamtalk_class_metadata:insert('CvkuNoMeta', no_meta_module, [], none, undefined),
-            ?assertEqual(
-                #{a => late}, beamtalk_class_metadata:class_var_kinds_or_unknown('CvkuDecl')
-            ),
-            ?assertEqual(#{}, beamtalk_class_metadata:class_var_kinds_or_unknown('CvkuEmpty')),
-            ?assertEqual(unknown, beamtalk_class_metadata:class_var_kinds_or_unknown('CvkuNoMeta')),
-            ?assertEqual(unknown, beamtalk_class_metadata:class_var_kinds_or_unknown('CvkuGhost'))
-        end)
-    after
-        unload_module(DeclMod),
-        unload_module(EmptyMod)
-    end.
 
 %%====================================================================
 %% read_meta/1, read_meta_detailed/1 (BT-3764) — the one guarded

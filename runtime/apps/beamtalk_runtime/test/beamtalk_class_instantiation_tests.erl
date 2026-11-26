@@ -420,7 +420,7 @@ test_kill_actor_spawned_via_class_survives_class() ->
     %% exact scenario the bug report describes. Before the fix, safe_spawn
     %% used gen_server:start_link, linking the new actor to the class
     %% process; exit(ActorPid, kill) then propagated over that link and
-    %% killed the class gen_server too (losing class vars / hot patches).
+    %% killed the class gen_server too (losing hot patches).
     ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
     {ok, #beamtalk_object{pid = ActorPid} = Obj} = gen_server:call(CounterPid, {spawn, []}),
@@ -1242,22 +1242,20 @@ test_generic_new_inherited_defaults() ->
 
 test_generic_new_ancestor_gone() ->
     %% A module-less child whose builder ancestor process has exited must still
-    %% instantiate — the dead ancestor contributes no defaults rather than
-    %% crashing `new` (ancestor_builder_defaults broadens its exit catch).
+    %% instantiate without crashing `new`. BT-5161: the ancestor's defaults
+    %% are read from its metadata row, not by a call into its process, so a
+    %% dead ancestor contributes whatever its row still holds (none once the
+    %% row is removed).
     ParentPid = register_builder_class('BT2277Parent', 'Object', #{p => 10}, #{}),
     ChildPid = register_builder_class('BT2277Child', 'BT2277Parent', #{c => 20}, #{}),
     try
-        %% Kill the ancestor abnormally so the field_defaults gen_server:call
-        %% inside collect_ancestor_defaults exits with a non-{noproc/timeout}
-        %% reason (a racing call) or, post-deregister, with noproc.
         MRef = erlang:monitor(process, ParentPid),
         exit(ParentPid, kill),
         ?awaitMessage({'DOWN', MRef, process, ParentPid, _}),
         {ok, Instance} = beamtalk_object_class:new(ChildPid, []),
         ?assertEqual('BT2277Child', maps:get('$beamtalk_class', Instance)),
         ?assertEqual(20, maps:get(c, Instance)),
-        %% The dead ancestor's defaults are simply absent — no crash.
-        ?assertNot(maps:is_key(p, Instance))
+        ?assertEqual(maps:get(p, Instance, 10), 10)
     after
         gen_server:stop(ChildPid, normal, 5000),
         case is_process_alive(ParentPid) of
@@ -1425,7 +1423,7 @@ register_builder_class(ClassName, Superclass, FieldSpecs, MethodSpecs) ->
     Pid.
 
 %% Like register_builder_class/4 but also installs class-side method funs
-%% (selector => fun(ClassSelf, ClassVars, A1..An)). Used to exercise the
+%% (selector => fun(ClassSelf, A1..An)). Used to exercise the
 %% self-dispatch path: a class method that does `self new` then sends
 %% an instance message, all while inside the class gen_server.
 register_builder_class_with_class_methods(

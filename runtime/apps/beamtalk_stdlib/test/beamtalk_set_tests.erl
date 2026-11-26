@@ -251,7 +251,6 @@ set_dispatch_asList_test() ->
 %%% ============================================================================
 
 set_responds_to_test() ->
-    beamtalk_extensions:init(),
     ?assertEqual(true, 'bt@stdlib@set':has_method('class')),
     ?assertEqual(true, 'bt@stdlib@set':has_method('size')),
     ?assertEqual(true, 'bt@stdlib@set':has_method('isEmpty')),
@@ -272,7 +271,6 @@ set_responds_to_test() ->
 %%% ============================================================================
 
 set_does_not_understand_test() ->
-    beamtalk_extensions:init(),
     Set = beamtalk_set:from_list([1, 2]),
     ?assertBtError(does_not_understand, 'Set', 'bt@stdlib@set':dispatch('nonExistent', [], Set)).
 

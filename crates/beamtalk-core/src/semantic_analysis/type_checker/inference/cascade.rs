@@ -55,6 +55,15 @@ impl TypeChecker {
             ..
         } = receiver
         {
+            // BT-5290: the cascade target and every message's block arguments
+            // run against one another, so a write in any of them ends the
+            // `Result` error-variant fact in all (no exclusive-arm exemption).
+            Self::forget_error_variants_written_by_sibling_blocks(
+                std::iter::once(inner.as_ref())
+                    .chain(inner_args)
+                    .chain(messages.iter().flat_map(|m| &m.arguments)),
+                env,
+            );
             let inner_ty = self.infer_send_receiver(inner, hierarchy, env, in_abstract_method);
             let send_ty = self.infer_message_send_with_receiver_ty(
                 inner,
@@ -349,9 +358,10 @@ fn receiver_display(receiver: &Expression) -> String {
         Expression::Identifier(_)
         | Expression::Super(_)
         | Expression::ClassReference { .. }
-        | Expression::Literal(Literal::Integer(_) | Literal::Symbol(_) | Literal::String(_), _) => {
-            crate::unparse::unparse_expression(receiver).to_pretty_string()
-        }
+        | Expression::Literal(
+            Literal::Integer(_) | Literal::BigInteger(_) | Literal::Symbol(_) | Literal::String(_),
+            _,
+        ) => crate::unparse::unparse_expression(receiver).to_pretty_string(),
         _ => "…".to_string(),
     }
 }

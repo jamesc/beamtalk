@@ -26,6 +26,7 @@ pub(in crate::core_erlang) mod match_lowering;
 mod type_tests;
 
 pub(super) use match_lowering::MatchThreading;
+pub(in crate::core_erlang) use type_tests::guard_boolean_test;
 
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::leaf;

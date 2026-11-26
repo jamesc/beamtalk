@@ -9,8 +9,8 @@
 // is a materially different code path (Workspace class registration, live
 // gen_server class/actor processes, REPL response formatting) than a
 // `cargo test -p beamtalk-codegen` or `just test-bunit` run. This file
-// proves the three storage families ADR 0122 unified — Actor `state:`,
-// class-method `classState:`, and value-type `TestCase` field — thread
+// proves the three storage families ADR 0122 unified — Actor `state:`
+// and value-type `TestCase` field — thread
 // correctly through each construct, end-to-end, via `:load` + a live method
 // call, and that the shapes still rejected at compile time (ADR 0122's own
 // decision, not a bug) fail with the expected diagnostic.
@@ -18,9 +18,6 @@
 // Fixtures (one class per file so a REJECTED method never keeps a whole
 // fixture from loading):
 //   storage_family_actor.bt                    — Actor `state:`, all ACCEPT
-//   storage_family_class_method.bt              — class `classState:`, all ACCEPT
-//   storage_family_class_method_ensure_direct_write.bt — classState direct write in ensure:
-//   storage_family_class_method_foldl_direct_write.bt  — classState direct write in do:
 //   storage_family_value_type.bt                — TestCase field, ACCEPT cells
 //   storage_family_value_type_match_reject.bt      — TestCase field REJECT (match:)
 //
@@ -66,63 +63,9 @@
 // => 0
 
 // ===========================================================================
-// FAMILY 2: class-method `classState:` — `to:do:`/`whileTrue:`/
-// `ifTrue:ifFalse:`, `do:`/`collect:` and `on:do:`/`ensure:` accept a bare
-// direct class-var write (ADR 0122 / BT-3506; ADR 0130 removed the
-// compile-time rejections that used to stop the last two).
+// FAMILY 2 (class-method class variables) was removed with class variables
+// (ADR 0153). Families are numbered as before so references stay stable.
 // ===========================================================================
-
-:load tests/repl-protocol/fixtures/storage_family_class_method.bt
-// => Loaded: StorageFamilyClassMethod
-
-StorageFamilyClassMethod toDo
-// => 15
-
-StorageFamilyClassMethod whileTrue
-// => 5
-
-StorageFamilyClassMethod ifTrueIfFalse: true
-// => 1
-
-StorageFamilyClassMethod ifTrueIfFalse: false
-// => 100
-
-StorageFamilyClassMethod doViaSelfSend
-// => 3
-
-StorageFamilyClassMethod onDoViaSelfSend
-// => 1
-
-// BT-3506's own headline repro (ADR 0122 "A sixth gap"), verbatim, now
-// proven through the REPL's own load/eval path: before the fix this
-// compiled via the closure path and silently discarded the self-send's
-// mutation, returning 0.
-StorageFamilyClassMethod ensureViaSelfSendOnly
-// => 1
-
-StorageFamilyClassMethod matchArm: 1
-// => 1
-
-StorageFamilyClassMethod matchArm: 2
-// => 0
-
-// ── A bare direct class-var write nested inside `ensure:` compiles (ADR 0130:
-// the write is an in-place `put`; before it was the compile-time rejection
-// ClassVarAssignmentInThreadedBody) and is kept.
-:load tests/repl-protocol/fixtures/storage_family_class_method_ensure_direct_write.bt
-// => Loaded: StorageFamilyClassMethodEnsureDirectWrite
-
-StorageFamilyClassMethodEnsureDirectWrite ensureDirectWrite
-// => 1
-
-// ── A bare direct class-var write inside a `do:` body compiles too (it used
-// to fall through to the generic stored-closure-body rejection) and every
-// iteration's write is kept.
-:load tests/repl-protocol/fixtures/storage_family_class_method_foldl_direct_write.bt
-// => Loaded: StorageFamilyClassMethodFoldlDirectWrite
-
-StorageFamilyClassMethodFoldlDirectWrite doDirectWrite
-// => 6
 
 // ===========================================================================
 // FAMILY 3: value-type `TestCase` field — `to:do:`/`whileTrue:`/

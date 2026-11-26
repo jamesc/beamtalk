@@ -339,10 +339,12 @@ pub fn run(
             hex_dep_names: &hex_dep_names,
         };
 
+        // `_cookie_home` holds the node's private cookie directory until this
+        // scope ends; the node has removed it by then (BT-5185).
         let ForegroundNode {
             mut child,
             cookie: fg_cookie,
-            cookie_dir,
+            cookie_home: _cookie_home,
         } = start_beam_node(
             node_name.as_ref(),
             &project_root,
@@ -370,10 +372,7 @@ pub fn run(
         };
 
         (
-            Some(BeamChildGuard {
-                child,
-                _cookie_dir: Some(cookie_dir),
-            }),
+            Some(BeamChildGuard { child }),
             true,
             None,
             fg_host,
@@ -642,6 +641,37 @@ fn eval_and_display(client: &mut ReplClient, expr: &str) {
     }
 }
 
+/// Flush through the `flush` operation and show the result. A refused request
+/// is an error; a flush that returned conflicts is reported on stderr as a
+/// failure to write those files, not as a success with a footnote.
+fn flush_and_display(
+    client: &mut ReplClient,
+    scope: beamtalk_repl_protocol::FlushScope<'_>,
+    confirm_destructive: bool,
+) {
+    match client.flush(scope, confirm_destructive) {
+        Ok(response) => display_flush_response(&response, client.raw_mfa()),
+        Err(e) => eprintln!("Error: {e}"),
+    }
+}
+
+fn display_flush_response(response: &ReplResponse, raw_mfa: bool) {
+    if response.is_error() {
+        display_eval_response(response, raw_mfa);
+        return;
+    }
+    let Some(value) = response.value.as_ref() else {
+        println!("Flushed 0 change(s) across 0 file(s)");
+        return;
+    };
+    let report = beamtalk_repl_protocol::format::format_flush_result(value);
+    if report.has_conflicts {
+        eprintln!("{}", report.text);
+    } else {
+        println!("{}", report.text);
+    }
+}
+
 /// Evaluate with reconnect-on-failure logic.
 ///
 /// Returns `true` if the REPL loop should break (fatal communication error).
@@ -809,11 +839,13 @@ pub(crate) fn repl_loop(
                 continue;
             }
             Err(ReadlineError::Eof) => {
+                client.close_session();
                 println!("Goodbye!");
                 break;
             }
             Err(e) => {
                 eprintln!("Readline error: {e}");
+                client.close_session();
                 break;
             }
         };
@@ -854,6 +886,7 @@ pub(crate) fn repl_loop(
             match handle_repl_command(line, client) {
                 CommandResult::Handled => continue,
                 CommandResult::Exit => {
+                    client.close_session();
                     println!("Goodbye!");
                     break;
                 }
@@ -1036,10 +1069,7 @@ mod tests {
 
         // Wrap in guard and drop it
         {
-            let _guard = BeamChildGuard {
-                child,
-                _cookie_dir: None,
-            };
+            let _guard = BeamChildGuard { child };
             // Guard is dropped here
         }
 

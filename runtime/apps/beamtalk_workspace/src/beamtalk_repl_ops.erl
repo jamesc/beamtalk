@@ -20,6 +20,15 @@ layer into two halves:
   directly over Erlang distribution, where JSON is both overhead and *lossy*
   (a live `{beamtalk_object, Class, Module, Pid}` carries a real remote pid
   that JSON would flatten to a dead display string).
+* `request/3` — the entry point for a dist-attached caller: builds the
+  request from an op name and a flat params map, then calls `dispatch/4`.
+* `render/2` — the one rendering function for such a caller (display text for
+  a term, a term list or an error).
+* `start_session/2`, `attach_session/2`, `session_bindings/1`,
+  `session_alive/1`, `session_count/0` — the one implementation of starting a
+  session, attaching an owner to it, reading its live bindings and probing it
+  (BT-5202), used by the WebSocket handler and by LiveView. A session is not an
+  op: it exists before any op can run in it.
 * `encode/2` — encodes an `op_result()` to the protocol JSON binary at the
   **WebSocket transport edge only**. The browser wire format is unchanged.
 
@@ -41,10 +50,11 @@ leak compiler/runtime internals.
 
 | Tag | Shape | Produced by |
 |-----|-------|-------------|
-| result | `{ok, Value, Output, Warnings}` | `eval`, `unload`, `clone`, tracing read ops |
+| result | `{ok, Value, Output, Warnings}` | `eval`, `unload`, tracing read ops |
 | trace | `{trace, Steps, Output, Warnings}` | `eval` (trace mode) |
 | script_exit | `{script_exit, Code, Output, Warnings}` | `eval` (connected `Program exit:`) |
 | actors | `{actors, [ActorMeta]}` | `actors` |
+| children | `{children, #{<<"children">> => [Row], <<"truncated">> => boolean()}}` | `children` |
 | inspect | `{inspect, map() \| binary()}` | `inspect` |
 | status | `{status, ok}` | `kill`, `interrupt`, `close`, `shutdown` |
 | value | `{value, JsonValue}` | `nav-query`, `nav-symbols`, `export-traces`, `list-tests`, `reload-findings` |
@@ -87,8 +97,19 @@ dist-attached clients consume the live terms directly without any JSON step.
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
--export([dispatch/4, encode/2]).
+-export([
+    dispatch/4,
+    request/3,
+    render/2,
+    encode/2,
+    start_session/2,
+    attach_session/2,
+    session_bindings/1,
+    session_alive/1,
+    session_count/0
+]).
 
 -export_type([op_result/0]).
 
@@ -104,6 +125,7 @@ tagged terms; `encode/2` is the only thing that turns them into JSON.
     | {script_exit, Code :: non_neg_integer(), Output :: binary(),
         Warnings :: [beamtalk_repl_protocol:warning()]}
     | {actors, [map()]}
+    | {children, map()}
     | {inspect, map() | binary()}
     | {status, ok}
     | {value, JsonValue :: term()}
@@ -124,6 +146,184 @@ tagged terms; `encode/2` is the only thing that turns them into JSON.
     | {error, #beamtalk_error{}}
     | {error, #beamtalk_error{}, Output :: binary(),
         Warnings :: [beamtalk_repl_protocol:warning()]}.
+
+-doc """
+Build a protocol request from an op name and a flat params map, then dispatch it.
+
+The single request-building entry point for dist-attached clients (BT-5201):
+the client passes the op name, the op's params as a map with binary keys, and
+the `SessionPid` `dispatch/4` expects, and gets back the `op_result()` term.
+The `protocol_msg()` record, and the `decode/1` + `get_params/1` prelude that
+used to build it, stay on the workspace node. It is `dispatch/4` over a
+request with no correlation `id` and no `session` field.
+
+`Params` is *flat*, exactly like the WebSocket frame minus its envelope: each
+op param is a top-level key (`#{<<"code">> => <<"1 + 1">>}`), never nested
+under a `<<"params">>` key. Values are the wire-shaped JSON values a decoded
+frame carries (binaries, numbers, booleans, `null`, lists, maps with binary
+keys), so a handler cannot tell this entry point from the WebSocket. The
+envelope keys `op`, `id` and `session` are not params and are dropped.
+""".
+-spec request(binary(), map(), pid()) -> op_result().
+request(Op, Params, SessionPid) when is_binary(Op), is_map(Params), is_pid(SessionPid) ->
+    case beamtalk_repl_protocol:decode_map(Params#{<<"op">> => Op}) of
+        {ok, Msg} ->
+            dispatch(Op, beamtalk_repl_protocol:get_params(Msg), Msg, SessionPid);
+        {error, _Reason} ->
+            %% Unreachable while `op` is always set; keeps the "return, never
+            %% raise" contract if decode_map/1 ever validates more.
+            unknown_op(Op)
+    end.
+
+-doc """
+Start a workspace-supervised REPL session (BT-5202).
+
+The one implementation of "start a session", shared by the WebSocket handler
+(at auth) and by dist-attached LiveView (at mount). It starts the shell under
+`beamtalk_session_sup`, which normalises `kind` in `Meta`. It does not register
+the id in `beamtalk_session_table`: that table is what `resume`, `close` with a
+`session` field and `Session withId:` resolve ids through, so only a caller that
+wants other clients to reach the session by id (the WebSocket handler) inserts
+the row. LiveView's sessions stay private to their front. Attaching an owner is
+the separate `attach_session/2`.
+
+Returns `{ok, SessionPid}` or `{error, #beamtalk_error{}}`.
+""".
+-spec start_session(binary(), map()) -> {ok, pid()} | {error, #beamtalk_error{}}.
+start_session(SessionId, Meta) when is_binary(SessionId), is_map(Meta) ->
+    case beamtalk_session_sup:start_session(SessionId, Meta) of
+        {ok, SessionPid} ->
+            {ok, SessionPid};
+        {error, Reason} ->
+            {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
+    end.
+
+-doc """
+Make `OwnerPid` an owner (client) of the session (BT-5202).
+
+The one implementation of "attach", shared by the WebSocket handler (create and
+resume) and LiveView. The shell monitors the owner: while one is attached the
+session never idles out; when the last goes away it counts as detached and the
+workspace's idle reaping covers it (BT-5012). Returns the shell's reply
+unchanged: `ok`; `gone` (the shell stopped, e.g. its idle period ran out, before
+it handled the attach); or `timeout` (a busy shell did not answer within 5 s; it
+is alive, so the caller must not discard the session).
+""".
+-spec attach_session(pid(), pid()) -> ok | gone | timeout.
+attach_session(SessionPid, OwnerPid) when is_pid(SessionPid), is_pid(OwnerPid) ->
+    beamtalk_repl_shell:attach(SessionPid, OwnerPid).
+
+-doc """
+The session's live bindings, as terms (BT-5202).
+
+A term-only session API, deliberately not a wire op: BT-2369 removed the
+`bindings` protocol op, and the other surfaces read bindings through `eval`
+(`Session current bindings`). A dist-attached client that needs the values as
+live terms (a bound actor is a real `{beamtalk_object, ...}` handle the
+Inspector follows) asks here. Returns `{ok, #{atom() => term()}}` or
+`{error, #beamtalk_error{}}` (`session_not_found` if the shell is gone,
+`session_busy` if it did not answer in 5 s, `session_unavailable` otherwise).
+""".
+-spec session_bindings(pid()) -> {ok, map()} | {error, #beamtalk_error{}}.
+session_bindings(SessionPid) when is_pid(SessionPid) ->
+    try beamtalk_repl_shell:get_bindings(SessionPid) of
+        {ok, Bindings} when is_map(Bindings) -> {ok, Bindings}
+    catch
+        exit:{timeout, _} ->
+            {error,
+                beamtalk_repl_errors:make(
+                    session_busy,
+                    'REPL',
+                    <<"Session did not answer">>,
+                    <<"The session is busy; try again.">>
+                )};
+        exit:{Reason, _} when Reason =:= noproc; Reason =:= normal; Reason =:= shutdown ->
+            {error,
+                beamtalk_repl_errors:make(
+                    session_not_found,
+                    'REPL',
+                    <<"Session not found">>,
+                    <<"The session has ended; start a new one.">>
+                )};
+        exit:Reason ->
+            ?LOG_WARNING("Reading session bindings failed", #{
+                reason => Reason, domain => [beamtalk, runtime]
+            }),
+            {error,
+                beamtalk_repl_errors:make(
+                    session_unavailable,
+                    'REPL',
+                    <<"Session unavailable">>,
+                    <<"The session could not be read; try again.">>
+                )}
+    end.
+
+-doc """
+Whether `SessionPid` is a live session of this workspace (BT-5202).
+
+One local check on the supervisor's child list plus `is_process_alive/1`, so it
+does not depend on any other session answering (unlike the `sessions` op, which
+asks every shell for its id). The resume path uses it to decide between
+re-binding a tab to its session and starting a fresh one.
+""".
+-spec session_alive(pid()) -> boolean().
+session_alive(SessionPid) when is_pid(SessionPid) ->
+    case whereis(beamtalk_session_sup) of
+        undefined ->
+            false;
+        _Sup ->
+            is_process_alive(SessionPid) andalso
+                lists:any(
+                    fun({_Id, Pid, _Type, _Modules}) -> Pid =:= SessionPid end,
+                    supervisor:which_children(beamtalk_session_sup)
+                )
+    end.
+
+-doc """
+The number of live sessions under the session supervisor (BT-5202).
+
+Counts the supervisor's active children, so an unresponsive shell is still
+counted (the `sessions` op omits one that misses its 1 s window). Used by the
+LiveView teardown tests to assert that no session is orphaned.
+""".
+-spec session_count() -> non_neg_integer().
+session_count() ->
+    case whereis(beamtalk_session_sup) of
+        undefined -> 0;
+        _Sup -> proplists:get_value(active, supervisor:count_children(beamtalk_session_sup), 0)
+    end.
+
+-doc """
+The one rendering function for dist-attached clients (BT-5201).
+
+A dist-attached client keeps live terms and renders them for display on its
+own side; where it wants the workspace's own text it asks here, so the text is
+byte-identical to what the WebSocket surfaces show.
+
+* `render(value, Term)` — the display value for one term (the JSON-ready value
+  the WebSocket sends: `term_to_json/1`).
+* `render(values, Terms)` — `render(value, T)` for each term, in order, in one
+  round-trip.
+* `render(error, Reason)` — `{Structured, Message}`: the `#beamtalk_error{}` for
+  any error reason (`beamtalk_repl_errors:ensure_structured_error/1`; a
+  structured reason passes through) and the user-facing message text
+  (`beamtalk_repl_json:format_error_message/1`).
+
+Rendering never feeds back into `dispatch/4`: it is display only.
+""".
+-spec render
+    (value, term()) -> term();
+    (values, [term()]) -> [term()];
+    (error, term()) -> {#beamtalk_error{}, binary()}.
+render(value, Term) ->
+    beamtalk_repl_json:term_to_json(Term);
+render(values, Terms) when is_list(Terms) ->
+    [beamtalk_repl_json:term_to_json(T) || T <- Terms];
+render(error, Reason) ->
+    {
+        beamtalk_repl_errors:ensure_structured_error(Reason),
+        beamtalk_repl_json:format_error_message(Reason)
+    }.
 
 %%% Dispatch — op name → term result
 
@@ -201,6 +401,11 @@ encode({script_exit, Code, Output, Warnings}, Msg) ->
     beamtalk_repl_protocol:encode_script_exit(Code, Msg, Output, Warnings);
 encode({actors, Actors}, Msg) ->
     beamtalk_repl_protocol:encode_actors(Actors, Msg, fun beamtalk_repl_json:term_to_json/1);
+encode({children, Result}, Msg) ->
+    %% Rows hold live `{beamtalk_supervisor | beamtalk_object, ...}` handles for
+    %% a distribution client; JSON cannot carry them, so each becomes its stable
+    %% id here, at the one seam every WebSocket reply passes through (BT-5205).
+    encode({value, beamtalk_repl_ops_process:wire_children(Result)}, Msg);
 encode({inspect, Map}, Msg) when is_map(Map) ->
     beamtalk_repl_protocol:encode_inspect(Map, Msg, fun beamtalk_repl_json:term_to_json/1);
 encode({inspect, Bin}, Msg) when is_binary(Bin) ->

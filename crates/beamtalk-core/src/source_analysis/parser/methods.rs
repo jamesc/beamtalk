@@ -4,13 +4,13 @@
 //! Method definition, selector/parameter and method-body parsing (split from `declarations.rs`).
 
 use crate::ast::{
-    ExpressionStatement, KeywordPart, MessageSelector, MethodDefinition, MethodKind,
-    MethodModifiers, ParameterDefinition, StandaloneMethodDefinition, TypeAnnotation,
+    ExpressionStatement, KeywordPart, MessageSelector, MethodDefinition, MethodModifiers,
+    ParameterDefinition, StandaloneMethodDefinition, TypeAnnotation,
 };
 use crate::source_analysis::TokenKind;
 
 use super::declarations::{SelectorContext, is_state_like_declaration_keyword, is_uses_keyword};
-use super::{Diagnostic, Parser};
+use super::{Diagnostic, DiagnosticCategory, Parser};
 
 impl Parser {
     /// Parses a method definition.
@@ -31,7 +31,6 @@ impl Parser {
         let header_indent = self.current_token().indentation_after_newline();
         let doc_comment = self.collect_doc_comment();
         let comments = self.collect_comment_attachment();
-        let method_kind = MethodKind::Primary;
         let mut method_is_sealed = false;
         let mut method_is_internal = false;
         let mut method_is_class = false;
@@ -87,9 +86,15 @@ impl Parser {
         // The `|>` sends this body adds belong to this method (ADR 0145).
         let pipeline_mark = self.pipeline_sends.len();
         let literal_mark = self.literal_comments.len();
+        let spelling_mark = self.number_spellings.len();
+        let gap_mark = self.gap_comments.len();
         let body = self.parse_method_body();
         let pipeline_sends = self.pipeline_sends.drain(pipeline_mark..).collect();
-        let literal_comments = self.literal_comments.drain(literal_mark..).collect();
+        let literal_comments = crate::ast::LiteralComments::from_records(
+            self.literal_comments.drain(literal_mark..),
+            self.number_spellings.drain(spelling_mark..),
+            self.gap_comments.drain(gap_mark..),
+        );
         self.current_method_header_indent = previous_method_header_indent;
         self.current_method_selector = previous_method_selector;
         self.in_method_body = false;
@@ -106,7 +111,6 @@ impl Parser {
                 is_sealed: method_is_sealed,
                 is_internal: method_is_internal,
                 is_class_method: method_is_class,
-                kind: method_kind,
             },
             span,
         );
@@ -231,7 +235,7 @@ impl Parser {
 
     /// Checks whether the current position starts a new class/protocol/
     /// type-alias/method/standalone-method declaration, or a `state:`/
-    /// `field:`/`classState:`/`uses:` keyword — the set of tokens that
+    /// `field:`/`uses:` keyword — the set of tokens that
     /// always end a method body no matter how the body was left (a trailing
     /// period, a cast `!`, or error recovery). Factored out of
     /// `parse_method_body` because the same check is needed at three
@@ -432,8 +436,10 @@ impl Parser {
     /// Syntax:
     /// - `ClassName >> selector => body` (instance method)
     /// - `ClassName class >> selector => body` (class method)
-    /// - `package@ClassName >> selector => body` (cross-package extension, ADR 0070)
-    /// - `package@ClassName class >> selector => body`
+    ///
+    /// A `package@ClassName >> ...` target still parses, so the rest of the
+    /// definition does not cascade into further errors, but it is a parse
+    /// error: package-qualified extension methods were removed (ADR 0152).
     pub(super) fn parse_standalone_method_definition(&mut self) -> StandaloneMethodDefinition {
         let start = self.current_token().span();
 
@@ -459,20 +465,37 @@ impl Parser {
         let class_blank_line_after_comments = initial_comments.blank_line_after_comments;
         let mut class_leading_comments = initial_comments.leading;
 
-        // Parse class name, with optional package qualifier (ADR 0070).
-        // Pattern: `identifier @ Identifier` or just `Identifier`.
-        let (class_name, package) = if matches!(self.current_kind(), TokenKind::Identifier(name) if !name.starts_with(|c: char| c.is_uppercase()))
+        // Parse the class name. A package qualifier (`identifier @ Identifier`,
+        // ADR 0070) is consumed so the definition parses, and reported: a
+        // package-qualified extension names another package's class, and
+        // cross-file extension methods were removed (ADR 0152).
+        let class_name = if matches!(self.current_kind(), TokenKind::Identifier(name) if !name.starts_with(|c: char| c.is_uppercase()))
             && matches!(self.peek_at(1), Some(TokenKind::At))
         {
             // Package-qualified: `json@Parser`
             let pkg_ident = self.parse_identifier("Expected package name");
             self.advance(); // consume `@`
             let cls_ident = self.parse_identifier("Expected class name after '@'");
-            (cls_ident, Some(pkg_ident))
+            self.diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "`{}@{} >> ...` adds a method to a class in another package; \
+                         package-qualified extension methods were removed (ADR 0152)",
+                        pkg_ident.name, cls_ident.name
+                    ),
+                    pkg_ident.span.merge(cls_ident.span),
+                )
+                .with_hint(
+                    "Define the method in the file that defines the class, or write a method \
+                     on a class of your own that takes the value."
+                        .to_string(),
+                )
+                .with_category(DiagnosticCategory::MisplacedExtension),
+            );
+            cls_ident
         } else {
             // Unqualified: `Counter`
-            let cls_ident = self.parse_identifier("Expected class name");
-            (cls_ident, None)
+            self.parse_identifier("Expected class name")
         };
 
         // Check for optional `class` modifier
@@ -542,7 +565,6 @@ impl Parser {
 
         StandaloneMethodDefinition {
             class_name,
-            package,
             is_class_method,
             method,
             span,

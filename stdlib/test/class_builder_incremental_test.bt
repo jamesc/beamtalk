@@ -3,16 +3,13 @@
 
 // BT-2269 / ADR 0084 Phase 3: the incremental class-piece ClassBuilder API.
 //
-// `addMethod:body:`, `addClassMethod:body:`, `addClassState:default:` and the
-// matching `removeMethod:` / `removeClassMethod:` write the SAME state maps the
-// bulk setters (`methods:`, `classMethods:`, `classVars:`) populate, so a class
-// can be assembled one piece at a time before `register` (the "browser" use
-// case). In a `classBuilder … register` cascade the compiler lowers each
-// `add*:body:` block exactly as it lowers the corresponding bulk-setter map
-// value — class methods become class-method funs that thread class-variable
-// state (`{class_var_result, …}`), so this does NOT reproduce the BT-873
-// closure-dispatch regression (state mutation is compiler-lowered, never a naive
-// runtime closure).
+// `addMethod:body:`, `addClassMethod:body:` and the matching `removeMethod:` /
+// `removeClassMethod:` write the SAME state maps the bulk setters (`methods:`,
+// `classMethods:`) populate, so a class can be assembled one piece at a time
+// before `register` (the "browser" use case). In a `classBuilder … register`
+// cascade the compiler lowers each `add*:body:` block exactly as it lowers the
+// corresponding bulk-setter map value: class methods become class-method funs
+// (`fun(ClassSelf, …)`).
 //
 // register returns the canonical, dispatchable class object since BT-2258, so
 // the cascade result is used directly.
@@ -31,20 +28,15 @@ TestCase subclass: ClassBuilderIncrementalTest
     self.cls := Object classBuilder name: #BT2269Full;
       superclass: Object;
       addField: #count default: 0;
-      addClassState: #total default: 0;
       addMethod: #answer body: [:inst | 42];
-      addClassMethod: #bump body: [:self |
-        self.total := self.total + 1
-        self.total
-      ];
+      addClassMethod: #bump body: [:self | 7];
       register
     // Instance-side piece is callable.
     instance := self.cls new
     self assert: instance answer equals: 42
     self assert: (instance fieldAt: #count) equals: 0
-    // Class-side piece is callable and threads class-variable state.
-    self assert: self.cls bump equals: 1
-    self assert: self.cls bump equals: 2
+    // Class-side piece is callable.
+    self assert: self.cls bump equals: 7
 
   // AC: an incrementally-added instance method with a keyword selector is
   // callable (block args bind positionally after the receiver).
@@ -55,21 +47,6 @@ TestCase subclass: ClassBuilderIncrementalTest
       register
     instance := self.cls new
     self assert: (instance double: 21) equals: 42
-
-  // AC: an incrementally-added class method whose body threads a class variable
-  // seeded by addClassState:default: works across calls (the BT-873 "dropped
-  // state" regression must not recur).
-  testIncrementalClassVarThreads =>
-    self.cls := Object classBuilder name: #BT2269Tally;
-      superclass: Object;
-      addClassState: #total default: 10;
-      addClassMethod: #tally body: [:self |
-        self.total := self.total + 5
-        self.total
-      ];
-      register
-    self assert: self.cls tally equals: 15
-    self assert: self.cls tally equals: 20
 
   // AC: a plain (no-arg) incrementally-added class method returns its value.
   testIncrementalPlainClassMethod =>

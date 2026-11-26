@@ -110,10 +110,13 @@ impl DependencyRegistry {
         })
     }
 
-    /// Returns all class names that are exported by dependencies.
+    /// Returns all class names that are exported by dependencies, sorted so
+    /// diagnostics emitted per class come out in a stable order (BT-5184).
     #[must_use]
     pub fn all_class_names(&self) -> Vec<&str> {
-        self.exports.keys().map(String::as_str).collect()
+        let mut names: Vec<&str> = self.exports.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        names
     }
 }
 
@@ -379,14 +382,12 @@ pub fn check_collision_at_use_sites(
 
     // Check standalone method definition targets (Tonel-style `Class >> method`)
     for standalone in &module.method_definitions {
-        if standalone.package.is_none() {
-            check_ambiguous_reference(
-                standalone.class_name.name.as_str(),
-                standalone.class_name.span,
-                registry,
-                diagnostics,
-            );
-        }
+        check_ambiguous_reference(
+            standalone.class_name.name.as_str(),
+            standalone.class_name.span,
+            registry,
+            diagnostics,
+        );
     }
 
     // Walk all expressions looking for unqualified ClassReference nodes
@@ -490,15 +491,13 @@ pub fn check_transitive_dep_usage(
 
     // Check standalone method definition targets
     for standalone in &module.method_definitions {
-        if standalone.package.is_none() {
-            check_transitive_reference(
-                standalone.class_name.name.as_str(),
-                standalone.class_name.span,
-                registry,
-                strict_deps,
-                diagnostics,
-            );
-        }
+        check_transitive_reference(
+            standalone.class_name.name.as_str(),
+            standalone.class_name.span,
+            registry,
+            strict_deps,
+            diagnostics,
+        );
     }
 
     // Walk all expressions looking for unqualified ClassReference nodes
@@ -862,24 +861,6 @@ mod tests {
     }
 
     #[test]
-    fn no_collision_in_qualified_standalone_method() {
-        let registry = make_registry(&[
-            ("Parser", "json", "bt@json@parser"),
-            ("Parser", "xml", "bt@xml@parser"),
-        ]);
-
-        // Qualified standalone method — no collision
-        let module = parse_bt("json@Parser >> customParse: input => input");
-        let mut diagnostics = Vec::new();
-        check_collision_at_use_sites(&module, &registry, &mut diagnostics);
-
-        assert!(
-            diagnostics.is_empty(),
-            "No collision for qualified standalone method: {diagnostics:?}"
-        );
-    }
-
-    #[test]
     fn collision_with_empty_registry_is_noop() {
         let registry = DependencyRegistry::new();
         let module = parse_bt("Parser new");
@@ -1060,5 +1041,36 @@ mod tests {
         assert_eq!(utils_exports.len(), 1);
         assert!(!utils_exports[0].is_direct);
         assert_eq!(utils_exports[0].via_chain, vec!["json".to_string()]);
+    }
+
+    /// BT-5184: `all_class_names` walked a `HashMap`, so the reservation
+    /// errors came out in a different order per registry (each has its own
+    /// hash seed).
+    #[test]
+    fn stdlib_reservation_errors_are_sorted_on_every_run() {
+        let entries = [
+            ("String", "pkg", "bt@pkg@string"),
+            ("Integer", "pkg", "bt@pkg@integer"),
+            ("Actor", "pkg", "bt@pkg@actor"),
+            ("Symbol", "pkg", "bt@pkg@symbol"),
+            ("Float", "pkg", "bt@pkg@float"),
+            ("Boolean", "pkg", "bt@pkg@boolean"),
+        ];
+        let run = || {
+            let mut diagnostics = Vec::new();
+            check_stdlib_reservation(&make_registry(&entries), &mut diagnostics);
+            diagnostics
+                .iter()
+                .map(|d| d.message.to_string())
+                .collect::<Vec<_>>()
+        };
+        let first = run();
+        assert_eq!(first.len(), entries.len(), "{first:?}");
+        let mut sorted = first.clone();
+        sorted.sort();
+        assert_eq!(first, sorted);
+        for _ in 0..20 {
+            assert_eq!(run(), first);
+        }
     }
 }

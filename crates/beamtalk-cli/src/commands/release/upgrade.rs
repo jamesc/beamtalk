@@ -49,11 +49,11 @@ struct ShapeEntry {
     version: u32,
     fields: BTreeMap<String, Option<String>>,
     migrations: BTreeMap<String, String>,
-    /// ADR 0130 `class_var_abi` of the class's module. `None` when absent or
-    /// `null`: a `shapes.json` written before this field existed, or a module
-    /// compiled before ADR 0130.
+    /// `module_abi` of the class's module (ADR 0153). `None` when absent or
+    /// `null`: a `shapes.json` written before ADR 0153 (it carried the
+    /// since-renamed older key, which is ignored) or a module built before it.
     #[serde(default)]
-    class_var_abi: Option<u32>,
+    module_abi: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -161,6 +161,9 @@ pub fn run_upgrade_preflight(
 
 fn is_tarball(path: &Utf8Path) -> bool {
     let name = path.file_name().unwrap_or_default();
+    // A tarball parked by `ReleaseSwap` (`--upgrade-from` naming the output
+    // being replaced) keeps its type under the parked suffix.
+    let name = name.strip_suffix(super::PREVIOUS_SUFFIX).unwrap_or(name);
     name.ends_with(".tar.gz")
         || std::path::Path::new(name)
             .extension()
@@ -377,15 +380,15 @@ fn render_report(
                 });
             }
             Some(new_entry) => {
-                if let (None, Some(current)) = (old_entry.class_var_abi, new_entry.class_var_abi) {
+                if let (None, Some(current)) = (old_entry.module_abi, new_entry.module_abi) {
                     *unstamped_by_abi.entry(current).or_default() += 1;
-                } else if new_entry.class_var_abi != old_entry.class_var_abi {
+                } else if new_entry.module_abi != old_entry.module_abi {
                     abi_findings.push(Finding {
                         class: class.clone(),
                         detail: format!(
-                            "class_var_abi {} → {}",
-                            describe_abi(old_entry.class_var_abi),
-                            describe_abi(new_entry.class_var_abi)
+                            "module_abi {} → {}",
+                            describe_abi(old_entry.module_abi),
+                            describe_abi(new_entry.module_abi)
                         ),
                         severity: Severity::Warning,
                     });
@@ -452,7 +455,7 @@ fn render_report(
         abi_findings.push(Finding {
             class: format!("{count} {}", if *count == 1 { "class" } else { "classes" }),
             detail: format!(
-                "class_var_abi none → {current}   previous release predates ADR 0130; \
+                "module_abi none → {current}   previous release predates ADR 0153; \
                  restart and recompile (no hot upgrade)"
             ),
             severity: Severity::Warning,
@@ -507,7 +510,7 @@ fn render_report(
     }
 
     if !abi_findings.is_empty() {
-        out.push_str("\n  Class-variable ABI changed (ADR 0130)\n");
+        out.push_str("\n  Module ABI changed (ADR 0153)\n");
         for f in &abi_findings {
             let _ = writeln!(
                 out,
@@ -556,8 +559,8 @@ fn render_report(
     }
 }
 
-/// `class_var_abi` as shown in the report: the number, or `none` for a module
-/// compiled before ADR 0130 (no `class_var_abi` entry).
+/// `module_abi` as shown in the report: the number, or `none` for a module
+/// compiled by a toolchain that did not declare one (before ADR 0153).
 fn describe_abi(abi: Option<u32>) -> String {
     abi.map_or_else(|| "none".to_string(), |n| n.to_string())
 }
@@ -642,7 +645,7 @@ mod tests {
                                 .iter()
                                 .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
                                 .collect(),
-                            class_var_abi: Some(1),
+                            module_abi: Some(1),
                         },
                     )
                 })
@@ -689,22 +692,22 @@ mod tests {
     }
 
     #[test]
-    fn matching_class_var_abi_is_not_reported() {
+    fn matching_module_abi_is_not_reported() {
         let prev = doc(&[("Widget", 1, &[], &[])]);
         let new = doc(&[("Widget", 1, &[], &[])]);
         let report = render_report("orders", "1.3.0", "1.4.0", &prev, &new, None, None);
-        assert!(!report.text.contains("class_var_abi"));
+        assert!(!report.text.contains("module_abi"));
         assert!(report.text.contains("0 errors, 0 warnings."));
     }
 
     #[test]
-    fn differing_class_var_abi_is_reported() {
+    fn differing_module_abi_is_reported() {
         let prev = doc(&[("Widget", 1, &[], &[])]);
         let mut new = doc(&[("Widget", 1, &[], &[])]);
-        new.shapes.get_mut("Widget").unwrap().class_var_abi = Some(2);
+        new.shapes.get_mut("Widget").unwrap().module_abi = Some(2);
         let report = render_report("orders", "1.3.0", "1.4.0", &prev, &new, None, None);
-        assert!(report.text.contains("Class-variable ABI changed"));
-        assert!(report.text.contains("class_var_abi 1 → 2   warning"));
+        assert!(report.text.contains("Module ABI changed"));
+        assert!(report.text.contains("module_abi 1 → 2   warning"));
         assert!(report.text.contains("0 errors, 1 warning."));
         assert!(!report.has_error);
     }
@@ -712,7 +715,7 @@ mod tests {
     fn with_prev_abi_none(entries: &[FixtureEntry]) -> ShapesDoc {
         let mut prev = doc(entries);
         for e in prev.shapes.values_mut() {
-            e.class_var_abi = None;
+            e.module_abi = None;
         }
         prev
     }
@@ -727,7 +730,7 @@ mod tests {
         let prev = with_prev_abi_none(entries);
         let new = doc(entries);
         let report = render_report("orders", "1.3.0", "1.4.0", &prev, &new, None, None);
-        assert_eq!(report.text.matches("class_var_abi none → 1").count(), 1);
+        assert_eq!(report.text.matches("module_abi none → 1").count(), 1);
         assert!(report.text.contains("3 classes"));
         assert!(!report.text.contains("Alpha"));
         assert!(report.text.contains("0 errors, 1 warning."));
@@ -748,13 +751,13 @@ mod tests {
     fn pre_abi_prev_does_not_hide_a_genuine_mismatch() {
         let prev_entries: &[FixtureEntry] = &[("Old", 1, &[], &[]), ("Other", 1, &[], &[])];
         let mut prev = with_prev_abi_none(prev_entries);
-        prev.shapes.get_mut("Other").unwrap().class_var_abi = Some(1);
+        prev.shapes.get_mut("Other").unwrap().module_abi = Some(1);
         let mut new = doc(prev_entries);
-        new.shapes.get_mut("Other").unwrap().class_var_abi = Some(2);
+        new.shapes.get_mut("Other").unwrap().module_abi = Some(2);
         let report = render_report("orders", "1.3.0", "1.4.0", &prev, &new, None, None);
         assert!(report.text.contains("1 class "));
         assert!(report.text.contains("Other"));
-        assert!(report.text.contains("class_var_abi 1 → 2   warning"));
+        assert!(report.text.contains("module_abi 1 → 2   warning"));
         assert!(report.text.contains("0 errors, 2 warnings."));
     }
 
@@ -763,23 +766,23 @@ mod tests {
         let entries: &[FixtureEntry] = &[("Widget", 1, &[], &[])];
         let prev = with_prev_abi_none(entries);
         let mut new = doc(entries);
-        new.shapes.get_mut("Widget").unwrap().class_var_abi = None;
+        new.shapes.get_mut("Widget").unwrap().module_abi = None;
         let report = render_report("orders", "1.3.0", "1.4.0", &prev, &new, None, None);
-        assert!(!report.text.contains("class_var_abi"));
+        assert!(!report.text.contains("module_abi"));
         assert!(report.text.contains("0 errors, 0 warnings."));
     }
 
     #[test]
-    fn shapes_json_without_class_var_abi_field_parses() {
+    fn shapes_json_without_module_abi_field_parses() {
         let doc: ShapesDoc = serde_json::from_str(
             r#"{"shapes":{"A":{"version":1,"fields":{},"migrations":{}},
-                "B":{"version":1,"fields":{},"migrations":{},"class_var_abi":null},
-                "C":{"version":1,"fields":{},"migrations":{},"class_var_abi":1}}}"#,
+                "B":{"version":1,"fields":{},"migrations":{},"module_abi":null},
+                "C":{"version":1,"fields":{},"migrations":{},"module_abi":1}}}"#,
         )
         .unwrap();
-        assert_eq!(doc.shapes["A"].class_var_abi, None);
-        assert_eq!(doc.shapes["B"].class_var_abi, None);
-        assert_eq!(doc.shapes["C"].class_var_abi, Some(1));
+        assert_eq!(doc.shapes["A"].module_abi, None);
+        assert_eq!(doc.shapes["B"].module_abi, None);
+        assert_eq!(doc.shapes["C"].module_abi, Some(1));
     }
 
     #[test]
@@ -852,6 +855,11 @@ mod tests {
     #[test]
     fn is_tarball_recognises_tar_gz_and_tgz_only() {
         assert!(is_tarball(Utf8Path::new("orders-1.3.0.tar.gz")));
+        // A tarball parked by `ReleaseSwap` (BT-5134).
+        assert!(is_tarball(Utf8Path::new(
+            "orders-1.3.0.tar.gz.beamtalk-previous"
+        )));
+        assert!(!is_tarball(Utf8Path::new("orders.beamtalk-previous")));
         assert!(is_tarball(Utf8Path::new("orders-1.3.0.tgz")));
         assert!(!is_tarball(Utf8Path::new("orders-1.3.0")));
         assert!(!is_tarball(Utf8Path::new("/some/dir")));

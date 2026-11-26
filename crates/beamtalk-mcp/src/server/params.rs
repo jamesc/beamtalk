@@ -415,7 +415,7 @@ pub struct RemoveMethodParams {
     )]
     pub selector: String,
     /// Optional fallback expression evaluated instead of raising when the
-    /// selector is not defined locally or as an extension.
+    /// selector is not defined locally.
     #[schemars(
         description = "Optional fallback: a Beamtalk expression (not a string value) evaluated as the body of an 'ifAbsent:' block when the selector is not found, instead of raising a selector_not_found error. Omit to raise on an absent selector."
     )]
@@ -468,19 +468,24 @@ pub struct RenameMethodParams {
 pub struct FlushParams {
     /// Optional class name to scope the flush to that class's pending entries.
     #[schemars(
-        description = "Optional class name to scope the flush (compiles to 'Workspace flush: ClassName'). Mutually exclusive with 'file' and 'kind'. Omit all three to flush every pending durable change."
+        description = "Optional class name to scope the flush (compiles to 'Workspace flush: ClassName'). Mutually exclusive with 'file' and 'kind'; may be combined with 'selector' to flush one method of one class. Omit all filters to flush every pending durable change."
     )]
     pub class: Option<String>,
     /// Optional file path to scope the flush to entries against that file.
     #[schemars(
-        description = "Optional source file path to scope the flush (compiles to 'Workspace flush: #{ #file => \"path\" }'). Mutually exclusive with 'class' and 'kind'."
+        description = "Optional source file path to scope the flush (compiles to 'Workspace flush: #{ #file => \"path\" }'). Mutually exclusive with 'class', 'kind' and 'selector'."
     )]
     pub file: Option<String>,
     /// Optional change-kind symbol (e.g. `"new-class"`) to scope the flush.
     #[schemars(
-        description = "Optional change-kind symbol to scope the flush, e.g. \"new-class\" (compiles to 'Workspace flush: #'new-class'). Mutually exclusive with 'class' and 'file'."
+        description = "Optional change-kind to scope the flush: one of \"new-class\", \"remove-method\", \"remove-class\", \"rename-class\" or \"rename-method\" (compiles to 'Workspace flush: #'new-class'). Mutually exclusive with 'class', 'file' and 'selector'."
     )]
     pub kind: Option<String>,
+    /// Optional method selector to scope the flush to that method's entries.
+    #[schemars(
+        description = "Optional method selector to scope the flush (e.g. \"increment\", \"at:put:\"; accepted with or without a leading '#'). Flushes that selector's pending entries in every class, or in one class when combined with 'class' (compiles to the 'flush' operation's 'selector' scope). Mutually exclusive with 'file' and 'kind'."
+    )]
+    pub selector: Option<String>,
     /// Required-when-applicable Tier-2 confirmation (ADR 0113 Phase 2/4).
     /// Must be `true` to also apply pending `remove-class`
     /// (destructive, file-deleting) entries; omitted or `false` flushes only

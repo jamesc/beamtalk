@@ -7,12 +7,54 @@
 
 use crate::ast::{Expression, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
-use crate::source_analysis::{Diagnostic, DiagnosticCategory};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
 use super::super::diagnostic_facts::ClassObjectType;
 use super::super::type_resolver;
 use super::super::{DynamicReason, InferredType, TypeChecker};
+
+/// Where a checked return value comes from: the method's tail expression
+/// (anchored on the method, "body returns") or an early `^` (BT-5292:
+/// anchored on the `^` expression, worded as a return).
+#[derive(Debug, Clone, Copy)]
+pub(in super::super) enum ReturnSite {
+    Tail,
+    Early(Span),
+}
+
+impl ReturnSite {
+    fn span(self, method: &crate::ast::MethodDefinition) -> Span {
+        match self {
+            Self::Tail => method.span,
+            Self::Early(span) => span,
+        }
+    }
+
+    fn hint(self, expected: &str, actual: &str) -> String {
+        match self {
+            Self::Tail => format!("Declared -> {expected}, inferred body type is {actual}"),
+            Self::Early(_) => format!("Declared -> {expected}, but this `^` returns {actual}"),
+        }
+    }
+
+    fn message(
+        self,
+        selector: &str,
+        class_name: &EcoString,
+        expected: &str,
+        actual: &str,
+    ) -> String {
+        match self {
+            Self::Tail => format!(
+                "Method '{selector}' in {class_name} declares return type {expected}, but body returns {actual}"
+            ),
+            Self::Early(_) => format!(
+                "`^` returns {actual}, but method '{selector}' in {class_name} declares return type {expected}"
+            ),
+        }
+    }
+}
 
 impl TypeChecker {
     /// Check that a method body's inferred return type matches its declared return type.
@@ -23,6 +65,7 @@ impl TypeChecker {
         body_type: &InferredType,
         class_name: &EcoString,
         hierarchy: &ClassHierarchy,
+        site: ReturnSite,
     ) {
         // Skip primitive methods
         if method
@@ -99,6 +142,7 @@ impl TypeChecker {
                     &expected,
                     class_name,
                     hierarchy,
+                    site,
                 );
             }
             return;
@@ -121,14 +165,10 @@ impl TypeChecker {
                 };
                 let selector = method.selector.name();
                 let diag = Self::shape_mismatch_diagnostic(
-                    format!(
-                        "Method '{selector}' in {class_name} declares return type {}, but body returns {}",
-                        show(&expected),
-                        show(body_type)
-                    ),
+                    site.message(&selector, class_name, &show(&expected), &show(body_type)),
                     &mismatch,
                     &expected,
-                    method.span,
+                    site.span(method),
                 );
                 self.diagnostics.push(diag);
             }
@@ -151,7 +191,7 @@ impl TypeChecker {
             match body_type {
                 InferredType::Union { members, .. } => {
                     self.check_union_body_return_type(
-                        method, body_type, members, &expected, class_name, hierarchy,
+                        method, body_type, members, &expected, class_name, hierarchy, site,
                     );
                 }
                 InferredType::Dynamic(reason) => {
@@ -209,13 +249,11 @@ impl TypeChecker {
                     let selector = method.selector.name();
                     self.diagnostics.push(
                         Diagnostic::warning(
-                            format!(
-                                "Method '{selector}' in {class_name} declares return type {expected_display}, but body returns {actual_display}"
-                            ),
-                            method.span,
+                            site.message(&selector, class_name, &expected_display, &actual_display),
+                            site.span(method),
                         )
                         .with_category(DiagnosticCategory::Type)
-                        .with_hint(format!("Declared -> {expected_display}, inferred body type is {actual_display}")),
+                        .with_hint(site.hint(&expected_display, &actual_display)),
                     );
                 }
             }
@@ -243,13 +281,11 @@ impl TypeChecker {
                         InferredType::class_name_for_diagnostic(actual_ty.as_str());
                     self.diagnostics.push(
                         Diagnostic::warning(
-                            format!(
-                                "Method '{selector}' in {class_name} declares return type {union_display}, but body returns {actual_display}"
-                            ),
-                            method.span,
+                            site.message(&selector, class_name, &union_display, &actual_display),
+                            site.span(method),
                         )
                         .with_category(DiagnosticCategory::Type)
-                        .with_hint(format!("Declared -> {union_display}, inferred body type is {actual_display}")),
+                        .with_hint(site.hint(&union_display, &actual_display)),
                     );
                 }
             }
@@ -269,10 +305,8 @@ impl TypeChecker {
                     .unwrap_or_else(|| InferredType::class_name_for_diagnostic(actual_ty.as_str()));
                 self.diagnostics.push(
                     Diagnostic::warning(
-                        format!(
-                            "Method '{selector}' in {class_name} declares return type Never, but body returns {actual_display}"
-                        ),
-                        method.span,
+                        site.message(&selector, class_name, "Never", &actual_display),
+                        site.span(method),
                     )
                     .with_category(DiagnosticCategory::Type)
                     .with_hint(format!(
@@ -299,6 +333,33 @@ impl TypeChecker {
         }
     }
 
+    /// BT-5290: an error-variant return (`Result(Never, E)`, a `^x` under
+    /// `x isError ifTrue:`) with its success slot filled from the declared
+    /// `-> Result(U, E')`, giving `Result(U, E)`. It is checked the same way
+    /// (`Never` and `U` both fit `U`), but a mismatch then reads "body returns
+    /// `Result(U, E)`" and names the error type, not a `Never` the user never
+    /// wrote. A declared return that is not a two-argument `Result` leaves
+    /// `ty` unchanged.
+    pub(in super::super) fn error_variant_as_declared_success(
+        &self,
+        method: &crate::ast::MethodDefinition,
+        ty: &InferredType,
+    ) -> InferredType {
+        let Some(declared) = method.return_type.as_ref() else {
+            return ty.clone();
+        };
+        let (expected, _) = type_resolver::resolve_type_annotation_with_alias_deps(
+            declared,
+            &type_resolver::SubstitutionMap::new(),
+            None,
+            self.alias_registry.as_deref(),
+        );
+        match Self::result_type_args(&expected) {
+            Some((declared_success, _)) => Self::with_result_success(ty, declared_success.clone()),
+            None => ty.clone(),
+        }
+    }
+
     /// BT-4440: warn when a method whose body is a class object (`C class` /
     /// `P class`) declares a return type that class object does not fit,
     /// judged by [`Self::metatype_assignable_to`] with the
@@ -313,6 +374,7 @@ impl TypeChecker {
         expected: &InferredType,
         class_name: &EcoString,
         hierarchy: &ClassHierarchy,
+        site: ReturnSite,
     ) {
         if matches!(expected, InferredType::Dynamic(_)) {
             return;
@@ -336,11 +398,14 @@ impl TypeChecker {
             &declared_type,
             hierarchy,
             self.protocol_registry.as_deref(),
-            format!(
-                "Method '{selector}' in {class_name} declares return type {expected_display}, but body returns {class_object}"
+            site.message(
+                &selector,
+                class_name,
+                &expected_display,
+                &class_object.to_string(),
             ),
-            format!("Declared -> {expected_display}, inferred body type is {class_object}"),
-            method.span,
+            site.hint(&expected_display, &class_object.to_string()),
+            site.span(method),
         );
         self.diagnostics.push(diag);
     }
@@ -471,6 +536,7 @@ impl TypeChecker {
     /// Part B's gating even though the underlying comparison itself is
     /// typed-status-agnostic — this keeps both diagnostics equally
     /// narrow and avoids a noise spike in untyped/dynamic classes.
+    #[allow(clippy::too_many_arguments)] // BT-5292: carries the return site
     fn check_union_body_return_type(
         &mut self,
         method: &crate::ast::MethodDefinition,
@@ -479,6 +545,7 @@ impl TypeChecker {
         expected: &InferredType,
         class_name: &EcoString,
         hierarchy: &ClassHierarchy,
+        site: ReturnSite,
     ) {
         if !hierarchy.is_typed(class_name) {
             return;
@@ -498,13 +565,16 @@ impl TypeChecker {
                 &declared_type,
                 hierarchy,
                 Self::is_type_compatible,
-                method.span,
+                site.span(method),
                 |class_object| {
                     (
-                        format!(
-                            "Method '{selector}' in {class_name} declares return type {expected_display}, but body returns {class_object}"
+                        site.message(
+                            &selector,
+                            class_name,
+                            &expected_display,
+                            &class_object.to_string(),
                         ),
-                        format!("Declared -> {expected_display}, inferred body type is {class_object}"),
+                        site.hint(&expected_display, &class_object.to_string()),
                     )
                 },
             ) {
@@ -544,10 +614,8 @@ impl TypeChecker {
             .unwrap_or_else(|| EcoString::from("Dynamic"));
         self.diagnostics.push(
             Diagnostic::warning(
-                format!(
-                    "Method '{selector}' in {class_name} declares return type {expected_display}, but body returns {actual_display}"
-                ),
-                method.span,
+                site.message(&selector, class_name, &expected_display, &actual_display),
+                site.span(method),
             )
             .with_category(DiagnosticCategory::Type),
         );
@@ -588,6 +656,8 @@ impl TypeChecker {
         if !hierarchy.is_typed(class_name) {
             return;
         }
+        // Only the tail reaches here: an early `^` of a `Dynamic` value is
+        // skipped by the caller, so this hint stays anchored on the method.
         let description = reason
             .description()
             .expect("AmbiguousControlFlow/UnannotatedReturn always have a description");

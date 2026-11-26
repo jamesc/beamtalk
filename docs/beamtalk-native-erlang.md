@@ -231,7 +231,7 @@ Not an error, and left as it was: an `abstract` subclass of a native actor (it i
 
 ### `self delegate` must be in the class's own file (BT-4930)
 
-`self delegate` reaches the backing module only for a method written in the class body or as a `Foo >> sel` extension in the same file as `Foo` (for a native `Actor`, class side only: an instance-side same-file extension on a native actor is its own compile error). A `Foo >> sel => self delegate` extension in a different file, on a `native:` class (an `Object` or an `Actor`, instance or class side), is a compile error at the definition: "`self delegate` method `sel` on native class `Foo` is defined outside the class's own file and will not reach the backing module". Before, it compiled and always raised "delegate called on a non-native Object" when called. Define the method in the file that declares the class. The return-type warning and the reserved-word error do not run for the cross-file form; only this error does. The check also applies to a native class that comes from a compiled dependency, as long as that dependency was built by a compiler that records the `native` flag in the class metadata; an older `.beam` is treated as non-native and gets no check.
+`self delegate` reaches the backing module only for a method written in the class body or as a `Foo >> sel` extension in the same file as `Foo` (for a native `Actor`, class side only: an instance-side same-file extension on a native actor is its own compile error). A `Foo >> sel` in any other file is a compile error for every class, native or not (ADR 0152), so a `self delegate` method must be defined in the file that declares the class. No `@expect` directive suppresses either error (BT-5184).
 
 ### Reserved-word constraint
 
@@ -348,7 +348,7 @@ terminate(_Reason, #{conn := Conn}) ->
 
 **Use `{ok, Result}` reply wrapping.** Replies must be `{ok, Value}` or `{error, Reason}`. The `DirectValue` fallback exists for legacy modules but new native actors must use wrapped replies to avoid ambiguity with error tuples.
 
-**No `state:` declarations.** Native actors cannot declare `state:` fields — all instance state lives in the gen_server. `classState:` is permitted for class-level state (e.g., a singleton reference).
+**No `state:` declarations.** Native actors cannot declare `state:` fields — all instance state lives in the gen_server. A class has no state of its own either (ADR 0153): keep a singleton reference in a named Actor, not in the class.
 
 ```beamtalk
 // This is a compile error:
@@ -453,11 +453,11 @@ request(Method, Url, Headers, TimeoutMs) ->
 
 ### Where a class-side send runs
 
-A class-side send from Erlang follows the same rule as one from Beamtalk (ADR 0142). It runs **in the caller**, the native code's own process, when neither the class nor any ancestor declares class variables, nothing shadows the class method (no class-side extension or runtime-installed method), and the selector is not process-bound (`new`, `new:`, `spawn`, `spawnWith:`, `startLink`, ...). There is no class-process hop and no timeout: a 30 s HTTP request takes 30 s.
+A class-side send from Erlang follows the same rule as one from Beamtalk (ADR 0142). It runs **in the caller**, the native code's own process, when nothing shadows the class method (no runtime-installed method) and the selector is not process-bound (`new`, `new:`, `spawn`, `spawnWith:`, `startLink`, ...). There is no class-process hop and no timeout: a 30 s HTTP request takes 30 s.
 
 Otherwise the class method runs **in the class's process** and the caller waits for the answer. `send/3` waits up to the default class-method call timeout, 60 seconds. For a method that may take longer, use `send/4`: its `Timeout` (milliseconds or `infinity`) replaces the default. Running out of it raises a structured `timeout` error (`#beamtalk_error{kind = timeout}`). `send/4`'s `Timeout` also bounds the wait for an actor instance's answer. It does not limit a send that runs in the caller, or a send to a value: there is no other process to wait for.
 
-Which path a send takes can change at run time: loading a class-side extension, or redefining the class with class variables, moves its class methods into the class process. If a long call must not time out, pass a `send/4` timeout either way.
+If a long call must not time out, pass a `send/4` timeout either way.
 
 ### Values at the boundary
 

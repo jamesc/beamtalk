@@ -33,8 +33,6 @@ handle_class_crash_recovery(ClassPid, Selector, Action) ->
                     %% Retry with the restarted class process. Wrap in try/catch
                     %% so that if the restarted process crashes again immediately,
                     %% the caller gets a clean error instead of a raw noproc exit.
-                    %% bt-catcher-audit: not-applicable-other-process - Action is a gen_server
-                    %% call to the class process
                     try
                         Action(NewPid)
                     catch

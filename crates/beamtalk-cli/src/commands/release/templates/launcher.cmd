@@ -33,8 +33,25 @@ if not defined ERL (
 )
 
 rem Pin epmd to loopback (ADR 0125 §1.6) for every verb that can start
-rem distribution or epmd itself — see launcher.sh's identical comment.
+rem distribution or epmd itself — see launcher.sh's identical comment. Under
+rem RELEASE_DISTRIBUTION=tls, :select_distribution points it at
+rem RELEASE_DIST_INTERFACE instead.
 set "ERL_EPMD_ADDRESS=127.0.0.1"
+
+rem ADR 0126 amendment D2 (BT-5233): RELEASE_DISTRIBUTION=tls is the only way
+rem off loopback (TLS distribution with peer verification); see launcher.sh's
+rem identical check. Plain TCP off-host is not offered. Delayed expansion
+rem only, as for RELEASE_NODE below: the value is never expanded where
+rem cmd.exe tokenizes operators. Any other value is refused by
+rem :select_distribution, so version and eval (no distribution) still run.
+set "DIST_MODE=loopback"
+if defined RELEASE_DISTRIBUTION (
+    if "!RELEASE_DISTRIBUTION!"=="tls" (
+        set "DIST_MODE=tls"
+    ) else (
+        set "DIST_MODE=unsupported"
+    )
+)
 
 rem Reject a malformed RELEASE_NODE before it ever reaches erl.exe — see
 rem launcher.sh's identical check for why (an invalid -sname otherwise
@@ -65,9 +82,9 @@ if defined RELEASE_NODE (
     )
 )
 
-rem BT-5077: reject a RELEASE_COOKIE that erl would split or mis-parse inside
-rem ERL_AFLAGS (see :export_cookie below), exactly as launcher.sh's
-rem `export_cookie` does for whitespace, quotes and backslashes. Delayed
+rem BT-5077: reject a RELEASE_COOKIE containing whitespace, quotes or
+rem backslashes (see :export_cookie below), exactly as launcher.sh's
+rem `export_cookie` does. Delayed
 rem expansion only, for the same reason as the RELEASE_NODE check above: the
 rem value is never expanded where cmd.exe tokenizes operators. Each
 rem character is stripped with a substitution and the result compared with
@@ -90,6 +107,17 @@ if not "!CK_CHECK!"=="!RELEASE_COOKIE!" (
     echo error: RELEASE_COOKIE must not contain whitespace, quotes or backslashes 1>&2
     exit /b 2
 )
+if "!RELEASE_COOKIE:~0,1!"=="-" goto :cookie_dash
+if "!RELEASE_COOKIE:~0,1!"=="+" goto :cookie_dash
+rem `set /p "=..."` (export_cookie) cannot write a value starting with `=`.
+if "!RELEASE_COOKIE:~0,1!"=="=" goto :cookie_equals
+goto :cookie_ok
+:cookie_dash
+echo error: RELEASE_COOKIE must not start with '-' or '+' 1>&2
+exit /b 2
+:cookie_equals
+echo error: RELEASE_COOKIE must not start with '=' on Windows 1>&2
+exit /b 2
 :cookie_ok
 
 set "VERB=%~1"
@@ -173,7 +201,7 @@ echo   This release's BEAM files were produced by OTP %BUILT_MAJOR% and will not
 echo   an older VM. 1>&2
 echo. 1>&2
 echo   Required: Erlang/OTP %REQ_MIN%-%REQ_MAX% (built on %BUILT_MAJOR%) 1>&2
-echo   Found:    Erlang/OTP %HOST_MAJOR% (%ERL%) 1>&2
+echo   Found:    Erlang/OTP %HOST_MAJOR% ^(!ERL!^) 1>&2
 echo. 1>&2
 echo   Either install a supported Erlang/OTP version, or rebuild the release on this host. 1>&2
 exit /b 1
@@ -181,22 +209,146 @@ exit /b 1
 :lib_pa_args
 set "PA_ARGS="
 for /d %%D in ("%ROOT%\lib\*") do (
-    if exist "%%D\ebin" set "PA_ARGS=!PA_ARGS! -pa "%%D\ebin""
+    rem BT-5134: copy the loop variable first; a close-paren in it, as in
+    rem Program Files x86, would otherwise end this block when expanded unquoted.
+    set "LIB_DIR=%%D"
+    if exist "!LIB_DIR!\ebin" set "PA_ARGS=!PA_ARGS! -pa "!LIB_DIR!\ebin""
 )
 exit /b 0
 
 :export_cookie
-rem BT-5067: pass the cookie via ERL_AFLAGS (process environment), never as
-rem `-setcookie` on the command line, which other local users can read from
-rem the process list. See launcher.sh's `export_cookie`.
-if defined RELEASE_COOKIE (
-    if defined ERL_AFLAGS (
-        set "ERL_AFLAGS=!ERL_AFLAGS! -setcookie !RELEASE_COOKIE!"
-    ) else (
-        set "ERL_AFLAGS=-setcookie !RELEASE_COOKIE!"
+rem BT-5126 / BT-5185: the cookie never goes on erl's command line (a cookie
+rem flag, ERL_AFLAGS and -args_file all expand into the emulator's argv, which other
+rem local users can read from the process list), and the node never runs with
+rem any other cookie, even while it boots. It goes in .erlang.cookie in a fresh
+rem directory under the per-user %TEMP%, which erl is started with as its home:
+rem erlexec derives -home from HOMEDRIVE + HOMEPATH on Windows, so OTP's auth
+rem reads the cookie there as the kernel boots. The node puts HOMEDRIVE and
+rem HOMEPATH back and removes the directory first thing. RELEASE_COOKIE is
+rem cleared so no process erl starts inherits it. See launcher.sh's
+rem `export_cookie`.
+set "COOKIE_HOME="
+if not defined RELEASE_COOKIE exit /b 0
+rem %RANDOM% is clock-seeded, so two launchers started together draw the same
+rem name; retry with a fresh delayed !RANDOM! draw (as check_otp_window does).
+rem mkdir fails on an existing path, so a directory is never reused.
+for /l %%N in (1,1,50) do if not defined COOKIE_HOME (
+    set "COOKIE_TRY=%TEMP%\__COOKIE_DIR_PREFIX__!RANDOM!!RANDOM!!RANDOM!!RANDOM!"
+    mkdir "!COOKIE_TRY!" >nul 2>&1 && set "COOKIE_HOME=!COOKIE_TRY!"
+)
+set "COOKIE_TRY="
+if not defined COOKIE_HOME (
+    echo error: could not create a private directory for the cookie 1>&2
+    exit /b 1
+)
+rem `set /p` writes the value with no trailing newline.
+<nul set /p "=!RELEASE_COOKIE!" > "!COOKIE_HOME!\.erlang.cookie"
+if not exist "!COOKIE_HOME!\.erlang.cookie" (
+    rmdir /s /q "!COOKIE_HOME!" 2>nul
+    echo error: could not write the cookie file 1>&2
+    exit /b 1
+)
+for %%F in ("!COOKIE_HOME!\.erlang.cookie") do if %%~zF==0 (
+    rmdir /s /q "!COOKIE_HOME!" 2>nul
+    echo error: could not write the cookie file 1>&2
+    exit /b 1
+)
+if defined HOMEDRIVE (
+    set "__ORIG_PREFIX__HOMEDRIVE=set:!HOMEDRIVE!"
+) else (
+    set "__ORIG_PREFIX__HOMEDRIVE=unset"
+)
+if defined HOMEPATH (
+    set "__ORIG_PREFIX__HOMEPATH=set:!HOMEPATH!"
+) else (
+    set "__ORIG_PREFIX__HOMEPATH=unset"
+)
+for %%I in ("!COOKIE_HOME!") do (
+    set "HOMEDRIVE=%%~dI"
+    set "HOMEPATH=%%~pnxI"
+)
+set "__COOKIE_HOME_ENV__=!COOKIE_HOME!"
+set "RELEASE_COOKIE="
+exit /b 0
+
+rem BT-5185: remove the private cookie home once erl has exited, in case the
+rem node died before its own restore step removed it. cmd does not exec, so
+rem this runs after every verb that made one, the foreground node included.
+:cleanup_cookie
+if defined COOKIE_HOME if exist "!COOKIE_HOME!" rmdir /s /q "!COOKIE_HOME!" 2>nul
+exit /b 0
+
+rem RELEASE_DISTRIBUTION=tls (BT-5233): run beamtalk_release_launcher's
+rem tls_preflight_main in a VM with no distribution, as launcher.sh's
+rem `select_distribution` does: it is not given vm.args to load, only its path
+rem as -beamtalk_vm_args, and reads just the -ssl_dist_opt, -ssl_dist_optfile
+rem and -proto_dist flags in Erlang (vm_args_dist_flags/1), so a user
+rem [release] vm-args overlay cannot run -eval, start distribution or silence
+rem the check there. It refuses (exit 2, each problem and its fix
+rem on stderr) unless RELEASE_HOST and RELEASE_DIST_INTERFACE are valid and
+rem the RELEASE_SSL_DIST_OPTFILE file makes both sides verify their peer;
+rem otherwise it prints one tls-KEY=VALUE line per setting. The output goes
+rem to a file in a directory made with mkdir, read back with `for /f`, for
+rem the reasons :check_otp_window gives. '=' separates key and value because
+rem an IPv6 address can start with ':', which `for /f` would skip as a
+rem delimiter. The values are validated by the check, so they are safe to
+rem expand: in particular tls_optfile/3 refuses '!', '^', '%' and '"' in the
+rem option-file path, which `set "TLS_OPTFILE=%%B"` under delayed expansion
+rem would otherwise mangle. epmd then follows the interface.
+:select_distribution
+if "%DIST_MODE%"=="unsupported" (
+    echo error: RELEASE_DISTRIBUTION "!RELEASE_DISTRIBUTION!" is not supported: unset it to stay on this host, or set it to 'tls' to cluster across hosts over TLS with peer verification; plain TCP off-host is not offered 1>&2
+    exit /b 2
+)
+if /I not "%DIST_MODE%"=="tls" exit /b 0
+call :lib_pa_args
+call :minimal_boot_args
+set "TLS_PROBE_DIR="
+for /l %%N in (1,1,50) do if not defined TLS_PROBE_DIR (
+    set "TLS_TRY=%TEMP%\beamtalk_tls_probe_!RANDOM!!RANDOM!!RANDOM!"
+    mkdir "!TLS_TRY!" >nul 2>&1 && set "TLS_PROBE_DIR=!TLS_TRY!"
+)
+set "TLS_TRY="
+if not defined TLS_PROBE_DIR (
+    echo error: could not create a directory for the RELEASE_DISTRIBUTION=tls check 1>&2
+    exit /b 1
+)
+set "TLS_PROBE=!TLS_PROBE_DIR!\preflight.txt"
+"%ERL%" -noshell %BOOT_ARGS% %PA_ARGS% -beamtalk_vm_args "%CONFIG_DIR%\vm.args" -beamtalk_launcher_verb %VERB% -eval "beamtalk_release_launcher:tls_preflight_main()." >"!TLS_PROBE!"
+set "TLS_RC=!errorlevel!"
+set "TLS_PROTO="
+set "TLS_INTERFACE="
+set "TLS_EPMD="
+set "TLS_HOST="
+set "TLS_OPTFILE="
+if "!TLS_RC!"=="0" (
+    for /f "usebackq tokens=1,* delims==" %%A in ("!TLS_PROBE!") do (
+        if "%%A"=="tls-proto" set "TLS_PROTO=%%B"
+        if "%%A"=="tls-interface" set "TLS_INTERFACE=%%B"
+        if "%%A"=="tls-epmd" set "TLS_EPMD=%%B"
+        if "%%A"=="tls-host" set "TLS_HOST=%%B"
+        if "%%A"=="tls-optfile" set "TLS_OPTFILE=%%B"
     )
 )
+del "!TLS_PROBE!" >nul 2>&1
+rmdir "!TLS_PROBE_DIR!" >nul 2>&1
+if not "!TLS_RC!"=="0" exit /b !TLS_RC!
+if not defined TLS_PROTO goto :tls_no_settings
+if not defined TLS_INTERFACE goto :tls_no_settings
+if not defined TLS_EPMD goto :tls_no_settings
+if not defined TLS_HOST goto :tls_no_settings
+if not defined TLS_OPTFILE goto :tls_no_settings
+rem all (interface 0.0.0.0 or ::): leave epmd at its default of every
+rem interface; naming 0.0.0.0 makes a freshly started epmd exit.
+if "!TLS_EPMD!"=="all" (
+    set "ERL_EPMD_ADDRESS="
+) else (
+    set "ERL_EPMD_ADDRESS=!TLS_EPMD!"
+)
 exit /b 0
+:tls_no_settings
+echo error: the RELEASE_DISTRIBUTION=tls check printed no settings 1>&2
+exit /b 1
 
 rem This node's own -sname: RELEASE_NODE if set, else the release name
 rem (matching `mix release`'s identically-named env var) — see
@@ -205,6 +357,15 @@ rem into vm.args (erl keeps the *first* -sname it sees and warns on a
 rem duplicate). This is what lets more than one instance of the same
 rem release run on one host at once (ADR 0126 section 9).
 :node_sname
+rem Under RELEASE_DISTRIBUTION=tls the host part is RELEASE_HOST (-name).
+if /I "%DIST_MODE%"=="tls" (
+    if defined RELEASE_NODE (
+        set "THIS_NODE=!RELEASE_NODE!@!TLS_HOST!"
+    ) else (
+        set "THIS_NODE=!RELEASE_NAME!@!TLS_HOST!"
+    )
+    exit /b 0
+)
 if defined RELEASE_NODE (
     set "THIS_NODE=%RELEASE_NODE%@localhost"
 ) else (
@@ -220,29 +381,69 @@ rem exactly this. A host ERTS already has its own default boot file.
 :minimal_boot_args
 set "BOOT_ARGS="
 if /I "%INCLUDE_ERTS%"=="true" if exist "%ROOT%\erts-%ERTS_VSN%\bin\start_clean.boot" (
-    set "BOOT_ARGS=-boot "%ROOT%\erts-%ERTS_VSN%\bin\start_clean""
+    rem BT-5134: delayed expansion; the root sits outside the quotes here and
+    rem a close-paren in it would end this block.
+    set "BOOT_ARGS=-boot "!ROOT!\erts-%ERTS_VSN%\bin\start_clean""
 )
 exit /b 0
 
+:client_epmd_args
+rem BT-5264: a client verb (stop, ping, rpc, remote_console) must not start an
+rem epmd while one already answers on the port; see launcher.sh's
+rem `client_epmd_args` for why (a second epmd shadows the first on macOS).
+rem Sets EPMD_ARGS to " -start_epmd false" when `epmd -names`, which only asks
+rem and never starts one, reaches an epmd on ERL_EPMD_PORT; otherwise empty
+rem (no epmd.exe beside erl.exe or on PATH: erl starts one, as before).
+set "EPMD_ARGS="
+for %%I in ("%ERL%") do set "EPMD_EXE=%%~dpIepmd.exe"
+if not exist "!EPMD_EXE!" for %%E in (epmd.exe) do set "EPMD_EXE=%%~$PATH:E"
+if not defined EPMD_EXE exit /b 0
+if not exist "!EPMD_EXE!" exit /b 0
+"!EPMD_EXE!" -names >nul 2>&1
+if not errorlevel 1 set "EPMD_ARGS= -start_epmd false"
+exit /b 0
+
 :foreground
+rem The dispatch above matched case-insensitively; name the verb canonically
+rem for the TLS check, which prints its notes only for foreground.
+set "VERB=foreground"
 call :check_otp_window
 if errorlevel 1 exit /b 1
+call :select_distribution
+if errorlevel 1 exit /b !errorlevel!
 call :export_cookie
+if errorlevel 1 exit /b 1
 call :node_sname
 rem -noshell -noinput: see launcher.sh's foreground comment — no
 rem interactive shell attaches stdin, so a supervisor with no tty
 rem (a Windows service, a container) does not make the node see EOF
 rem and terminate right after boot. Console output is unaffected.
+if /I "%DIST_MODE%"=="tls" goto :foreground_tls
 "%ERL%" -noshell -noinput -boot "%CONFIG_DIR%\start" -boot_var RELEASE_DIR "%ROOT%" ^
     -sname "%THIS_NODE%" ^
     -config "%CONFIG_DIR%\sys" -args_file "%CONFIG_DIR%\vm.args"
-exit /b %errorlevel%
+set "RC=!errorlevel!"
+call :cleanup_cookie
+exit /b !RC!
+:foreground_tls
+rem -kernel flags are first-wins, so this interface, ahead of -args_file,
+rem replaces vm.args's loopback one.
+"%ERL%" -noshell -noinput -boot "%CONFIG_DIR%\start" -boot_var RELEASE_DIR "%ROOT%" ^
+    -name "%THIS_NODE%" -proto_dist !TLS_PROTO! -ssl_dist_optfile "!TLS_OPTFILE!" ^
+    -kernel inet_dist_use_interface "!TLS_INTERFACE!" ^
+    -config "%CONFIG_DIR%\sys" -args_file "%CONFIG_DIR%\vm.args"
+set "RC=!errorlevel!"
+call :cleanup_cookie
+exit /b !RC!
 
 :stop
 call :check_otp_window
 if errorlevel 1 exit /b 1
+call :select_distribution
+if errorlevel 1 exit /b !errorlevel!
 call :lib_pa_args
 call :export_cookie
+if errorlevel 1 exit /b 1
 call :minimal_boot_args
 call :node_sname
 rem `%RANDOM%` three times over: a single 15-bit draw collides often enough
@@ -258,15 +459,28 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so stop targets whichever instance was started with
 rem the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -noshell -hidden -sname "%SNAME%" %BOOT_ARGS% %PA_ARGS% ^
+if /I "%DIST_MODE%"=="tls" (
+    set "DIST_ARGS=-hidden -name "%SNAME%@!TLS_HOST!" -proto_dist !TLS_PROTO! -ssl_dist_optfile "!TLS_OPTFILE!" -kernel inet_dist_use_interface "!TLS_INTERFACE!""
+) else (
+    set "DIST_ARGS=-hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}""
+)
+call :client_epmd_args
+set "DIST_ARGS=!DIST_ARGS!!EPMD_ARGS!"
+"%ERL%" -noshell %DIST_ARGS% %BOOT_ARGS% %PA_ARGS% ^
+    -eval "__RESTORE_HOME_EVAL__." ^
     -eval "beamtalk_release_launcher:stop_client_main()." -extra "%NODE%"
-exit /b %errorlevel%
+set "RC=!errorlevel!"
+call :cleanup_cookie
+exit /b !RC!
 
 :ping
 call :check_otp_window
 if errorlevel 1 exit /b 1
+call :select_distribution
+if errorlevel 1 exit /b !errorlevel!
 call :lib_pa_args
 call :export_cookie
+if errorlevel 1 exit /b 1
 call :minimal_boot_args
 call :node_sname
 rem See `:stop`'s comment above: three `%RANDOM%` draws, not one, to keep
@@ -276,14 +490,28 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so ping targets whichever instance was started with
 rem the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -noshell -hidden -sname "%SNAME%" %BOOT_ARGS% %PA_ARGS% ^
+if /I "%DIST_MODE%"=="tls" (
+    set "DIST_ARGS=-hidden -name "%SNAME%@!TLS_HOST!" -proto_dist !TLS_PROTO! -ssl_dist_optfile "!TLS_OPTFILE!" -kernel inet_dist_use_interface "!TLS_INTERFACE!""
+) else (
+    set "DIST_ARGS=-hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}""
+)
+call :client_epmd_args
+set "DIST_ARGS=!DIST_ARGS!!EPMD_ARGS!"
+"%ERL%" -noshell %DIST_ARGS% %BOOT_ARGS% %PA_ARGS% ^
+    -eval "__RESTORE_HOME_EVAL__." ^
     -eval "beamtalk_release_launcher:ping_client_main()." -extra "%NODE%"
-exit /b %errorlevel%
+set "RC=!errorlevel!"
+call :cleanup_cookie
+exit /b !RC!
 
 :remote_console
 call :check_otp_window
 if errorlevel 1 exit /b 1
+call :select_distribution
+if errorlevel 1 exit /b !errorlevel!
+call :lib_pa_args
 call :export_cookie
+if errorlevel 1 exit /b 1
 call :minimal_boot_args
 call :node_sname
 rem See `:stop`'s comment above: three `%RANDOM%` draws, not one, to keep
@@ -293,8 +521,20 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so remote_console attaches to whichever instance was
 rem started with the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -hidden -sname "%SNAME%" %BOOT_ARGS% -remsh "%NODE%"
-exit /b %errorlevel%
+rem Put HOMEDRIVE and HOMEPATH back first (BT-5185), then start the same
+rem remote shell `-remsh` does (OTP 26+).
+if /I "%DIST_MODE%"=="tls" (
+    set "DIST_ARGS=-hidden -name "%SNAME%@!TLS_HOST!" -proto_dist !TLS_PROTO! -ssl_dist_optfile "!TLS_OPTFILE!" -kernel inet_dist_use_interface "!TLS_INTERFACE!""
+) else (
+    set "DIST_ARGS=-hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}""
+)
+call :client_epmd_args
+set "DIST_ARGS=!DIST_ARGS!!EPMD_ARGS!"
+"%ERL%" -noshell %DIST_ARGS% %BOOT_ARGS% %PA_ARGS% ^
+    -eval "__RESTORE_HOME_EVAL__, shell:start_interactive({'%NODE%', {shell, start, []}})."
+set "RC=!errorlevel!"
+call :cleanup_cookie
+exit /b !RC!
 
 :eval
 call :check_otp_window
@@ -328,8 +568,11 @@ for /f "tokens=1,2,*" %%A in ("%ENTRY%") do (
 )
 if not defined CLASS goto :usage
 if not defined SELECTOR goto :usage
+call :select_distribution
+if errorlevel 1 exit /b !errorlevel!
 call :lib_pa_args
 call :export_cookie
+if errorlevel 1 exit /b 1
 call :minimal_boot_args
 call :node_sname
 rem See `:stop`'s comment above: three `%RANDOM%` draws, not one, to keep
@@ -339,10 +582,20 @@ rem This instance's own name — see :node_sname's comment (respects
 rem RELEASE_NODE, so rpc targets whichever instance was started with
 rem the same value).
 set "NODE=%THIS_NODE%"
-"%ERL%" -noshell -hidden -sname "%SNAME%" %BOOT_ARGS% %PA_ARGS% ^
+if /I "%DIST_MODE%"=="tls" (
+    set "DIST_ARGS=-hidden -name "%SNAME%@!TLS_HOST!" -proto_dist !TLS_PROTO! -ssl_dist_optfile "!TLS_OPTFILE!" -kernel inet_dist_use_interface "!TLS_INTERFACE!""
+) else (
+    set "DIST_ARGS=-hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}""
+)
+call :client_epmd_args
+set "DIST_ARGS=!DIST_ARGS!!EPMD_ARGS!"
+"%ERL%" -noshell %DIST_ARGS% %BOOT_ARGS% %PA_ARGS% ^
+    -eval "__RESTORE_HOME_EVAL__." ^
     -eval "beamtalk_release_launcher:rpc_client_main()." ^
     -extra "%NODE%" "%CLASS%" "%SELECTOR%" %ENTRY_REST%
-exit /b %errorlevel%
+set "RC=!errorlevel!"
+call :cleanup_cookie
+exit /b !RC!
 
 :version
 if exist "%PROVENANCE%" (

@@ -317,6 +317,145 @@ examples() ->
                         'end' => 15
                     })
                 ]
+            }}},
+        %% BT-5203: the editing writes, each `{value, Map}` of scalars.
+        {<<"save-method">>, <<"save-method">>,
+            {value, #{<<"class">> => <<"Counter">>, <<"selector">> => <<"increment">>}}},
+        {<<"save-class">>, <<"save-class">>, {value, #{<<"path">> => <<"src/Greeter.bt">>}}},
+        {<<"revert-method">>, <<"revert-method">>,
+            {value, #{<<"class">> => <<"Counter">>, <<"selector">> => <<"increment">>}}},
+        {<<"reload-file">>, <<"reload-file">>,
+            {value, #{<<"classes">> => [<<"Counter">>, <<"Greeter">>]}}},
+        %% BT-5204: workspace state. Each `{value, Map}` is the wire projection
+        %% (`beamtalk_repl_ops_state`): binary keys, `null` for absent.
+        {<<"flush">>, <<"flush">>,
+            {value, #{
+                <<"flushed">> => 1,
+                <<"files">> => [<<"src/counter.bt">>],
+                <<"newClasses">> => 0,
+                <<"removedClasses">> => 0,
+                <<"skipped">> => [
+                    #{
+                        <<"seq">> => 2,
+                        <<"class">> => <<"Gone">>,
+                        <<"reason">> => <<"destructive">>
+                    }
+                ],
+                <<"conflicts">> => []
+            }}},
+        {<<"changes">>, <<"changes">>,
+            {value, #{
+                <<"entries">> => [
+                    #{
+                        <<"seq">> => 1,
+                        <<"className">> => <<"Counter">>,
+                        <<"selector">> => <<"increment">>,
+                        <<"kind">> => <<"instance">>,
+                        <<"side">> => <<"instance">>,
+                        <<"intent">> => <<"durable">>,
+                        <<"flushable">> => true,
+                        <<"authorKind">> => <<"human">>,
+                        <<"sourceFile">> => <<"src/counter.bt">>,
+                        <<"orphan">> => false,
+                        <<"priorEpoch">> => false,
+                        <<"flushed">> => false,
+                        <<"active">> => true,
+                        <<"shadowed">> => false,
+                        <<"clean">> => false,
+                        <<"diff">> => <<"-  increment => 1\n+  increment => 2\n">>,
+                        <<"oldClass">> => null,
+                        <<"oldSelector">> => null
+                    }
+                ]
+            }}},
+        {<<"info">>, <<"info">>,
+            {value, #{
+                <<"version">> => #{
+                    <<"runtime_version">> => <<"0.6.0">>,
+                    <<"protocol_version">> => <<"2.0">>,
+                    <<"otp_release">> => <<"27">>,
+                    <<"erts_version">> => <<"15.0">>
+                },
+                <<"node">> => <<"beamtalk_workspace_ab12@localhost">>,
+                <<"workspace_id">> => <<"ws-ab12">>,
+                <<"settings">> => #{<<"autoflush">> => false}
+            }}},
+        %% BT-5205: git ops, `{value, Map}` wire-shaped (`beamtalk_repl_ops_git`).
+        %% `git-unstage` and `git-revert-file` answer the same `{path}` as `git-stage`.
+        {<<"git-status">>, <<"git-status">>,
+            {value, #{
+                <<"branch">> => <<"main">>,
+                <<"upstream">> => <<"origin/main">>,
+                <<"ahead">> => 1,
+                <<"behind">> => 0,
+                <<"files">> => [
+                    #{
+                        <<"path">> => <<"src/counter.bt">>,
+                        <<"index">> => <<"unmodified">>,
+                        <<"worktree">> => <<"modified">>
+                    }
+                ],
+                <<"truncated">> => false
+            }}},
+        {<<"git-diff">>, <<"git-diff">>,
+            {value, #{
+                <<"path">> => <<"src/counter.bt">>,
+                <<"worktree">> => <<"@@ -1 +1 @@\n-value => 0\n+value => 1\n">>,
+                <<"staged">> => <<>>,
+                <<"truncated">> => false
+            }}},
+        {<<"git-log">>, <<"git-log">>,
+            {value, #{
+                <<"commits">> => [
+                    #{
+                        <<"sha">> => <<"0123456789abcdef0123456789abcdef01234567">>,
+                        <<"short_sha">> => <<"0123456">>,
+                        <<"subject">> => <<"Add Counter">>,
+                        <<"author">> => <<"Ada">>,
+                        <<"ts">> => <<"2026-11-26T10:00:00+00:00">>
+                    }
+                ],
+                <<"limit">> => 20
+            }}},
+        {<<"git-stage">>, <<"git-stage">>, {value, #{<<"path">> => <<"src/counter.bt">>}}},
+        {<<"git-commit">>, <<"git-commit">>, {value, #{<<"committed">> => true}}},
+        %% BT-5205: process navigation (`beamtalk_repl_ops_process`). The term holds a
+        %% live `handle`; `encode/2` sends its stable id, and a foreign child's is `null`.
+        {<<"children">>, <<"children">>,
+            {children, #{
+                <<"children">> => [
+                    #{
+                        <<"label">> => <<"Counter">>,
+                        <<"className">> => <<"Counter">>,
+                        <<"kind">> => <<"beamtalkActor">>,
+                        <<"pid">> => <<"<0.201.0>">>,
+                        <<"registeredName">> => null,
+                        <<"childCount">> => 0,
+                        <<"isSupervisor">> => false,
+                        <<"handle">> =>
+                            {beamtalk_object, 'Counter', counter, list_to_pid("<0.201.0>")}
+                    },
+                    #{
+                        <<"label">> => <<"process">>,
+                        <<"className">> => null,
+                        <<"kind">> => <<"otpProcess">>,
+                        <<"pid">> => <<"<0.202.0>">>,
+                        <<"registeredName">> => null,
+                        <<"childCount">> => 0,
+                        <<"isSupervisor">> => false,
+                        <<"handle">> => null
+                    }
+                ],
+                <<"truncated">> => false
+            }}},
+        {<<"process-info">>, <<"process-info">>,
+            {value, #{
+                <<"pid">> => <<"<0.201.0>">>,
+                <<"alive">> => true,
+                <<"status">> => <<"waiting">>,
+                <<"message_queue_len">> => 0,
+                <<"memory">> => 2688,
+                <<"reductions">> => 4021
             }}}
     ].
 

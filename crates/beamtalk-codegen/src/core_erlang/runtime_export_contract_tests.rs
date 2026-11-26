@@ -28,7 +28,7 @@
 //!    next document piece. When that piece is a literal `leaf::atom("f")`,
 //!    the call is read directly. When it comes from an enum or a typed
 //!    constant, [`dynamic_calls`] enumerates every value the emitter can
-//!    take (`actor_state_helper::ALL`, `class_var_fn::ALL`, the `ALL` arrays
+//!    take (`actor_state_helper::ALL`, the `ALL` arrays
 //!    of `SpawnVariant`, `NamedSpawn`, `GuardSense` and the supervisor
 //!    kinds). An open head under `primitives/` is covered by pass 2. Any
 //!    other open head whose module has no enumeration fails the test, so a
@@ -44,7 +44,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::actor_state_access::actor_state_helper;
-use super::class_var_access::class_var_fn;
 use super::dispatch_codegen::NamedSpawn;
 use super::gen_server::SpawnVariant;
 use super::guard_returns::GuardSense;
@@ -461,16 +460,6 @@ fn dynamic_calls() -> Vec<EmittedCall> {
             "actor_state_helper::ALL",
         ));
     }
-    // `class_var_fn`'s arity is not part of its type: read helpers take an
-    // extra capture argument inside a block, so only the name is checked.
-    for f in class_var_fn::ALL {
-        out.push(call(
-            "beamtalk_class_vars",
-            f.name(),
-            None,
-            "class_var_fn::ALL",
-        ));
-    }
     for f in KindOfFn::ALL {
         out.push(call(
             "beamtalk_behaviour_intrinsics",
@@ -549,7 +538,7 @@ fn resolve_open_heads(
             problems.push(format!(
                 "{}: the function called on {} is chosen at render time, and nothing \
                  enumerates it. Give its emitter a typed set of values with an `ALL` \
-                 list (like `class_var_fn`) and add it to `dynamic_calls`.",
+                 list and add it to `dynamic_calls`.",
                 head.origin, head.module
             ));
         }

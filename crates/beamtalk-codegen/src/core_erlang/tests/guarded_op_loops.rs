@@ -480,15 +480,15 @@ const ON_DO_HYBRID_LOOPS: [&str; 6] = [
 const ON_DO_HYBRID_PROTECTED: [&str; 2] = ["0 error: \"boom\"", "0"];
 const ON_DO_HYBRID_HANDLERS: [&str; 3] = ["[:e | nil]", "[nil]", "[:e | e]"];
 
-/// Every cell-boundary entry in `out`: the text between each class-variable
-/// snapshot and the `try` that follows it.
+/// Every `on:do:` cell-boundary entry in `out`: the `let` that snapshots the
+/// cell or stores the pre-region `State`, rendered immediately before the
+/// boundary's `try` (ADR 0137 §5).
 fn on_do_entries(out: &str) -> Vec<&str> {
-    out.match_indices("'beamtalk_class_vars':'snapshot'()")
-        .map(|(i, _)| {
-            let rest = &out[i..];
-            &rest[..rest.find("try ").expect("on:do: entry precedes its try")]
-        })
-        .collect()
+    let entry = regex::Regex::new(
+        r"let [^ ]+ = call 'beamtalk_actor_state':'(snapshot|store)'\([^)]*\) in try ",
+    )
+    .expect("valid regex");
+    entry.find_iter(out).map(|m| m.as_str()).collect()
 }
 
 #[test]
@@ -1361,9 +1361,10 @@ fn field_write_corpus_is_verifier_clean() {
 /// from its own bracket decision, so the §4b rule ("no loop that brackets
 /// admits a field write in its body") holds even if mode selection regresses.
 /// With mode selection's field-write exclusion off, every shape it lowers
-/// stateless reports `FieldWriteInBracketedLoop` — a write directly in the body
-/// and one in a nested loop alike — and every other shape stays clean because
-/// an independent guard keeps it on the `StateAcc` path.
+/// stateless reports the lost write — `FieldWriteOnPrivateScratch` where the
+/// write is lowered on the loop's private scratch map (BT-5281), else
+/// `FieldWriteInBracketedLoop` from the checkout — and every other shape stays
+/// clean because an independent guard keeps it on the `StateAcc` path.
 #[test]
 fn checkout_reports_a_field_write_in_a_bracketing_loop() {
     let mut reported = 0;
@@ -1374,9 +1375,20 @@ fn checkout_reports_a_field_write_in_a_bracketing_loop() {
         } else {
             let report =
                 report.unwrap_or_else(|| panic!("{name}: faulted compile should report:\n{src}"));
+            // BT-5281: a write lowered in the stateless loop's own frame (or an
+            // arm or loop nested in it that holds no whole `State` either) is
+            // reported first, where it is lowered, as
+            // `FieldWriteOnPrivateScratch`. A write in a nested frame that does
+            // hold a whole `State` (`separatedBy:`'s `StateAcc` body) is left to
+            // the bracketing checkout.
+            let expected = if name.ends_with("/nested_separated_by") {
+                "FieldWriteInBracketedLoop"
+            } else {
+                "FieldWriteOnPrivateScratch"
+            };
             assert!(
-                report.contains("FieldWriteInBracketedLoop"),
-                "{name}: expected the field-write finding, got:\n{report}\n{src}"
+                report.contains(expected),
+                "{name}: expected {expected}, got:\n{report}\n{src}"
             );
             reported += 1;
         }

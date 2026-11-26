@@ -23,9 +23,8 @@ Object subclass: FoldValueCtr
     coll inject: 0 into: [:acc :each | acc + each]
 
 Actor subclass: FoldClassMethodCtr
-  classState: total = 0
 
-  // ClassMethod: `do:` with a captured local mutation (class var untouched).
+  // ClassMethod: `do:` with a captured local mutation.
   class sumDo: coll =>
     sum := 0
     coll do: [:each | sum := sum + each]

@@ -26,7 +26,7 @@ creates a table. It holds no state of its own and does no work beyond owning
 tables, so it has nothing to crash on. If it is killed from outside anyway,
 two things are lost: every table it currently holds (inherited from a crashed
 owner and not yet reclaimed) is destroyed, and the boot tables owned by the
-app master (class registry, metadata, extensions, protocol tables) lose their
+app master (class registry, metadata, protocol tables) lose their
 heir permanently, because `adopt_owned_tables/0` runs once at app start and
 `maybe_set_heir/1` is a no-op for any caller that does not own the table. The
 tables of live restartable owners (trace store, announcements bus) are in the
@@ -120,7 +120,7 @@ Make the heir process the heir of every ETS table the caller owns.
 
 Called once by `beamtalk_runtime_app:start/2` after `beamtalk_runtime_sup` is
 up: every table the app master created before the heir existed (class registry,
-metadata, extensions, protocol registry, supervisor tables) gets the heir in
+metadata, protocol registry, supervisor tables) gets the heir in
 one pass, without a hand-kept list of table names to fall out of date.
 """.
 -spec adopt_owned_tables() -> ok.

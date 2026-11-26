@@ -29,13 +29,13 @@ handle(Op, Params, Msg, SessionPid) ->
 
 -doc """
 Term-returning handler for actors/inspect/kill/interrupt. Returns
-`{actors, [Meta]}`, `{inspect, map() | binary()}`, `{status, ok}`, or
+`{actors, [Meta]}` (each with `pid_text`, the pid as this node prints it), `{inspect, map() | binary()}`, `{status, ok}`, or
 `{error, #beamtalk_error{}}` — no JSON in this path.
 """.
 -spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
     beamtalk_repl_ops:op_result().
 handle_term(<<"actors">>, _Params, _Msg, _SessionPid) ->
-    {actors, beamtalk_workspace_actors:list()};
+    {actors, [with_pid_text(Actor) || Actor <- beamtalk_workspace_actors:list()]};
 handle_term(<<"inspect">>, Params, _Msg, _SessionPid) ->
     case beamtalk_repl_params:actor_pid(Params) of
         {error, _} = Err ->
@@ -104,8 +104,12 @@ handle_term(<<"kill">>, Params, _Msg, _SessionPid) ->
                             ]),
                             <<"System actors are started by the runtime; use :actors to find user actors.">>
                         )};
-                _ ->
-                    exit(Pid, kill),
+                {error, not_found} ->
+                    %% BT-5199: no longer an actor between the param check and
+                    %% here — refuse rather than report a kill that never ran.
+                    {error, not_killable_error(Pid, PidBin)};
+                {ok, _} ->
+                    kill_and_wait(Pid),
                     {status, ok}
             end
     end;
@@ -132,6 +136,62 @@ handle_term(<<"interrupt">>, _Params, Msg, SessionPid) ->
         ok = beamtalk_repl_shell:interrupt(TargetPid),
         {status, ok}
     catch
-        exit:{noproc, _} ->
-            {status, ok}
+        exit:{Reason, _} when Reason =:= noproc; Reason =:= normal; Reason =:= shutdown ->
+            %% Gone before, or while, the call was in flight: nothing to interrupt.
+            {status, ok};
+        exit:{timeout, _} ->
+            %% The shell did not answer in 5 s: it is alive but wedged. Say so
+            %% rather than letting the exit crash the caller.
+            {error,
+                beamtalk_repl_errors:make(
+                    session_busy,
+                    'REPL',
+                    <<"Session did not answer">>,
+                    <<"The session is busy; try again.">>
+                )}
+    end.
+
+%% BT-5205: `pid_text` is the pid as this node prints it (`<0.123.0>`, the form
+%% every other surface shows). A client attached over distribution holds the
+%% live pid, which it cannot format this way itself. The WebSocket encoder
+%% picks its own fields, so the wire is unchanged.
+-spec with_pid_text(map()) -> map().
+with_pid_text(#{pid := Pid} = Actor) ->
+    Actor#{pid_text => list_to_binary(pid_to_list(Pid))}.
+
+%% BT-5199: reply only once the actor is gone, so a client that reads `actors`
+%% right after the reply (the VS Code and LiveView "Kill actor" actions do)
+%% never lists it. `exit/2` only sends the signal. Bounded: a process that is
+%% somehow still alive after 5 s is left to die on its own.
+-define(KILL_WAIT_MS, 5000).
+
+-spec kill_and_wait(pid()) -> ok.
+kill_and_wait(Pid) ->
+    MRef = erlang:monitor(process, Pid),
+    exit(Pid, kill),
+    receive
+        {'DOWN', MRef, process, Pid, _Reason} -> ok
+    after ?KILL_WAIT_MS ->
+        erlang:demonitor(MRef, [flush]),
+        ok
+    end.
+
+%% Why `kill` refuses a pid the actor scan does not list: it has stopped, or it
+%% is a live process that is not an actor (BT-5199).
+-spec not_killable_error(pid(), binary()) -> beamtalk_error:error().
+not_killable_error(Pid, PidBin) ->
+    case is_process_alive(Pid) of
+        true ->
+            beamtalk_repl_errors:make(
+                not_an_actor,
+                'Actor',
+                iolist_to_binary([<<"Not an actor: ">>, PidBin]),
+                <<"Use :actors to find actors.">>
+            );
+        false ->
+            beamtalk_repl_errors:make(
+                actor_not_alive,
+                'Actor',
+                iolist_to_binary([<<"Actor is not alive: ">>, PidBin])
+            )
     end.

@@ -34,26 +34,26 @@
 //! A block is reported at most once, in flavor priority order: writes, then
 //! reads, then self-sends.
 //!
-//! This is a lint, not a guarantee: a block passed through a variable, a
-//! field, a parameter or an instance method is only caught at run time, and
-//! only for writes. A block that stays home never fires: self-sends and casts
-//! to `self`, inlined control flow, same-process collection operations,
-//! `on:do:`/`ensure:` and `Result tryDo:` (their receivers are `self`, the
-//! block, a local or a stdlib class), class methods that run in the caller
-//! (no class variables in the receiving class's chain, judged by
+//! This is a lint, not a guarantee: a block passed through a variable, a field,
+//! a parameter or an instance method is only caught at run time, and only for
+//! writes. A block that stays home never fires: self-sends and casts to `self`,
+//! inlined control flow, same-process collection operations, `on:do:`/`ensure:`
+//! and `Result tryDo:` (their receivers are `self`, the block, a local or a
+//! stdlib class), class methods that run in the caller (judged by
 //! [`ClassHierarchy::runs_class_method_in_caller`], ADR 0142 §1), and blocks
 //! that touch no field and send nothing to `self`.
 //!
-//! Differences from the `class-state-abroad` lint this is modelled on
-//! (`semantic_analysis::validators::class_state_abroad`): there is no
-//! stored/returned rule (ADR 0137: the lint sees only blocks passed directly
-//! to `Timer`, another actor or a class method); a send to the actor's *own*
-//! class's class-side method is abroad (the class process is not the actor
-//! process); and there is no transitive write analysis (a `self` send from an
-//! away block messages home, where its writes are kept — only direct field
-//! writes raise). Field reads, writes and `hasField:` probes are read off
-//! [`class_var_accesses`], which is generic over the name set it is given:
-//! here the actor's mutable instance fields, not class variables.
+//! Differences from the former `class-state-abroad` lint this was modelled on
+//! (removed with class variables, ADR 0153): there is no stored/returned rule
+//! (ADR 0137: the lint sees only blocks passed directly to `Timer`, another
+//! actor or a class method); a send to the actor's *own* class's class-side
+//! method that runs in the class process is abroad (the class process is not
+//! the actor process), like any other; and there is no transitive write
+//! analysis (a `self` send from an away block messages home, where its writes
+//! are kept — only direct field writes raise). Field reads, writes and
+//! `hasField:` probes are read off [`self_slot_accesses`], which is generic
+//! over the name set it is given: here the actor's mutable instance fields, not
+//! class variables.
 //!
 //! Overlap: a synchronous `self` send in a `Timer` block also fires
 //! `sync_send_in_timer_block` (at the send); this lint fires at the block,
@@ -92,13 +92,13 @@ use std::collections::HashSet;
 use crate::{LintContext, LintPass, async_cast_hint};
 use beamtalk_core::ast::{
     Block, ClassDefinition, ClassKind, DeclaredKeyword, Expression, ExpressionStatement,
-    MessageSelector, MethodKind, Module, ParameterDefinition, TypeAnnotation, WellKnownSelector,
+    MessageSelector, Module, ParameterDefinition, TypeAnnotation, WellKnownSelector,
 };
 use beamtalk_core::ast_walker::{SendRef, SendSite, walk_expression, walk_sends};
 use beamtalk_core::semantic_analysis::ClassHierarchy;
 use beamtalk_core::semantic_analysis::actor_spawn::{actor_locals, is_actor_spawn};
 use beamtalk_core::semantic_analysis::block_facts::{
-    ClassVarAccesses, class_var_accesses, probe_clause,
+    SelfSlotAccesses, probe_clause, self_slot_accesses,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory};
 
@@ -128,23 +128,14 @@ fn check_module(module: &Module, hierarchy: &ClassHierarchy, diagnostics: &mut V
             actor_fields: actor_typed_fields(module, hierarchy, class_name),
             hierarchy,
         };
-        for method in class
-            .methods
-            .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
-        {
+        for method in &class.methods {
             check_method_body(&method.body, &method.parameters, &ctx, diagnostics);
         }
     }
     // Standalone `Counter >> tick => ...` definitions are instance methods
-    // of `Counter` too. Package-qualified extensions are left alone: their
-    // class is resolved by package, which the simple-name hierarchy lookup
-    // does not model.
+    // of `Counter` too.
     for standalone in &module.method_definitions {
-        if standalone.is_class_method
-            || standalone.package.is_some()
-            || standalone.method.kind != MethodKind::Primary
-        {
+        if standalone.is_class_method {
             continue;
         }
         let class_name = standalone.class_name.name.as_str();
@@ -456,13 +447,13 @@ fn check_block(
     skip_reads: bool,
     report: &mut impl FnMut(&Block, Diagnostic),
 ) {
-    // `class_var_accesses` is generic over the name set it is given: here
+    // `self_slot_accesses` is generic over the name set it is given: here
     // the actor's mutable fields, so `reads`/`writes` are field reads/writes
     // and `has_field_probes` are actor-state probes (nested blocks included).
     // Its `reflective_writes` (`fieldAt:put:`/`clearField:` on `self`,
     // BT-4184) are the same cell writes, reflectively, of any name: a write
     // away from home raises whatever field it names.
-    let accesses = class_var_accesses(block, &ctx.fields);
+    let accesses = self_slot_accesses(block, &ctx.fields);
     let first_write = accesses
         .writes
         .iter()
@@ -481,7 +472,7 @@ fn check_block(
         .min_by_key(|(start, _)| *start);
     if let Some((_, what)) = first_write {
         report(block, writes_diagnostic(ctx, block, &what, shape));
-    } else if !skip_reads && accesses.reads_class_state() {
+    } else if !skip_reads && accesses.reads_slots() {
         report(block, reads_diagnostic(ctx, block, &accesses, shape));
     } else if let Some(self_send) = first_sync_self_send(block) {
         report(block, self_send_diagnostic(ctx, block, &self_send, shape));
@@ -491,7 +482,7 @@ fn check_block(
 impl ClassCtx<'_> {
     /// Shape A: a class-side send whose method carries the hierarchy's
     /// `spawns_block` mark (`Timer after:do:`/`every:do:`,
-    /// `Parallel all:`/`any:`) — the same mark `class-state-abroad` reads.
+    /// `Parallel all:`/`any:`).
     fn spawned_shape(&self, receiver: &Expression, selector: &str) -> Option<AbroadShape> {
         let Expression::ClassReference { name, package, .. } = receiver.unwrap_parens() else {
             return None;
@@ -547,8 +538,8 @@ impl ClassCtx<'_> {
     }
 
     /// Shape C: a class-side send that runs in the target class's process.
-    /// The target is any user-defined class that is not direct-called —
-    /// including the actor's own class, whose class-side methods run in the
+    /// The target is any user-defined class whose method does not run in the
+    /// caller — the actor's own class included: such a method runs in the
     /// class process, away from an instance method's actor process — reached
     /// as a class reference or through `self class` / `super class`. A
     /// stdlib class is stateless and its blocks run at home (`Result tryDo:`,
@@ -738,7 +729,7 @@ fn writes_diagnostic(
 fn reads_diagnostic(
     ctx: &ClassCtx<'_>,
     block: &Block,
-    accesses: &ClassVarAccesses,
+    accesses: &SelfSlotAccesses,
     shape: &AbroadShape,
 ) -> Diagnostic {
     let class = ctx.class_name;
@@ -859,8 +850,6 @@ Actor subclass: Runner
   run: aBlock => aBlock value
 
 Object subclass: Lib
-  classState: hits = 0
-
   class each: aBlock => aBlock value
 
   class sealed eachSealed: aBlock => aBlock value
@@ -872,16 +861,12 @@ sealed Object subclass: SealedLib
   class sealed each: aBlock => aBlock value
 
 sealed Object subclass: StatefulSealed
-  classState: seen = 0
-
   class sealed each: aBlock => aBlock value
 
 Actor subclass: Counter
   state: n = 0
   state: onTick = nil
   field: tag = #c
-  classState: ticks = 0
-
   class each: aBlock => aBlock value
 
   bump => self.n := self.n + 1
@@ -1430,17 +1415,6 @@ Actor subclass: Counter
     }
 
     #[test]
-    fn reflective_fieldat_class_method_may_keep_it() {
-        one_with(
-            "  peekVia => Lib each: [(self fieldAt: #n) printNl]\n",
-            &[
-                "block reads field n of Counter with `fieldAt:`",
-                "passed to 'Lib each:', which may keep it",
-            ],
-        );
-    }
-
-    #[test]
     fn direct_and_reflective_reads_combined() {
         one_with(
             "  startBoth => Timer after: 1 do: [self.n printNl. (self fieldAt: #onTick) printNl]\n",
@@ -1711,105 +1685,11 @@ Actor subclass: Counter
         assert!(d.is_empty(), "{d:?}");
     }
 
-    // ---- Shape C: a class method that runs in its class process -----------
+    // ---- Shape C: a class method that runs in the caller -------------------
     //
-    // ADR 0142 §1 (BT-4301): only a class whose chain declares class variables
-    // keeps its process (`Lib`, `StatefulSealed`, `Counter` declare
-    // `classState:`); sealing plays no part.
-
-    #[test]
-    fn open_class_method_write_warns() {
-        let d = only("  viaLib => Lib each: [self.n := 1]\n");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(
-            d[0].message
-                .contains("passed to 'Lib each:', which runs it in Lib's process"),
-            "{}",
-            d[0].message
-        );
-    }
-
-    #[test]
-    fn sealed_method_of_open_class_warns() {
-        // A `class sealed` method of a class with class variables still runs
-        // in its class process.
-        let d = only("  viaLibSealed => Lib eachSealed: [self.n := 1]\n");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(
-            d[0].message.contains("passed to 'Lib eachSealed:'"),
-            "{}",
-            d[0].message
-        );
-    }
-
-    #[test]
-    fn sealed_stateful_class_method_warns() {
-        // Direct-called needs no class variables.
-        let d = only("  viaStateful => StatefulSealed each: [self.n := 1]\n");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(
-            d[0].message.contains("passed to 'StatefulSealed each:'"),
-            "{}",
-            d[0].message
-        );
-    }
-
-    #[test]
-    fn inherited_class_side_method_warns() {
-        // An inherited method of a chain with class variables runs in the
-        // receiving class's process.
-        let d = abroad(
-            "Object subclass: Lib
-  classState: hits = 0
-
-  class each: aBlock => aBlock value
-
-Lib subclass: Kid
-  kidHelper => nil
-
-Actor subclass: Counter
-  state: n = 0
-
-  viaKid => Kid each: [self.n := 1]
-",
-        );
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(
-            d[0].message.contains("passed to 'Kid each:'"),
-            "{}",
-            d[0].message
-        );
-    }
-
-    #[test]
-    fn class_side_self_send_warns() {
-        let d = only("  viaLibTick => Lib each: [self bump]\n");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(
-            d[0].message.contains("sends `self bump`"),
-            "{}",
-            d[0].message
-        );
-        assert!(
-            d[0].message.contains("passed to 'Lib each:'"),
-            "{}",
-            d[0].message
-        );
-    }
-
-    #[test]
-    fn own_class_side_method_warns() {
-        // An instance method's home is the actor process; the class's own
-        // class-side method runs in the class process.
-        let d = only("  viaOwn => Counter each: [self.n]\n");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(
-            d[0].message
-                .contains("passed to 'Counter each:', which may keep it"),
-            "{}",
-            d[0].message
-        );
-    }
+    // ADR 0153: classes declare no class variables, so no class method runs in
+    // a class process of its own for this lint to flag; a block passed to one
+    // stays in the caller.
 
     /// `body` appended to `Counter`, linted against this module's hierarchy
     /// with `shadowed` declared by more than one package in scope.
@@ -1863,28 +1743,6 @@ Actor subclass: Counter
         let mut diagnostics = Vec::new();
         super::check_module(&module, &hierarchy, &mut diagnostics);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    }
-
-    #[test]
-    fn self_class_receiver_warns() {
-        let d = only("  viaSelfClass => self class each: [self.n := 1]\n");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(
-            d[0].message.contains("passed to 'Counter each:'"),
-            "{}",
-            d[0].message
-        );
-    }
-
-    #[test]
-    fn super_class_receiver_warns() {
-        let d = only("  viaSuperClass => super class each: [self.n := 1]\n");
-        assert_eq!(d.len(), 1, "{d:?}");
-        assert!(
-            d[0].message.contains("passed to 'Counter each:'"),
-            "{}",
-            d[0].message
-        );
     }
 
     // ---- staying home stays quiet ------------------------------------------

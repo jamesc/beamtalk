@@ -107,7 +107,7 @@ fn dynamic_in_typed_class_warnings(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
 
 fn build_hierarchy(module: &Module) -> ClassHierarchy {
     let mut hierarchy = ClassHierarchy::with_builtins();
-    let user_hierarchy = ClassHierarchy::build(module).0.unwrap();
+    let user_hierarchy = ClassHierarchy::build(module).0;
     hierarchy.merge(&user_hierarchy);
     hierarchy
 }
@@ -291,7 +291,6 @@ fn union_class_side_send_instance_only_dnu_override_still_contributes() {
         methods: vec![MethodInfo {
             selector: eco_string("doesNotUnderstand:args:"),
             arity: 2,
-            kind: MethodKind::Primary,
             defined_in: eco_string("WithInstanceOverride"),
             is_sealed: false,
             is_internal: false,
@@ -308,7 +307,6 @@ fn union_class_side_send_instance_only_dnu_override_still_contributes() {
         class_methods: vec![MethodInfo {
             selector: eco_string("spawn:"),
             arity: 1,
-            kind: MethodKind::Primary,
             defined_in: eco_string("WithInstanceOverride"),
             is_sealed: false,
             is_internal: false,
@@ -328,7 +326,6 @@ fn union_class_side_send_instance_only_dnu_override_still_contributes() {
         class_methods: vec![MethodInfo {
             selector: eco_string("spawn:"),
             arity: 1,
-            kind: MethodKind::Primary,
             defined_in: eco_string("Plain"),
             is_sealed: false,
             is_internal: false,

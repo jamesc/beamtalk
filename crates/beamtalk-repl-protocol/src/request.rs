@@ -29,6 +29,68 @@ pub fn next_msg_id() -> String {
 #[derive(Debug)]
 pub struct RequestBuilder;
 
+/// The `ChangeEntry` kinds a `flush` can be scoped to (its `kind` param).
+/// `beamtalk_workspace_flush:kind_filters/0` is the one definition; a test in
+/// this crate reads that function and fails when this list differs.
+pub const FLUSH_KINDS: [&str; 5] = [
+    "new-class",
+    "remove-method",
+    "remove-class",
+    "rename-class",
+    "rename-method",
+];
+
+/// What a `flush` request is scoped to (BT-5204). The operation takes at most
+/// one of `class`, `file` and `kind`, or a `selector` (alone, or with a
+/// `class`); this enum makes sending a combination the op refuses impossible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlushScope<'a> {
+    /// Every pending durable change.
+    All,
+    /// One class's changes (`remove-class` entries match by class name).
+    Class(&'a str),
+    /// One source file's changes.
+    File(&'a str),
+    /// One `ChangeEntry` kind, such as `new-class`.
+    Kind(&'a str),
+    /// One method selector (`increment`, `at:put:`) in every class (BT-5297).
+    Selector(&'a str),
+    /// One method selector in one class: `(class, selector)` (BT-5297).
+    ClassSelector(&'a str, &'a str),
+}
+
+/// Whether a `ChangeLog`-recording request comes from a person or an agent
+/// (ADR 0082 `author_kind`). It is audit metadata, not a filter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthorKind {
+    /// A person at a REPL, editor or browser. What the workspace records when a
+    /// request names no author.
+    Human,
+    /// An agent, such as an MCP tool call.
+    Agent,
+}
+
+impl AuthorKind {
+    /// The wire value of the `author_kind` param.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Human => "human",
+            Self::Agent => "agent",
+        }
+    }
+}
+
+/// Who a `save-method` or `save-class` request is recorded as in the
+/// `ChangeLog` (ADR 0082): a name, such as the MCP tool, and a kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Author<'a> {
+    /// The audit author, for example `mcp:save_method`.
+    pub name: &'a str,
+    /// Human or agent.
+    pub kind: AuthorKind,
+}
+
 impl RequestBuilder {
     // --- Core operations ---
 
@@ -192,13 +254,17 @@ impl RequestBuilder {
     // Session state is read and reset via the `Session` API
     // (`Session current bindings keys`, `Session current clear`) over `eval`.
 
-    /// Build a `sessions` request.
+    /// Build a `sessions` request. No Rust client sends it (VS Code and the
+    /// LiveView facade do); the REPL-protocol e2e harness uses it to prove a
+    /// release-mode listener answers a non-compiling op
+    /// (`crates/beamtalk-cli/tests/repl_protocol.rs`).
     #[must_use]
     pub fn sessions() -> serde_json::Value {
         Self::no_param("sessions")
     }
 
-    /// Build a `close` request.
+    /// Build a `close` request: ends the sender's own session (the CLI REPL's
+    /// `:exit` / Ctrl-D, BT-5199).
     #[must_use]
     pub fn close() -> serde_json::Value {
         Self::no_param("close")
@@ -222,7 +288,8 @@ impl RequestBuilder {
         })
     }
 
-    /// Build a `kill` request.
+    /// Build a `kill` request. Clients send `kill` from VS Code and LiveView;
+    /// in Rust the REPL-protocol e2e harness uses this to drive the real op.
     #[must_use]
     pub fn kill(actor: &str) -> serde_json::Value {
         serde_json::json!({
@@ -256,6 +323,104 @@ impl RequestBuilder {
             "id": next_msg_id(),
             "module": module
         })
+    }
+
+    // --- Code editing operations (BT-5203) ---
+
+    /// Build a `save-method` request: durably install `source` (the body to the
+    /// right of `=>`) as `selector` on `class`.
+    ///
+    /// The three values cross as structured params, never spliced into a
+    /// Beamtalk expression, so the body needs no escaping.
+    #[must_use]
+    pub fn save_method(class: &str, selector: &str, source: &str) -> serde_json::Value {
+        serde_json::json!({
+            "op": "save-method",
+            "id": next_msg_id(),
+            "class": class,
+            "selector": selector,
+            "source": source
+        })
+    }
+
+    /// [`save_method`](Self::save_method), recorded in the `ChangeLog` as
+    /// `author` rather than as the connection's own (human) author.
+    #[must_use]
+    pub fn save_method_by(
+        class: &str,
+        selector: &str,
+        source: &str,
+        author: Author<'_>,
+    ) -> serde_json::Value {
+        Self::with_author(Self::save_method(class, selector, source), author)
+    }
+
+    /// [`save_class`](Self::save_class), recorded in the `ChangeLog` as
+    /// `author`.
+    #[must_use]
+    pub fn save_class_by(source: &str, path: &str, author: Author<'_>) -> serde_json::Value {
+        Self::with_author(Self::save_class(source, path), author)
+    }
+
+    fn with_author(mut req: serde_json::Value, author: Author<'_>) -> serde_json::Value {
+        req["author"] = author.name.into();
+        req["author_kind"] = author.kind.as_str().into();
+        req
+    }
+
+    /// Build a `save-class` request: create a class from `source` at `path`.
+    #[must_use]
+    pub fn save_class(source: &str, path: &str) -> serde_json::Value {
+        serde_json::json!({
+            "op": "save-class",
+            "id": next_msg_id(),
+            "source": source,
+            "path": path
+        })
+    }
+
+    // --- Workspace state operations (BT-5204) ---
+
+    /// Build a `flush` request: write pending `ChangeLog` entries to disk.
+    ///
+    /// `scope` narrows it to one class, source file or `ChangeEntry` kind (at
+    /// most one, by construction). `confirm_destructive` is sent only when
+    /// `true`: it is the explicit confirmation that also applies Tier 2
+    /// (`remove-class`, `rename-class`, `rename-method`) entries, and the
+    /// operation reads anything but a boolean `true` as "withhold them", so
+    /// it is never implied by omission.
+    #[must_use]
+    pub fn flush(scope: FlushScope<'_>, confirm_destructive: bool) -> serde_json::Value {
+        let mut req = Self::no_param("flush");
+        match scope {
+            FlushScope::All => {}
+            FlushScope::Class(class) => req["class"] = class.into(),
+            FlushScope::File(file) => req["file"] = file.into(),
+            FlushScope::Kind(kind) => req["kind"] = kind.into(),
+            FlushScope::Selector(selector) => req["selector"] = selector.into(),
+            FlushScope::ClassSelector(class, selector) => {
+                req["class"] = class.into();
+                req["selector"] = selector.into();
+            }
+        }
+        if confirm_destructive {
+            req["confirm_destructive"] = true.into();
+        }
+        req
+    }
+
+    /// Build a `changes` request: every `ChangeLog` entry, with the flags a
+    /// client uses to pick the pending view.
+    #[must_use]
+    pub fn changes() -> serde_json::Value {
+        Self::no_param("changes")
+    }
+
+    /// Build an `info` request: version, node, workspace id and the settings
+    /// a client needs.
+    #[must_use]
+    pub fn info() -> serde_json::Value {
+        Self::no_param("info")
     }
 
     // --- Test operations ---
@@ -733,6 +898,139 @@ mod tests {
     }
 
     #[test]
+    fn save_method_sends_values_not_source() {
+        let body = "\"he said {x}\" \\ ^1";
+        let req = RequestBuilder::save_method("Counter", "at:put:", body);
+        assert_eq!(req["op"], "save-method");
+        assert_eq!(req["class"], "Counter");
+        assert_eq!(req["selector"], "at:put:");
+        // The body is the value, byte for byte: nothing is escaped.
+        assert_eq!(req["source"], body);
+    }
+
+    /// `FLUSH_KINDS` is a copy of the Erlang list, so read the Erlang source and
+    /// compare, and check the protocol doc names each kind.
+    #[test]
+    fn flush_kinds_match_the_runtime_and_the_protocol_doc() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let erl = std::fs::read_to_string(
+            root.join("runtime/apps/beamtalk_workspace/src/beamtalk_workspace_flush.erl"),
+        )
+        .expect("read beamtalk_workspace_flush.erl");
+        let body = erl
+            .split("\nkind_filters() ->")
+            .nth(1)
+            .and_then(|rest| rest.split("\n\n").next())
+            .expect("kind_filters/0 definition");
+        let runtime: Vec<&str> = body.split('\'').skip(1).step_by(2).collect();
+        assert_eq!(
+            runtime, FLUSH_KINDS,
+            "kind_filters/0 and FLUSH_KINDS differ"
+        );
+        let doc = std::fs::read_to_string(root.join("docs/repl-protocol.md"))
+            .expect("read repl-protocol.md");
+        // Every other place that spells the kinds out: the op table note, and the
+        // MCP tool and param descriptions (attribute literals, so read the source).
+        let others = [
+            "runtime/apps/beamtalk_runtime/src/beamtalk_repl_op_table.erl",
+            "crates/beamtalk-mcp/src/server/tools/flush.rs",
+            "crates/beamtalk-mcp/src/server/params.rs",
+        ];
+        for kind in FLUSH_KINDS {
+            assert!(
+                doc.contains(&format!("`{kind}`")),
+                "docs/repl-protocol.md does not list the flush kind `{kind}`"
+            );
+            for file in others {
+                let text = std::fs::read_to_string(root.join(file)).expect(file);
+                assert!(
+                    text.contains(kind),
+                    "{file} does not name the flush kind `{kind}`"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn authored_saves_send_the_author_and_its_kind() {
+        let author = Author {
+            name: "mcp:save_method",
+            kind: AuthorKind::Agent,
+        };
+        let req = RequestBuilder::save_method_by("Counter", "inc", "1", author);
+        assert_eq!(req["op"], "save-method");
+        assert_eq!(req["author"], "mcp:save_method");
+        assert_eq!(req["author_kind"], "agent");
+        let req = RequestBuilder::save_class_by("Object subclass: G", "src/g.bt", author);
+        assert_eq!(req["op"], "save-class");
+        assert_eq!(req["author_kind"], "agent");
+        // The plain builders name no author: the workspace records its default.
+        let plain = RequestBuilder::save_class("Object subclass: G", "src/g.bt");
+        assert!(plain.get("author").is_none() && plain.get("author_kind").is_none());
+    }
+
+    #[test]
+    fn save_class_sends_source_and_path() {
+        let req = RequestBuilder::save_class("Object subclass: Greeter", "src/greeter.bt");
+        assert_eq!(req["op"], "save-class");
+        assert_eq!(req["source"], "Object subclass: Greeter");
+        assert_eq!(req["path"], "src/greeter.bt");
+    }
+
+    #[test]
+    fn flush_unscoped_sends_no_scope_and_no_confirmation() {
+        let req = RequestBuilder::flush(FlushScope::All, false);
+        assert_eq!(req["op"], "flush");
+        for key in ["class", "file", "kind", "selector", "confirm_destructive"] {
+            assert!(req.get(key).is_none(), "{key} must be absent: {req}");
+        }
+    }
+
+    #[test]
+    fn flush_sends_exactly_one_scope() {
+        let req = RequestBuilder::flush(FlushScope::Class("Counter"), false);
+        assert_eq!(req["class"], "Counter");
+        assert!(req.get("file").is_none() && req.get("kind").is_none());
+
+        let req = RequestBuilder::flush(FlushScope::File("src/counter.bt"), false);
+        assert_eq!(req["file"], "src/counter.bt");
+        assert!(req.get("class").is_none() && req.get("kind").is_none());
+
+        let req = RequestBuilder::flush(FlushScope::Kind("new-class"), false);
+        assert_eq!(req["kind"], "new-class");
+        assert!(req.get("class").is_none() && req.get("file").is_none());
+    }
+
+    /// BT-5297: a selector is sent alone, or together with its class.
+    #[test]
+    fn flush_selector_scope_sends_selector_and_optional_class() {
+        let req = RequestBuilder::flush(FlushScope::Selector("increment"), false);
+        assert_eq!(req["selector"], "increment");
+        for key in ["class", "file", "kind"] {
+            assert!(req.get(key).is_none(), "{key} must be absent: {req}");
+        }
+
+        let req = RequestBuilder::flush(FlushScope::ClassSelector("Counter", "at:put:"), true);
+        assert_eq!(req["class"], "Counter");
+        assert_eq!(req["selector"], "at:put:");
+        assert!(req.get("file").is_none() && req.get("kind").is_none());
+    }
+
+    #[test]
+    fn flush_confirmation_is_a_json_boolean_sent_only_when_true() {
+        let req = RequestBuilder::flush(FlushScope::Class("Counter"), true);
+        assert_eq!(req["confirm_destructive"], serde_json::Value::Bool(true));
+        let req = RequestBuilder::flush(FlushScope::All, true);
+        assert_eq!(req["confirm_destructive"], serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn changes_and_info_requests_carry_no_params() {
+        assert_eq!(RequestBuilder::changes()["op"], "changes");
+        assert_eq!(RequestBuilder::info()["op"], "info");
+    }
+
+    #[test]
     fn unload_request_has_correct_shape() {
         let req = RequestBuilder::unload("bt@counter");
         assert_eq!(req["op"], "unload");
@@ -1012,6 +1310,28 @@ mod tests {
             RequestBuilder::interrupt(),
             RequestBuilder::interrupt_with_session("s"),
             RequestBuilder::unload("m"),
+            RequestBuilder::save_method("C", "s", "1"),
+            RequestBuilder::save_class("Object subclass: C", "src/c.bt"),
+            RequestBuilder::save_method_by(
+                "C",
+                "s",
+                "1",
+                Author {
+                    name: "a",
+                    kind: AuthorKind::Agent,
+                },
+            ),
+            RequestBuilder::save_class_by(
+                "Object subclass: C",
+                "src/c.bt",
+                Author {
+                    name: "a",
+                    kind: AuthorKind::Agent,
+                },
+            ),
+            RequestBuilder::flush(FlushScope::Class("C"), true),
+            RequestBuilder::changes(),
+            RequestBuilder::info(),
             RequestBuilder::test_class("C"),
             RequestBuilder::test_file("f"),
             RequestBuilder::test_all(),
@@ -1157,10 +1477,10 @@ mod tests {
 
     #[test]
     fn removed_ops_have_no_builder() {
-        // `info` was a builder for an op the server never had; `test` ignores a
-        // `method` filter. Neither builder exists any more (BT-4673).
+        // `test` ignores a `method` filter, so no builder sends one (BT-4673).
+        // (An `info` builder used to be here for an op the server never had;
+        // the op exists since BT-5204.)
         for req in every_builder_request() {
-            assert_ne!(req["op"], "info");
             assert!(req.get("method").is_none());
         }
     }

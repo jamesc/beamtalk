@@ -16,11 +16,9 @@
 //! 1. [`collect_lint_files`] picks the `.bt` and `.erl` targets for a path.
 //! 2. [`parse_package_sources`] (Pass 1) parses every file in the package —
 //!    not only the targets — and extracts the cross-file context: classes,
-//!    extensions, protocols, carried protocol ASTs, type aliases and trait
-//!    users.
-//! 3. [`analyse_package`] (Pass 2) merges the dependencies' metadata, lifts
-//!    or keeps the pre-WS3 dependency guard, flattens trait provisions and
-//!    analyses each target file with [`analyse_file`], reporting each one to
+//!    protocols, carried protocol ASTs, type aliases and trait users.
+//! 3. [`analyse_package`] (Pass 2) merges the dependencies' metadata,
+//!    flattens trait provisions and analyses each target file with [`analyse_file`], reporting each one to
 //!    a callback, then routes flattened-provision diagnostics to their
 //!    protocol's file.
 //!    Each file's `TypeMap` rides along on [`FileLint`], so CLI
@@ -44,7 +42,6 @@ use std::sync::Arc;
 
 use beamtalk_core::ast::{Module, ProtocolDefinition};
 use beamtalk_core::compilation::diagnostics_policy::{self, DiagnosticsTable};
-use beamtalk_core::compilation::extension_index::ExtensionIndex;
 use beamtalk_core::file_walker::FileWalker;
 use beamtalk_core::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
@@ -159,11 +156,6 @@ pub struct DependencyMetadata {
     /// Every type alias they declare, `internal` ones included — the
     /// seeding-boundary filter runs in `AliasRegistry::add_pre_loaded`.
     pub alias_infos: Vec<AliasInfo>,
-    /// Their extension methods (ADR 0070 WS3, BT-4608).
-    pub extensions: ExtensionIndex,
-    /// Whether `extensions` holds every dependency's extensions; `false`
-    /// keeps the pre-WS3 dependency guard on.
-    pub extensions_complete: bool,
 }
 
 /// A lint target parsed by Pass 1.
@@ -190,8 +182,6 @@ pub struct PackageSources {
     pub scope: PackageCheckerScope,
     /// Every class in the package's source files, package-stamped.
     pub class_infos: Vec<ClassInfo>,
-    /// Every standalone extension method in them (ADR 0066).
-    pub extension_index: ExtensionIndex,
     /// Every protocol declared in them.
     pub protocol_infos: Vec<ProtocolInfo>,
     /// The full ASTs of their carried protocols.
@@ -251,7 +241,6 @@ pub fn parse_package_sources(
     let mut complete = walk_errors.is_empty();
 
     let mut class_infos = Vec::new();
-    let mut extension_index = ExtensionIndex::new();
     let mut protocol_infos = Vec::new();
     let mut protocol_defs = Vec::new();
     let mut alias_infos = Vec::new();
@@ -273,9 +262,14 @@ pub fn parse_package_sources(
 
         let (mut module, mut parse_diagnostics) = parse(lex_with_eof(&source));
         // One compilation unit per class (BT-4721): class infos see the file's
-        // own extensions as methods of the class. The fold's own diagnostics
+        // own same-file `>>` methods as methods of the class. The fold's own diagnostics
         // join the file's diagnostics below, after the parse-error check.
-        let fold_diagnostics = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
+        let mut fold_diagnostics =
+            beamtalk_core::compilation::fold_same_file_extensions(&mut module);
+        // ADR 0152: a `>>` whose target this file does not define is an error.
+        fold_diagnostics.extend(beamtalk_core::compilation::reject_cross_file_extensions(
+            &module,
+        ));
 
         // A file with parse errors may have an under-recovered method
         // surface — mark its classes so the receiver-knowledge classifier
@@ -301,7 +295,6 @@ pub fn parse_package_sources(
         // Also records each carried protocol's source identity (ADR 0127
         // §3), first definition wins.
         trait_users.add_source_file(&module, file.as_str(), &source, current_package);
-        extension_index.add_module(&module, file.as_std_path());
         protocol_infos.extend(ProtocolRegistry::extract_protocol_infos(&module));
         protocol_defs.extend(
             module
@@ -336,7 +329,6 @@ pub fn parse_package_sources(
         package_root,
         scope,
         class_infos,
-        extension_index,
         protocol_infos,
         protocol_defs,
         alias_infos,
@@ -366,11 +358,6 @@ pub struct FileContext<'a> {
     pub native_type_registry: Option<Arc<NativeTypeRegistry>>,
     /// `ProjectComplete` inside a package.
     pub knowledge_scope: KnowledgeScope,
-    /// Every standalone extension method, the package's and the
-    /// dependencies'; `None` for none.
-    pub cross_file_extensions: Option<&'a ExtensionIndex>,
-    /// The pre-WS3 dependency guard (`CompilerOptions`).
-    pub dependency_extensions_unknown: bool,
     /// The package name; E0401/E0402/E0403 only run when it is set.
     pub current_package: Option<&'a str>,
     /// The package names a `pkg@Class` qualifier may name (ADR 0070 Phase 2);
@@ -433,14 +420,12 @@ pub fn analyse_file_with_types(
 
     let options = beamtalk_core::CompilerOptions {
         knowledge_scope: ctx.knowledge_scope,
-        dependency_extensions_unknown: ctx.dependency_extensions_unknown,
         current_package: ctx.current_package.map(str::to_string),
         known_packages: ctx.known_packages,
         stdlib_mode: ctx.stdlib_mode,
         known_erlang_modules: ctx.known_erlang_modules,
         ..Default::default()
     };
-    let no_extensions = ExtensionIndex::new();
     let no_overrides = DiagnosticsTable::new();
     let analysis_ctx = AnalysisContext::default()
         .with_options(&options)
@@ -450,7 +435,6 @@ pub fn analyse_file_with_types(
         .with_protocol_sources(ctx.protocol_sources)
         .with_pre_loaded_aliases(ctx.pre_loaded_aliases)
         .with_native_type_registry(ctx.native_type_registry)
-        .with_cross_file_extensions(ctx.cross_file_extensions.unwrap_or(&no_extensions))
         .with_is_stub_file(ctx.is_stub_file);
     let (hierarchy, type_map) =
         beamtalk_language_service::queries::diagnostic_provider::run_post_analysis_lint_pipeline_with_types(
@@ -535,7 +519,6 @@ pub fn analyse_package(
         package_root,
         scope,
         mut class_infos,
-        mut extension_index,
         mut protocol_infos,
         mut protocol_defs,
         mut alias_infos,
@@ -552,15 +535,6 @@ pub fn analyse_package(
     protocol_defs.extend(dependencies.protocol_defs);
     merge_protocol_sources(&mut protocol_sources, dependencies.protocol_sources);
     alias_infos.extend(dependencies.alias_infos);
-    extension_index.merge(&dependencies.extensions);
-
-    // The pre-WS3 dependency guard, by the rule `build`/`check`/`test`
-    // share: on unless every dependency's extensions were loaded.
-    let dependency_extensions_unknown = crate::dependency_extensions::dependency_extensions_unknown(
-        scope.has_package_dependencies,
-        package_root.is_some(),
-        dependencies.extensions_complete,
-    );
 
     // Flatten cross-file trait provisions into the same-package infos, as
     // `build` does (BT-3673) — after the dependency merge so a `uses:` of a
@@ -578,6 +552,11 @@ pub fn analyse_package(
         beamtalk_core::ffi_type_specs::collect_installed_erlang_modules,
         beamtalk_core::ffi_type_specs::collect_known_erlang_modules,
     );
+    // BT-5251: `native/test/` helpers are known to files under `test/` only.
+    let test_helper_modules = package_root
+        .as_deref()
+        .map(beamtalk_core::ffi_type_specs::collect_project_test_helper_modules)
+        .unwrap_or_default();
     // BT-4377: the package's `[diagnostics]` table, via the loader the
     // compiler port (REPL) and LSP use.
     let diagnostics_overrides = package_root
@@ -598,6 +577,14 @@ pub fn analyse_package(
         let is_stub_file = package_root.as_deref().is_some_and(|root| {
             package::is_under_stubs_dir(root.as_std_path(), target.path.as_std_path())
         });
+        let mut file_known_modules = known_erlang_modules.clone();
+        if !test_helper_modules.is_empty()
+            && package_root.as_deref().is_some_and(|root| {
+                beamtalk_core::ffi_type_specs::is_project_test_file(root, &target.path)
+            })
+        {
+            file_known_modules.extend_modules(test_helper_modules.clone());
+        }
         let (diags, class_hierarchy, type_map) = analyse_file_with_types(
             &target.module,
             &target.source,
@@ -610,14 +597,12 @@ pub fn analyse_package(
                 pre_loaded_aliases: alias_infos.clone(),
                 native_type_registry: native_type_registry.cloned(),
                 knowledge_scope: scope.knowledge_scope,
-                cross_file_extensions: Some(&extension_index),
-                dependency_extensions_unknown,
                 current_package,
                 known_packages: scope.known_packages.clone(),
                 is_stub_file,
                 file_stem: target.path.file_stem(),
                 stdlib_mode: package::is_under_stdlib_src_dir(target.path.as_std_path()),
-                known_erlang_modules: known_erlang_modules.clone(),
+                known_erlang_modules: file_known_modules,
                 diagnostics_overrides: Some(&diagnostics_overrides),
             },
         );
@@ -875,5 +860,51 @@ mod tests {
         );
         assert_eq!(sources.scope.knowledge_scope, KnowledgeScope::ModuleOnly);
         assert_eq!(sources.targets.len(), 1);
+    }
+
+    /// BT-5251: a `native/test/` helper is known to `test/*.bt` but not to
+    /// `src/*.bt`, in lint.
+    #[test]
+    fn test_helpers_known_to_test_files_only() {
+        if !beamtalk_core::ffi_type_specs::collect_installed_erlang_modules().check_enabled() {
+            return; // no OTP: the unresolved_ffi check is off
+        }
+        let call = "Object subclass: Probe\n  run => (Erlang bt5251_helper) ping\n";
+        let (_temp, root) = package_with(&[("probe.bt", call)]);
+        std::fs::create_dir_all(root.join("test")).unwrap();
+        std::fs::write(
+            root.join("test").join("probe_test.bt"),
+            call.replace("Probe", "ProbeTest"),
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("native").join("test")).unwrap();
+        std::fs::write(
+            root.join("native").join("test").join("bt5251_helper.erl"),
+            "-module(bt5251_helper).\n",
+        )
+        .unwrap();
+
+        let targets = vec![
+            root.join("src").join("probe.bt"),
+            root.join("test").join("probe_test.bt"),
+        ];
+        let sources = parse_package_sources(&root, &targets, |f, _, e| panic!("{f}: {e}"));
+        let mut flagged = Vec::new();
+        analyse_package(sources, DependencyMetadata::default(), None, |lint| {
+            let hit = lint
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("bt5251_helper"));
+            flagged.push((lint.path.file_name().unwrap().to_string(), hit));
+        });
+        flagged.sort();
+        assert_eq!(
+            flagged,
+            vec![
+                ("probe.bt".to_string(), true),
+                ("probe_test.bt".to_string(), false)
+            ],
+            "src/ must still flag the helper; test/ must not"
+        );
     }
 }

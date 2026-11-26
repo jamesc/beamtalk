@@ -32,8 +32,12 @@ lifecycle_test_() ->
         fun close_aborts_running_eval/1,
         fun attach_to_stopped_session_answers_gone/1,
         fun attach_after_queued_idle_timeout_answers_gone/1,
+        fun attach_to_busy_shell_answers_timeout_not_gone/1,
+        fun attach_twice_keeps_one_monitor/1,
         fun idle_period_is_settable_from_environment/1,
         fun close_stops_session_and_removes_row/1,
+        fun close_with_session_stops_that_session/1,
+        fun close_with_unknown_session_stops_nothing/1,
         fun sessions_op_lists_ids_that_resume_accepts/1,
         fun idle_monitor_sees_detached_only_workspace_as_idle/1,
         fun idle_monitor_keeps_attached_session_alive/1,
@@ -216,6 +220,26 @@ close_stops_session_and_removes_row(_) ->
         ?assertEqual(error, beamtalk_session_table:lookup(<<"lc-7">>))
     end}.
 
+close_with_session_stops_that_session(_) ->
+    {"close naming another session stops that one, not the caller (BT-5199)", fun() ->
+        Caller = new_session(<<"lc-7-caller">>),
+        Target = new_session(<<"lc-7-target">>),
+        Msg = beamtalk_test_repl:make_msg(<<"close">>, <<"c-2">>, <<"lc-7-target">>),
+        ?assertEqual({status, ok}, beamtalk_repl_ops:dispatch(<<"close">>, #{}, Msg, Caller)),
+        beamtalk_test_wait:dead(Target),
+        ?assertEqual(error, beamtalk_session_table:lookup(<<"lc-7-target">>)),
+        ?assert(is_process_alive(Caller))
+    end}.
+
+close_with_unknown_session_stops_nothing(_) ->
+    {"close naming an unknown session never falls back to the caller (BT-5199)", fun() ->
+        Caller = new_session(<<"lc-7-alone">>),
+        Msg = beamtalk_test_repl:make_msg(<<"close">>, <<"c-3">>, <<"lc-no-such">>),
+        ?assertEqual({status, ok}, beamtalk_repl_ops:dispatch(<<"close">>, #{}, Msg, Caller)),
+        ok = beamtalk_test_wait:sync(Caller),
+        ?assert(is_process_alive(Caller))
+    end}.
+
 close_aborts_running_eval(_) ->
     {"close mid-eval kills the eval worker instead of orphaning it (BT-5084)", fun() ->
         Session = new_session(<<"lc-close-eval">>),
@@ -232,6 +256,29 @@ attach_to_stopped_session_answers_gone(_) ->
         ok = beamtalk_repl_shell:stop(Session),
         Client = new_client(),
         ?assertEqual(gone, beamtalk_repl_shell:attach(Session, Client)),
+        disconnect(Client)
+    end}.
+
+attach_to_busy_shell_answers_timeout_not_gone(_) ->
+    {"BT-5129: a live shell that does not answer in time is `timeout`, not `gone`",
+        {timeout, 30, fun() ->
+            Session = new_session(<<"lc-busy">>),
+            Client = new_client(),
+            %% Suspended: alive but unable to answer the attach call.
+            ok = sys:suspend(Session),
+            ?assertEqual(timeout, beamtalk_repl_shell:attach(Session, Client)),
+            ok = sys:resume(Session),
+            disconnect(Client)
+        end}}.
+
+attach_twice_keeps_one_monitor(_) ->
+    {"BT-5129: attaching the same client twice monitors it once", fun() ->
+        Session = new_session(<<"lc-twice">>),
+        Client = new_client(),
+        ok = beamtalk_repl_shell:attach(Session, Client),
+        ok = beamtalk_repl_shell:attach(Session, Client),
+        {monitored_by, Monitors} = process_info(Client, monitored_by),
+        ?assertEqual(1, length([M || M <- Monitors, M =:= Session])),
         disconnect(Client)
     end}.
 

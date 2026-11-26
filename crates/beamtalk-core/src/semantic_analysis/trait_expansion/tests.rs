@@ -1137,8 +1137,7 @@ fn analyse(source: &str) -> Vec<Diagnostic> {
     let mut module = parse_source(source);
     let (mut diagnostics, origins) = expand_module(&mut module, &HashMap::new());
 
-    let (hierarchy_result, hierarchy_diags) = ClassHierarchy::build(&module);
-    let mut hierarchy = hierarchy_result.expect("ClassHierarchy::build is infallible");
+    let (mut hierarchy, hierarchy_diags) = ClassHierarchy::build(&module);
     diagnostics.extend(hierarchy_diags);
     apply_origins(&mut hierarchy, &origins);
 
@@ -1674,7 +1673,7 @@ fn self_field_write_in_provision_is_error() {
 
 #[test]
 fn state_declaration_in_protocol_body_is_parse_error() {
-    // The parser rejects `state:`/`field:`/`classState:` inside a protocol
+    // The parser rejects `state:`/`field:` inside a protocol
     // body directly (ADR 0127 §7, §13) — it never reaches `ProtocolDefinition`
     // at all, so this is a parser-level test, not `check_after_hierarchy`.
     use crate::source_analysis::{lex_with_eof, parse};
@@ -1697,7 +1696,6 @@ fn late_state_declaration_in_protocol_body_leaks_no_phantom_late_selector() {
     for decl in [
         "late state: total :: Integer = 0",
         "late field: total :: Integer = 0",
-        "late classState: total :: Integer = 0",
     ] {
         let src = format!("Protocol define: Counting\n  {decl}\n  count -> Integer");
         let (module, diagnostics) = parse(lex_with_eof(&src));
@@ -2033,7 +2031,7 @@ fn check_after_hierarchy_validates_against_the_protocol_the_qualifier_names() {
     );
     let (diagnostics, _origins) = expand_module(&mut module, &external);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let registry = ProtocolRegistry::default();
 
     let diagnostics = check_after_hierarchy(&module, &hierarchy, &registry, &external, None);

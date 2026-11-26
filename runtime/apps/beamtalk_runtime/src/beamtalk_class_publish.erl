@@ -15,7 +15,7 @@ the writers for those facts, none of which touch the `#class_state{}` record:
 * the unified `beamtalk_class_metadata` ETS row and the process-dictionary
   caches that mirror it (`sync_identity/6`, `sync_direct_constructors/2`,
   `sync_constant_class_methods/2`, `sync_caller_safe_primitives/2`,
-  `sync_class_process_facts/3`, `seed_runtime_class_methods/2`);
+  `sync_process_bound_selectors/2`, `seed_runtime_class_methods/2`);
 * the `beamtalk_xref` cross-reference index (`register_xref/2`,
   `register_state_var_xref/2`, `refresh_xref/2`, `put_method_xref/4`);
 * the compiler-server registration (`notify_compiler_server_register/2`) and the
@@ -43,10 +43,11 @@ plain map of the class fields they read that `beamtalk_object_class` builds with
     sync_direct_constructors/2,
     sync_constant_class_methods/2,
     sync_caller_safe_primitives/2,
-    sync_class_process_facts/3,
+    sync_process_bound_selectors/2,
     warn_stale_subclass_constructors/3,
     is_runtime_fun_info/1,
     seed_runtime_class_methods/2,
+    replace_runtime_class_methods/2,
     publish_reflection/1,
     method_record/4,
     notify_hot_patch/1
@@ -195,7 +196,7 @@ put_method_xref(ClassName, ClassSide, Selector, Source) ->
     Entry = beamtalk_xref:build_method_entry(
         ClassSide, Selector, Source, indexed, put_method
     ),
-    beamtalk_extensions:safe_xref(fun() ->
+    beamtalk_xref:safe_xref(fun() ->
         beamtalk_xref:put_method(ClassName, ClassSide, Selector, Entry)
     end).
 
@@ -366,27 +367,14 @@ sync_caller_safe_primitives(ClassName, Meta) ->
     beamtalk_class_metadata:put_caller_safe_primitives(ClassName, Primitives).
 
 -doc """
-Publish the class-variable fact and the process-bound selector list (ADR 0142
-§1, BT-4299) into the unified metadata row.
-
-Whether the class declares class variables is read from the compiled
-`__beamtalk_meta/0`'s `class_field_kinds` (every declared `classState:`,
-`late` ones included); a class without it (a ClassBuilder class, an older
-module) falls back to the keys of its `classState` defaults. Never re-derived
-from source. `beamtalk_class_metadata:put_class_variables/2` erases the
-derived direct-call flag before a changed fact becomes visible.
+Publish the process-bound selector list (ADR 0142 §1 rule 3, ADR 0153 §5)
+into the unified metadata row: the one input to where a class method runs.
 
 `process_bound_class_selectors` is the generated list Rust owns; a module
 without the key stores `undefined` (unknown), never a runtime copy.
 """.
--spec sync_class_process_facts(class_name(), map(), map()) -> ok.
-sync_class_process_facts(ClassName, Meta, ClassVarDefaults) ->
-    HasClassVars =
-        case maps:get(class_field_kinds, Meta, undefined) of
-            Kinds when is_map(Kinds) -> map_size(Kinds) > 0;
-            _ -> map_size(ClassVarDefaults) > 0
-        end,
-    beamtalk_class_metadata:put_class_variables(ClassName, HasClassVars),
+-spec sync_process_bound_selectors(class_name(), map()) -> ok.
+sync_process_bound_selectors(ClassName, Meta) ->
     ProcessBound =
         case maps:get(process_bound_class_selectors, Meta, undefined) of
             L when is_list(L) -> [S || S <- L, is_atom(S)];
@@ -451,6 +439,29 @@ warn_stale_subclass_constructors(ClassName, OldClassMethods, NewClassMethods) ->
 -spec is_runtime_fun_info(term()) -> boolean().
 is_runtime_fun_info(Info) ->
     is_map(Info) andalso maps:is_key(block, Info).
+
+-doc """
+The reload path's reconciliation of the fun store with the incoming class
+methods (ADR 0082: disk wins). With no incoming funs (a compiled reload) every
+runtime fun is purged and the gate reset. With incoming funs (a `ClassBuilder`
+re-register) they are seeded first and only then are the stale ones dropped, so
+the gate never closes and a selector defined before and after the reload never
+reads as missing to an in-caller send that resolved it (ADR 0153 §5, BT-5161).
+A selector that was a fun and becomes a compiled method answers with the old
+fun until its row is dropped: the same lock-free window as any reload, with
+disk winning once the drop lands (ADR 0082).
+""".
+-spec replace_runtime_class_methods(class_name(), map()) -> ok.
+replace_runtime_class_methods(ClassName, ClassMethods) ->
+    Funs = maps:filter(fun(_Selector, Info) -> is_runtime_fun_info(Info) end, ClassMethods),
+    case maps:size(Funs) of
+        0 ->
+            beamtalk_class_metadata:delete_class_method_funs(ClassName),
+            beamtalk_class_metadata:reset_runtime_class_methods(ClassName);
+        _ ->
+            ok = seed_runtime_class_methods(ClassName, ClassMethods),
+            beamtalk_class_metadata:delete_class_method_funs_except(ClassName, maps:keys(Funs))
+    end.
 
 -doc """
 Seed the runtime class-method fun retrieval store from a class_methods map.

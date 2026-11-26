@@ -32,7 +32,8 @@ desktop/
                            (`bin/server` on Unix, `bin\bt_attach.bat` on
                            Windows — BT-2988)
       dto.rs             JSON view models for the frontend
-    entitlements.plist  Hardened Runtime entitlements for the bundled BEAM
+    beam-entitlements.plist  Hardened Runtime entitlements for the bundled
+                         BEAM VM executable (beam.smp) only (BT-5194)
                          release (BT-2987 — see the packaging section below)
     icons/               Placeholder icon set (resized from
                          editors/vscode/images/icon.png — the existing
@@ -84,11 +85,12 @@ On macOS, every nested Mach-O binary in that bundled release (`beam.smp`,
 them in, because Tauri's own macOS bundler only reliably signs the top-level
 `.app` — arbitrary resource binaries are a known gap
 (tauri-apps/tauri#11992) and Apple's notary service rejects a bundle
-containing any unsigned Mach-O. `entitlements.plist` grants the Hardened
-Runtime allowances BEAM needs (`allow-jit` +
+containing any unsigned Mach-O. `beam-entitlements.plist` grants the
+Hardened Runtime allowances BEAM needs (`allow-jit` +
 `allow-unsigned-executable-memory` for BeamAsm's JIT, `disable-library-
-validation` for independently-signed NIFs) to both that pre-pass and the
-top-level app (`bundle.macOS.entitlements`). See the workflow file's header
+validation` for independently-signed NIFs) to `beam.smp` alone; every other
+nested binary and the top-level app are signed with the Hardened Runtime and
+no entitlements (BT-5194). See the workflow file's header
 comment for the full signing/notarization flow and the required secrets.
 Windows has no equivalent code-signing pass in this lane — the `.msi`/`.exe`
 Tauri produces are unsigned; that's a real gap (unsigned installers trigger
@@ -365,7 +367,9 @@ status" above); Linux and Windows are the remaining gap.
 ```bash
 # Point the broker at a from-source dist-liveview build instead of the
 # resource-bundled one CI packages (BT-2987) — simplest for local iteration,
-# since it skips a full `cargo tauri build`:
+# since it skips a full `cargo tauri build`. Debug builds (`cargo tauri dev`)
+# only: a release build ignores the override and runs the bundled launcher
+# (BT-5194):
 just dist-liveview   # from editors/liveview/, produces bin/server
 export BEAMTALK_ATTACH_LAUNCHER=/path/to/dist-liveview/bin/server
 
@@ -388,12 +392,32 @@ cargo tauri dev
 
 ## Security note on capabilities
 
-`capabilities/default.json` scopes command access to the `picker` window
-only — workspace windows (label `ws-<id>`) load the attached front's own
-`http://127.0.0.1:<port>/` LiveView page and have **no** capability grant, so
-that (arbitrary, workspace-authored) content cannot invoke any of this app's
-Tauri commands. Detach/quit/window-title updates for those windows are all
-driven from the Rust side, never from JS running inside them.
+Workspace windows (label `ws-<id>`) load the attached front's own
+`http://localhost:<port>/` LiveView page, which shows workspace- and
+user-authored content. That content must not reach this app's Tauri commands
+(`quit`, `attach`, `detach`, `create_workspace`, `get_launcher_logs`, …), and
+three things make sure of it (BT-5194):
+
+- **An app manifest.** `build.rs` declares every command
+  (`src/app_commands.rs`) in an `AppManifest`. Without one, Tauri 2 checks
+  app commands against the capabilities only for remote origins: any window
+  showing a local page (`tauri://localhost`) could call them, whatever the
+  capability's `windows` list said.
+- **Per-command grants to the picker only.** `capabilities/default.json`
+  grants `allow-<command>` to the `picker` window and nothing to any other
+  window, webview or remote URL.
+- **No global API.** `withGlobalTauri` is off (it is app-wide, so it put
+  `window.__TAURI__` in workspace windows too); the picker calls `invoke` and
+  `listen` through `ui/tauri-bridge.js`. Tauri still injects
+  `window.__TAURI_INTERNALS__` into every webview, so the ACL above, not the
+  missing global, is the boundary.
+
+`src/app_commands.rs`'s tests pin all three against Tauri's real ACL (a mock
+app built from this crate's own `tauri.conf.json` and capabilities): the
+picker may invoke every command; a workspace window may not, from its own page
+or from a local one; the picker may not from a remote page. Detach/quit/
+window-title updates for workspace windows are all driven from the Rust side,
+never from JS running inside them.
 
 ## Closing the picker (BT-3252)
 

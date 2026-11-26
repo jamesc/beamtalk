@@ -43,6 +43,11 @@ defmodule BtAttachWeb.ReadinessControllerTest do
     def readiness, do: {:error, :dead_workspace}
   end
 
+  defmodule TooOldClient do
+    @moduledoc false
+    def readiness, do: {:error, :workspace_too_old}
+  end
+
   setup do
     on_exit(fn -> Application.delete_env(:bt_attach, :workspace_client) end)
     :ok
@@ -114,5 +119,15 @@ defmodule BtAttachWeb.ReadinessControllerTest do
     conn = get(conn, ~p"/readiness")
 
     assert redirected_to(conn) == ~p"/oidc/auth"
+  end
+
+  test "503 with reason workspace_too_old and a message saying what to do", %{conn: conn} do
+    Application.put_env(:bt_attach, :workspace_client, TooOldClient)
+
+    body = conn |> get(~p"/readiness") |> json_response(503)
+
+    assert %{"status" => "error", "reason" => "workspace_too_old", "message" => message} = body
+    assert message =~ "older than this app"
+    assert message =~ "beamtalk workspace stop"
   end
 end

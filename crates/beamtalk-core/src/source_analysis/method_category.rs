@@ -26,7 +26,7 @@
 //!
 //! # Divider format (locked down here for every consumer)
 //!
-//! A leading `//` line comment (not `///`, not `/* */`) is a divider when its
+//! A leading `//` line comment (not `///`) is a divider when its
 //! text, trimmed, has the shape:
 //!
 //! ```text
@@ -57,7 +57,7 @@
 //! inside a class body.
 //!
 //! A divider can precede *any* class member — not only a method. A
-//! `state:`/`classState:` declaration between a divider and the next method
+//! `state:` declaration between a divider and the next method
 //! still lets the divider start a new category (its own leading comments are
 //! checked too), but the declaration itself never becomes a
 //! [`CategorizedMethod`] — matching this module's method-only scope.
@@ -66,7 +66,7 @@
 //!
 //! - **Fields are not nested into categories.** `beamtalk-language-service`'s
 //!   `queries::document_symbols_provider` still renders a class's
-//!   `state:`/`classState:` fields as flat, top-level
+//!   `state:` fields as flat, top-level
 //!   children of the class symbol regardless of where dividers place them.
 //!   A divider written directly above a field (rather than a method) is
 //!   still recognized (see above) and its category's `span` — the divider
@@ -81,7 +81,7 @@
 //!   this is almost certainly a source mistake the author would notice by
 //!   reading their own file.
 //! - **A near-miss divider is not diagnosed.** `=== Name ====` (mismatched
-//!   run lengths), `== Name ==` (too short), or a `///`/`/* */` divider-
+//!   run lengths), `== Name ==` (too short), or a `///` divider-
 //!   shaped comment all silently fail to parse as a divider and fall back to
 //!   an ordinary leading comment — so the run of methods below it is
 //!   silently absorbed into whatever category was already open, with no
@@ -207,7 +207,7 @@ pub fn parse_divider_name(content: &str) -> Option<&str> {
 /// Returns the divider name from a method's leading comments, if any.
 ///
 /// Only [`CommentKind::Line`] comments are considered (never `///` doc
-/// comments or `/* */` block comments). When more than one divider-shaped
+/// comments). When more than one divider-shaped
 /// line comment precedes the same method — unusual, but not prevented by the
 /// grammar — the one nearest the method (last in source order) wins, matching
 /// the natural reading that the closest heading is the current one.
@@ -267,7 +267,7 @@ fn find_divider_span(source: &str, member_line_start: u32, expected_name: &str) 
 
 /// One member of a class body in source order, for the merged walk
 /// [`categorize_methods`] performs. A divider can precede *any* class member
-/// — not only a method — so `state:`/`classState:` declarations must
+/// — not only a method — so `state:` declarations must
 /// still be able to start a new category: without
 /// this, `// === Beta ===\nstate: x = 0\nbar => 2` would silently swallow
 /// "Beta" and mis-attribute `bar` to whatever category preceded `state: x`.
@@ -284,12 +284,12 @@ enum ClassMember<'a> {
 ///
 /// `class` must have been parsed from `source` (the divider-span lookup
 /// re-scans `source` around each member's header line). Instance methods,
-/// class-side methods, state declarations (`state:`), and class variables
-/// (`classState:`) are all merged and walked in true source order (by AST
+/// class-side methods, and state declarations (`state:`)
+/// are all merged and walked in true source order (by AST
 /// span), not grouped by kind, so a divider spanning both sides of a class —
 /// or one written directly above a field rather than a method — still groups
 /// correctly. Only methods are ever collected into a category's `methods`;
-/// state/class-variable declarations merely establish where a new category
+/// state declarations merely establish where a new category
 /// begins, matching this module's scope (categories group *methods*).
 #[must_use]
 pub fn categorize_methods(class: &ClassDefinition, source: &str) -> Vec<MethodCategory> {
@@ -303,13 +303,6 @@ pub fn categorize_methods(class: &ClassDefinition, source: &str) -> Vec<MethodCa
                 ClassMember::NonMethod,
             )
         })
-        .chain(class.class_variables.iter().map(|s| {
-            (
-                s.span,
-                s.comments.leading.as_slice(),
-                ClassMember::NonMethod,
-            )
-        }))
         .chain(class.methods.iter().map(|m| {
             (
                 m.span,
@@ -714,22 +707,6 @@ Object subclass: Counter
         assert_eq!(categories[1].name.as_deref(), Some("Beta"));
         assert_eq!(categories[1].methods.len(), 1);
         assert_eq!(categories[1].methods[0].selector, "bar");
-    }
-
-    #[test]
-    fn divider_above_a_class_variable_still_starts_a_new_category() {
-        let src = "\
-Object subclass: Counter
-  // === Shared state ===
-  classState: total :: Integer = 0
-
-  foo => 1
-";
-        let class = parse_class(src);
-        let categories = categorize_methods(&class, src);
-        assert_eq!(categories.len(), 1);
-        assert_eq!(categories[0].name.as_deref(), Some("Shared state"));
-        assert_eq!(categories[0].methods[0].selector, "foo");
     }
 
     #[test]

@@ -7,7 +7,6 @@
 // they answer what the class-method twin answers now.
 
 Object subclass: Bt3947InlineBlockLoopClass
-  classState: n = 0
 
   class cell0 =>
     t := 0
@@ -422,54 +421,6 @@ Object subclass: Bt3947InlineBlockLoopClass
     ] whileTrue: [t := t + 1]
     t
 
-  class cell30 =>
-    t := 0
-    c := true
-    1
-      to: 3
-      do: [:i |
-        self.n := self.n + 1
-        c
-          ifTrue: [
-            t := t + ([:z |
-              w := z
-              w
-            ] value: i)
-          ]
-      ]
-    t
-
-  class cell31 =>
-    t := 0
-    c := true
-    1
-      to: 3
-      do: [:i |
-        self.n := self.n + 1
-        c
-          and: [
-            ([:z |
-              w := z
-              w
-            ] value: i) > 0
-          ]
-      ]
-    t
-
-  class cell32 =>
-    t := 0
-    [
-      ([:z |
-        w := z
-        w
-      ] value: t) < 3
-    ]
-      whileTrue: [
-        self.n := self.n + 1
-        t := t + 1
-      ]
-    t
-
   class cell33 =>
     t := 0
     [
@@ -568,17 +519,6 @@ Object subclass: Bt3947InlineBlockLoopClass
         ifFalse: [false]
     ] whileTrue: [t := t + 1]
     t
-
-  class cell42 =>
-    self.n := 0
-    [
-      [
-        w := 3
-        w
-      ] value
-      self.n < 1
-    ] whileTrue: [self.n := self.n + 1]
-    self.n
 
   class cell43 =>
     r := 0

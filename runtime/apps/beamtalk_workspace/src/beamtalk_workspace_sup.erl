@@ -607,7 +607,7 @@ do_setup_file_logger(WorkspaceId) ->
             ok;
         WsDir ->
             LogFile = filename:join(WsDir, "workspace.log"),
-            case filelib:ensure_dir(LogFile) of
+            case beamtalk_workspace_file:ensure_private_dir(WsDir) of
                 ok ->
                     %% Read log level from app env (set by --log-level CLI flag),
                     %% defaulting to info.

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Core `Analyser` fundamentals: empty-module analysis,
-//! `BlockContext`/`SemanticError`/`BlockInfo`/`CapturedVar`/
+//! `BlockContext`/`BlockInfo`/`CapturedVar`/
 //! mutation-kind construction, and block-context classification
 //! (control-flow, stored, passed) including field-assignment and
 //! captured-mutation diagnostics inside blocks.
@@ -37,19 +37,6 @@ fn test_block_context_values() {
     ];
 
     assert_eq!(contexts.len(), 5);
-}
-
-#[test]
-fn test_semantic_error_creation() {
-    let error = SemanticError::new(
-        SemanticErrorKind::UndefinedVariable { name: "foo".into() },
-        Span::default(),
-    );
-
-    assert!(matches!(
-        error.kind,
-        SemanticErrorKind::UndefinedVariable { .. }
-    ));
 }
 
 #[test]

@@ -20,7 +20,7 @@ use beamtalk_cerl_doc::leaf::fname;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{
     Block, ClassDefinition, Expression, Identifier, Literal, MapPair, MessageSelector,
-    MethodDefinition, MethodKind, ParameterDefinition,
+    MethodDefinition, ParameterDefinition,
 };
 use beamtalk_core::semantic_analysis::InferredType;
 use beamtalk_core::semantic_analysis::type_checker::ffi_annotation_type;
@@ -48,22 +48,10 @@ impl CoreErlangGenerator {
         &mut self,
         class: &ClassDefinition,
     ) -> Result<Document<'static>> {
-        // Populate class variable names for field access validation. These are
-        // the class's own `classState:` declarations (BT-3762): the AST class
-        // definition is the same own-declaration set that
-        // `ClassHierarchy::own_class_variable_names` answers for the
-        // hierarchy-sourced callers, so an ancestor's variable is rejected.
-        *self.class_var_names_mut() = class
-            .class_variables
-            .iter()
-            .map(|cv| cv.name.name.to_string())
-            .collect();
-
         // Populate class method selectors for self-send routing
         *self.class_method_selectors_mut() = class
             .class_methods
             .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
             .map(|m| m.selector.name().to_string())
             .collect();
 
@@ -78,10 +66,6 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = Vec::new();
 
         for method in &class.class_methods {
-            if method.kind != MethodKind::Primary {
-                continue;
-            }
-
             let selector_name = method.selector.name();
             // +1 for the ClassSelf parameter (ADR 0130 §3: class variables
             // are neither passed in nor returned)
@@ -152,7 +136,6 @@ impl CoreErlangGenerator {
             // `frame` drops here, popping the scope, clearing
             // `in_class_method`, and restoring the selector.
         }
-        self.class_var_names_mut().clear();
         self.class_method_selectors_mut().clear();
         self.set_class_slot_constructor_selector(None);
         Ok(Document::Vec(docs))
@@ -169,15 +152,12 @@ impl CoreErlangGenerator {
     /// blocks whose shape does not match the selector, fall through to ordinary
     /// expression lowering (a computed fun the user supplied).
     ///
-    /// `class_var_names` are the keys of the cascade's `classVars:` map; they make
-    /// `self.cvar` reads/writes lower as class-variable access (in place, in
-    /// the class process — ADR 0130). `class_name` keys the runtime self/`super`
-    /// dispatch the funs emit (they have no module export to call).
+    /// `class_name` keys the runtime self/`super` dispatch the funs emit (they
+    /// have no module export to call).
     pub(in crate::core_erlang) fn generate_class_methods_map_arg(
         &mut self,
         pairs: &[MapPair],
         class_name: &str,
-        class_var_names: &[String],
         docs: &mut Vec<super::threaded_ir::ThreadedStmt>,
     ) -> Result<Document<'static>> {
         if pairs.is_empty() {
@@ -212,12 +192,8 @@ impl CoreErlangGenerator {
                 splits.push(self.split_cascade_arg(&pair.key)?);
             }
             if matches!(pair.value, Expression::Block(_)) {
-                let fun_doc = self.class_method_map_value_doc(
-                    &pair.key,
-                    &pair.value,
-                    class_name,
-                    class_var_names,
-                )?;
+                let fun_doc =
+                    self.class_method_map_value_doc(&pair.key, &pair.value, class_name)?;
                 splits.push((Vec::new(), fun_doc));
             } else {
                 splits.push(self.split_cascade_arg(&pair.value)?);
@@ -268,10 +244,9 @@ impl CoreErlangGenerator {
         key: &Expression,
         block: &Block,
         class_name: &str,
-        class_var_names: &[String],
     ) -> Result<Document<'static>> {
         let value = Expression::Block(block.clone());
-        self.class_method_map_value_doc(key, &value, class_name, class_var_names)
+        self.class_method_map_value_doc(key, &value, class_name)
     }
 
     /// Lowers a single `classMethods:` map value: a class-method fun for a literal
@@ -296,7 +271,6 @@ impl CoreErlangGenerator {
         key: &Expression,
         value: &Expression,
         class_name: &str,
-        class_var_names: &[String],
     ) -> Result<Document<'static>> {
         if let Expression::Literal(Literal::Symbol(sym), _) = key
             && let Some(selector) = super::class_builder_source::selector_from_symbol(sym)
@@ -306,7 +280,7 @@ impl CoreErlangGenerator {
             // selector slot.
             let expected = selector.arity() + 1;
             if block.parameters.len() == expected {
-                let saved = self.enter_builder_class_method_context(class_name, class_var_names);
+                let saved = self.enter_builder_class_method_context(class_name);
                 let result = self.generate_class_method_fun_from_block(&selector, block);
                 self.exit_builder_class_method_context(saved);
                 return result;
@@ -428,8 +402,8 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// The body of a class-side method, shared by compiled class methods, `ClassBuilder`
-    /// funs and class-side extension funs (ADR 0130 §3): the bare result, with a
+    /// The body of a class-side method, shared by compiled class methods and `ClassBuilder`
+    /// funs (ADR 0130 §3): the bare result, with a
     /// real `NlrCatch` prepended when `needs_nlr` (the token is minted by
     /// [`Self::with_nlr_scope`] before the body lowers, production's real mint
     /// order) and the whole sequence verified and rendered once. Class variables
@@ -445,24 +419,21 @@ impl CoreErlangGenerator {
             let ((), _) = self.with_nlr_scope(needs_nlr, |_| ());
             return Ok(docvec!["ClassSelf"]);
         }
-        // BT-3719: the class key is bound once around the whole body.
-        self.with_class_var_key_binding(|this| {
-            let (body_stmts_result, nlr_token_var) =
-                this.with_nlr_scope(needs_nlr, |g| g.lower_class_method_body(method));
-            let mut body_stmts = body_stmts_result?;
-            if let Some(token_var) = nlr_token_var {
-                body_stmts.insert(
-                    0,
-                    threaded_ir::ThreadedStmt::NlrCatch {
-                        boundary: super::NlrBoundary::ClassMethod,
-                        token: threaded_ir::TokenId::new(token_var),
-                        frame: threaded_ir::FrameId::ROOT,
-                        span: method.span,
-                    },
-                );
-            }
-            Ok(this.verify_and_render_body_stmts(&body_stmts, method.span))
-        })
+        let (body_stmts_result, nlr_token_var) =
+            self.with_nlr_scope(needs_nlr, |g| g.lower_class_method_body(method));
+        let mut body_stmts = body_stmts_result?;
+        if let Some(token_var) = nlr_token_var {
+            body_stmts.insert(
+                0,
+                threaded_ir::ThreadedStmt::NlrCatch {
+                    boundary: super::NlrBoundary::ClassMethod,
+                    token: threaded_ir::TokenId::new(token_var),
+                    frame: threaded_ir::FrameId::ROOT,
+                    span: method.span,
+                },
+            );
+        }
+        Ok(self.verify_and_render_body_stmts(&body_stmts, method.span))
     }
 
     /// Builds the trailing fun parameter list `, P1, P2, …` as `Document` pieces

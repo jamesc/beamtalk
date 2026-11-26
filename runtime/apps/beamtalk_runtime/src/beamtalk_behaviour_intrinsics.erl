@@ -37,8 +37,6 @@ that the Behaviour/Class libraries can rely on.
 | classFieldKinds/1            | Field name -> eager/late kind, local only (ADR 0124 §9/B5b) |
 | classAllFieldKinds/1         | Combined field name -> eager/late kind via superclass chain (ADR 0124 §9/B5b) |
 | classAllFieldKindsByName/1   | Same as classAllFieldKinds/1, by ClassName (ADR 0124 §9/B5b)  |
-| classClassVarNames/1        | Class-side field names (class variables) from class meta   |
-| classAllClassVarNames/1     | Combined class-side field names via superclass chain       |
 | className/1                 | Class name from class gen_server state                    |
 | classClass/1                | Real metaclass object (ADR 0036)                          |
 | classDoc/1                  | Class doc string from published metadata (ADR 0033)       |
@@ -77,8 +75,11 @@ that the Behaviour/Class libraries can rely on.
     compiled_includes_selector/2,
     classCanUnderstandFromName/2,
     selectorProviderFromName/2,
+    overridesDoesNotUnderstandFromName/1,
     overridesCollectionSelectorFromName/1,
     speciesConstructionOverriddenFromName/2,
+    speciesDependentThroughCollectionFromName/2,
+    foldsOverDoFromName/2,
     classFieldNames/1,
     classAllFieldNames/1,
     classAllFieldNamesByName/1,
@@ -90,9 +91,6 @@ that the Behaviour/Class libraries can rely on.
     classFieldKinds/1,
     classAllFieldKinds/1,
     classAllFieldKindsByName/1,
-    %% class-side field (class variable) reflection
-    classClassVarNames/1,
-    classAllClassVarNames/1,
     className/1,
     classClass/1,
     %% BT-4065: `Object>>isKindOf:` in the caller, no class-process sends
@@ -369,8 +367,7 @@ Who answers `Selector` for instances of the class named ClassName (BT-3916).
 Walks the hierarchy exactly as `classCanUnderstandFromName/2` does and answers
 `stdlib` when the first class on the chain that defines the selector is a
 stdlib module, `user` when it is any other module (unless the method is a provision of a
-stdlib protocol the class `uses:`, recorded in its meta) or a registered
-extension method, and `none` when nothing on the chain defines it. The receiver guard of
+stdlib protocol the class `uses:`, recorded in its meta), and `none` when nothing on the chain defines it. The receiver guard of
 an inlined list-op fold (`beamtalk_collection:to_list_for_threading/2`) reads
 this to tell "the stdlib's own `inject:into:`, which is the fold over `do:`"
 from a class's own method the fold would otherwise bypass.
@@ -380,26 +377,40 @@ selectorProviderFromName(ClassName, Selector) ->
     walk_hierarchy(
         ClassName,
         fun(CN, CPid, _Acc) ->
-            case beamtalk_dispatch:check_extension(CN, Selector) of
-                {ok, _Fun} ->
-                    {halt, user};
-                not_found ->
-                    case defines_selector_locally(CN, CPid, Selector) of
-                        true ->
-                            Module = beamtalk_object_class:module_name_safe(CPid),
-                            case
-                                is_stdlib_module_name(Module) orelse
-                                    is_stdlib_trait_provision(Module, Selector)
-                            of
-                                true -> {halt, stdlib};
-                                false -> {halt, user}
-                            end;
-                        false ->
-                            {cont, none}
-                    end
+            case defines_selector_locally(CN, CPid, Selector) of
+                true ->
+                    Module = beamtalk_object_class:module_name_safe(CPid),
+                    case
+                        is_stdlib_module_name(Module) orelse
+                            is_stdlib_trait_provision(Module, Selector)
+                    of
+                        true -> {halt, stdlib};
+                        false -> {halt, user}
+                    end;
+                false ->
+                    {cont, none}
             end
         end,
         none
+    ).
+
+-doc """
+Whether the class named ClassName answers an unknown message with a
+`doesNotUnderstand:args:` override (BT-5236): the first class on the chain that
+defines it is not `ProtoObject`, whose own definition is the default that raises.
+A stdlib forwarder (`TimeoutProxy`, `ErlangModule`) counts, as a user proxy does.
+""".
+-spec overridesDoesNotUnderstandFromName(atom()) -> boolean().
+overridesDoesNotUnderstandFromName(ClassName) ->
+    walk_hierarchy(
+        ClassName,
+        fun(CN, CPid, _Acc) ->
+            case defines_selector_locally(CN, CPid, 'doesNotUnderstand:args:') of
+                true -> {halt, CN =/= 'ProtoObject'};
+                false -> {cont, false}
+            end
+        end,
+        false
     ).
 
 %% Does this exact class (not an ancestor) define `Selector`? The published
@@ -436,32 +447,22 @@ stdlib, a collection message the stdlib's own collection methods run through
 
 Reads the `overrides_collection_selector` key codegen bakes into each class's
 meta from the compiler's one list of those messages
-(`state_threading_selectors::overridable_collection_selectors`). A runtime
-extension method (BT-3951) is invisible to that flag, so each class on the chain
-is also asked `beamtalk_collection_selectors:extended_on/1`, whose list a Rust
-test holds equal to the compiler's. A class without meta (dynamic, older build)
-counts as `false`.
+(`state_threading_selectors::overridable_collection_selectors`). A class without
+meta (dynamic, older build) counts as `false`.
 """.
 -spec overridesCollectionSelectorFromName(atom()) -> boolean().
 overridesCollectionSelectorFromName(ClassName) ->
     walk_hierarchy(
         ClassName,
-        fun(CN, CPid, _Acc) ->
-            %% A runtime extension (BT-3951) is invisible to the compile-time
-            %% flag, and may sit on a stdlib class.
-            case beamtalk_collection_selectors:extended_on(CN) of
+        fun(_CN, CPid, _Acc) ->
+            Module = beamtalk_object_class:module_name_safe(CPid),
+            case is_stdlib_module_name(Module) of
                 true ->
-                    {halt, true};
+                    {cont, false};
                 false ->
-                    Module = beamtalk_object_class:module_name_safe(CPid),
-                    case is_stdlib_module_name(Module) of
-                        true ->
-                            {cont, false};
-                        false ->
-                            case meta_for_module(Module) of
-                                {ok, #{overrides_collection_selector := true}} -> {halt, true};
-                                _ -> {cont, false}
-                            end
+                    case meta_for_module(Module) of
+                        {ok, #{overrides_collection_selector := true}} -> {halt, true};
+                        _ -> {cont, false}
                     end
             end
         end,
@@ -478,8 +479,8 @@ provision does: a selector the class gets from a stdlib trait such as
 `Enumerable` forwards to `self elements` and never reaches `species`. So this is
 `false` unless the selector is species-dependent, its first definer on the chain
 is not a trait provision, and a class on the chain defines a species-construction
-message outside the stdlib (the `overrides_species_construction` meta key) or a
-runtime extension does. A class without meta counts as `false`.
+message outside the stdlib (the `overrides_species_construction` meta key). A
+class without meta counts as `false`.
 """.
 -spec speciesConstructionOverriddenFromName(atom(), atom()) -> boolean().
 speciesConstructionOverriddenFromName(ClassName, Selector) ->
@@ -487,27 +488,94 @@ speciesConstructionOverriddenFromName(ClassName, Selector) ->
         reached_through_collection(ClassName, Selector) andalso
         walk_hierarchy(
             ClassName,
-            fun(CN, CPid, _Acc) ->
-                case beamtalk_collection_selectors:species_construction_extended_on(CN) of
+            fun(_CN, CPid, _Acc) ->
+                Module = beamtalk_object_class:module_name_safe(CPid),
+                case is_stdlib_module_name(Module) of
                     true ->
-                        {halt, true};
+                        {cont, false};
                     false ->
-                        Module = beamtalk_object_class:module_name_safe(CPid),
-                        case is_stdlib_module_name(Module) of
-                            true ->
-                                {cont, false};
-                            false ->
-                                case meta_for_module(Module) of
-                                    {ok, #{overrides_species_construction := true}} ->
-                                        {halt, true};
-                                    _ ->
-                                        {cont, false}
-                                end
+                        case meta_for_module(Module) of
+                            {ok, #{overrides_species_construction := true}} ->
+                                {halt, true};
+                            _ ->
+                                {cont, false}
                         end
                 end
             end,
             false
         ).
+
+-doc """
+Whether `Selector` is one of the species-dependent messages and the class gets
+it from `Collection`'s own provision, for a `Bag` (BT-5136): the pure path
+answers a Bag, which `beamtalk_collection:from_list_like/2` cannot rebuild, so
+the stateful fold refuses it. A user `Collection` with the default `species`
+and `withAll:` answers a List on both paths.
+""".
+-spec speciesDependentThroughCollectionFromName(atom(), atom()) -> boolean().
+speciesDependentThroughCollectionFromName(ClassName, Selector) ->
+    lists:member(Selector, beamtalk_collection_selectors:species_dependent()) andalso
+        reached_through_collection(ClassName, Selector) andalso
+        walk_hierarchy(
+            ClassName,
+            fun(CN, _CPid, Acc) -> {cont, Acc orelse CN =:= 'Bag'} end,
+            false
+        ).
+
+-doc """
+Whether the stdlib's `Selector` on this class is a fold over `do:` (BT-5190),
+the only thing an in-place writing fold can stand in for: the class is a
+`Collection` (whose provisions are folds over `do:`), or its first definer of
+`Selector` on the chain is a stdlib trait provision such as `Enumerable`'s (a
+stdlib class that `uses: Enumerable`, `Ets`, included). A stdlib `Enumerable`
+user is trusted to answer a selector it defines natively as the `do:` fold does,
+as every stdlib class was before this check.
+A stdlib class that defines the selector natively and is neither, a `Stream`,
+answers something the fold cannot: a lazy `Stream` from `select:`, a
+short-circuit from `detect:`. Forcing it through `do:` never ends on an
+infinite stream and answers a List.
+BT-5263: `Stream inject:into:` is the exception. It is eager (it consumes the
+stream to answer one value), so the in-place fold answers what the pure send does
+on a finite stream. The fold drains the stream before the block runs, so an early
+`^` exit or a raise partway, or an infinite stream, differs from the pure send
+(which stops pulling); only `Stream` is exempt, as the one stdlib class known to
+be eager here.
+The allowlist's limit: it is checked only for a map-backed object (a `Collection`
+or a class instance); a receiver that is a raw List, tuple or other primitive
+never gets here (`guard_species_rebuild/3` passes it).
+""".
+-spec foldsOverDoFromName(atom(), atom()) -> boolean().
+foldsOverDoFromName('Stream', 'inject:into:') ->
+    true;
+foldsOverDoFromName(ClassName, Selector) ->
+    beamtalk_class_registry:inherits_from(ClassName, 'Collection') orelse
+        walk_hierarchy(
+            ClassName,
+            fun(CN, CPid, _Acc) ->
+                case defines_selector_locally(CN, CPid, Selector) of
+                    true ->
+                        Module = beamtalk_object_class:module_name_safe(CPid),
+                        {halt,
+                            is_stdlib_trait_provision(Module, Selector) orelse
+                                stdlib_uses_enumerable(Module)};
+                    false ->
+                        {cont, false}
+                end
+            end,
+            false
+        ).
+
+%% A stdlib class that `uses: Enumerable` (`Ets`): its `select:` and friends are
+%% the protocol's provisions flattened into its own stdlib module, which records
+%% no `stdlib_trait_methods` (a stdlib module's own methods all count as the
+%% stdlib's), so the `uses` key stands in.
+-spec stdlib_uses_enumerable(atom()) -> boolean().
+stdlib_uses_enumerable(Module) ->
+    is_stdlib_module_name(Module) andalso
+        case meta_for_module(Module) of
+            {ok, Meta} -> lists:member('Enumerable', maps:get(uses, Meta, []));
+            not_available -> false
+        end.
 
 %% Is the first definer of `Selector` on the chain a stdlib class's own method
 %% (`Collection`'s), rather than a stdlib trait's provision flattened into a
@@ -634,12 +702,7 @@ class (not inherited).
 Backs `@primitive "classFieldKinds"` (`Behaviour>>fieldKinds`, ADR 0124 §9/B5b)
 — the instance-side counterpart to `classFieldNames/1`, reading B5a's
 `'field_kinds'` key from `__beamtalk_meta/0` instead of walking the AST.
-Instance side only: a class-side (`classState:`) kind map is deliberately
-*not* exposed under this name — an instance slot and a class var can share
-a name, so folding both into one dictionary would be ambiguous (ADR 0124
-§9's B10 documentation pass records the split; `classVarNames/1` is the
-existing precedent for keeping class-side reflection under its own
-selector rather than merging it into the instance-side one).
+Instance side only: a class has no fields (ADR 0153).
 
 Dynamic classes built via `beamtalk_class_builder` carry no static meta,
 so they answer `'eager'` for every field they report — ClassBuilder has no
@@ -782,59 +845,6 @@ classFieldNames(Self) ->
             beamtalk_object_class_read:instance_variables_safe(ClassPid)
     end.
 
--doc """
-Return the class-side field (class variable) names declared in this class.
-
-Backs `@primitive "classClassVarNames"` (`Behaviour>>classVarNames`)
-— the class-side counterpart to `classFieldNames/1`. Reads the `class_fields`
-key emitted into `__beamtalk_meta/0` from `classState:` declarations. Returns
-`[]` for dynamic classes built via ClassBuilder (no static meta) and for
-classes with no class-side state.
-
-A distinct selector (not `fieldNames`) is required: `fieldNames` is intercepted
-at the call site as an instance-reflection primitive and never reaches the
-Behaviour method table.
-""".
--spec classClassVarNames(#beamtalk_object{}) -> [atom()].
-classClassVarNames(Self) ->
-    ClassPid = erlang:element(4, Self),
-    Module = beamtalk_object_class:module_name_safe(ClassPid),
-    case meta_for_module(Module) of
-        {ok, Meta} ->
-            maps:get(class_fields, Meta, []);
-        not_available ->
-            []
-    end.
-
--doc """
-Return all class-side field names including inherited, in slot order.
-
-Backs `@primitive "classAllClassVarNames"`
-(`Behaviour>>allClassVarNames`) — the class-side counterpart to
-`classAllFieldNames/1`. Walks the superclass chain collecting each level's
-`class_fields`, mirroring the slot order of `classAllFieldNames/1` (ancestor
-class-side slots precede subclass ones).
-""".
--spec classAllClassVarNames(#beamtalk_object{}) -> [atom()].
-classAllClassVarNames(Self) ->
-    ClassPid = erlang:element(4, Self),
-    ClassName = beamtalk_object_class_read:class_name_safe(ClassPid),
-    walk_hierarchy(
-        ClassName,
-        fun(_CN, CPid, Acc) ->
-            Module = beamtalk_object_class:module_name_safe(CPid),
-            CVars =
-                case meta_for_module(Module) of
-                    {ok, Meta} ->
-                        maps:get(class_fields, Meta, []);
-                    not_available ->
-                        []
-                end,
-            {cont, CVars ++ Acc}
-        end,
-        []
-    ).
-
 -doc "Return the name of the class as a Symbol (atom).".
 -spec className(#beamtalk_object{}) -> atom().
 className(Self) ->
@@ -950,10 +960,9 @@ derived-cache lookup.
 Here one lookup answers both questions: under `{primitive_is_kind_of, C,
 Behaviour}` the derived cache keeps the decided `objectIsKindOf/2` answer for
 an instance of `C`, recorded only when nothing on `C`'s chain overrides
-`isKindOf:` (no compiled method below `Object` and no extension at any level,
+`isKindOf:` (no compiled method below `Object`,
 `beamtalk_default_method:owner/2`), and validated on every hit by the same
-class-pid liveness check the `is_kind_of` entry uses. Every class write and
-every extension (un)registration flushes it. Anything else — an override, an
+class-pid liveness check the `is_kind_of` entry uses. Every class write flushes it. Anything else — an override, an
 unpublished chain, an argument that is not a canonical class or metaclass
 object — takes the ordinary primitive send.
 """.
@@ -1002,7 +1011,7 @@ For a plain value — anything but an actor, class object or supervisor handle,
 a future (any tuple headed by one of those reserved tags), or a map the
 runtime treats as tagged (`beamtalk_tagged_map:is_tagged/1`) — the class is one
 of the stdlib's built-ins. So while no class other than `Object` has ever
-defined `isKindOf:`, compiled or as an extension
+defined `isKindOf:`
 (`beamtalk_default_method:overridden_anywhere/1`, which also covers code
 compiled against an older stdlib), the send would run `Object>>isKindOf:`, and
 its answer is `TestAnswer`: a value passes the test exactly when its class is
@@ -1154,8 +1163,7 @@ plain_value(_) ->
     true.
 
 %% `objectIsKindOf/2`'s decided answer for an instance of `C`, when `C` runs
-%% `Object>>isKindOf:`; `overridden` (cached: the next class write or
-%% extension change flushes it) when something on the chain overrides it.
+%% `Object>>isKindOf:`; `overridden` (cached: the next class write flushes it) when something on the chain overrides it.
 -spec decide_primitive_is_kind_of(atom(), #beamtalk_object{}) ->
     {cache, {kind_of, boolean(), pid(), pid()} | overridden} | {nocache, undecided}.
 decide_primitive_is_kind_of(C, Behaviour) ->
@@ -1398,7 +1406,7 @@ Cleanup sequence:
   1. Stop all live actors of this class (found by the process scan)
   2. Stop the class gen_server (terminate/2 removes ETS entry and pg group)
   3. Purge the BEAM module (code:soft_purge + code:delete)
-  4. Purge derived registries — xref, extensions, protocol registry,
+  4. Purge derived registries — xref, protocol registry,
      compiler cache, workspace class_sources (via
      beamtalk_class_lifecycle:class_removed/2)
   5. Notify the workspace layer / REPL sessions (publish_class_removed/2)
@@ -1511,7 +1519,7 @@ classRemoveFromSystemByName(ClassName) ->
                                 code:soft_purge(Module)
                             ),
                             %% Purge every derived registry (xref,
-                            %% extensions, protocol registry, compiler cache,
+                            %% protocol registry, compiler cache,
                             %% workspace class_sources) — the single teardown
                             %% path, run before the workspace/REPL notification
                             %% below.
@@ -2014,16 +2022,19 @@ Uses registered-name tricks to avoid a hard DDD dep from beamtalk_runtime →
 beamtalk_workspace (same pattern as stop_class_actors/1 and classReload/1).
 
   - beamtalk_workspace_meta has a known registered name — cast directly.
-  - beamtalk_repl_shells pg group — broadcast to all active REPL sessions.
+  - beamtalk_repl_shells pg group — broadcast to this node's REPL sessions.
+    Local members only (BT-5192): the group's default `pg` scope is synced
+    across connected nodes, and a class removed here is still loaded on a peer,
+    so a peer's shells must not drop it from their trackers.
 """.
 -spec publish_class_removed(atom(), atom()) -> ok.
 publish_class_removed(ClassName, Module) ->
     %% Workspace metadata cleanup.
     gen_server:cast(beamtalk_workspace_meta, {unregister_module, Module}),
-    %% REPL session tracker cleanup — broadcast to all joined session shells.
+    %% REPL session tracker cleanup — broadcast to this node's session shells.
     Shells =
         try
-            pg:get_members(beamtalk_repl_shells)
+            pg:get_local_members(beamtalk_repl_shells)
         catch
             _:_ -> []
         end,

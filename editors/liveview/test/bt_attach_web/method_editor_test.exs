@@ -381,6 +381,33 @@ defmodule BtAttachWeb.Live.MethodEditorTest do
       assert tab.base == "foo => 42"
     end
 
+    test "BT-5206: a save whose ChangeLog entry was not recorded shows the warnings" do
+      StubWorkspaceClient.put_save_warnings([
+        "The change is live, but ChangeLog append failed: disk full"
+      ])
+
+      tabs = [method_tab("method:Counter:instance:foo", "Counter", "foo")]
+      socket = base_socket(%{tabs: tabs, active_tab: "method:Counter:instance:foo"})
+
+      {:noreply, socket} =
+        MethodEditor.handle_event(
+          "save_method",
+          %{
+            "class" => "Counter",
+            "selector" => "foo",
+            "source" => "foo => 42",
+            "tab" => "method:Counter:instance:foo"
+          },
+          socket
+        )
+
+      assert socket.assigns.save_error == nil
+      assert socket.assigns.save_result =~ "Saved foo on Counter"
+      assert socket.assigns.save_result =~ "ChangeLog append failed: disk full"
+      # The method itself is live: the tab is clean.
+      assert [%{dirty: false}] = socket.assigns.tabs
+    end
+
     test "a :def tab evals its whole definition (compiling the class) instead of calling save" do
       tabs = [def_tab("def:Counter", "Counter")]
       socket = base_socket(%{tabs: tabs, active_tab: "def:Counter"})
@@ -1360,6 +1387,31 @@ defmodule BtAttachWeb.Live.MethodEditorTest do
                  MethodEditor.handle_event(event, params, base_socket()),
                "MethodEditor.handle_event/3 has no clause for #{inspect(event)} (or it crashed)"
       end
+    end
+  end
+
+  describe "queued class compile (BT-5189)" do
+    test "a compile dropped from the queue by Stop says so in the editor status" do
+      tabs = [def_tab("def:Counter", "Counter")]
+      socket = base_socket(%{tabs: tabs, active_tab: "def:Counter", eval_running: true})
+
+      {:noreply, socket} =
+        MethodEditor.handle_event(
+          "save_method",
+          %{
+            "class" => "Counter",
+            "selector" => "",
+            "source" => "Object subclass: Counter",
+            "tab" => "def:Counter"
+          },
+          socket
+        )
+
+      assert length(socket.assigns.eval_queue) == 1
+      {:noreply, socket} = BtAttachWeb.Live.Dock.handle_event("eval_interrupt", %{}, socket)
+
+      assert socket.assigns.save_error ==
+               "Compiling Counter did not complete: Stopped before it ran."
     end
   end
 end

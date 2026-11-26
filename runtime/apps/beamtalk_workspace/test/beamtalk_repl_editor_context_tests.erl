@@ -26,11 +26,14 @@ load_fixture(Name) ->
 %% Lexeme skippers
 %%====================================================================
 
-%% An interpolation or nested string left unterminated is `unsupported`.
+%% An interpolation left open leaves the
+%% string unterminated, which ends at the end of its opening line, as the
+%% lexer recovers (BT-5182). A nested string left open is `unsupported`.
 skip_string_literal_unterminated_interpolation_test() ->
-    ?assertEqual(unsupported, beamtalk_repl_editor_context:skip_string_literal("\"a {b")),
+    ?assertEqual({ok, []}, beamtalk_repl_editor_context:skip_string_literal("\"a {b")),
+    ?assertEqual({ok, "\nx"}, beamtalk_repl_editor_context:skip_string_literal("\"a {b\nx")),
     ?assertEqual(unsupported, beamtalk_repl_editor_context:skip_string_literal("\"a {b \"c")),
-    ?assertEqual(unsupported, beamtalk_repl_editor_context:skip_string_literal("\"a {b /* c")).
+    ?assertEqual({ok, []}, beamtalk_repl_editor_context:skip_string_literal("\"a {b /* c")).
 
 %% (Per AGENTS.md Essential Rules: a "mirrors" claim across the
 %% Rust/Erlang boundary needs a shared conformance fixture, not
@@ -57,6 +60,11 @@ assert_literal_span_case(#{
             <<"string">> ->
                 {ok, R} = beamtalk_repl_editor_context:skip_string_literal(Source),
                 R;
+            <<"unterminated_string">> ->
+                %% BT-5182: ends at the end of its opening line, or before a
+                %% definition header.
+                {ok, R} = beamtalk_repl_editor_context:skip_string_literal(Source),
+                R;
             <<"character">> ->
                 beamtalk_repl_editor_context:skip_character_literal(Source)
         end,
@@ -69,9 +77,9 @@ assert_literal_span_case(#{
 
 %% (Per AGENTS.md Essential Rules: a "mirrors" claim across the
 %% Rust/Erlang boundary needs a shared conformance fixture, not just a
-%% comment): `skip_line_comment/1`/`skip_block_comment/1` are hand-rolled
+%% comment): `skip_line_comment/1`/`skip_block_comment_opener/1` are hand-rolled
 %% Erlang mirrors of the Rust lexer's `lex_line_comment/0`/
-%% `lex_block_comment/0` span computation. Both sides run the exact same
+%% `lex_block_comment_opener/0` span computation. Both sides run the exact same
 %% cases from `test/fixtures/comment_span_corpus.json` — see
 %% `source_analysis::lexer::tests::comment_span_matches_shared_corpus` for
 %% the Rust side.
@@ -91,14 +99,35 @@ assert_comment_span_case(#{
         case Kind of
             <<"line_comment">> ->
                 beamtalk_repl_editor_context:skip_line_comment(Source);
-            <<"block_comment">> ->
-                beamtalk_repl_editor_context:skip_block_comment(Source)
+            <<"block_comment_opener">> ->
+                %% BT-5229: a stray `/*` skips to the end of its line.
+                beamtalk_repl_editor_context:skip_block_comment_opener(Source)
         end,
     Consumed = length(Source) - length(Remaining),
     ?assertEqual(
         ExpectedEnd,
         Consumed,
         lists:flatten(io_lib:format("span-end mismatch for ~p (~ts)", [Source, Why]))
+    ).
+
+%% BT-5182: `is_definition_header/1` mirrors the Rust lexer's
+%% `is_definition_header`, the line test an unterminated string or block
+%% comment stops at. Both sides run `test/fixtures/definition_header_corpus.json`
+%% — see `source_analysis::parser::tests::lexer_recovery_tests::
+%% definition_header_agrees_with_parser` for the Rust side.
+definition_header_matches_shared_corpus_test() ->
+    Cases = load_fixture("definition_header_corpus.json"),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(#{<<"line">> := LineBin, <<"header">> := Expected, <<"why">> := Why}) ->
+            Line = unicode:characters_to_list(LineBin),
+            ?assertEqual(
+                Expected,
+                beamtalk_repl_editor_context:is_definition_header(Line),
+                lists:flatten(io_lib:format("header mismatch for ~p (~ts)", [Line, Why]))
+            )
+        end,
+        Cases
     ).
 
 %%====================================================================

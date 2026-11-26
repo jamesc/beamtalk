@@ -95,9 +95,6 @@ TestCase subclass: SystemNavigationUnusedTest
   testHelperAddSentSelectorsIsDefined =>
     self assert: (SystemNavigation class includesSelector: #addSentSelectorsIn:into:)
 
-  testHelperCollectExtensionSentSelectorsIsDefined =>
-    self assert: (SystemNavigation class includesSelector: #collectExtensionSentSelectorsInto:)
-
   // The candidate side walks owners and applies the exclusions per selector.
   testHelperCollectUnusedIsDefined =>
     self assert: (SystemNavigation class includesSelector: #collectUnusedFor:owner:sent:excluded:into:)
@@ -111,10 +108,6 @@ TestCase subclass: SystemNavigationUnusedTest
 
   testHelperIsPrimitiveMethodIsDefined =>
     self assert: (SystemNavigation class includesSelector: #isPrimitiveMethod:in:)
-
-  // The class-tag resolver helper (shared with the other queries) is present.
-  testHelperResolveExtensionClassIsDefined =>
-    self assert: (SystemNavigation class includesSelector: #resolveExtensionClass:)
 
   // The index-backed sent-set mapper (BT-2303): indexed `all_sent_selectors_bt`
   // selectors are folded into the sent Set via this typed helper.

@@ -251,6 +251,31 @@ impl SpawnedFront {
         &self.port_file
     }
 
+    /// Wrap an already-spawned `child` as a front, for downstream tests that
+    /// need a real tracked process without a workspace or launcher
+    /// (`test` feature only). On Windows the child is put in a fresh
+    /// Job Object, as [`spawn_front`] does.
+    ///
+    /// # Errors
+    ///
+    /// Windows only: creating the Job Object or assigning `child` to it.
+    #[cfg(feature = "test")]
+    pub fn from_child_for_tests(child: Child) -> io::Result<Self> {
+        #[cfg(windows)]
+        let job = {
+            let job = crate::winjob::JobHandle::new()?;
+            job.assign(&child)?;
+            job
+        };
+        Ok(Self {
+            child,
+            instance_id: String::new(),
+            port_file: PathBuf::new(),
+            #[cfg(windows)]
+            job,
+        })
+    }
+
     /// Stop the front and reap it: a graceful signal first, a forced kill only
     /// if it has not exited within `grace` (BT-5081).
     ///
@@ -262,24 +287,54 @@ impl SpawnedFront {
     /// `SIGKILL`. On Windows there is no graceful-signal equivalent for an
     /// arbitrary child, so it is the forced kill (the Job Object then takes the
     /// rest of the process tree down).
+    ///
+    /// A front that has already exited is not signalled at all (BT-5194): the
+    /// desktop app's monitor thread reaps an exited front with `try_wait()`,
+    /// and once reaped its PID is free for the OS to hand to an unrelated
+    /// process. `std`'s `Child` remembers a reaped status, so the `try_wait()`
+    /// here sees it and returns before any `kill(2)`.
     pub fn stop(&mut self, grace: Duration) {
         #[cfg(unix)]
-        if let Ok(pid) = i32::try_from(self.child.id()) {
-            // SAFETY: kill(2) on the PID of our own, still-unreaped child.
+        self.stop_signalling(grace, |pid| {
+            // SAFETY: kill(2) on the PID of our own child, which
+            // `stop_signalling` has just confirmed (`try_wait`) is not yet
+            // reaped, so the PID cannot have been recycled.
             unsafe { libc::kill(pid, libc::SIGTERM) };
-            let deadline = std::time::Instant::now() + grace;
-            loop {
-                match self.child.try_wait() {
-                    Ok(Some(_)) => return,
-                    Ok(None) if std::time::Instant::now() < deadline => {
-                        std::thread::sleep(Duration::from_millis(25));
-                    }
-                    _ => break,
-                }
-            }
-        }
+        });
         #[cfg(not(unix))]
-        let _ = grace;
+        {
+            let _ = grace;
+            if matches!(self.child.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    /// [`Self::stop`]'s Unix body, with the `SIGTERM` delivery injected so a
+    /// test can observe whether it was sent.
+    #[cfg(unix)]
+    fn stop_signalling(&mut self, grace: Duration, sigterm: impl FnOnce(i32)) {
+        // Already exited (and now reaped): its PID may belong to another
+        // process, so there is nothing to signal.
+        if matches!(self.child.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        if let Ok(pid) = i32::try_from(self.child.id()) {
+            let child = &mut self.child;
+            // Exited or not, the forced kill below is right: it is a no-op
+            // on a child `try_wait` has reaped.
+            let _ = beamtalk_process::escalate::terminate_and_wait(
+                grace,
+                Duration::from_millis(25),
+                std::thread::sleep,
+                || sigterm(pid),
+                || matches!(child.try_wait(), Ok(Some(_))),
+            );
+        }
+        // `Child::kill` is a no-op on an already-reaped child, so this
+        // fallback cannot reach a recycled PID either.
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -400,71 +455,55 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
 
     detach(&mut cmd);
 
-    // Created before `cmd.spawn()` (not after) so there is no
-    // JobHandle-creation-fails-after-spawn case to unwind: if this errors,
-    // nothing has been spawned yet and the `?` below can propagate directly.
-    #[cfg(windows)]
-    let job = crate::winjob::JobHandle::new()?;
-
-    // `mut` is only needed on the `#[cfg(windows)]` path below, which kills
-    // `child` itself if job-object assignment fails; the non-Windows arm
-    // never mutates it.
-    #[cfg_attr(not(windows), allow(unused_mut))]
-    let mut child = cmd.spawn()?;
-
+    // Windows: `detach` set `CREATE_SUSPENDED`, so `spawn_in_job` assigns the
+    // child to its job before it runs, so `cmd.exe` cannot launch `erl.exe`
+    // outside the job (BT-3880), and only then resumes it. A failure kills and
+    // reaps the child first: no job would ever reap it, and `crate::reap`'s
+    // PID-file sweep can't catch it either (a PID file is only written after
+    // `spawn_front` returns `Ok`).
     #[cfg(windows)]
     {
-        // `child` is still suspended here (`detach` passed
-        // `CREATE_SUSPENDED`), so assigning it now covers every descendant
-        // it will ever create — there is no window in which `cmd.exe` could
-        // already have launched `erl.exe` outside the job (BT-3880; see
-        // `crate::winjob`'s doc). Only once it is inside the job is it
-        // released to run. Both steps are checked and surface a failure
-        // rather than silently returning a front this job object does not
-        // actually protect (or one that would sit suspended forever).
-        // `cmd.spawn()` above already succeeded, so a failure past this
-        // point must kill `child` itself before propagating — otherwise the
-        // job object we failed to attach never exists to reap it, and
-        // `crate::reap`'s PID-file sweep can't catch it either (a PID file
-        // is only written after `spawn_front` returns `Ok`), leaving a live,
-        // untracked `cmd.exe`/`erl.exe` tree behind.
-        if let Err(e) = job
-            .assign(&child)
-            .and_then(|()| crate::winjob::resume_initial_thread(&child))
-        {
-            kill_orphaned_child(&mut child);
-            // Best-effort (low
-            // severity): `build_launch_command` above already created this
-            // attempt's RELEASE_TMP directory. At this point in the boot
-            // sequence the release has likely not written secrets into it
-            // yet, but there's no reason to leave even an empty stray
-            // directory behind — same cleanup `remove_record` does on the
-            // success path, just inlined here since this failure never
-            // reaches a saved `FrontRecord` for `remove_record` to key off.
-            let _ =
-                std::fs::remove_dir_all(release_tmp_dir(&config.workspace_id, &config.instance_id));
-            return Err(e.into());
+        match crate::winjob::spawn_in_job(&mut cmd) {
+            Ok((child, job)) => Ok(SpawnedFront {
+                child,
+                instance_id: config.instance_id.clone(),
+                port_file,
+                job,
+            }),
+            Err(e) => {
+                // Best-effort (low severity): `build_launch_command` above
+                // already created this attempt's RELEASE_TMP directory. The
+                // release has likely not written secrets into it yet, but
+                // there's no reason to leave even an empty stray directory
+                // behind — same cleanup `remove_record` does on the success
+                // path, inlined since this failure never reaches a saved
+                // `FrontRecord` for `remove_record` to key off.
+                let _ = std::fs::remove_dir_all(release_tmp_dir(
+                    &config.workspace_id,
+                    &config.instance_id,
+                ));
+                Err(e.into())
+            }
         }
-        Ok(SpawnedFront {
-            child,
-            instance_id: config.instance_id.clone(),
-            port_file,
-            job,
-        })
     }
     #[cfg(not(windows))]
     {
         Ok(SpawnedFront {
-            child,
+            child: cmd.spawn()?,
             instance_id: config.instance_id.clone(),
             port_file,
         })
     }
 }
 
+/// Once `attach.log` reaches this size, the next front launch moves it to
+/// `attach.log.1` (replacing any older one) and starts a fresh log (BT-5194),
+/// so a long-lived workspace's log stays bounded at about twice this.
+const ATTACH_LOG_MAX_BYTES: u64 = 10 * 1024 * 1024;
+
 /// Redirect `cmd`'s stdout/stderr to `~/.beamtalk/workspaces/<id>/attach.log`
-/// (append mode, accumulating across restarts — mirrors `workspace.log`'s own
-/// convention on the workspace-node side) instead of the default inherited
+/// (append mode, accumulating across restarts until it reaches
+/// [`ATTACH_LOG_MAX_BYTES`], then rotated once to `attach.log.1`) instead of the default inherited
 /// stdio. Inherited stdio is the packaged Tauri app's own — i.e. nowhere, in
 /// a release build (`windows_subsystem = "windows"` on Windows; macOS/Linux
 /// app bundles have no attached terminal either) — so without this, a
@@ -479,7 +518,7 @@ pub fn spawn_front(config: &SpawnConfig) -> Result<SpawnedFront> {
 fn redirect_front_stdio(cmd: &mut Command, workspace_id: &str) {
     let stdio_pair = beamtalk_workspace::workspace_dir(workspace_id)
         .ok()
-        .and_then(|dir| open_front_log(&dir.join("attach.log")).ok());
+        .and_then(|dir| open_front_log(&dir.join("attach.log"), ATTACH_LOG_MAX_BYTES).ok());
 
     if let Some((stdout_file, stderr_file)) = stdio_pair {
         cmd.stdout(Stdio::from(stdout_file));
@@ -504,7 +543,8 @@ fn redirect_front_stdio(cmd: &mut Command, workspace_id: &str) {
 /// e.g. `metadata.json` — appropriate there, not here). No Windows
 /// equivalent is set here; it inherits the parent directory's ACLs, same as
 /// this crate's other Windows gaps this module's doc comment already notes.
-fn open_front_log(path: &Path) -> io::Result<(File, File)> {
+fn open_front_log(path: &Path, max_bytes: u64) -> io::Result<(File, File)> {
+    rotate_if_at_least(path, max_bytes);
     let mut options = OpenOptions::new();
     options.create(true).append(true);
     #[cfg(unix)]
@@ -517,19 +557,15 @@ fn open_front_log(path: &Path) -> io::Result<(File, File)> {
     Ok((file, cloned))
 }
 
-/// Kill and reap `child` after it was successfully spawned but
-/// [`crate::winjob::JobHandle::assign`] then failed to attach it to the
-/// job created before `spawn`, or [`crate::winjob::resume_initial_thread`]
-/// failed to release it afterwards — see the call site in [`spawn_front`].
-/// `TerminateProcess` (what `Child::kill` is on Windows) works on a
-/// still-suspended process too, so both cases are handled the same way.
-/// Best-effort: swallows its own errors rather than shadowing the setup
-/// failure that's already being propagated, since there's no better recovery
-/// available for a failure to kill a process we're already trying to kill.
-#[cfg(windows)]
-fn kill_orphaned_child(child: &mut std::process::Child) {
-    let _ = child.kill();
-    let _ = child.wait();
+/// Move `path` to `<path>.1` (replacing it) if `path` is at least
+/// `max_bytes` long. Best-effort, like the log itself: a failed rotation
+/// leaves the log appending as before.
+fn rotate_if_at_least(path: &Path, max_bytes: u64) {
+    if std::fs::metadata(path).is_ok_and(|m| m.len() >= max_bytes) {
+        let mut rotated = path.as_os_str().to_owned();
+        rotated.push(".1");
+        let _ = std::fs::rename(path, PathBuf::from(rotated));
+    }
 }
 
 /// Build the OS process invocation for `config`, platform-specific per this
@@ -871,8 +907,8 @@ fn detach(cmd: &mut Command) {
     // `CREATE_SUSPENDED` is not about detaching: it makes the child start
     // frozen so `spawn_front` can assign it to its job object before it
     // executes anything (and so before `cmd.exe` can launch `erl.exe`
-    // outside that job — BT-3880). `spawn_front` resumes it via
-    // `crate::winjob::resume_initial_thread` straight after the assignment.
+    // outside that job — BT-3880). `crate::winjob::spawn_in_job` resumes it
+    // straight after the assignment.
     // It lives here only because `creation_flags` replaces rather than
     // ORs, so every flag the front needs must be set in one call.
     cmd.creation_flags(
@@ -932,6 +968,38 @@ mod tests {
         assert!(marker.exists(), "SIGTERM handler did not run before exit");
     }
 
+    /// BT-5194: once the front has exited and been reaped (the desktop app's
+    /// monitor thread `try_wait()`s a front that stops answering), its PID is
+    /// free for the OS to reuse, so `stop` must not signal it.
+    #[cfg(unix)]
+    #[test]
+    fn stop_does_not_signal_a_front_that_was_already_reaped() {
+        let mut front = script_front("exit 0");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !matches!(front.child.try_wait(), Ok(Some(_))) {
+            assert!(std::time::Instant::now() < deadline, "front never exited");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        let mut signalled = Vec::new();
+        front.stop_signalling(Duration::from_secs(5), |pid| signalled.push(pid));
+        assert!(
+            signalled.is_empty(),
+            "stop sent SIGTERM to the reaped front's (possibly recycled) PID {signalled:?}"
+        );
+    }
+
+    /// The counterpart: a still-running front does get its `SIGTERM`.
+    #[cfg(unix)]
+    #[test]
+    fn stop_signals_a_running_front() {
+        let mut front = script_front("while :; do sleep 0.05; done");
+        let mut signalled = Vec::new();
+        front.stop_signalling(Duration::from_millis(50), |pid| signalled.push(pid));
+        assert_eq!(signalled, vec![i32::try_from(front.child.id()).unwrap()]);
+        assert!(matches!(front.child.try_wait(), Ok(Some(_))));
+    }
+
     /// A front that ignores `SIGTERM` is force-killed once the grace elapses, and
     /// `stop` still returns (it never hangs on a wedged front).
     #[cfg(unix)]
@@ -959,6 +1027,27 @@ mod tests {
             matches!(front.child.try_wait(), Ok(Some(_))),
             "front still running"
         );
+    }
+
+    /// BT-5194: `attach.log` used to grow forever (appended on every
+    /// launch). At the size cap the next launch rotates it to `attach.log.1`.
+    #[test]
+    fn open_front_log_rotates_a_full_log_once() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let log = dir.path().join("attach.log");
+        let rotated = dir.path().join("attach.log.1");
+
+        std::fs::write(&log, "small\n").unwrap();
+        drop(open_front_log(&log, 64).unwrap());
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "small\n");
+        assert!(!rotated.exists(), "a log under the cap is appended to");
+
+        std::fs::write(&log, "x".repeat(64)).unwrap();
+        std::fs::write(&rotated, "older").unwrap();
+        let (mut out, _err) = open_front_log(&log, 64).unwrap();
+        io::Write::write_all(&mut out, b"fresh\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "fresh\n");
+        assert_eq!(std::fs::read_to_string(&rotated).unwrap(), "x".repeat(64));
     }
 
     #[test]
@@ -2106,7 +2195,8 @@ mod tests {
                 let Some(handle) = ProcessHandle::open(pid) else {
                     continue;
                 };
-                match front.job.contains_process(handle.raw()) {
+                // SAFETY: `handle` is open until it drops, after this call.
+                match unsafe { front.job.contains_process(handle.raw()) } {
                     Ok(true) => {
                         found = Some((pid, handle));
                         return true;

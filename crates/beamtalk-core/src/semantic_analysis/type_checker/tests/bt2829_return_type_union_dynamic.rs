@@ -26,7 +26,7 @@ use super::common::*;
 fn untyped_class_hierarchy(class_name: &str) -> ClassHierarchy {
     let source = format!("Object subclass: {class_name}\n");
     let module = parse_source(&source);
-    ClassHierarchy::build(&module).0.unwrap()
+    ClassHierarchy::build(&module).0
 }
 
 /// Build a minimal unary method with the given declared return type
@@ -410,7 +410,7 @@ fn bt2829_consecutive_declaration_level_expect_all_suppress_cleanly() {
                   \x20\x20third -> String =>\n\
                   \x20\x20\x20\x20true ifTrue: [\"yes\"] ifFalse: [42]\n";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let class = &module.classes[0];
     assert_eq!(
         class.methods.len(),

@@ -16,12 +16,13 @@ defmodule BtAttachWeb.ReadinessController do
   Responses:
 
     * `200` — the workspace is reachable. Body includes the version report
-      (`beamtalk_version:get/0`, BT-2991) so the broker can warn/refuse on a
+      (the `info` operation's `version`, BT-2991, BT-5204) so the broker can warn/refuse on a
       runtime/protocol mismatch.
     * `503` — not reachable, with a machine-readable `reason` distinguishing
-      *epmd absent*, *bad cookie*, and *dead workspace* (`BtAttach.Workspace.
-      readiness/0`'s taxonomy) so the broker can show a precise error instead
-      of a generic "connection failed".
+      *epmd absent*, *bad cookie*, *workspace too old* and *dead workspace*
+      (`BtAttach.Workspace.readiness/0`'s taxonomy) so the broker can show a
+      precise error instead of a generic "connection failed". A too-old workspace
+      also carries a `message` saying what to do (BT-5206).
   """
   use BtAttachWeb, :controller
 
@@ -32,6 +33,18 @@ defmodule BtAttachWeb.ReadinessController do
         conn
         |> put_status(:ok)
         |> json(%{status: "ok", version: version_report})
+
+      {:error, :workspace_too_old} ->
+        conn
+        |> put_status(:service_unavailable)
+        |> json(%{
+          status: "error",
+          reason: "workspace_too_old",
+          message:
+            "The workspace is older than this app and does not serve the operations it " <>
+              "needs. Stop it (`beamtalk workspace stop <id>`) and start it again from a " <>
+              "matching Beamtalk install."
+        })
 
       {:error, reason} ->
         conn

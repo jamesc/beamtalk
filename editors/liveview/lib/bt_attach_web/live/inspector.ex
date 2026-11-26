@@ -64,6 +64,8 @@ defmodule BtAttachWeb.Live.Inspector do
   defdelegate scalar_kind(term), to: View
   defdelegate supervisor_child_rows(term), to: View
   defdelegate target_info(label, term), to: View
+  defdelegate children_cut_notice(target), to: View
+  defdelegate supervisor_target_info(label, term, rows, truncated), to: View
   defdelegate watched_pid?(watch, pid), to: View
   defdelegate valid_receiver?(label), to: View
   defdelegate window_watched_terms(windows), to: View
@@ -85,7 +87,7 @@ defmodule BtAttachWeb.Live.Inspector do
   @inspector_events ~w(
     inspect drill crumb freeze_toggle poke close_inspector set_inspector_mode
     window_close window_crumb window_drill window_focus window_freeze
-    window_moved window_poke window_reset_positions dismiss_window_error
+    window_moved window_poke window_reset_positions dismiss_window_error kill_actor
   )
 
   @doc false
@@ -125,6 +127,9 @@ defmodule BtAttachWeb.Live.Inspector do
     refresh_pending: false,
     poke_result: nil,
     poke_error: nil,
+    # BT-5199: the "Kill actor" outcome and the actor list read right after it.
+    kill_notice: nil,
+    actor_list: nil,
     windows: [],
     window_z: 10,
     next_window_id: 1,
@@ -223,6 +228,18 @@ defmodule BtAttachWeb.Live.Inspector do
 
   def handle_event("poke", _params, socket), do: {:noreply, socket}
 
+  # Owner-only "Kill actor" (BT-5199): the button carries a `data-confirm`
+  # prompt, so this runs only after the user confirmed. Sends the `kill` facade
+  # op (the wire `kill` operation, `:admin` capability — an Observer is refused
+  # server-side even with a crafted event), then closes the pane, which would
+  # otherwise show a dead actor (and any floating window on it), and reads the
+  # actor list again so the user
+  # sees the actor gone. A refusal (a system actor, an actor that already
+  # stopped) is shown in the pane, which stays open.
+  def handle_event("kill_actor", _params, socket) do
+    {:noreply, kill_inspected_actor(socket)}
+  end
+
   # ── floating inspector windows (BT-2493, epic BT-2482 Phase 3) ───────────────
 
   # Flip the Inspector between docked and floating ("overlay") modes (the
@@ -254,7 +271,9 @@ defmodule BtAttachWeb.Live.Inspector do
         inspect_rows: [],
         inspect_crumbs: [],
         inspect_error: nil,
-        inspect_frozen: false
+        inspect_frozen: false,
+        kill_notice: nil,
+        actor_list: nil
       )
 
     {:noreply, update_docked_pane(socket, &track_pane(&1, socket, nil))}
@@ -353,7 +372,8 @@ defmodule BtAttachWeb.Live.Inspector do
   # root reports it can't send.
   def handle_event("window_poke", %{"id" => id, "message" => message}, socket)
       when is_binary(message) do
-    {:noreply, update_window(socket, id, fn w -> poke_window(socket, w, message) end)}
+    window = Enum.find(socket.assigns.windows, &(&1.id == id))
+    {:noreply, if(window, do: poke_window(socket, window, message), else: socket)}
   end
 
   def handle_event("window_poke", _params, socket), do: {:noreply, socket}
@@ -552,10 +572,10 @@ defmodule BtAttachWeb.Live.Inspector do
   defp inspect_pane(pane, socket, label, term, crumbs) do
     if Workspace.inspectable?(term) do
       case Facade.dispatch(:inspect, %{term: term}, RequestContext.build(socket)) do
-        {:ok, {:supervisor_children, child_rows}} ->
+        {:ok, {:supervisor_children, child_rows, truncated}} ->
           %{
             pane
-            | target: target_info(label, term),
+            | target: supervisor_target_info(label, term, child_rows, truncated),
               rows: supervisor_child_rows(child_rows),
               crumbs: crumbs,
               error: nil
@@ -1054,17 +1074,17 @@ defmodule BtAttachWeb.Live.Inspector do
 
     cond do
       not is_pid(pid) ->
-        %{w | poke_result: nil, poke_error: "not attached to workspace"}
+        put_window(socket, %{w | poke_result: nil, poke_error: "not attached to workspace"})
 
       message == "" ->
-        %{w | poke_result: nil, poke_error: "Enter a message to send."}
+        put_window(socket, %{w | poke_result: nil, poke_error: "Enter a message to send."})
 
       is_nil(label) ->
-        %{
+        put_window(socket, %{
           w
           | poke_result: nil,
             poke_error: "Can only send to a bound object — inspect a binding to poke it."
-        }
+        })
 
       true ->
         send_window_poke(socket, w, pid, label, message)
@@ -1073,8 +1093,30 @@ defmodule BtAttachWeb.Live.Inspector do
 
   defp send_window_poke(socket, w, pid, label, message) do
     code = "#{label} #{message}"
+    crumbs = w.crumbs
 
-    case Facade.dispatch(:eval, %{session_pid: pid, code: code}, RequestContext.build(socket)) do
+    # BT-5189: the result lands only on the window it was sent from, and only
+    # while that window still shows the poked object — a window closed or
+    # navigated elsewhere meanwhile must not show it against another object.
+    BtAttachWeb.Live.Dock.eval_async(
+      socket,
+      pid,
+      code,
+      fn socket, result ->
+        update_window_at(socket, w.id, crumbs, &fold_window_poke(socket, &1, result))
+      end,
+      fn socket, reason ->
+        update_window_at(socket, w.id, crumbs, &%{&1 | poke_result: nil, poke_error: reason})
+      end
+    )
+  end
+
+  defp update_window_at(socket, id, crumbs, fun) do
+    update_window(socket, id, fn w -> if w.crumbs == crumbs, do: fun.(w), else: w end)
+  end
+
+  defp fold_window_poke(socket, w, result) do
+    case result do
       {:ok, term, _output, _warnings} ->
         w = %{w | poke_result: "→ #{Workspace.render_term(term)}", poke_error: nil}
 
@@ -1136,6 +1178,8 @@ defmodule BtAttachWeb.Live.Inspector do
   # so the DOM order) stable — z-order is carried by each window's `:z`, not
   # list position, so an update never reshuffles the windows and resets
   # their drag positions.
+  defp put_window(socket, w), do: update_window(socket, w.id, fn _ -> w end)
+
   defp update_window(socket, id, fun) do
     windows =
       Enum.map(socket.assigns.windows, fn w ->
@@ -1259,6 +1303,75 @@ defmodule BtAttachWeb.Live.Inspector do
     end
   end
 
+  @doc """
+  True when the docked Inspector's head is a live actor handle — the only
+  target "Kill actor" applies to (a supervisor, a future or a scalar is not
+  killed from here).
+  """
+  def killable?(assigns) do
+    match?(
+      %{term: {:beamtalk_object, _, _, pid}} when is_pid(pid),
+      List.last(assigns.inspect_crumbs)
+    )
+  end
+
+  @doc """
+  One row of the post-kill actor list: class and pid as the workspace prints
+  it, e.g. `Counter <0.123.0>` (the pid term itself if that text is missing).
+  """
+  def actor_row_label(%{class: class, pid_text: pid_text}), do: "#{class} #{pid_text}"
+  def actor_row_label(%{class: class, pid: pid}), do: "#{class} #{inspect(pid)}"
+  def actor_row_label(other), do: inspect(other)
+
+  defp kill_inspected_actor(socket) do
+    term = head_term(socket)
+    label = socket.assigns.inspect_target && socket.assigns.inspect_target.label
+
+    if killable?(socket.assigns) do
+      case Facade.dispatch(:kill, %{term: term}, RequestContext.build(socket)) do
+        :ok ->
+          {:noreply, socket} = handle_event("close_inspector", %{}, socket)
+          {:beamtalk_object, _, _, killed_pid} = term
+
+          socket
+          |> close_windows_on(killed_pid)
+          |> assign(kill_notice: "Killed #{label}.")
+          |> refresh_actor_list()
+
+        {:error, reason} ->
+          assign(socket, inspect_error: FacadeError.render(reason))
+      end
+    else
+      assign(socket, inspect_error: "Only a live actor can be killed.")
+    end
+  end
+
+  # Close every floating window on the killed actor — its head, or its root
+  # (a window drilled into one of the actor's fields; the reconnect stash keys
+  # windows by root, so it would come back as an error window). Like the
+  # docked pane, it would otherwise keep showing a dead actor. A window rooted
+  # on another, live actor stays open.
+  defp close_windows_on(socket, pid) do
+    socket.assigns.windows
+    |> Enum.filter(fn w ->
+      Enum.any?(
+        [List.first(w.crumbs), List.last(w.crumbs)],
+        &match?(%{term: {:beamtalk_object, _, _, ^pid}}, &1)
+      )
+    end)
+    |> Enum.reduce(socket, fn w, acc -> close_window(acc, w.id) end)
+  end
+
+  # Read the running actors (the `actors` facade op) after a kill, so the
+  # empty Inspector lists what is still running. A failed read leaves no list
+  # rather than a stale one.
+  defp refresh_actor_list(socket) do
+    case Facade.dispatch(:actors, %{}, RequestContext.build(socket)) do
+      {:ok, actors} when is_list(actors) -> assign(socket, actor_list: actors)
+      _ -> assign(socket, actor_list: nil)
+    end
+  end
+
   # The live term at the current inspector head: the last drill crumb
   # carries it. nil when nothing is inspected.
   defp head_term(socket) do
@@ -1300,8 +1413,30 @@ defmodule BtAttachWeb.Live.Inspector do
 
   defp send_poke(socket, pid, label, message) do
     code = "#{label} #{message}"
+    crumbs = socket.assigns.inspect_crumbs
 
-    case Facade.dispatch(:eval, %{session_pid: pid, code: code}, RequestContext.build(socket)) do
+    # BT-5189: fold the (possibly queued) result only while the docked
+    # Inspector still shows the object it was sent to — navigation meanwhile
+    # resets the pane, and the result must not appear against another object.
+    BtAttachWeb.Live.Dock.eval_async(
+      socket,
+      pid,
+      code,
+      fn socket, result ->
+        if socket.assigns.inspect_crumbs == crumbs,
+          do: fold_poke(socket, result),
+          else: socket
+      end,
+      fn socket, reason ->
+        if socket.assigns.inspect_crumbs == crumbs,
+          do: assign(socket, poke_result: nil, poke_error: reason),
+          else: socket
+      end
+    )
+  end
+
+  defp fold_poke(socket, result) do
+    case result do
       {:ok, term, _output, _warnings} ->
         socket
         |> assign(poke_result: "→ #{Workspace.render_term(term)}", poke_error: nil)

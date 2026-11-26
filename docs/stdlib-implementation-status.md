@@ -60,7 +60,6 @@
 | `class` | intrinsic | ✅ | Type introspection |
 | `doesNotUnderstand:args:` | intrinsic | ✅ | Fallback for unknown messages |
 | `perform:withArguments:` | intrinsic | ✅ | Dynamic dispatch |
-| `performLocally:withArguments:` | intrinsic | ✅ | Execute a class method in the caller's process, bypassing gen_server dispatch |
 | `perform:withArguments:timeout:` | intrinsic | ✅ | Dynamic dispatch with explicit timeout |
 
 ### Object (`stdlib/src/object.bt`)
@@ -1007,6 +1006,8 @@ The following stdlib `.bt` classes exist but have not yet received a full method
 | `InspectorField` | `Value` | `inspector_field.bt` | Immutable record for one drillable inspected field (ADR 0095 §2) |
 | `Interval` | `Collection` | `interval.bt` | Arithmetic sequence (1 to: 10) |
 | `Json` | `Object` | `json.bt` | JSON parse/stringify |
+| `JsonMappable` | Protocol | `json_mappable.bt` | Derive `asJson` from a declarative `JsonMapping`: implement class-side `jsonMapping -> JsonMapping` and `asJson` is provided; a hand-written `asJson` wins (BT-2819); mapping built once per class, subclass adding fields must override `jsonMapping` (BT-5191) |
+| `JsonMapping` | `Value` | `json_mapping.bt` | Declarative field-to-wire-key schema: `mapField:`, `mapField:to:`, `mapField:to:using:` (converter block), `encode:` → Dictionary; unmapped fields omitted; chain with `\|>` not cascades (BT-2819); `omittingNil`, `forClass:` (cached), `validate`, secret actor slots redacted (BT-5191) |
 | `Logger` | `Object` | `logger.bt` | OTP logger wrapper |
 | `Metaclass` | `Behaviour` | `metaclass.bt` | Metaclass mirror |
 | `Node` | `Value` | `node.bt` | BEAM node identity value: `current`, `named:`, `connected`, `connect`/`disconnect`/`ping` (ADR 0126 §2) |
@@ -1018,6 +1019,7 @@ The following stdlib `.bt` classes exist but have not yet received a full method
 | `Parallel` | `Object` | `parallel.bt` | Block-based fan-out/join combinators (`all:`, `all:timeout:`, `any:`) — spawns one linked+monitored process per block, blocks the caller, returns plain `Result` values; no awaitable future/promise ever escapes into user code (BT-2974, ADR 0104) |
 | `Pid` | `Object` | `pid.bt` | BEAM process identifier |
 | `Port` | `Object` | `port.bt` | BEAM port wrapper |
+| `PersistentTerm` | `Object` | `persistent_term.bt` | Sealed class-side facade over `persistent_term` for build-once computed constants: `at:ifAbsentPut:`, `at:ifAbsent:`, `includesKey:`, `erase:` (answers a Boolean, forces a global GC); no `at:put:`; refuses a top-level pid/actor/class value (ADR 0153, BT-5146) |
 | `ProcessDictionary` | `Object` | `process_dictionary.bt` | Blessed wrapper for the calling process's dictionary: `at:`, `at:ifAbsent:`, `at:put:`, `erase:`, `keys`; missing keys answer `nil` (BT-4320) |
 | `ProcessNavigation` | `Value` | `process_navigation.bt` | Live supervision-tree introspection queries (ADR 0092) |
 | `Program` | `Object` | `program.bt` | The running program/invocation (ADR 0099 §2) |

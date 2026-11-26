@@ -9,21 +9,21 @@
 Test helper module for beamtalk_class_dispatch_tests.
 
 Provides minimal class method implementations so beamtalk_class_dispatch
-tests can exercise the successful invoke_class_method path without touching
+tests can exercise the successful invoke_class_method/6 path without touching
 production code.
 
 Function naming convention follows Beamtalk's `class_` prefix scheme:
   class_<selector>/1  for zero-argument class methods
   class_<selector>/2  for one-argument class methods
 
-(ADR 0130 §3: `ClassSelf` plus the arguments; class variables are accessed
-through `beamtalk_class_vars`, never passed or returned.)
+(ADR 0130 §3: `ClassSelf` plus the arguments.)
 """.
+
+-include("beamtalk.hrl").
 
 -export([
     class_testSuccess/1,
     class_testSelf/1,
-    class_testClassVar/1,
     'class_testWith:'/2,
     'class_testSleep:'/2,
     class_testInternalUndef/1,
@@ -32,12 +32,9 @@ through `beamtalk_class_vars`, never passed or returned.)
     class_testDnu/1,
     class_testScriptExit/1,
     class_testNlrThrow/1,
-    class_testWriteThenRaise/1,
-    class_testWriteThenNlr/1,
     'class_testTwoArgs:and:'/3,
     class_testGroupLeader/1,
-    class_testClassSelf/1,
-    class_testHasCount/1
+    class_testClassSelf/1
 ]).
 
 -doc """
@@ -53,42 +50,6 @@ class_testSelf(_ClassSelf) ->
 -spec class_testSuccess(term()) -> term().
 class_testSuccess(_ClassSelf) ->
     test_success_result.
-
--doc """
-Zero-argument class method that writes a class variable.
-
-Writes `updated => true` through `beamtalk_class_vars:put/3` (the invocation's
-installed home, ADR 0130 §1) and returns a bare value. Exercises the
-`{ok, Result} -> {reply, {ok, Result}, get(Key)}` path in
-invoke_class_method: the write is read back as the new class-variable map.
-""".
--spec class_testClassVar(term()) -> term().
-class_testClassVar(ClassSelf) ->
-    beamtalk_class_vars:put(ClassSelf, updated, true),
-    class_var_updated_value.
-
--doc """
-Zero-argument class method that writes a class variable and then raises.
-
-Exercises the `{error, E}` path: the escaping error discards the write and the
-entry replies with the pre-call map (ADR 0130 §1, §4).
-""".
--spec class_testWriteThenRaise(term()) -> no_return().
-class_testWriteThenRaise(ClassSelf) ->
-    beamtalk_class_vars:put(ClassSelf, count, 99),
-    error(test_deliberate_error).
-
--doc """
-Zero-argument class method that writes a class variable and then throws a `^`
-non-local-return signal.
-
-Exercises the `{nlr_relay, Nlr, _}` path: writes made before a foreign `^` are
-kept (ADR 0130 §1).
-""".
--spec class_testWriteThenNlr(term()) -> no_return().
-class_testWriteThenNlr(ClassSelf) ->
-    beamtalk_class_vars:put(ClassSelf, count, 99),
-    throw({'$bt_nlr', bt3707_token, nlr_value, nlr_state}).
 
 -doc """
 One-argument keyword class method that echoes its argument.
@@ -163,7 +124,7 @@ class_testScriptExit(_ClassSelf) ->
 Zero-argument class method that throws a `^` non-local return signal
 (ADR 0110) — the state-carrying `{'$bt_nlr', Token, Value, State}`
 4-tuple codegen throws for a foreign `^` unwinding out of a class method.
-Exercises the `{nlr_relay, Nlr, ST}` catch in `invoke_class_method/7`.
+Exercises the `{nlr_relay, Nlr, ST}` catch in `invoke_class_method/6`.
 """.
 -spec class_testNlrThrow(term()) -> no_return().
 class_testNlrThrow(_ClassSelf) ->
@@ -196,11 +157,3 @@ class_testGroupLeader(_ClassSelf) ->
 -spec class_testClassSelf(term()) -> term().
 class_testClassSelf(ClassSelf) ->
     ClassSelf.
-
--doc """
-Zero-argument class method that tests for a class variable `count`, as a
-compiled `self hasField: #count` does (BT-4300: no home in the caller).
-""".
--spec class_testHasCount(term()) -> boolean().
-class_testHasCount(ClassSelf) ->
-    beamtalk_class_vars:has(ClassSelf, count).

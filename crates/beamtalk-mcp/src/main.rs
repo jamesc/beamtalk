@@ -162,29 +162,22 @@ async fn resolve_port_and_cookie(
         return Ok((port, cookie, None));
     }
 
-    // Try project-specific workspace discovery
-    if let Some((port, cookie, ws_id)) =
-        workspace::discover_port_cookie_and_id(args.workspace_id.as_deref())
-    {
-        if cookie.trim().is_empty() {
-            return Err(format!(
-                "Workspace cookie is empty for workspace {:?}; restart with `beamtalk repl`",
-                args.workspace_id
-            )
-            .into());
-        }
-        return Ok((port, cookie, Some(ws_id)));
-    }
-
-    // If --start, auto-start the workspace for this directory rather than falling
-    // back to a workspace from a different project.
-    if args.start {
-        return start_workspace(args.workspace_id.as_deref()).await;
-    }
-
-    // An explicit --workspace-id never falls back to a different workspace
-    // (BT-5080).
+    // An explicit --workspace-id is used as given: it never falls back to a
+    // different workspace (BT-5080), and its files are trusted without a
+    // liveness probe (the caller named it).
     if let Some(id) = args.workspace_id.as_deref() {
+        if let Some((port, cookie, ws_id)) = workspace::discover_port_cookie_and_id(Some(id)) {
+            if cookie.trim().is_empty() {
+                return Err(format!(
+                    "Workspace cookie is empty for workspace {id:?}; restart with `beamtalk repl`"
+                )
+                .into());
+            }
+            return Ok((port, cookie, Some(ws_id)));
+        }
+        if args.start {
+            return start_workspace(Some(id)).await;
+        }
         return Err(format!(
             "Workspace {id:?} has no port/cookie files, so it is not running. \
              Start it with 'beamtalk repl' or use --start."
@@ -192,15 +185,29 @@ async fn resolve_port_and_cookie(
         .into());
     }
 
-    // Look for a live workspace for the current project (never another project's).
-    if let Some((port, cookie, ws_id)) = workspace::discover_any_port_cookie_and_id()? {
-        if cookie.trim().is_empty() {
-            return Err(
-                "Auto-discovered workspace has empty cookie; restart with `beamtalk repl`".into(),
-            );
+    // No explicit workspace: look for a *live* workspace for the current
+    // project (never another project's). BT-5132: the liveness probe runs
+    // here, so a stale port file left by a dead workspace neither attaches to
+    // nothing nor bypasses `--start`.
+    match workspace::discover_any_port_cookie_and_id().await {
+        Ok(Some((port, cookie, ws_id))) => {
+            if cookie.trim().is_empty() {
+                return Err(
+                    "Auto-discovered workspace has empty cookie; restart with `beamtalk repl`"
+                        .into(),
+                );
+            }
+            tracing::info!(port, workspace_id = %ws_id, "Attached to the current project's running REPL");
+            return Ok((port, cookie, Some(ws_id)));
         }
-        tracing::info!(port, workspace_id = %ws_id, "Attached to the current project's running REPL");
-        return Ok((port, cookie, Some(ws_id)));
+        Ok(None) => {}
+        // Only other projects' workspaces are running: --start still starts
+        // this project's own rather than attaching to one of those.
+        Err(_) if args.start => {}
+        Err(e) => return Err(e.into()),
+    }
+    if args.start {
+        return start_workspace(None).await;
     }
 
     Err("Could not find a running beamtalk REPL. \

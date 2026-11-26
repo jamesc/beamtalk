@@ -75,6 +75,10 @@ pub enum FailureReason {
     /// epmd has no record of the target node, or it died between connect and
     /// the version RPC.
     DeadWorkspace,
+    /// The workspace is running but older than this app's front: it has no
+    /// operation layer to call (BT-5206). Restarting it from a matching install
+    /// fixes it; retrying does not.
+    WorkspaceTooOld,
     /// The workspace is reachable but speaks a different REPL/RPC protocol
     /// version than this broker (BT-5033): the version lock the REPL, MCP,
     /// LSP and VS Code enforce, applied to the LiveView attach path. Not a
@@ -97,6 +101,7 @@ impl From<&str> for FailureReason {
             "epmd_absent" => Self::EpmdAbsent,
             "bad_cookie" => Self::BadCookie,
             "dead_workspace" => Self::DeadWorkspace,
+            "workspace_too_old" => Self::WorkspaceTooOld,
             other => Self::Unknown(other.to_string()),
         }
     }
@@ -111,6 +116,11 @@ impl FailureReason {
             Self::EpmdAbsent => "this app could not register with the local epmd".to_string(),
             Self::BadCookie => "the workspace rejected this app's cookie".to_string(),
             Self::DeadWorkspace => "the workspace node is not running".to_string(),
+            Self::WorkspaceTooOld => "the workspace is older than this app and does not serve \
+                 the operations it needs; stop it (`beamtalk workspace list`, then \
+                 `beamtalk workspace stop <id>`) and start it again from a matching \
+                 Beamtalk install"
+                .to_string(),
             Self::ProtocolMismatch {
                 workspace,
                 expected,
@@ -619,12 +629,23 @@ mod tests {
     }
 
     #[test]
+    fn workspace_too_old_is_described_with_what_to_do() {
+        let text = FailureReason::WorkspaceTooOld.describe();
+        assert!(text.contains("older than this app"), "{text}");
+        assert!(text.contains("beamtalk workspace stop"), "{text}");
+    }
+
+    #[test]
     fn failure_reason_taxonomy_from_str() {
         assert_eq!(
             FailureReason::from("epmd_absent"),
             FailureReason::EpmdAbsent
         );
         assert_eq!(FailureReason::from("bad_cookie"), FailureReason::BadCookie);
+        assert_eq!(
+            FailureReason::from("workspace_too_old"),
+            FailureReason::WorkspaceTooOld
+        );
         assert_eq!(
             FailureReason::from("dead_workspace"),
             FailureReason::DeadWorkspace

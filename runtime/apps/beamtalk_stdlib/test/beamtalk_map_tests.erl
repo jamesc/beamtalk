@@ -260,7 +260,6 @@ dictionary_keys_and_values_do_test() ->
 %%% ============================================================================
 
 dictionary_responds_to_test() ->
-    beamtalk_extensions:init(),
     ?assertEqual(true, 'bt@stdlib@dictionary':has_method('class')),
     ?assertEqual(true, 'bt@stdlib@dictionary':has_method('keys')),
     ?assertEqual(true, 'bt@stdlib@dictionary':has_method('values')),
@@ -279,7 +278,6 @@ dictionary_responds_to_test() ->
 %%% ============================================================================
 
 dictionary_does_not_understand_test() ->
-    beamtalk_extensions:init(),
     ?assertBtError(
         does_not_understand,
         'Dictionary',

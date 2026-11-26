@@ -15,10 +15,8 @@
 //! Soundness rules (when in doubt a file keys on the full hash):
 //! - a file with no stored [`ConsultedSurface`] (first build, an old or
 //!   unreadable sidecar) keys on the full package-wide hash;
-//! - so does a file that read extension state while dependency extensions were
-//!   not all loaded (`extensions_unknown`);
 //! - a name's hash covers the class entry, the protocol and alias of that name,
-//!   the standalone extensions targeting it, and its entries in the superclass
+//!   and its entries in the superclass
 //!   and module indexes, and is closed over its superclass chain (a class's
 //!   normalised flags are derived from its ancestors);
 //! - a name absent from the surface hashes as a fixed "absent" value, so a
@@ -30,7 +28,7 @@ use ecow::EcoString;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::commands::util::{
-    alias_surface_value, extension_surface_value, protocol_surface_value, signature_only_class_info,
+    alias_surface_value, protocol_surface_value, signature_only_class_info,
 };
 use beamtalk_package::content_hash::sha256_hex;
 
@@ -42,7 +40,7 @@ const ABSENT: &str = "absent";
 pub(crate) struct SurfaceKeys {
     /// Hash per bare name, over every namespace and the superclass chain.
     names: HashMap<EcoString, String>,
-    /// Digest of every class, extension and index entry (a class-map scan).
+    /// Digest of every class and index entry (a class-map scan).
     classes_digest: String,
     /// Digest of every protocol (a protocol-registry scan).
     protocols_digest: String,
@@ -53,8 +51,8 @@ pub(crate) struct SurfaceKeys {
     /// than once, and alias cycles. Constant while the package has none, so an
     /// alias edit that creates no problem moves only the files that name it.
     alias_problems_digest: String,
-    /// Package-wide inputs no name addresses (the dependency-extension guard,
-    /// the project-known Erlang modules); folded into every file's key.
+    /// Package-wide inputs no name addresses (the project-known Erlang
+    /// modules); folded into every file's key.
     pub(crate) globals: String,
 }
 
@@ -74,7 +72,6 @@ impl SurfaceKeys {
         class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
         protocol_infos: &[beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo],
         alias_infos: &[beamtalk_core::semantic_analysis::AliasInfo],
-        extension_index: &beamtalk_core::compilation::extension_index::ExtensionIndex,
         class_superclass_index: &HashMap<String, String>,
         class_module_index: &HashMap<String, String>,
     ) -> Option<Self> {
@@ -113,15 +110,6 @@ impl SurfaceKeys {
                 .entry(name.as_str().into())
                 .or_default()
                 .push(format!("module:{module}"));
-        }
-        for (key, locations) in extension_index.entries() {
-            for loc in locations {
-                parts
-                    .class
-                    .entry(key.class_name.clone())
-                    .or_default()
-                    .push(format!("extension:{}", extension_surface_value(key, loc)));
-            }
         }
         for info in protocol_infos {
             parts
@@ -218,12 +206,8 @@ impl SurfaceKeys {
         self.names.get(name).map_or(ABSENT, String::as_str)
     }
 
-    /// The text a file that consulted `surface` folds into its cache key, or
-    /// `None` when it must key on the full package-wide hash instead.
-    pub(crate) fn key_part(&self, surface: &ConsultedSurface) -> Option<String> {
-        if surface.extensions_unknown {
-            return None;
-        }
+    /// The text a file that consulted `surface` folds into its cache key.
+    pub(crate) fn key_part(&self, surface: &ConsultedSurface) -> String {
         let mut buf = String::from("names\n");
         buf.push_str(&self.globals);
         if surface.scanned_classes {
@@ -249,7 +233,7 @@ impl SurfaceKeys {
             buf.push('=');
             buf.push_str(self.name_hash(name));
         }
-        Some(sha256_hex(buf.as_bytes()))
+        sha256_hex(buf.as_bytes())
     }
 }
 
@@ -317,7 +301,6 @@ pub(crate) fn encode_surface(surface: &ConsultedSurface) -> String {
         "p": surface.scanned_protocols,
         "a": surface.scanned_aliases,
         "s": surface.alias_seeding,
-        "x": surface.extensions_unknown,
     })
     .to_string()
 }
@@ -338,7 +321,6 @@ pub(crate) fn decode_surface(text: &str) -> Option<ConsultedSurface> {
         scanned_protocols: flag("p")?,
         scanned_aliases: flag("a")?,
         alias_seeding: flag("s")?,
-        extensions_unknown: flag("x")?,
     })
 }
 
@@ -361,7 +343,6 @@ mod tests {
             scanned_protocols: false,
             scanned_aliases: true,
             alias_seeding: true,
-            extensions_unknown: false,
         };
         assert_eq!(decode_surface(&encode_surface(&original)), Some(original));
     }
@@ -374,20 +355,11 @@ mod tests {
     }
 
     #[test]
-    fn extensions_unknown_falls_back_to_the_full_hash() {
-        let keys = SurfaceKeys::default();
-        let mut s = surface(&["A"]);
-        assert!(keys.key_part(&s).is_some());
-        s.extensions_unknown = true;
-        assert_eq!(keys.key_part(&s), None);
-    }
-
-    #[test]
     fn the_key_covers_exactly_the_names_and_scans_a_file_consulted() {
         let keys = SurfaceKeys::default();
-        let base = keys.key_part(&surface(&["A"])).unwrap();
-        assert_eq!(keys.key_part(&surface(&["A"])).unwrap(), base);
-        assert_ne!(keys.key_part(&surface(&["A", "B"])).unwrap(), base);
+        let base = keys.key_part(&surface(&["A"]));
+        assert_eq!(keys.key_part(&surface(&["A"])), base);
+        assert_ne!(keys.key_part(&surface(&["A", "B"])), base);
         for scan in [
             ConsultedSurface {
                 scanned_classes: true,
@@ -406,16 +378,16 @@ mod tests {
                 ..surface(&["A"])
             },
         ] {
-            assert_ne!(keys.key_part(&scan).unwrap(), base, "{scan:?}");
+            assert_ne!(keys.key_part(&scan), base, "{scan:?}");
         }
     }
 
     #[test]
     fn package_wide_globals_are_part_of_every_key() {
         let mut keys = SurfaceKeys::default();
-        let before = keys.key_part(&surface(&["A"])).unwrap();
+        let before = keys.key_part(&surface(&["A"]));
         keys.globals = "erlang:1:lists".into();
-        assert_ne!(keys.key_part(&surface(&["A"])).unwrap(), before);
+        assert_ne!(keys.key_part(&surface(&["A"])), before);
     }
 
     #[test]

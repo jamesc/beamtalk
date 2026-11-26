@@ -50,11 +50,33 @@ ensure_console_cookie_noop_for_release_without_console_test() ->
 %% end to end; this assertion is self-consistent either way.
 ensure_console_cookie_release_console_matches_setcookie_argument_test() ->
     Result = beamtalk_workspace_app:ensure_console_cookie(#{mode => release, console => true}),
-    case init:get_argument(setcookie) of
-        {ok, _} ->
+    Configured =
+        init:get_argument(setcookie) =/= error orelse beamtalk_cookie_home:booted_with_cookie(),
+    case Configured of
+        true ->
             ?assertEqual(ok, Result);
-        error ->
+        false ->
             ?assertMatch({error, #beamtalk_error{kind = release_console_no_cookie}}, Result)
+    end.
+
+%% BT-5185: the launcher no longer passes any `-setcookie`; a release booted
+%% from a private cookie home (RELEASE_COOKIE set) has a configured cookie
+%% and must start its console.
+ensure_console_cookie_accepts_a_cookie_home_boot_test() ->
+    Parent = beamtalk_test_fs:tmp_dir("console_cookie_home"),
+    Dir = filename:join(Parent, beamtalk_cookie_home:cookie_dir_prefix() ++ "console"),
+    ok = file:make_dir(Dir),
+    ok = file:write_file(filename:join(Dir, ".erlang.cookie"), <<"c">>),
+    true = os:putenv("BEAMTALK_COOKIE_HOME", Dir),
+    try
+        restored = beamtalk_cookie_home:restore(),
+        ?assertEqual(
+            ok, beamtalk_workspace_app:ensure_console_cookie(#{mode => release, console => true})
+        )
+    after
+        os:unsetenv("BEAMTALK_COOKIE_HOME"),
+        _ = persistent_term:erase({beamtalk_cookie_home, booted_with_cookie}),
+        beamtalk_test_fs:rm_rf(Parent)
     end.
 
 %%====================================================================

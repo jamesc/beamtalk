@@ -45,7 +45,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0016](0016-unified-stdlib-module-naming.md) | Unified Stdlib Packaging and Module Naming | Implemented | 2026-02-10 |
 | [0017](0017-browser-connectivity-to-running-workspaces.md) | Browser Connectivity to Running Workspaces | Implemented (2026-06-07; Phase 3 LiveView IDE shipped, auth via 0091) | 2026-02-17 |
 | [0018](0018-document-tree-codegen.md) | Document Tree Code Generation (Wadler-Lindig Pretty Printer) | Implemented | 2026-02-15 |
-| [0019](0019-singleton-class-variables.md) | Singleton Access via Class Variables | Implemented | 2026-02-15 |
+| [0019](0019-singleton-class-variables.md) | Singleton Access via Class Variables | Superseded by 0153 | 2026-02-15 |
 | [0020](0020-connection-security.md) | Connection Security — mTLS, Proxies, and Network Overlays | Implemented | 2026-02-17 |
 | [0021](0021-streams-and-io-design.md) | Stream — Lazy Pipeline for Value-Side Data | Implemented (Revised) | 2026-02-15 |
 | [0022](0022-embedded-compiler-via-otp-port.md) | Embedded Compiler via OTP Port (with NIF option) | Implemented | 2026-02-15 |
@@ -92,7 +92,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0063](0063-remove-file-path-sandbox.md) | Remove File Path Sandbox | Implemented | 2026-03-16 |
 | [0064](0064-runtime-logging-control-and-observability-api.md) | Runtime Logging Control and Observability API | Implemented | 2026-03-17 |
 | [0065](0065-complete-otp-primitives-actor-lifecycle.md) | Complete OTP Primitives for Actor Lifecycle and Supervision | Implemented (error contract amended by 0134) | 2026-03-17 |
-| [0066](0066-open-class-extension-methods.md) | Open Class Extension Methods (`>>` Syntax) | Implemented | 2026-03-18 |
+| [0066](0066-open-class-extension-methods.md) | Open Class Extension Methods (`>>` Syntax) | Implemented (superseded in part by 0152, 2026-11-24) | 2026-03-18 |
 | [0067](0067-separate-state-field-keywords-by-class-kind.md) | Separate state:/field: Keywords by Class Kind | Implemented | 2026-03-18 |
 | [0068](0068-parametric-types-and-protocols.md) | Parametric Types and Protocols | Accepted \| Implemented | 2026-03-20 |
 | [0069](0069-actor-observability-and-tracing.md) | Actor Observability and Tracing | Implemented (amended 2026-10-21: `Telemetry` application events, BT-4025) | 2026-03-21 |
@@ -156,7 +156,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0127](0127-traits-for-behavioural-reuse.md) | Traits — Protocols with Provided Methods, Flattened into Users | Implemented (v1, 2026-09-28; post-v1 items in BT-3595 backlog) | 2026-09-23 |
 | [0128](0128-opaque-callable-fold-threading-for-collection-homs.md) | Thread Captured-Local Block Accumulators Through Opaque Callable Forwarding to Stdlib Collection HOMs | Superseded by 0133 | 2026-09-23 |
 | [0129](0129-class-side-system-facades.md) | Replace Injected `Beamtalk`/`Workspace`/`Transcript` Bindings with Class-Side Facades | Implemented (2026-09-30; amended by 0142, 2026-10-30) | 2026-09-25 |
-| [0130](0130-class-variables-live-in-the-class-process.md) | Class Variables Live in the Class Process During an Invocation | Implemented (amended by 0142, 2026-10-30) | 2026-10-06 |
+| [0130](0130-class-variables-live-in-the-class-process.md) | Class Variables Live in the Class Process During an Invocation | Superseded by 0153 | 2026-10-06 |
 | [0131](0131-outer-local-rebinds-as-threaded-value-preludes.md) | Outer-Local Rebinds as `ThreadedValue` Preludes in Every Context | Implemented | 2026-11-01 |
 | [0132](0132-callee-side-threaded-entry-points-for-higher-order-methods.md) | Callee-Side Threaded Entry Points for Higher-Order Methods | Superseded by 0133 | 2026-10-17 |
 | [0133](0133-scope-of-captured-variable-mutation-in-blocks.md) | Scope of Captured-Variable Mutation in Blocks | Implemented (2026-11-03) | 2026-10-18 |
@@ -178,6 +178,9 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0149](0149-eep48-doc-chunks-for-beamtalk-modules.md) | EEP-48 Doc Chunks for Beamtalk Modules | Deferred (2026-11-14) | 2026-11-14 |
 | [0150](0150-actor-registry-off-the-start-path.md) | Actor Registration Off the Start Path | Implemented (2026-11-16) | 2026-11-15 |
 | [0151](0151-elixir-interop-and-mix-backed-packages.md) | Elixir Interop and Mix-Backed Packages | Proposed (2026-11-16) | 2026-11-16 |
+| [0152](0152-remove-cross-file-extension-methods.md) | Remove Cross-File Extension Methods (Supersedes ADR 0066 in Part) | Accepted | 2026-11-24 |
+| [0153](0153-remove-class-variables.md) | Remove Class Variables (`classState:`) | Accepted | 2026-11-24 |
+| [0154](0154-uat-external-acceptance-gate-for-full-environments.md) | beamtalk-uat as the External Acceptance Gate for Full Environments | Accepted (2026-11-26) | 2026-11-26 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

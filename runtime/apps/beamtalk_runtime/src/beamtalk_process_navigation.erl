@@ -341,7 +341,7 @@ on(#{?BT_CLASS_TAG_KEY := 'Node', name := Name}, Limit) ->
 remote_default_snapshot(Name, Limit) ->
     case
         beamtalk_call_failure:erpc(
-            Name, ?MODULE, remote_snapshot_target, [Limit], ?REMOTE_SNAPSHOT_TIMEOUT
+            Name, ?MODULE, remote_snapshot_target, [Limit], ?REMOTE_SNAPSHOT_TIMEOUT, fun is_list/1
         )
     of
         {ok, Snapshot} when is_list(Snapshot) ->
@@ -1070,7 +1070,7 @@ whose Beamtalk class is not resolvable — such a row is shown but not drillable
 
 Returns `{ok, [Row]}` for a live supervisor (the empty list for a supervisor
 with no running children), or `{error, Reason}` (a structured `#beamtalk_error{}`)
-for a malformed pid string or a dead/unreachable supervisor — so a dead
+for a malformed pid string, a pid of another node or a dead/unreachable supervisor — so a dead
 supervisor degrades to a clear error, never a crash. (A supervisor that
 crashes mid-call, after the liveness check but before `which_children`, may
 degrade to `{ok, []}` rather than `{error, stale_handle}` — accepted
@@ -1081,7 +1081,9 @@ best-effort per ADR 0092 §4; the difference is display-only.)
 child_handles(SupPidStr) ->
     case parse_pid(SupPidStr) of
         {ok, SupPid} ->
-            case erlang:is_process_alive(SupPid) of
+            %% A pid of another node is not ours to ask: `is_process_alive/1`
+            %% raises `badarg` for it (BT-5205).
+            case node(SupPid) =:= node() andalso erlang:is_process_alive(SupPid) of
                 true -> {ok, child_handle_rows(SupPid)};
                 false -> {error, child_handles_dead_error(SupPidStr)}
             end;

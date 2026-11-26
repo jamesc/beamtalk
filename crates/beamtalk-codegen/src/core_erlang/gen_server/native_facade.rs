@@ -16,12 +16,11 @@ use std::collections::HashSet;
 use super::super::errors::{BeamtalkErrorChain, ErrorBinding};
 use super::super::selector_mangler::dispatch_fn_name;
 use super::super::spec_codegen;
-use super::super::util::omit_late_defaultless_slot;
 use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use super::spawn::SpawnVariant;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, form, join, leaf, line, nest};
-use beamtalk_core::ast::{MethodDefinition, MethodKind, Module};
+use beamtalk_core::ast::{MethodDefinition, Module};
 use beamtalk_core::unparse::unparse_method_display_signature;
 
 impl CoreErlangGenerator {
@@ -98,12 +97,7 @@ impl CoreErlangGenerator {
         let self_delegate_methods: Vec<&MethodDefinition> = module
             .classes
             .first()
-            .map(|c| {
-                c.methods
-                    .iter()
-                    .filter(|m| m.kind == MethodKind::Primary && m.is_self_delegate())
-                    .collect()
-            })
+            .map(|c| c.methods.iter().filter(|m| m.is_self_delegate()).collect())
             .unwrap_or_default();
 
         // Build dispatch export entries: 'dispatch_<selector>'/<arity+1>
@@ -558,19 +552,11 @@ impl CoreErlangGenerator {
             };
 
             // Instance methods
-            let instance_methods: Vec<_> = class
-                .methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-                .collect();
+            let instance_methods: Vec<_> = class.methods.iter().collect();
 
-            // Class-side primary methods (used for both the signature/source maps
+            // Class-side methods (used for both the signature/source maps
             // below and the xref index).
-            let class_methods_primary: Vec<_> = class
-                .class_methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-                .collect();
+            let class_method_refs: Vec<_> = class.class_methods.iter().collect();
 
             // ADR 0087 Phase 2: per-method cross-reference
             // index. The standard `register_class/0` path bakes this for every
@@ -581,7 +567,7 @@ impl CoreErlangGenerator {
             // fallback. Bake the same `methodXref` list here so native classes
             // are indexed like the rest.
             let method_xref_doc =
-                self.build_method_xref_list(class, &instance_methods, &class_methods_primary);
+                self.build_method_xref_list(class, &instance_methods, &class_method_refs);
 
             // Method source
             let mut method_source_docs: Vec<Document<'static>> = Vec::new();
@@ -616,12 +602,7 @@ impl CoreErlangGenerator {
 
             // Class-side method display signatures
             let mut class_method_sig_docs: Vec<Document<'static>> = Vec::new();
-            for (method_idx, method) in class
-                .class_methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-                .enumerate()
-            {
+            for (method_idx, method) in class.class_methods.iter().enumerate() {
                 if method_idx > 0 {
                     class_method_sig_docs.push(Document::Str(", "));
                 }
@@ -638,12 +619,7 @@ impl CoreErlangGenerator {
             // instance side). Allows SystemNavigation source-text scanners to
             // walk class-side method bodies.
             let mut class_method_source_docs: Vec<Document<'static>> = Vec::new();
-            for (method_idx, method) in class
-                .class_methods
-                .iter()
-                .filter(|m| m.kind == MethodKind::Primary)
-                .enumerate()
-            {
+            for (method_idx, method) in class.class_methods.iter().enumerate() {
                 if method_idx > 0 {
                     class_method_source_docs.push(Document::Str(", "));
                 }
@@ -655,16 +631,6 @@ impl CoreErlangGenerator {
                 ]);
             }
             let class_method_source_doc = Document::Vec(class_method_source_docs);
-
-            // Class variable initial values. ADR 0124 §2/B2: a defaultless
-            // `late classState:` slot is omitted from the map entirely — see
-            // `omit_late_defaultless_slot`.
-            let class_vars: Vec<&beamtalk_core::ast::StateDeclaration> = class
-                .class_variables
-                .iter()
-                .filter(|cv| !omit_late_defaultless_slot(cv))
-                .collect();
-            let class_vars_doc = self.class_var_map_doc(&class_vars)?;
 
             // Class-level doc comment
             let class_doc_value: Document<'static> = if let Some(ref doc) = class.doc_comment {
@@ -740,10 +706,6 @@ impl CoreErlangGenerator {
                         method_xref_doc,
                         ",",
                         line(),
-                        "'classState' => ",
-                        class_vars_doc,
-                        ",",
-                        line(),
                         "'classDoc' => ",
                         class_doc_value,
                         ",",
@@ -805,11 +767,6 @@ impl CoreErlangGenerator {
 
         let try_body = Self::build_short_circuit_chain(&class_docs);
 
-        // Foreign extensions register before the chain. Same-file extensions
-        // never reach codegen as extensions: the front end folded them into the
-        // class (BT-4721).
-        let foreign_ext_doc = self.generate_foreign_extension_registrations(module)?;
-        let try_body = docvec![foreign_ext_doc, try_body];
         let of_clause = Document::Str("of RegResult -> RegResult");
 
         let doc = Self::register_class_fn_doc(try_body, of_clause);

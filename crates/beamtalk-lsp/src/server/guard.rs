@@ -20,7 +20,7 @@ use std::panic::AssertUnwindSafe;
 use futures_util::FutureExt;
 use tower_lsp::jsonrpc::{Error, Result};
 
-fn panic_message(payload: &(dyn Any + Send)) -> String {
+pub(in crate::server) fn panic_message(payload: &(dyn Any + Send)) -> String {
     payload
         .downcast_ref::<&str>()
         .map(|s| (*s).to_string())

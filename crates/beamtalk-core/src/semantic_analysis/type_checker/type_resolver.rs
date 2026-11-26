@@ -97,8 +97,6 @@ pub(in crate::semantic_analysis) fn merge_substitutions(
 ///   is marked `Declared(span)` since the annotation is user-written.
 /// * [`TypeAnnotation::Union`] — resolves each member, then folds through
 ///   [`InferredType::union_of`] which handles flattening and deduplication.
-/// * [`TypeAnnotation::FalseOr`] — `inner | False`, using the same union
-///   machinery.
 /// * [`TypeAnnotation::Difference`] — `base \ excluded`, resolved through
 ///   [`InferredType::difference`] (ADR 0102 §1) with `hierarchy = None` (this
 ///   resolver only consults the class hierarchy for the `Substitution`
@@ -300,7 +298,7 @@ impl<'a> ResolutionContext<'a> {
 ///
 /// Behaviour is the [`TypeAnnotation`]-based resolver's, verbatim, per
 /// variant — see [`resolve_type_annotation`]'s doc for the full per-variant
-/// rundown (`Simple`, `Generic`, `Union`, `FalseOr`, `Difference`,
+/// rundown (`Simple`, `Generic`, `Union`, `Difference`,
 /// `Intersection`, `SelfType`, `SelfClass`, `ClassOf`, `Singleton`) — plus
 /// the [`TypeStringContext`] provenance rules: in
 /// [`TypeStringContext::Substitution`], an
@@ -566,24 +564,6 @@ fn resolve_declared_type_inner(
                 })
                 .collect();
             let unioned = InferredType::union_of(&members);
-            if ctx == TypeStringContext::Substitution {
-                stamp_substituted_provenance(unioned)
-            } else {
-                unioned
-            }
-        }
-        DeclaredType::FalseOr(inner) => {
-            let inner_ty = resolve_declared_type_inner(
-                inner,
-                subst,
-                protocol_registry,
-                alias_registry,
-                ctx,
-                hierarchy,
-                expanding,
-                memo,
-            );
-            let unioned = InferredType::union_of(&[inner_ty, InferredType::known("False")]);
             if ctx == TypeStringContext::Substitution {
                 stamp_substituted_provenance(unioned)
             } else {
@@ -1200,23 +1180,6 @@ mod tests {
             has_result_with_args,
             "Result member must preserve its two type args: {members:?}"
         );
-    }
-
-    // ---- resolve_type_annotation: false_or ----
-
-    #[test]
-    fn false_or_produces_union_with_false() {
-        let ann = TypeAnnotation::FalseOr {
-            inner: Box::new(TypeAnnotation::Simple(ident("Integer"))),
-            span: span(),
-        };
-        let result = resolve_type_annotation(&ann, &empty_subst(), None, None);
-        let InferredType::Union { members, .. } = result else {
-            panic!("expected Union, got {result:?}");
-        };
-        assert_eq!(members.len(), 2);
-        assert!(members.contains(&InferredType::known("Integer")));
-        assert!(members.contains(&InferredType::known("False")));
     }
 
     // ---- resolve_type_annotation: difference ----

@@ -72,14 +72,14 @@ fn fmt_rewrites_files_in_place() {
 }
 
 #[test]
-fn fmt_check_rejects_legacy_check_flag() {
+fn fmt_check_flag_is_removed_bt_5196() {
     let project = cli_common::fixture_project();
     cli_common::beamtalk()
         .current_dir(project.path())
         .args(["fmt", "--check"])
         .assert()
         .failure()
-        .stderr(contains("fmt-check"));
+        .stderr(contains("unexpected argument '--check'"));
 }
 
 #[test]

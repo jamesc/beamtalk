@@ -1130,7 +1130,7 @@ fn test_actor_non_literal_callable_uses_the_plain_list_op() {
 fn test_class_method_do_non_literal_callable_does_not_fold() {
     // A class method forwarding a non-literal callable to `do:` uses the
     // plain-value wrapper, like every other context.
-    let src = "Object subclass: Srv\n  classState: runs = 0\n\n  class run: items with: block =>\n    items do: block\n";
+    let src = "Object subclass: Srv\n  class run: items with: block =>\n    items do: block\n";
     let code = codegen(src);
     assert_has(
         "Non-literal callable do: in a class method should use lists:foreach (no fold)",
@@ -1347,7 +1347,7 @@ fn test_class_method_collect_non_literal_callable_does_not_fold() {
     // ADR 0128 fold rewrite — class methods have no `State`/`StateAcc` parameter.
     // Mirrors `test_class_method_do_non_literal_callable_does_not_fold` for the
     // "map" operation path.
-    let src = "Object subclass: Srv\n  classState: runs = 0\n\n  class run: items with: block =>\n    items collect: block\n";
+    let src = "Object subclass: Srv\n  class run: items with: block =>\n    items collect: block\n";
     let code = codegen(src);
     assert_has(
         "Non-literal callable collect: in a class method should use lists:map (no fold)",
@@ -2480,11 +2480,12 @@ fn test_sort_comparator_cf_mutations_local_assign_unpacks_tuple() {
 }
 
 #[test]
-fn test_actor_match_in_direct_params_loop_never_reaches_private_scratch_error() {
+fn test_actor_match_in_direct_params_loop_keeps_scratch_private() {
     // ADR 0131 section 3: `match:` is a State-family producer. In an actor
     // instance method a loop body holding a `match:` that writes a local (the
-    // loop threads only locals: the direct-params shape) must compile, not hit
-    // the private-scratch internal error in `control_flow_tuple_to_threaded_value`.
+    // loop threads only locals: the direct-params shape) must compile. (BT-5281
+    // removed the private-scratch internal error this once guarded against: a
+    // `match:` in such a frame keeps its scratch map private.)
     let src = concat!(
         "Actor subclass: MatchLoop\n",
         "  state: x = 0\n\n",
@@ -2497,13 +2498,13 @@ fn test_actor_match_in_direct_params_loop_never_reaches_private_scratch_error() 
         "    count\n",
     );
     let code = codegen(src);
-    // The loop really is direct-params (it rebuilds StateAcc once at exit), so
-    // the success of `codegen` above shows the error branch is not reached.
+    // The loop really is direct-params (it rebuilds StateAcc once at exit).
     assert_has(
         "Outer loop should be direct-params (rebuild StateAcc at exit)",
         &code,
         &["ExitSA"],
     );
+    crate::core_erlang::tests::assert_compiles_through_erlc("test", &code);
 }
 
 // ── BT-3916: receiver guard of the inlined writing fold ──────

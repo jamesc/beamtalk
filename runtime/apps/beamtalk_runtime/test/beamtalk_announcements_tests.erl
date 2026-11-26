@@ -507,7 +507,7 @@ deliver_to_subscriber_test_() ->
 %% sync path the runtime dispatches `Receiver perform: Selector with: Event` via
 %% `beamtalk_message_dispatch:send/3`. We exercise it against a real Beamtalk
 %% value (an Integer) so the dispatch goes through the genuine runtime path; the
-%% full runtime app is started so value dispatch (the extensions table) is live.
+%% full runtime app is started so value dispatch is live.
 when_send_to_dispatches_message_test_() ->
     {foreach, fun setup_with_dispatch/0, fun cleanup/1, [
         ?_test(begin
@@ -1402,19 +1402,14 @@ build_hierarchy() ->
     ok.
 
 %% Set up for the `when:send:to:` test: the standalone bus (via `setup/0`) plus
-%% the `beamtalk_extensions` table that real value dispatch reads. Initialising
-%% that table is all the `{send, Selector, Receiver}` path needs to dispatch a
-%% genuine value method (e.g. `Integer printString`) — no need to start the whole
-%% runtime application (which would clash with the standalone bus other tests in
-%% this module leave registered). `init/0` is idempotent if the app already
-%% created the table.
+%% the shadow-flag readiness that real value dispatch reads. Marking it ready is
+%% all the `{send, Selector, Receiver}` path needs to dispatch a genuine value
+%% method (e.g. `Integer printString`) — no need to start the whole runtime
+%% application (which would clash with the standalone bus other tests in this
+%% module leave registered). `mark_ready/0` is idempotent.
 setup_with_dispatch() ->
     Pid = setup(),
-    try
-        beamtalk_extensions:init()
-    catch
-        _:_ -> ok
-    end,
+    ok = beamtalk_class_shadow_flags:mark_ready(),
     Pid.
 
 %% Spawn an idle process to act as the subscriber pid for synchronous-path tests.

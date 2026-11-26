@@ -1,0 +1,151 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0153 decision 7 (BT-5155): with class variables gone, a class has no
+// fields. The instance-field reflection selectors sent to a class
+// (`fieldAt:`, `fieldAt:put:`, `hasField:`, `clearField:`) raise the ordinary
+// `does_not_understand`, as do the removed class-variable reflection and
+// `performLocally:withArguments:`. `perform:withArguments:` is the
+// replacement for `performLocally:` and still answers.
+//
+// The removed selectors are sent with `perform:` so they are not a
+// compile-time warning; the four field selectors are also sent directly to
+// class literals, which the type checker reports as does-not-understand
+// (BT-5241), so those sends carry `@expect dnu`.
+//
+// Fixtures: fixtures/guarded_diff_class_root.bt, fixtures/guarded_diff_class_leaf.bt,
+// fixtures/class_field_reflection_probe.bt, fixtures/class_field_at_owner.bt.
+
+TestCase subclass: ClassFieldReflectionDnuTest
+
+  // Answers the class as Dynamic, so sends to it are plain dynamic class sends.
+  dynamicClass -> Dynamic => GuardedDiffClassRoot
+
+  dynamicOwner -> Dynamic => ClassFieldAtOwner
+
+  testFieldAtOnAClassIsDoesNotUnderstand =>
+    @expect dnu
+    self should: [GuardedDiffClassRoot fieldAt: #x] raise: #does_not_understand
+    self should: [self dynamicClass fieldAt: #x] raise: #does_not_understand
+    @expect dnu
+    self should: [GuardedDiffClassLeaf fieldAt: #x] raise: #does_not_understand
+
+  testFieldAtPutOnAClassIsDoesNotUnderstand =>
+    self
+      should: [
+        @expect dnu
+        GuardedDiffClassRoot fieldAt: #x put: 1
+      ]
+      raise: #does_not_understand
+    self should: [
+      self dynamicClass fieldAt: #x put: 1
+    ] raise: #does_not_understand
+
+  testHasFieldOnAClassIsDoesNotUnderstand =>
+    @expect dnu
+    self should: [GuardedDiffClassRoot hasField: #x] raise: #does_not_understand
+    self should: [self dynamicClass hasField: #x] raise: #does_not_understand
+
+  testClearFieldOnAClassIsDoesNotUnderstand =>
+    self
+      should: [
+        @expect dnu
+        GuardedDiffClassRoot clearField: #x
+      ]
+      raise: #does_not_understand
+    self should: [self dynamicClass clearField: #x] raise: #does_not_understand
+
+  // From inside a class method: a `self` send compiles as an ordinary
+  // class-side send (no class-variable lowering), in a block too, and a send
+  // to the class held in a variable takes the external route.
+  testFieldReflectionInsideAClassMethodIsDoesNotUnderstand =>
+    cls := ClassFieldReflectionProbe
+    self should: [cls selfFieldAt] raise: #does_not_understand
+    self should: [cls selfFieldAtPut] raise: #does_not_understand
+    self should: [cls selfHasField] raise: #does_not_understand
+    self should: [cls selfClearField] raise: #does_not_understand
+    self should: [cls selfHasFieldInBlock] raise: #does_not_understand
+    self should: [cls fieldAtOf: cls] raise: #does_not_understand
+
+  // From the class's own process (a process-bound class method).
+  testFieldReflectionFromTheClassProcessIsDoesNotUnderstand =>
+    cls := ClassFieldReflectionProbe
+    @expect dnu
+    self should: [
+      cls run: [ClassFieldReflectionProbe hasField: #x]
+    ] raise: #does_not_understand
+    @expect dnu
+    self should: [
+      cls run: [ClassFieldReflectionProbe fieldAt: #x]
+    ] raise: #does_not_understand
+
+  // A class that defines its own class method of one of these names: that
+  // method answers on every route, and `respondsTo:` agrees.
+  testAClassOwnFieldAtMethodAnswersOnEveryRoute =>
+    cls := ClassFieldAtOwner
+    dyn := self dynamicOwner
+    self assert: (ClassFieldAtOwner fieldAt: #k) equals: #(#own, #k)
+    self assert: (dyn fieldAt: #k) equals: #(#own, #k)
+    self assert: (cls perform: #fieldAt: withArguments: #(#k)) equals: #(#own, #k)
+    self assert: cls viaSelf equals: #(#own, #k)
+    self assert: (cls hasField: #anything)
+    self assert: (cls respondsTo: #fieldAt:)
+    self assert: (cls respondsTo: #hasField:)
+    @expect dnu
+    self should: [cls clearField: #k] raise: #does_not_understand
+    self deny: (cls respondsTo: #clearField:)
+
+  testFieldReflectionThroughPerformIsDoesNotUnderstand =>
+    cls := self dynamicClass
+    self should: [
+      cls perform: #fieldAt: withArguments: #(#x)
+    ] raise: #does_not_understand
+    self should: [
+      cls perform: #fieldAt:put: withArguments: #(#x, 1)
+    ] raise: #does_not_understand
+    self should: [
+      cls perform: #hasField: withArguments: #(#x)
+    ] raise: #does_not_understand
+    self should: [
+      cls perform: #clearField: withArguments: #(#x)
+    ] raise: #does_not_understand
+
+  testDoesNotUnderstandNamesTheClassAndSelector =>
+    @expect dnu
+    err := [GuardedDiffClassRoot fieldAt: #x] on: Error do: [:e | e]
+    self assert: err kind equals: #does_not_understand
+    self assert: err selector equals: #fieldAt:
+
+  testRespondsToAgreesWithDoesNotUnderstand =>
+    cls := self dynamicClass
+    self deny: (cls respondsTo: #fieldAt:)
+    self deny: (cls respondsTo: #fieldAt:put:)
+    self deny: (cls respondsTo: #hasField:)
+    self deny: (cls respondsTo: #clearField:)
+    self deny: (cls respondsTo: #classVarNames)
+    self deny: (cls respondsTo: #allClassVarNames)
+    self deny: (cls respondsTo: #performLocally:withArguments:)
+    self assert: (cls respondsTo: #rootName)
+    self assert: (cls respondsTo: #perform:withArguments:)
+    self assert: (cls respondsTo: #fieldNames)
+
+  testClassVarNamesIsDoesNotUnderstand =>
+    cls := self dynamicClass
+    self should: [
+      cls perform: #classVarNames withArguments: #()
+    ] raise: #does_not_understand
+    self should: [
+      cls perform: #allClassVarNames withArguments: #()
+    ] raise: #does_not_understand
+
+  testPerformLocallyIsDoesNotUnderstand =>
+    cls := self dynamicClass
+    self should: [
+      cls perform: #performLocally:withArguments: withArguments: #(#rootName, #())
+    ] raise: #does_not_understand
+
+  testPerformWithArgumentsStillWorksOnAClass =>
+    cls := self dynamicClass
+    self assert: (cls perform: #rootName withArguments: #()) equals: #root
+    self assert: (cls perform: #add:and: withArguments: #(2, 3)) equals: 5
+    self assert: (GuardedDiffClassLeaf perform: #receiverName withArguments: #()) equals: #GuardedDiffClassLeaf

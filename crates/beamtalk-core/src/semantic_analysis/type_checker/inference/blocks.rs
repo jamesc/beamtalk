@@ -725,7 +725,7 @@ impl TypeChecker {
         in_abstract_method: bool,
     ) -> InferredType {
         if let Expression::Block(block) = arg {
-            let mut block_env = env.child();
+            let mut block_env = Self::block_child_env(block, env);
             // Narrowing uses the unified refinement API; the layers
             // are block-scoped because the child env is dropped on return.
             for (var_key, narrowed_type) in narrowings {
@@ -1042,13 +1042,20 @@ impl TypeChecker {
 
                     if type_params.len() >= 2 {
                         // All but last are block parameter types, last is return type
-                        let block_param_types: Vec<InferredType> = type_params
+                        let mut block_param_types: Vec<InferredType> = type_params
                             [..type_params.len() - 1]
                             .iter()
                             .map(|p| {
                                 Self::resolve_type_param(p, &class_subst, &method_subst, hierarchy)
                             })
                             .collect();
+                        Self::narrow_to_by_do_param(
+                            selector_name,
+                            class_name,
+                            is_class_side_send,
+                            &arg_types,
+                            &mut block_param_types,
+                        );
 
                         arg_types[i] = self.infer_block_with_typed_params(
                             block,
@@ -1082,6 +1089,35 @@ impl TypeChecker {
         }
 
         arg_types
+    }
+
+    /// BT-5246: `Integer>>to:by:do:` declares its block `Block(Number, Object)`
+    /// because a Float step passes Floats (BT-5216). When the receiver (the
+    /// start) and the step are both statically `Integer`, every value is an
+    /// `Integer`, so the block parameter is narrowed to `Integer`. Any other
+    /// step type (`Float`, `Number`, `Dynamic`, ...) keeps the declared
+    /// `Number`. A narrow rule for this one selector, not a general
+    /// type-variable mechanism.
+    fn narrow_to_by_do_param(
+        selector_name: &str,
+        receiver_class: &str,
+        is_class_side_send: bool,
+        arg_types: &[InferredType],
+        block_param_types: &mut [InferredType],
+    ) {
+        let integer = WellKnownClass::Integer.as_str();
+        let step_is_integer = arg_types
+            .get(1)
+            .and_then(InferredType::as_known)
+            .is_some_and(|c| c.as_str() == integer);
+        if selector_name == "to:by:do:"
+            && !is_class_side_send
+            && receiver_class == integer
+            && step_is_integer
+            && let Some(first) = block_param_types.first_mut()
+        {
+            *first = InferredType::known(integer);
+        }
     }
 
     /// The Phase-1 stand-in for a literal block argument, before Phase 2
@@ -1378,10 +1414,43 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> InferredType {
+        self.infer_block_with_typed_params_narrowed(
+            block,
+            block_span,
+            param_types,
+            &[],
+            hierarchy,
+            env,
+            in_abstract_method,
+        )
+    }
+
+    /// [`Self::infer_block_with_typed_params`] with `narrowings` applied to
+    /// the block's own environment (block-scoped, like
+    /// [`Self::infer_block_with_narrowings`]): the error block of
+    /// `x ifError:` / `x ifOk:ifError:` sees `x` as the error variant
+    /// (BT-5290).
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::semantic_analysis::type_checker) fn infer_block_with_typed_params_narrowed(
+        &mut self,
+        block: &crate::ast::Block,
+        block_span: Span,
+        param_types: &[InferredType],
+        narrowings: &[(&EnvKey, &InferredType)],
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> InferredType {
         // BT-4102: explicit `:: T` annotations win over the pushed-down type,
         // which wins over `Dynamic(UnannotatedParam)`.
         let resolved = self.resolve_block_param_types(block, param_types, hierarchy);
-        let mut block_env = env.child();
+        let mut block_env = Self::block_child_env(block, env);
+        for (var_key, narrowed_type) in narrowings {
+            block_env.push_refinement(RefinementLayer::block_scope(
+                (*var_key).clone(),
+                (*narrowed_type).clone(),
+            ));
+        }
         for (param, ty) in block.parameters.iter().zip(resolved.iter()) {
             block_env.set_local(param.name.clone(), ty.clone());
         }

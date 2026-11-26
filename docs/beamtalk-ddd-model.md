@@ -512,7 +512,7 @@ impl CoreErlangGenerator {
 | **Pragma** | In-body annotation (`@primitive name`) declaring a method's implementation |
 | **Named Intrinsic** | Entry in compiler's finite registry mapping name → code generation function |
 | **Primitive Type** | Class backed by native Erlang value (Integer, String, etc.) — method table only, no constructor |
-| **Runtime Dispatch Module** | Erlang module (e.g., `beamtalk_integer.erl`) providing type checking, structured errors, extension registry |
+| **Runtime Dispatch Module** | Erlang module (e.g., `beamtalk_integer.erl`) providing type checking and structured errors |
 
 **Relationships:**
 - **Consumes from:** Source Analysis Context (parsed AST from `stdlib/src/*.bt` files)
@@ -689,7 +689,7 @@ the instance (from Flavors):
 dispatch(Selector, Args, Self, State) ->
     case Selector of
         increment -> {reply, Result, NewState};   %% one clause per method
-        Other     -> inherited_extension_or_dnu(Other, Args, Self, State)
+        Other     -> inherited_or_dnu(Other, Args, Self, State)
     end.
 %% Result: {reply, Result, NewState} | {error, #beamtalk_error{}, State}
 ```
@@ -1008,7 +1008,7 @@ handle_info(check_idle, #state{enabled = true, max_idle_seconds = Max} = State) 
 
 **Operation Handlers (Domain Services):**
 - `OpsEval` (`beamtalk_repl_ops_eval`): `eval`, `show-codegen`, `stdin`
-- `OpsSession` (`beamtalk_repl_ops_session`): `bindings`, `clear`, `clone`, `close`, `sessions`
+- `OpsSession` (`beamtalk_repl_ops_session`): `close`, `health`, `sessions`, `shutdown`
 - `OpsLoad` (`beamtalk_repl_ops_load`): `load-file`, `load-source`, `reload`
 - `OpsActors` (`beamtalk_repl_ops_actors`): `actors`, `inspect`, `kill`
 - `OpsDev` (`beamtalk_repl_ops_dev`): `test`, `test-all`, `describe`, `health`, `shutdown`

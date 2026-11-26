@@ -69,6 +69,8 @@ Every generated project includes a `Justfile` with these targets:
 | `publish` | `git push origin --tags` | Push release tags |
 | `run` | `beamtalk run` | Run the application (**`--app` only**) |
 
+**`beamtalk fmt` never loses source (BT-5183).** Before writing a file, the formatter re-parses its own output and checks that every comment is still there, every number keeps its spelling (`16rFF`, `1e10`) and the program is unchanged. If any check fails — a formatter bug — the file is left untouched, `fmt` prints what would have been lost and exits non-zero (`fmt-check` too). A file with parse errors is skipped with a warning, as before. A CRLF file keeps CRLF line endings. The LSP's document formatting applies the same check and returns no edits when it fails.
+
 **`beamtalk run --raw-mfa`** (script and `--connect` modes) follows an uncaught error's message with the complete stack, one `  at Class>>selector (file:line)  [module:function/arity]` line per frame, hidden frames included. Without it the message is followed by the visible frames, `  at Class>>selector (file:line)`, and `(N frames hidden; --raw-mfa shows all)` when some were left out, as `beamtalk test` prints. Put the flag before the program arguments (`beamtalk run Greeter main: --raw-mfa Alice`); after the first argument it is passed to the program. It is rejected for service mode (`beamtalk run .`).
 
 **`beamtalk run` output routing:** Status and progress lines (`Building...`, `Running ClassName>>selector...`, `Connecting to workspace...`, and service mode's `Started <app> v<version> / Supervisor / REPL port` banner) are written to **stderr** in all three run modes — script, connected, and service (`beamtalk run .`). Stdout carries only the dispatched program's own output, keeping it clean for piped/programmatic consumers (`beamtalk run MyApp run | head`). `beamtalk build --escript` follows the same convention for its `Building...` line.
@@ -93,7 +95,7 @@ Every build runs through three sequential phases:
 
 Beamtalk uses content-hash-based change detection to avoid redundant work (BT-3120):
 
-- Each `.bt` source file's SHA-256 content hash is compared against the hash recorded for it in a `.beamtalk-beam-hashes.json` sidecar (the hash that produced its current `.beam`). If the hashes differ (or no `.beam` exists), the file is recompiled. mtime is deliberately not used for this decision — it lies under git operations (a branch switch restores old content under a fresh mtime) and under tools that preserve or backdate mtimes on write, either of which could make an mtime-keyed check serve a stale `.beam`. The recorded hash also folds in the slice of the cross-file analysis surface (class, protocol and type-alias signatures, standalone extensions) that the file's last compile actually consulted, which the sidecar stores next to it (BT-4690). A signature change therefore rebuilds the files that looked it up, not the whole package; a file with no stored record keys on the whole package-wide surface instead, and a doc-only or method-body edit rebuilds only its own file.
+- Each `.bt` source file's SHA-256 content hash is compared against the hash recorded for it in a `.beamtalk-beam-hashes.json` sidecar (the hash that produced its current `.beam`). If the hashes differ (or no `.beam` exists), the file is recompiled. mtime is deliberately not used for this decision — it lies under git operations (a branch switch restores old content under a fresh mtime) and under tools that preserve or backdate mtimes on write, either of which could make an mtime-keyed check serve a stale `.beam`. The recorded hash also folds in the slice of the cross-file analysis surface (class, protocol and type-alias signatures) that the file's last compile actually consulted, which the sidecar stores next to it (BT-4690). A signature change therefore rebuilds the files that looked it up, not the whole package; a file with no stored record keys on the whole package-wide surface instead, and a doc-only or method-body edit rebuilds only its own file.
 - **Pass 1 caching** — The class-module index from Pass 1 is cached in `_build/dev/ebin/.beamtalk-pass1-cache.json`, also keyed by each file's content hash. On subsequent builds, only files whose content hash has changed since the cache was written are re-parsed. Unchanged files reuse their cached class metadata. If the `beamtalk.toml` manifest changes (an mtime check — the manifest itself isn't content-hashed), the entire cache is invalidated and all files are re-parsed.
 - **Force rebuild** — `beamtalk build --force` ignores all caches and recompiles everything. Useful after toolchain upgrades or when build artifacts may be stale (e.g. switching git branches or worktrees).
 - **Orphan detection** — `.beam` files with no corresponding `.bt` source are reported as warnings (the source may have been deleted or renamed).
@@ -135,7 +137,7 @@ same scope as `build`.
 
 - `beamtalk build` / `beamtalk test` fail on `Error` diagnostics, and with
   `--warnings-as-errors` also on `Warning`/`Hint` (except the documented
-  `Deprecation`/`UnresolvedClass`/`UnresolvedFfi`/`ArityMismatch` exclusions,
+  `UnresolvedClass`/`UnresolvedFfi`/`ArityMismatch` exclusions,
   which an explicit `[diagnostics]` entry can opt back in).
 - `beamtalk lint` is the lint-severity gate by default. With
   `--warnings-as-errors` it additionally fails on the live-recheck set — the
@@ -164,8 +166,7 @@ same scope as `build`.
 - `beamtalk build` re-checks a byte-identical file when a signature it
   type-checks against changes elsewhere (BT-4336): every pre-loaded class
   (project and dependency, trait provisions flattened in), protocol and
-  type alias, plus every standalone extension method and the project-known
-  Erlang modules, is hashed into each file's incremental cache key, so a
+  type alias, plus the project-known Erlang modules, is hashed into each file's incremental cache key, so a
   dependent is recompiled — and its diagnostics recomputed — rather than
   replayed from the cache against the old signature. Doc-comment edits and
   line shifts leave the hash alone; any signature change rebuilds the whole
@@ -244,10 +245,8 @@ Module:'__beamtalk_meta'() ->
         field_types       => #{count => 'Integer'},
         field_has_default => #{count => true},
         %% ADR 0124 §1/B5a: per-field slot kind (`#eager` | `#late`),
-        %% instance-side and class-side (`classState:`) respectively.
+        %% instance-side (a class has no fields, ADR 0153).
         field_kinds       => #{count => eager},
-        class_fields      => [],
-        class_field_kinds => #{},
         methods           => [{increment, 1}, {value, 0}],
         class_methods     => [{new, 0}],
         method_info       => #{...},
@@ -304,7 +303,7 @@ beamtalk release --output dist/                     # override output directory
 beamtalk release --no-include-erts                  # slim image; requires host OTP
 beamtalk release --upgrade-from prev-release/       # shape-compatibility preflight
 beamtalk release --force                            # force rebuild
-beamtalk release --force-output                     # replace an --output dir lacking the .beamtalk-release marker
+beamtalk release --force-output                     # replace an unmarked, release-shaped --output dir
 ```
 
 ### Release Configuration
@@ -383,7 +382,7 @@ beamtalk repl --port 9090    # Use a specific port
 beamtalk repl --node mynode  # Use a specific node name
 ```
 
-**Session idle period.** A REPL session whose client disconnected stays resumable for 4 hours, then the workspace stops it. A session no client ever attached to (a `clone`, a dist-attached LiveView) is stopped after the same period without an eval. Change the period with the `BEAMTALK_SESSION_IDLE_SECONDS` environment variable of the workspace node, or with `{beamtalk_workspace, [{session_idle_seconds, N}]}` in `sys.config` (which wins). This is separate from `--idle-timeout`, which stops the whole workspace node.
+**Session idle period.** A REPL session whose client disconnected stays resumable for 4 hours, then the workspace stops it. A session no client ever attached to (a dist-attached LiveView) is stopped after the same period without an eval. Change the period with the `BEAMTALK_SESSION_IDLE_SECONDS` environment variable of the workspace node, or with `{beamtalk_workspace, [{session_idle_seconds, N}]}` in `sys.config` (which wins). This is separate from `--idle-timeout`, which stops the whole workspace node.
 
 On startup, the REPL prints the version and a help hint:
 
@@ -606,12 +605,14 @@ for the full model.
 |---------|-------------------|-------------|
 | `:changes` | `Workspace changes` | Show the ChangeLog (returns a `ChangeLog` object) |
 | `:dirty` | `Workspace changes dirtyMethods` | Per-class set of dirty selectors |
-| `:flush` | `Workspace flush` | Write every durable + flushable Tier 1 entry back to its source file |
-| `:flush Counter` | `Workspace flush: Counter` | Flush entries targeting one class |
-| `:flush #'new-class'` | `Workspace flush: #'new-class'` | Flush only entries of one kind |
-| `:flush #{ #file => "path" }` | `Workspace flush: #{ #file => "path" }` | Flush entries against one file |
-| `:flush-destructive` | `Workspace flushIncludingDestructive` | Flush all pending entries including Tier 2 (`remove-class` — file deletion); prompts `y/N` |
-| `:flush-destructive Counter` | `Workspace flush: Counter confirmDestructive: true` | Destructive flush scoped to one class; prompts `y/N` |
+| `:flush` | `flush` operation (as `Workspace flush`) | Write every durable + flushable Tier 1 entry back to its source file |
+| `:flush Counter` | `flush` operation, class scope | Flush entries targeting one class |
+| `:flush #'new-class'` | `flush` operation, kind scope (`new-class`, `remove-method`, `remove-class`, `rename-class`, `rename-method`) | Flush only entries of one kind |
+| `:flush #increment` | `flush` operation, selector scope | Flush entries for one method selector in every class |
+| `:flush Counter>>#increment` | `flush` operation, class + selector scope | Flush entries for one method of one class |
+| `:flush #{ #file => "path" }` | `flush` operation, file scope | Flush entries against one file |
+| `:flush-destructive` | `flush` operation with `confirm_destructive` | Flush all pending entries including Tier 2 (`remove-class` — file deletion); prompts `y/N` |
+| `:flush-destructive Counter` | `flush` operation, class scope, `confirm_destructive` | Destructive flush scoped to one class; prompts `y/N` |
 | `:remove-method Counter increment` | `Counter removeSelector: #increment` | Remove a method from a class (strips optional `#` from selector) |
 | `:remove-class Counter` | `Counter removeFromSystem` | Remove a class entirely (memory-only; prompts `y/N`). Flush separately to delete the file |
 | `:rename-class Counter Accumulator` | `Counter renameTo: #Accumulator` | Rename a class (memory-only; prompts `y/N`). Flush separately (`:flush-destructive`) to move the file and rewrite cross-file references |
@@ -715,7 +716,7 @@ Classes can be defined directly at the REPL prompt without writing a `.bt` file:
 ..>   increment => self.value := self.value + 1
 ```
 
-Methods can be added or replaced on existing classes using Tonel-style standalone method definitions (`>>`):
+Methods can be added or replaced on a class whose source the workspace holds, using Tonel-style standalone method definitions (`>>`). The REPL recompiles the class from its stored source and hot-loads it:
 
 ```beamtalk
 > InlineCounter >> getValue => self.value
@@ -741,6 +742,8 @@ Actor(InlineCounter, 0.234.0)
 > c2 increment
 10
 ```
+
+This is a live edit, not a way to extend a class from another file. A stdlib class is read-only in the workspace, and a class with no stored source (a dependency class, or one made with `ClassBuilder`) fails with "Class source not available". In a `.bt` file, `Foo >> sel => ...` is valid only in the file that defines `Foo`, where it is folded into the class. In any other file it is a compile error, reported by `build`, `check`, `lint`, MCP `lint`, the LSP and `Workspace load:` (ADR 0152).
 
 ### Hot Reload
 
@@ -1017,7 +1020,7 @@ Path arguments of `lint`, `diagnostic_summary`, `load_file`, `load_project`, `te
 | `nodes` | List connected BEAM nodes with their shape-skew counts |
 | `save_method` | Durable live patch (ADR 0082): wraps `aClass compile: #sel source: body`; logs a durable ChangeEntry |
 | `try_method` | Ephemeral spike (ADR 0082): wraps `aClass tryCompile: #sel source: body`; logs an ephemeral ChangeEntry (not flushable — pruned on workspace restart or via `Workspace changes clear`) |
-| `save_class` | Create a new class file (ADR 0082): wraps `Workspace newClass: source at: path`; logs a `kind: #'new-class'` ChangeEntry (flush writes the file to disk) |
+| `save_class` | Create a new class file (ADR 0082): sends the `save-class` op (`Workspace newClass: source at: path` semantics); logs a `kind: #'new-class'` ChangeEntry (flush writes the file to disk) |
 | `remove_method` | Remove a method from a class (ADR 0112): wraps `Behaviour>>removeSelector:` with optional `if_absent` fallback |
 | `remove_class` | Remove a class entirely (ADR 0113): wraps `removeFromSystem`, returns the resulting `remove-class` ChangeEntry |
 | `rename_class` | Rename a class in the running system (ADR 0114): wraps `renameTo:`, auto-rewriting in-project cross-file references |
@@ -1064,7 +1067,7 @@ just web <name>   # Start the LiveView IDE, connecting to workspace <name>
 - **Workspace pane** — expression evaluation (doIt/printIt/inspectIt) with display-formatted results, same surface-shared rules as CLI / REPL / MCP
 - **Transcript pane** — real-time captured output via `beamtalk_repl_subscriptions`
 - **Bindings pane** — live session bindings list, updated in real time via the bindings subscription stream; object-valued bindings offer an Inspect action
-- **Inspector pane** — navigable `Inspector` cursor view (ADR 0095) with breadcrumb drill navigation, type/pid chips, and drillable reference-following into nested objects. Live tracking mode: field-flash highlights changed fields on actor state writes, freeze/unfreeze toggle, pid stats chips (queue depth, memory, reductions, status), and poke (evaluate expressions against the inspected object). Inspector instances can be popped out into draggable overlay windows for side-by-side comparison
+- **Inspector pane** — navigable `Inspector` cursor view (ADR 0095) with breadcrumb drill navigation, type/pid chips, and drillable reference-following into nested objects. Live tracking mode: field-flash highlights changed fields on actor state writes, freeze/unfreeze toggle, pid stats chips (queue depth, memory, reductions, status), poke (evaluate expressions against the inspected object), and an Owner-only "Kill actor" button that asks for confirmation, kills the inspected actor and lists the actors still running (BT-5199). Inspector instances can be popped out into draggable overlay windows for side-by-side comparison
 - **System Browser pane** — hierarchy view (class tree), category view (grouped by package), protocol/selector panes (instance/class side) with layered protocol categorization and a `Protocol | Sections` toggle that groups methods by `// === Name ===` divider category (mirroring the LSP outline; only appears when a class has dividers), method source viewer, class definition viewer, and read-only Erlang backend view for `native:` classes (jump from a `self delegate` facade to the backing `handle_call` clause). Type Aliases panel: clicking a row toggles an inline read-only source pane (project-owned aliases show their `.bt` source; stdlib/dependency aliases degrade to the "source not available" empty state). Section authoring: inline rename of existing section headers, and an "add section" form to insert a new divider above a chosen method. New Class form (collapsed-by-default) derives the target path `src/<ClassName>.bt` from the declared class name. Stdlib classes show synthesized definitions from reflection
 - **Method Editor pane** — tabbed editor with compile/save (⌘S), dirty tracking, breadcrumb navigation, class definition view, collapsible doc block (collapsed by default), Senders/Implementors navigation popovers, and "new method" entries for creating methods directly from the browser. Compiler-derived methods (value accessors, `with<Field>:` setters, actor `new`/`new:`/`spawn`/`spawn:`) open as a read-only tab showing the resolved documentation and signature instead of a blank editable buffer (BT-2714)
 - **Omni search** — top-bar class + selector search with keyboard navigation, backed by the `nav-symbols` index
@@ -1073,6 +1076,8 @@ just web <name>   # Start the LiveView IDE, connecting to workspace <name>
 - **System Browser backend** — browse ops (`browse-classes`, `browse-protocols`, `browse-method-source`, `browse-class-definition`, `browse-native-source`, `browse-native-modules`, `browse-type-aliases`, `browse-alias-source`, `browse-categories`) through `beamtalk_repl_ops` — pure reflection, Observer-grantable `:read` capability (ADR 0096)
 - **Per-tab session isolation** — each browser tab gets its own workspace-supervised session via a per-tab `sessionStorage` token; bindings and loaded classes persist across evals
 - **Session resume** — reconnecting tabs (LiveView reconnect, page reload) resume their existing session within a grace window instead of starting fresh
+- **Logout and session revocation** — when an auth gate (OIDC / dev-auth) is active the top bar shows a "Log out" button. Logging out revokes the session server-side, so a copied cookie stops working immediately (revocations are ETS-tracked and swept after the session TTL)
+- **Eval queue cap** — at most 25 evaluations may be queued per tab; a 26th is refused with a visible error
 - **Hot-reload coherence** — a method saved in one tab is immediately visible to evals in all tabs (inherent to the shared workspace node in the Attach topology)
 
 **Packaging:** The IDE ships on its own release lane (separate from the `beamtalk` toolchain bundle). Three installation paths:
@@ -1140,7 +1145,6 @@ beamtalk test              # Auto parallelism (default)
 beamtalk test --jobs 4     # Up to 4 classes concurrently
 beamtalk test -j 1         # Sequential (backward-compatible)
 beamtalk test --raw-mfa    # Every stack frame per failure (hidden ones too), raw module:function/arity beside each name
-# `--full-traces` still works but is deprecated: it is a hidden alias of `--raw-mfa`
 ```
 
 From code: `TestRunner runAll: 0` (auto), `TestRunner runAll: 4` (bounded), `TestRunner runAll` (sequential).

@@ -359,20 +359,12 @@ mod tests {
         );
     }
 
-    // ── ADR 0070 WS3 (BT-4608): dependency extensions ─────────────────────
+    // ── Dependency guard (ADR 0070 WS3, BT-4608) ──────────────────────────
     //
     // A consumer package with a path dependency. `[diagnostics]` escalates
     // `dnu` and `type` to errors so whether `check` passes shows whether the
-    // pre-WS3 dependency guard lifted: before WS3 every receiver in a package
-    // with dependencies was `Open`, so no DNU or conformance diagnostic could
-    // fire at all.
-
-    /// The producer's extensions: on `Object`, on a stdlib class instance-
-    /// and class-side, and class-side on its own sealed class.
-    const PRODUCER_EXTENSIONS: &str = "Object >> shout -> Integer => 1\n\
-         Integer >> doubled -> Integer => self * 2\n\
-         Integer class >> fromShout -> Integer => 2\n\
-         Codec class >> make -> Integer => 3\n";
+    // dependency guard lifted. ADR 0152 removed cross-file extension methods,
+    // so a dependency contributes classes only.
 
     /// A sealed producer class with a class method, and no
     /// `validateHeader:value:` (the BT-4526 repro shape).
@@ -395,39 +387,14 @@ mod tests {
         )
     }
 
-    fn producer_with_extensions() -> Vec<(&'static str, &'static str)> {
-        vec![
-            ("codec.bt", PRODUCER_CODEC),
-            ("ext.bt", PRODUCER_EXTENSIONS),
-        ]
-    }
-
     #[test]
-    fn dependency_extensions_resolve_with_no_false_dnu() {
-        let temp = TempDir::new().unwrap();
-        let consumer = consumer_with_dependency(
-            &temp,
-            &producer_with_extensions(),
-            &[(
-                "main.bt",
-                "Object subclass: Main\n  run => 42 shout + 42 doubled + Integer fromShout + Codec make\n",
-            )],
-        );
-        run_check(
-            consumer.as_str(),
-            &beamtalk_core::CompilerOptions::default(),
-        )
-        .expect("selectors the dependency's extensions define must not be reported");
-    }
-
-    #[test]
-    fn missing_selector_is_reported_once_dependency_extensions_are_loaded() {
+    fn missing_selector_is_reported_in_a_package_with_dependencies() {
         // Before WS3 the guard kept every receiver `Open` in a package with
         // dependencies, so this passed.
         let temp = TempDir::new().unwrap();
         let consumer = consumer_with_dependency(
             &temp,
-            &producer_with_extensions(),
+            &[("codec.bt", PRODUCER_CODEC)],
             &[("main.bt", "Object subclass: Main\n  run => 42 whisper\n")],
         );
         let err = run_check(
@@ -445,7 +412,7 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let consumer = consumer_with_dependency(
             &temp,
-            &producer_with_extensions(),
+            &[("codec.bt", PRODUCER_CODEC)],
             &[(
                 "main.bt",
                 "Object subclass: Main\n  run => Codec validateHeader: 1 value: 2\n",
@@ -456,54 +423,5 @@ mod tests {
             &beamtalk_core::CompilerOptions::default(),
         )
         .expect_err("the removed class method must be reported");
-    }
-
-    #[test]
-    fn removing_the_dependency_extension_brings_the_dnu_back() {
-        let temp = TempDir::new().unwrap();
-        let consumer = consumer_with_dependency(
-            &temp,
-            &[("codec.bt", PRODUCER_CODEC)],
-            &[("main.bt", "Object subclass: Main\n  run => 42 shout\n")],
-        );
-        run_check(
-            consumer.as_str(),
-            &beamtalk_core::CompilerOptions::default(),
-        )
-        .expect_err("without the producer's extension, `shout` is not understood");
-    }
-
-    #[test]
-    fn dependency_extension_satisfies_protocol_conformance() {
-        let consumer_files = [
-            (
-                "shouter.bt",
-                "Protocol define: Shouter\n  shout -> Integer\n",
-            ),
-            (
-                "main.bt",
-                "Object subclass: Main\n  \
-                 use: s :: Shouter -> Integer => s shout\n  \
-                 run => self use: 42\n",
-            ),
-        ];
-
-        let temp = TempDir::new().unwrap();
-        let consumer =
-            consumer_with_dependency(&temp, &producer_with_extensions(), &consumer_files);
-        run_check(
-            consumer.as_str(),
-            &beamtalk_core::CompilerOptions::default(),
-        )
-        .expect("Integer conforms to Shouter through the dependency's `Object >> shout`");
-
-        let temp = TempDir::new().unwrap();
-        let consumer =
-            consumer_with_dependency(&temp, &[("codec.bt", PRODUCER_CODEC)], &consumer_files);
-        run_check(
-            consumer.as_str(),
-            &beamtalk_core::CompilerOptions::default(),
-        )
-        .expect_err("without the extension, Integer does not conform to Shouter");
     }
 }

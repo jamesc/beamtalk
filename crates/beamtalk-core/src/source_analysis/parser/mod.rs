@@ -52,7 +52,9 @@
 
 use std::collections::HashSet;
 
-use crate::ast::{Comment, CommentAttachment, Expression, ExpressionStatement, Module};
+use crate::ast::{
+    Comment, CommentAttachment, Expression, ExpressionStatement, Module, TypeAnnotation,
+};
 #[cfg(test)]
 use crate::ast::{CommentKind, Literal};
 use crate::source_analysis::{Span, Token, TokenKind, Trivia, lex_with_eof};
@@ -61,6 +63,7 @@ use ecow::EcoString;
 // Submodules with additional impl blocks for Parser
 mod binary;
 mod declarations;
+mod depth_ledger;
 mod expressions;
 mod literals;
 mod methods;
@@ -68,6 +71,7 @@ mod patterns;
 mod protocols;
 mod types;
 
+use depth_ledger::DepthLedger;
 use types::DoubleColonSkip;
 
 // Property-based tests (ADR 0011 Phase 2)
@@ -82,9 +86,11 @@ mod error_recovery_tests;
 #[cfg(test)]
 mod tests;
 
-// Re-export helper functions for tests
+// The integer-literal reader, shared with the formatter (BT-5183), which
+// checks that a recorded number spelling reads back as the printed value.
 #[cfg(test)]
 use expressions::parse_integer;
+pub(crate) use expressions::parse_integer_literal;
 
 // ============================================================================
 // Pratt Parsing for Binary Operator Precedence
@@ -307,7 +313,7 @@ pub fn parse_method(tokens: Vec<Token>) -> (Option<crate::ast::MethodDefinition>
 /// It returns `false` (incomplete) when:
 ///
 /// - Delimiters are unclosed: `[`, `(`, `{`, `#{`, `#(`, `#[`
-/// - A string or block comment is unterminated
+/// - A string is unterminated
 /// - The last token is a keyword (`at:`), binary operator (`+`), assignment
 ///   (`:=`), cascade (`;`), return (`^`), or pipeline (`|>`) — all of which
 ///   expect a following expression
@@ -343,17 +349,6 @@ pub fn is_input_complete(source: &str) -> bool {
 
     for token in &tokens {
         let kind = token.kind();
-
-        // Check for unterminated block comments in the EOF token's leading trivia
-        if kind.is_eof() {
-            for trivia in token.leading_trivia() {
-                if let Trivia::BlockComment(text) = trivia
-                    && !text.ends_with("*/")
-                {
-                    return false;
-                }
-            }
-        }
 
         match kind {
             // Error tokens from unterminated literals (e.g., `"hello` without
@@ -504,16 +499,6 @@ pub fn needs_blank_line_to_complete(source: &str) -> bool {
     for token in &tokens {
         let kind = token.kind();
 
-        if kind.is_eof() {
-            for trivia in token.leading_trivia() {
-                if let Trivia::BlockComment(text) = trivia
-                    && !text.ends_with("*/")
-                {
-                    return false;
-                }
-            }
-        }
-
         match kind {
             TokenKind::Error(msg) if !is_diagnostic_error(msg) => {
                 return false;
@@ -557,14 +542,17 @@ pub fn needs_blank_line_to_complete(source: &str) -> bool {
 }
 
 /// Check if a lexer error message is a human-readable diagnostic (complete but
-/// invalid syntax) rather than a raw source fragment from an unterminated literal.
+/// invalid syntax) rather than an input that more lines could complete.
 ///
-/// Unterminated literal errors contain the raw source text (e.g., `"hello` or `$\`),
-/// which starts with a delimiter character.  Diagnostic errors are English sentences
-/// that start with a lowercase letter (e.g., "single-quoted strings are no longer
-/// supported...").
+/// Diagnostic errors are English sentences that start with a lowercase letter
+/// (e.g., "single-quoted strings are no longer supported..."). An
+/// unterminated string is also reported as a sentence
+/// (`unterminated string literal starting at ...`, BT-5182) but more input
+/// can close it, so it is not complete. Other incomplete-input errors carry
+/// the raw source text (e.g., `$` at end of input), which starts with a
+/// delimiter character.
 fn is_diagnostic_error(msg: &str) -> bool {
-    msg.starts_with(|c: char| c.is_ascii_lowercase())
+    super::lexer::is_message_error(msg) && !super::lexer::is_unterminated_error(msg)
 }
 
 /// The semantic category of a diagnostic, used by `@expect` for suppression.
@@ -583,12 +571,6 @@ pub enum DiagnosticCategory {
     Lint,
     /// Dead assignment in block closure.
     DeadAssignment,
-    /// Duplicate extension method conflict.
-    ExtensionConflict,
-    /// Deprecation warning — wrong keyword/class-kind combination.
-    ///
-    /// Excluded from `--warnings-as-errors` to allow gradual migration.
-    Deprecation,
     /// Actor-new error — using `new`/`new:` on an Actor subclass.
     ActorNew,
     /// Visibility error/warning (ADR 0071) — cross-package access to internal methods.
@@ -599,8 +581,6 @@ pub enum DiagnosticCategory {
     UnresolvedFfi,
     /// Arity mismatch — wrong argument count for known Erlang function.
     ArityMismatch,
-    /// Workspace binding shadows class — REPL binding hides a class name.
-    ShadowedClass,
     /// Missing type annotation in typed class.
     ///
     /// Separate from `Type` so that `@expect type_annotation` suppresses
@@ -661,35 +641,13 @@ pub enum DiagnosticCategory {
     /// when every arm of the match is a block literal (an intentional
     /// block-valued match). Suppressible with `@expect match_arm_block`.
     MatchArmBlock,
-    /// A block literal that reads or writes a class variable of its home
-    /// class is used where it will run outside an invocation of that class
-    /// (ADR 0130 §5): a reading block handed to an asynchronous send, stored
-    /// or returned sees the values captured at creation; a writing block
-    /// carried into another class's class-side method raises
-    /// `class_state_unreachable`. A lint, not a guarantee.
-    ClassStateAbroad,
-    /// A class-side method that runs in its class's `gen_server` process (it
-    /// is not direct-called) and directly calls a process-sensitive Erlang
-    /// function — one that blocks, or depends on the identity or ownership of
-    /// the calling process (BT-4031, ADR 0129). Suppressible with
-    /// `@expect class_process_ffi` for deliberate serialisation.
-    ClassProcessFfi,
-    /// A class-side method that is direct-called in the caller's process
-    /// (today: `class sealed` in a `sealed` class without class variables;
-    /// after ADR 0142, every class method of a class without class variables)
+    /// A class-side method, which runs in the caller's process (ADR 0142),
     /// directly calls an Erlang function that creates a resource tied to the
     /// calling process (ETS table, port, linked process, link, monitor,
     /// registered name, timer) or acts on the calling process itself
     /// (`self()`, the process dictionary, process flags) (BT-4302).
     /// Suppressible with `@expect class_method_process_resource`.
     ClassMethodProcessResource,
-    /// A class-side method named after a class-variable reflection selector
-    /// (`fieldAt:`, `fieldAt:put:`, `hasField:`, `clearField:`), which the
-    /// class process answers itself whenever the name argument is a Symbol,
-    /// so such a send never reaches the method (BT-4422). A warning, not an
-    /// error: a non-Symbol argument still reaches it. Suppressible with
-    /// `@expect class_var_reflection_shadowing`.
-    ClassVarReflectionShadowing,
     /// A block literal that reads or writes a `state:` field of its actor,
     /// probes with `hasField:`, or makes a synchronous `self` send, and is
     /// passed to `Timer`, to a send whose receiver is statically another
@@ -752,6 +710,28 @@ pub enum DiagnosticCategory {
     /// dynamic-site report among them). Drivers surface exactly this
     /// category alongside `InternalVerifier`. Not a `[diagnostics]` key.
     CodegenReport,
+    /// A standalone `X >> m => ...` that cannot compile where it is written
+    /// (ADR 0152, BT-5184): its target is not a class declared in this file
+    /// (cross-file extension methods were removed), it names another
+    /// package's class (`pkg@Foo >> m`), it targets a protocol, or it is an
+    /// instance-side method on a same-file `native:` actor. An error.
+    /// No `@expect` directive suppresses it, not even `@expect all` (see
+    /// [`Self::is_expect_suppressible`]), and it is not a `[diagnostics]` key:
+    /// the method would otherwise silently not exist.
+    MisplacedExtension,
+}
+
+impl DiagnosticCategory {
+    /// Whether an `@expect` directive (including `@expect all`) may suppress
+    /// a diagnostic of this category. The one place that rule lives: every
+    /// `@expect` pass consults it.
+    #[must_use]
+    pub fn is_expect_suppressible(self) -> bool {
+        // `InternalVerifier` is emitted by codegen, after the `@expect` pass,
+        // so it never meets a directive today; listing it keeps its own
+        // "not suppressible by `@expect`" promise true if that ever changes.
+        !matches!(self, Self::MisplacedExtension | Self::InternalVerifier)
+    }
 }
 
 /// A secondary note attached to a diagnostic.
@@ -1020,16 +1000,81 @@ impl Severity {
     }
 }
 
-/// Maximum nesting depth for expressions before the parser bails out.
+/// Maximum nesting depth before the parser bails out.
 ///
-/// Prevents stack overflow on deeply nested input (e.g., `(((((...)))))`).
-/// Each nesting level uses multiple stack frames through the parser call
-/// chain, and ASAN-instrumented builds (fuzzing) have larger frames.
-/// 64 is generous enough for any realistic program while staying safe.
+/// Prevents stack overflow on deeply nested input (e.g., `(((((...)))))`,
+/// `#(#(#(...)))`, `Foo(Foo(...))`, `2 ** 2 ** ...`). Each nesting level uses
+/// multiple stack frames through the parser call chain, and ASAN-instrumented
+/// builds (fuzzing) have larger frames. 64 is generous enough for any
+/// realistic program while staying safe.
 ///
-/// As a second line of defence, `stacker::maybe_grow` is used at the
-/// recursive entry point so the stack is extended on the heap if needed.
-const MAX_NESTING_DEPTH: usize = 64;
+/// Every recursive parse path descends through [`Parser::with_nesting`],
+/// which enforces this limit and, as a second line of defence, extends the
+/// stack on the heap with `stacker::maybe_grow`. The lexer applies the same
+/// limit to string interpolation, which it lexes recursively, and the
+/// lookahead skippers for type annotations apply it to their own recursion.
+pub(crate) const MAX_NESTING_DEPTH: usize = 64;
+
+/// Maximum depth of an expression's syntax tree, and so also the maximum
+/// length of one flat chain of sends (`a + b + c ...`, `a foo bar ...`,
+/// `a |> f |> g ...`, `a.b.c ...`) or of a type operator chain
+/// (`A & B & C ...`) (BT-5181).
+///
+/// A flat chain does not recurse while it is parsed, but it builds a
+/// left-deep tree that every later pass (and `Drop`) walks recursively, so an
+/// unbounded chain would overflow their stacks instead. A chain is capped as
+/// it is built; an expression that is deep through nesting and chains
+/// together is measured once complete and replaced by an error node.
+///
+/// 512 is far past any realistic program, and leaves the recursive passes
+/// that run on the language server's 2 MiB worker threads a wide margin
+/// even in debug builds (about 700 levels fit there; the
+/// `deep_input_stack_safety` tests in `beamtalk-language-service` check it).
+pub(crate) const MAX_EXPRESSION_DEPTH: usize = 512;
+
+/// Stack the parser keeps free before descending one nesting level, and the
+/// size of each heap segment `stacker` adds when less than that is left.
+///
+/// The red zone must hold one nesting level's whole frame chain (a dozen
+/// frames between two guarded entry points, large in debug builds); the
+/// segment is kept modest because `MAX_NESTING_DEPTH` caps how many are ever
+/// needed and a large one would cause OOM under `AddressSanitizer`.
+const STACK_RED_ZONE: usize = 128 * 1024;
+const STACK_SEGMENT: usize = 1024 * 1024;
+
+/// Whether `closer` closes a group opened by `opener`.
+fn closes(opener: &TokenKind, closer: &TokenKind) -> bool {
+    matches!(
+        (opener, closer),
+        (
+            TokenKind::LeftParen | TokenKind::ListOpen,
+            TokenKind::RightParen
+        ) | (
+            TokenKind::LeftBracket | TokenKind::ArrayOpen,
+            TokenKind::RightBracket
+        ) | (
+            TokenKind::LeftBrace | TokenKind::MapOpen,
+            TokenKind::RightBrace
+        ) | (TokenKind::LtLt, TokenKind::GtGt)
+    )
+}
+
+/// Whether a token of `kind` can end an operand, so a `<<` after it
+/// is infix rather than opening a construction.
+fn ends_operand(kind: &TokenKind) -> bool {
+    kind.is_closing_bracket()
+        || matches!(
+            kind,
+            TokenKind::Identifier(_)
+                | TokenKind::Integer(_)
+                | TokenKind::Float(_)
+                | TokenKind::String(_)
+                | TokenKind::Symbol(_)
+                | TokenKind::Character(_)
+                | TokenKind::StringEnd(_)
+                | TokenKind::GtGt
+        )
+}
 
 /// The parser state.
 pub(super) struct Parser {
@@ -1074,6 +1119,16 @@ pub(super) struct Parser {
     pub(super) current_method_header_indent: Option<usize>,
     /// Current expression nesting depth (guards against stack overflow).
     nesting_depth: usize,
+    /// The depths of the expression trees answered by the nesting levels
+    /// open around the parser, so each level's depth bound walks only the
+    /// nodes it built itself ([`Self::bound_expression_depth`], BT-5237).
+    expression_depths: DepthLedger<Expression>,
+    /// [`Self::expression_depths`] for type annotations
+    /// ([`Self::bound_type_depth`]).
+    type_depths: DepthLedger<TypeAnnotation>,
+    /// Current recursion depth of the type-annotation lookahead skippers,
+    /// which take `&self` (see `skip_type_operand`).
+    pub(super) lookahead_depth: std::cell::Cell<usize>,
     /// Indices of tokens whose leading trivia contains at least one `DocComment`.
     ///
     /// Pre-scanned in `Parser::new`. Entries are removed as doc comments are
@@ -1113,6 +1168,38 @@ pub(super) struct Parser {
     /// The comments inside collection literals so far, keyed by the literal's
     /// span (BT-3983). Taken by the owning definition like `pipeline_sends`.
     pub(super) literal_comments: Vec<(Span, crate::ast::LiteralCommentSlots)>,
+    /// The source spelling of every number literal so far, keyed by its
+    /// token's span (BT-5183), so the formatter can print `16rFF` rather
+    /// than `255`. Taken by the owning definition like `literal_comments`.
+    pub(super) number_spellings: Vec<(Span, EcoString)>,
+    /// The comments written in the gaps between an expression's tokens so
+    /// far (BT-5183), each with its anchor offset and slot. Taken by the
+    /// owning definition like `literal_comments`.
+    pub(super) gap_comments: Vec<(u32, crate::ast::GapSlot, crate::ast::GapComments)>,
+}
+
+/// The [`Comment`] one trivia item holds, with its delimiters stripped
+/// (`// `, `/// `), or `None` for whitespace. `span` is the span
+/// recorded on the comment (its token's).
+pub(super) fn comment_from_trivia(trivia: &Trivia, span: Span) -> Option<Comment> {
+    match trivia {
+        Trivia::Whitespace(_) => None,
+        Trivia::LineComment(text) => {
+            let s = text.as_str();
+            let content = s
+                .strip_prefix("// ")
+                .or_else(|| s.strip_prefix("//"))
+                .unwrap_or(s);
+            Some(Comment::line(content, span))
+        }
+        Trivia::DocComment(text) => {
+            let s = text.as_str();
+            let content = s
+                .strip_prefix("/// ")
+                .unwrap_or_else(|| s.strip_prefix("///").unwrap_or(s));
+            Some(Comment::doc(content, span))
+        }
+    }
 }
 
 impl Parser {
@@ -1138,10 +1225,15 @@ impl Parser {
             in_protocol_body: false,
             current_method_header_indent: None,
             nesting_depth: 0,
+            expression_depths: DepthLedger::default(),
+            type_depths: DepthLedger::default(),
+            lookahead_depth: std::cell::Cell::new(0),
             unattached_doc_comment_indices,
             attached_doc_comment_positions: None,
             pipeline_sends: Vec::new(),
             literal_comments: Vec::new(),
+            number_spellings: Vec::new(),
+            gap_comments: Vec::new(),
         }
     }
 
@@ -1303,7 +1395,7 @@ impl Parser {
                         block_positions.clear();
                     }
                 }
-                _ => {
+                super::Trivia::LineComment(_) => {
                     // A non-doc-comment (e.g. `//`) resets collection
                     if !lines.is_empty() {
                         had_unattached = true;
@@ -1370,7 +1462,7 @@ impl Parser {
 
     /// Extracts regular (non-doc) comments from the current token's leading trivia.
     ///
-    /// Collects `//` line comments and `/* */` block comments into
+    /// Collects `//` line comments into
     /// [`CommentAttachment::leading`].  `///` doc comments are intentionally
     /// **skipped** — they are handled by [`collect_doc_comment`] and must not
     /// be duplicated here.  Call this *after* [`collect_doc_comment`] so both
@@ -1412,31 +1504,11 @@ impl Parser {
             .map(|(_, positions)| positions);
         for (pos, trivia) in self.current_token().leading_trivia().iter().enumerate() {
             match trivia {
-                super::Trivia::LineComment(text) => {
-                    // Strip `// ` (with space) or `//` — Comment.content is
-                    // documented as "text without delimiters", consistent with
-                    // how collect_doc_comment strips `/// ` from DocComment.
-                    let s = text.as_str();
-                    let content = s
-                        .strip_prefix("// ")
-                        .or_else(|| s.strip_prefix("//"))
-                        .unwrap_or(s);
-                    let mut comment = Comment::line(content, token_span);
-                    comment.preceding_blank_line = saw_blank_line;
-                    leading.push(comment);
-                    saw_blank_line = false;
-                }
-                super::Trivia::BlockComment(text) => {
-                    // Strip `/* ` / ` */` delimiters.
-                    let s = text.as_str();
-                    let content = s
-                        .strip_prefix("/* ")
-                        .and_then(|s| s.strip_suffix(" */"))
-                        .or_else(|| s.strip_prefix("/*").and_then(|s| s.strip_suffix("*/")))
-                        .unwrap_or(s);
-                    let mut comment = Comment::block(content, token_span);
-                    comment.preceding_blank_line = saw_blank_line;
-                    leading.push(comment);
+                super::Trivia::LineComment(_) => {
+                    if let Some(mut comment) = comment_from_trivia(trivia, token_span) {
+                        comment.preceding_blank_line = saw_blank_line;
+                        leading.push(comment);
+                    }
                     saw_blank_line = false;
                 }
                 super::Trivia::Whitespace(ws) => {
@@ -1454,15 +1526,12 @@ impl Parser {
                 // trivia — preserve it as a `Comment::doc` leading
                 // comment (renders back as `///`, not `//`) so the formatter
                 // doesn't drop or mangle it.
-                super::Trivia::DocComment(text) => {
+                super::Trivia::DocComment(_) => {
                     let already_attached =
                         attached_positions.is_some_and(|positions| positions.contains(&pos));
-                    if !already_attached {
-                        let s = text.as_str();
-                        let content = s
-                            .strip_prefix("/// ")
-                            .unwrap_or_else(|| s.strip_prefix("///").unwrap_or(s));
-                        let mut comment = Comment::doc(content, token_span);
+                    if !already_attached
+                        && let Some(mut comment) = comment_from_trivia(trivia, token_span)
+                    {
                         comment.preceding_blank_line = saw_blank_line;
                         leading.push(comment);
                         saw_blank_line = false;
@@ -1483,6 +1552,66 @@ impl Parser {
         }
     }
 
+    /// The comments in the gap before the token at `idx` (BT-5183): the
+    /// previous token's trailing trivia (comments on its line) and this
+    /// token's leading trivia (comments on their own lines).
+    ///
+    /// Only for gaps inside an expression, which no statement- or
+    /// declaration-level collector reads: each token's trailing trivia is
+    /// read by whichever construct follows it, so a gap is collected once.
+    fn gap_before(&self, idx: usize) -> crate::ast::GapComments {
+        let mut gap = crate::ast::GapComments::default();
+        if let Some(prev) = idx.checked_sub(1).and_then(|i| self.tokens.get(i)) {
+            gap.same_line.extend(
+                prev.trailing_trivia()
+                    .iter()
+                    .filter_map(|t| comment_from_trivia(t, prev.span())),
+            );
+        }
+        if let Some(token) = self.tokens.get(idx) {
+            // A blank line before an own-line comment is kept (as
+            // `collect_comment_attachment` keeps it for statements).
+            let mut saw_blank_line = false;
+            for trivia in token.leading_trivia() {
+                if let Trivia::Whitespace(ws) = trivia {
+                    saw_blank_line |= ws.chars().filter(|&c| c == '\n').count() > 1;
+                } else if let Some(mut comment) = comment_from_trivia(trivia, token.span()) {
+                    comment.preceding_blank_line = saw_blank_line;
+                    saw_blank_line = false;
+                    gap.own_line.push(comment);
+                }
+            }
+        }
+        gap
+    }
+
+    /// The comments in the gap before the current token.
+    pub(super) fn gap_before_current(&self) -> crate::ast::GapComments {
+        self.gap_before(self.current)
+    }
+
+    /// The comments on both sides of the current token: the gap before it
+    /// and the gap after it (for a `;` or a binary operator, whose comments
+    /// are printed together before the token after it).
+    pub(super) fn gaps_around_current(&self) -> crate::ast::GapComments {
+        let mut gap = self.gap_before(self.current);
+        gap.extend(self.gap_before(self.current + 1));
+        gap
+    }
+
+    /// Files the comments of one gap on the parser; the owning definition
+    /// takes them (BT-5183). An empty gap is skipped.
+    pub(super) fn record_gap(
+        &mut self,
+        anchor: u32,
+        slot: crate::ast::GapSlot,
+        gap: crate::ast::GapComments,
+    ) {
+        if !gap.is_empty() {
+            self.gap_comments.push((anchor, slot, gap));
+        }
+    }
+
     /// Collects a trailing end-of-line comment from the last consumed token's trailing trivia.
     ///
     /// After parsing a complete expression, call this to check whether there is a
@@ -1490,9 +1619,8 @@ impl Parser {
     /// lexer places same-line trailing comments in [`Token::trailing_trivia`], so
     /// checking the previously-consumed token is sufficient — no look-ahead needed.
     ///
-    /// Only `//` line comments are considered; doc comments (`///`) and block
-    /// comments (`/* */`) are ignored here (block comments can span multiple lines
-    /// and are already collected as leading comments by [`collect_comment_attachment`]).
+    /// `//` line comments and `///` comments are considered (a `///` after
+    /// code on its line is an end-of-line comment, BT-5183).
     pub(super) fn collect_trailing_comment(&self) -> Option<Comment> {
         if self.current == 0 {
             return None;
@@ -1517,17 +1645,18 @@ impl Parser {
             self.tokens.len()
         );
         let last_token = &self.tokens[token_idx];
-        for trivia in last_token.trailing_trivia() {
-            if let super::Trivia::LineComment(text) = trivia {
-                let s = text.as_str();
-                let content = s
-                    .strip_prefix("// ")
-                    .or_else(|| s.strip_prefix("//"))
-                    .unwrap_or(s);
-                return Some(Comment::line(content, last_token.span()));
-            }
-        }
-        None
+        // `//` and `///` end-of-line comments (a trailing `///` after code is
+        // an end-of-line comment, BT-5183).
+        last_token
+            .trailing_trivia()
+            .iter()
+            .find(|t| {
+                matches!(
+                    t,
+                    super::Trivia::LineComment(_) | super::Trivia::DocComment(_)
+                )
+            })
+            .and_then(|t| comment_from_trivia(t, last_token.span()))
     }
 
     /// Reports an error at the current token.
@@ -1586,32 +1715,310 @@ impl Parser {
         )
     }
 
-    /// Increments the nesting depth and returns `Err(Expression::Error)` if
-    /// it exceeds [`MAX_NESTING_DEPTH`].  Call [`leave_nesting`] on every
-    /// exit path when this returns `Ok(())`.
-    pub(super) fn enter_nesting(&mut self, span: Span) -> Result<(), Expression> {
-        self.nesting_depth += 1;
-        if self.nesting_depth > MAX_NESTING_DEPTH {
-            self.diagnostics.push(Diagnostic::error(
-                format!("Expression nesting is too deep (maximum {MAX_NESTING_DEPTH} levels)"),
-                span,
-            ));
+    /// Runs `body` one nesting level deeper, or `too_deep` (after reporting
+    /// the "nesting is too deep" diagnostic at `span`) once the level would
+    /// exceed [`MAX_NESTING_DEPTH`].
+    ///
+    /// Every recursive parse path goes through here — expressions, collection
+    /// literals, right-associative operators, type annotations and patterns —
+    /// so no input can recurse more than [`MAX_NESTING_DEPTH`] levels, and the
+    /// stack is extended on the heap when less than [`STACK_RED_ZONE`] is
+    /// left (BT-5181).
+    pub(super) fn with_nesting<T>(
+        &mut self,
+        span: Span,
+        too_deep: impl FnOnce(&mut Self) -> T,
+        body: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        stacker::maybe_grow(STACK_RED_ZONE, STACK_SEGMENT, || {
+            if self.nesting_depth >= MAX_NESTING_DEPTH {
+                self.diagnostics.push(Diagnostic::error(
+                    format!("Expression nesting is too deep (maximum {MAX_NESTING_DEPTH} levels)"),
+                    span,
+                ));
+                return too_deep(self);
+            }
+            self.nesting_depth += 1;
+            let result = body(self);
             self.nesting_depth -= 1;
-            return Err(Expression::Error {
-                message: "Expression nesting too deep".into(),
-                span,
-            });
-        }
-        Ok(())
+            result
+        })
     }
 
-    /// Decrements the nesting depth (pair with [`enter_nesting`]).
-    pub(super) fn leave_nesting(&mut self) {
-        debug_assert!(
-            self.nesting_depth > 0,
-            "leave_nesting called without matching enter_nesting"
+    /// [`Self::with_nesting`] for a parse path that answers an
+    /// [`Expression`]: past the limit it answers an error node, and the
+    /// answer is held to [`MAX_EXPRESSION_DEPTH`] ([`Self::bounded_expression_level`]).
+    pub(super) fn with_expression_nesting(
+        &mut self,
+        span: Span,
+        body: impl FnOnce(&mut Self) -> Expression,
+    ) -> Expression {
+        self.with_nesting(
+            span,
+            |_| Self::nesting_error(span),
+            |p| p.bounded_expression_level(body),
+        )
+    }
+
+    /// [`Self::with_expression_nesting`] for a bracketed construct starting at
+    /// the current token: past the limit the whole construct, up to its
+    /// matching closer, is skipped, so its contents are not reparsed (and
+    /// reported again) as the enclosing construct's elements.
+    pub(super) fn with_bracketed_nesting(
+        &mut self,
+        body: impl FnOnce(&mut Self) -> Expression,
+    ) -> Expression {
+        let start = self.current_token().span();
+        self.with_nesting(
+            start,
+            |p| {
+                let end = p.skip_bracketed_group();
+                Self::nesting_error(start.merge(end))
+            },
+            |p| p.bounded_expression_level(body),
+        )
+    }
+
+    fn nesting_error(span: Span) -> Expression {
+        Expression::Error {
+            message: "Expression nesting too deep".into(),
+            span,
+        }
+    }
+
+    /// Consumes the bracketed group opening at the current token (a
+    /// [`TokenKind::is_opening_bracket`] token, or the `<<` of a binary
+    /// construction), up to its matching closer, without recursion. Answers
+    /// the span of the last token consumed. Consumes just the current token
+    /// when it opens no group.
+    ///
+    /// Closers are matched against a stack of the openers seen: a closer
+    /// that matches no open group is skipped over, and one that matches an
+    /// outer group closes the inner ones left open. Inside the group `<<`
+    /// opens a construction only in operand position and `>>` closes one
+    /// only when a construction is open, so infix `<<` and `Foo >> #bar`
+    /// do not unbalance the count. The scan stops early, leaving the token,
+    /// at a line that starts a method definition, which no group spans.
+    pub(super) fn skip_bracketed_group(&mut self) -> Span {
+        let mut open: Vec<TokenKind> = Vec::new();
+        let mut last = self.current_token().span();
+        let mut previous_is_operand = false;
+        loop {
+            if self.is_at_end() {
+                return last;
+            }
+            let kind = self.current_kind().clone();
+            if !open.is_empty()
+                && self.current_token().has_leading_newline()
+                && self.is_at_method_definition()
+            {
+                return last;
+            }
+            if kind.is_opening_bracket() || (kind == TokenKind::LtLt && !previous_is_operand) {
+                open.push(kind.clone());
+            } else if (kind.is_closing_bracket() || kind == TokenKind::GtGt)
+                && let Some(at) = open.iter().rposition(|opener| closes(opener, &kind))
+            {
+                open.truncate(at);
+            }
+            last = self.advance().span();
+            if open.is_empty() {
+                return last;
+            }
+            previous_is_operand = ends_operand(&kind);
+        }
+    }
+
+    /// Counts one more link of a flat chain in `links` and answers whether
+    /// the chain may take it (see [`MAX_EXPRESSION_DEPTH`]). Reports the
+    /// "too long" diagnostic at `span` once, for the first link past the
+    /// limit; the caller consumes that link and the rest of the chain
+    /// without building them.
+    pub(super) fn chain_may_grow(&mut self, links: &mut usize, span: Span) -> bool {
+        *links = links.saturating_add(1);
+        if *links <= MAX_EXPRESSION_DEPTH {
+            return true;
+        }
+        if *links == MAX_EXPRESSION_DEPTH + 1 {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "Expression chain is too long (maximum {MAX_EXPRESSION_DEPTH} operators or messages in one chain)"
+                    ),
+                    span,
+                )
+                .with_hint("split the chain across statements with intermediate variables"),
+            );
+        }
+        false
+    }
+
+    /// Answers the chain built so far or, once `links` has passed the limit
+    /// ([`Self::chain_may_grow`]), an error node spanning the whole chain:
+    /// a too-long chain leaves one diagnostic and no partial tree.
+    pub(super) fn finish_chain(&mut self, built: Expression, links: usize) -> Expression {
+        if links <= MAX_EXPRESSION_DEPTH {
+            return built;
+        }
+        let span = built.span().merge(self.previous_token_span());
+        self.discard_expression(built, span);
+        Expression::Error {
+            message: "Expression chain too long".into(),
+            span,
+        }
+    }
+
+    /// Drops a parsed expression the parser is not keeping, without
+    /// recursion ([`crate::ast_walker::dismantle_expression`]), and forgets
+    /// the pipeline sends recorded inside `span` (which covers it), since
+    /// they are no longer in the tree.
+    pub(super) fn discard_expression(&mut self, expr: Expression, span: Span) {
+        crate::ast_walker::dismantle_expression(expr);
+        self.pipeline_sends
+            .retain(|(send, _)| send.start() < span.start() || send.end() > span.end());
+    }
+
+    /// The span of the token most recently consumed (the current token's
+    /// before any is consumed).
+    pub(super) fn previous_token_span(&self) -> Span {
+        self.current
+            .checked_sub(1)
+            .and_then(|i| self.tokens.get(i))
+            .map_or_else(|| self.current_token().span(), Token::span)
+    }
+
+    /// Runs `body` as one expression nesting level and holds its answer to
+    /// [`MAX_EXPRESSION_DEPTH`] ([`Self::bound_expression_depth`]).
+    pub(super) fn bounded_expression_level(
+        &mut self,
+        body: impl FnOnce(&mut Self) -> Expression,
+    ) -> Expression {
+        let mark = self.expression_depths.open();
+        let expr = body(self);
+        self.bound_expression_depth(expr, mark)
+    }
+
+    /// Replaces `expr` with an error node, reporting a diagnostic, when its
+    /// syntax tree is deeper than [`MAX_EXPRESSION_DEPTH`]. Checked on the
+    /// result of every nesting level ([`Self::bounded_expression_level`]):
+    /// long chains nested inside each other can be deep together while each
+    /// chain and each nesting level is within its own limit, so bounding
+    /// each level keeps every tree the parser holds — and every tree a later
+    /// pass walks — shallow enough to recurse over and drop (BT-5181).
+    ///
+    /// `mark` opened the level in [`Self::expression_depths`]: the trees of
+    /// the levels inside it are not walked again, their recorded depths are
+    /// taken instead, and this tree's depth is recorded in turn for the
+    /// level around it. Each node is visited by the bound of the level that
+    /// built it (and looked up once more as the root of a measured subtree),
+    /// rather than once per level around it: O(n) visits over a parse, not
+    /// O(n × depth) (BT-5237). Debug builds also check the result against a
+    /// full walk.
+    fn bound_expression_depth(&mut self, expr: Expression, mark: usize) -> Expression {
+        let depth = self.expression_depths.frame(mark).measure(
+            &expr,
+            Expression::span,
+            crate::ast_walker::expression_depth_with,
         );
-        self.nesting_depth = self.nesting_depth.saturating_sub(1);
+        debug_assert_eq!(
+            depth,
+            crate::ast_walker::expression_depth(&expr),
+            "recorded subtree depths disagree with a full walk of the expression at {:?}",
+            expr.span()
+        );
+        if depth <= MAX_EXPRESSION_DEPTH {
+            self.expression_depths
+                .close(mark, expr.span(), std::mem::discriminant(&expr), depth);
+            return expr;
+        }
+        let span = expr.span();
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "Expression is too long or nested too deep (maximum syntax tree depth {MAX_EXPRESSION_DEPTH})"
+                ),
+                span,
+            )
+            .with_hint("split it across statements with intermediate variables"),
+        );
+        self.discard_expression(expr, span);
+        let error = Expression::Error {
+            message: "Expression too deep".into(),
+            span,
+        };
+        self.expression_depths
+            .close(mark, span, std::mem::discriminant(&error), 1);
+        error
+    }
+
+    /// Runs `body` as one type-annotation nesting level and holds its answer
+    /// to [`MAX_EXPRESSION_DEPTH`] ([`Self::bound_type_depth`]).
+    pub(super) fn bounded_type_level(
+        &mut self,
+        body: impl FnOnce(&mut Self) -> TypeAnnotation,
+    ) -> TypeAnnotation {
+        let mark = self.type_depths.open();
+        let ty = body(self);
+        self.bound_type_depth(ty, mark)
+    }
+
+    /// The type-annotation counterpart of [`Self::bound_expression_depth`]:
+    /// grouping parentheses let `&`/`\` chains nest inside each other, so a
+    /// type tree can be deep while each chain and level is within its limit.
+    /// Measured against [`Self::type_depths`] in the same way (BT-5237).
+    ///
+    /// A union's members are measured and recorded one by one as well: a
+    /// grouped union, `(A | B) | C`, is spliced into the union around it,
+    /// so the enclosing level finds the members rather than this union.
+    fn bound_type_depth(&mut self, ty: TypeAnnotation, mark: usize) -> TypeAnnotation {
+        let mut frame = self.type_depths.frame(mark);
+        let mut measure = |node: &TypeAnnotation| {
+            let depth = frame.measure(
+                node,
+                TypeAnnotation::span,
+                crate::ast_walker::type_annotation_depth_with,
+            );
+            (node.span(), std::mem::discriminant(node), depth)
+        };
+        let (members, depth) = if let TypeAnnotation::Union { types, .. } = &ty {
+            let members: Vec<_> = types.iter().map(&mut measure).collect();
+            let depth = 1 + members
+                .iter()
+                .map(|&(_, _, depth)| depth)
+                .max()
+                .unwrap_or(0);
+            (members, depth)
+        } else {
+            (Vec::new(), measure(&ty).2)
+        };
+        debug_assert_eq!(
+            depth,
+            crate::ast_walker::type_annotation_depth(&ty),
+            "recorded subtree depths disagree with a full walk of the type annotation at {:?}",
+            ty.span()
+        );
+        if depth <= MAX_EXPRESSION_DEPTH {
+            self.type_depths.close_with(
+                mark,
+                members,
+                ty.span(),
+                std::mem::discriminant(&ty),
+                depth,
+            );
+            return ty;
+        }
+        let span = ty.span();
+        self.diagnostics.push(Diagnostic::error(
+            format!(
+                "Type annotation is too long or nested too deep (maximum depth {MAX_EXPRESSION_DEPTH})"
+            ),
+            span,
+        ));
+        crate::ast_walker::dismantle_type_annotation(ty);
+        let error = TypeAnnotation::Simple(crate::ast::Identifier::new("Error", span));
+        self.type_depths
+            .close(mark, span, std::mem::discriminant(&error), 1);
+        error
     }
 
     /// Synchronizes parser to a safe recovery point.
@@ -1623,12 +2030,20 @@ impl Parser {
     /// - Right brace (`}`) - tuple end
     /// - Semicolon (`;`) - cascade separator
     /// - Newline (when inside method body) - implicit statement separator
+    /// - The start of a class, protocol, type alias, native declaration or
+    ///   standalone method (at top level) - the next definition (BT-5182)
     pub(super) fn synchronize(&mut self) {
         // If we're already at a newline boundary in a method body, don't
         // advance past the first token of the next statement. parse_expression()
         // typically consumes the bad token via advance() in parse_primary, so
         // current may already point to the next statement's first token.
         if !self.is_at_end() && self.in_method_body && self.current_token().has_leading_newline() {
+            return;
+        }
+        // Likewise at top level, never skip the definition right after the
+        // bad token: a stray `)` line before `Object subclass: Foo` must not
+        // swallow the class header.
+        if self.is_at_top_level_definition() {
             return;
         }
 
@@ -1658,6 +2073,10 @@ impl Parser {
         }
 
         if matches!(self.current_kind(), TokenKind::Caret) {
+            return true;
+        }
+
+        if self.is_at_top_level_definition() {
             return true;
         }
 
@@ -1799,10 +2218,27 @@ impl Parser {
             pipeline_sends: std::mem::take(&mut self.pipeline_sends)
                 .into_iter()
                 .collect(),
-            literal_comments: std::mem::take(&mut self.literal_comments)
-                .into_iter()
-                .collect(),
+            literal_comments: crate::ast::LiteralComments::from_records(
+                std::mem::take(&mut self.literal_comments),
+                std::mem::take(&mut self.number_spellings),
+                std::mem::take(&mut self.gap_comments),
+            ),
         }
+    }
+
+    /// Whether the parser is at top level (outside any class, protocol or
+    /// method body) and the current token starts a definition `parse_module`
+    /// dispatches on: a class, protocol, type alias, native declaration or
+    /// standalone method. Such a token is a recovery point there (BT-5182).
+    fn is_at_top_level_definition(&self) -> bool {
+        !self.in_method_body
+            && !self.in_class_body
+            && !self.in_protocol_body
+            && (self.is_at_class_definition()
+                || self.is_at_protocol_definition()
+                || self.is_at_type_alias_definition()
+                || self.is_at_native_declaration()
+                || self.is_at_standalone_method_definition())
     }
 
     /// Checks if the current position looks like the start of a class definition.
@@ -2165,6 +2601,42 @@ impl Parser {
                     depth = depth.saturating_sub(1);
                     if depth == 0 {
                         return matches!(self.peek_at(offset + 1), Some(TokenKind::Assign));
+                    }
+                }
+                Some(_) => {}
+            }
+            offset += 1;
+        }
+    }
+
+    /// Whether the `#[` / `#{` at the cursor opens an array or map pattern
+    /// that carries a `::` annotation and is followed by `:=` (BT-5284).
+    ///
+    /// Scans to the matching close, counting every bracket kind. Only a
+    /// literal that holds a `::` at some depth qualifies, so unannotated
+    /// array/map destructuring keeps its existing expression-then-convert
+    /// path unchanged.
+    pub(super) fn leading_collection_is_typed_destructure(&self) -> bool {
+        let mut depth: usize = 0;
+        let mut saw_annotation = false;
+        let mut offset = 0;
+        loop {
+            match self.peek_at(offset) {
+                None | Some(TokenKind::Eof) => return false,
+                Some(TokenKind::DoubleColon) => saw_annotation = true,
+                Some(
+                    TokenKind::LeftBrace
+                    | TokenKind::MapOpen
+                    | TokenKind::ArrayOpen
+                    | TokenKind::LeftBracket
+                    | TokenKind::LeftParen
+                    | TokenKind::ListOpen,
+                ) => depth += 1,
+                Some(TokenKind::RightBrace | TokenKind::RightBracket | TokenKind::RightParen) => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return saw_annotation
+                            && matches!(self.peek_at(offset + 1), Some(TokenKind::Assign));
                     }
                 }
                 Some(_) => {}

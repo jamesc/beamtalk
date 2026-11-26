@@ -1212,8 +1212,8 @@ mod tests {
     use super::*;
     use crate::ast::{
         ClassDefinition, CommentAttachment, ExpressionStatement, KeywordPart, MessageSelector,
-        MethodDefinition, MethodKind, Module, ParameterDefinition, ProtocolDefinition,
-        ProtocolMethodSignature, TypeAnnotation, TypeParamDecl,
+        MethodDefinition, Module, ParameterDefinition, ProtocolDefinition, ProtocolMethodSignature,
+        TypeAnnotation, TypeParamDecl,
     };
     use crate::semantic_analysis::class_hierarchy::ClassInfo;
     use crate::test_helpers::test_support::empty_module;
@@ -1316,7 +1316,6 @@ mod tests {
                             crate::ast::Expression::Identifier(ident("self")),
                         )],
                         return_type: None,
-                        kind: MethodKind::Primary,
                         is_sealed: false,
                         is_internal: false,
                         is_class_method: false,
@@ -1363,7 +1362,6 @@ mod tests {
             is_sealed: false,
             is_internal: false,
             is_class_method: false,
-            kind: MethodKind::Primary,
             expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
@@ -1635,7 +1633,6 @@ mod tests {
             ..empty_module()
         };
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut registry = ProtocolRegistry::new();
         registry.register_module(&module, &hierarchy);
 
@@ -1657,7 +1654,6 @@ mod tests {
             ..empty_module()
         };
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut registry = ProtocolRegistry::new();
         registry.register_module(&module, &hierarchy);
 
@@ -1694,7 +1690,6 @@ Value subclass: Version
         assert!(expansion_diags.is_empty(), "{expansion_diags:?}");
 
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut registry = ProtocolRegistry::new();
         registry.register_module(&module, &hierarchy);
 
@@ -1764,7 +1759,6 @@ Value subclass: Version
             ..empty_module()
         };
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut registry = ProtocolRegistry::new();
         registry.register_module(&module, &hierarchy);
 
@@ -1790,7 +1784,6 @@ Value subclass: Version
             ..empty_module()
         };
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
         let mut registry = ProtocolRegistry::new();
         registry.register_module(&module, &hierarchy);
 
@@ -1937,7 +1930,6 @@ Value subclass: Version
                 methods: vec![MethodInfo {
                     selector: "serialize".into(),
                     arity: 0,
-                    kind: MethodKind::Primary,
                     defined_in: "Gadget".into(),
                     is_sealed: false,
                     is_internal: false,
@@ -2081,7 +2073,6 @@ Value subclass: Version
         };
 
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
 
         let mut registry = ProtocolRegistry::new();
         registry.register_module(&module, &hierarchy);

@@ -932,9 +932,7 @@ fn test_meta_synthesized_value_methods_agree_with_hierarchy() {
         let module = beamtalk_core::test_helpers::test_support::parse_bt(src);
         let class = module.classes.first().expect("fixture declares a class");
         let hierarchy =
-            beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
-                .0
-                .expect("fixture hierarchy should build");
+            beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
         let info = hierarchy
             .get_class(class.name.name.as_str())
             .expect("class should be present");
@@ -997,4 +995,19 @@ fn test_meta_field_types_map_records_shape_as_dictionary() {
     let doc = CoreErlangGenerator::meta_field_types_map(&module.classes[0].state);
     let text = doc.to_pretty_string();
     assert!(text.contains("'cfg' => 'Dictionary'"), "{text}");
+}
+
+/// The runtime's load gate compares a module's `module_abi` with
+/// `?BT_MODULE_ABI` in the checked-in runtime header; this test is what
+/// keeps the Rust constant and that header equal.
+#[test]
+fn module_abi_matches_the_runtime_header() {
+    let hrl = include_str!(
+        "../../../../../runtime/apps/beamtalk_runtime/include/beamtalk_module_abi.hrl"
+    );
+    let expected = format!("-define(BT_MODULE_ABI, {MODULE_ABI}).");
+    assert!(
+        hrl.lines().any(|line| line == expected),
+        "beamtalk_module_abi.hrl must contain `{expected}`"
+    );
 }

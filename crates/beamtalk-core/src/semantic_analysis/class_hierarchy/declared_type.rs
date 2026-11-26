@@ -61,8 +61,6 @@ pub enum DeclaredType {
         /// Type parameters.
         parameters: Vec<DeclaredType>,
     },
-    /// A false-or type (Option/Maybe pattern), e.g. `Integer | False`.
-    FalseOr(Box<DeclaredType>),
     /// A difference/negation type (e.g., `Symbol \ #foo`) — ADR 0102 §1.
     Difference {
         /// The base type being narrowed.
@@ -417,7 +415,6 @@ impl DeclaredType {
                 base: base.clone(),
                 parameters: parameters.iter().map(Self::erase_shapes).collect(),
             },
-            Self::FalseOr(inner) => Self::FalseOr(Box::new(inner.erase_shapes())),
             Self::Difference { base, excluded } => Self::Difference {
                 base: Box::new(base.erase_shapes()),
                 excluded: Box::new(excluded.erase_shapes()),
@@ -444,7 +441,6 @@ impl DeclaredType {
                 names.contains(base) || parameters.iter().any(|p| p.mentions_any(names))
             }
             Self::Union(members) => members.iter().any(|m| m.mentions_any(names)),
-            Self::FalseOr(inner) => inner.mentions_any(names),
             Self::Difference { base, excluded } => {
                 base.mentions_any(names) || excluded.mentions_any(names)
             }
@@ -474,7 +470,6 @@ impl DeclaredType {
                 parameters.iter().map(|p| p.to_annotation(span)).collect(),
                 span,
             ),
-            Self::FalseOr(inner) => TypeAnnotation::false_or(inner.to_annotation(span), span),
             Self::Difference { base, excluded } => TypeAnnotation::difference(
                 base.to_annotation(span),
                 excluded.to_annotation(span),
@@ -537,9 +532,6 @@ impl From<&TypeAnnotation> for DeclaredType {
                 base: base.name.clone(),
                 parameters: parameters.iter().map(DeclaredType::from).collect(),
             },
-            TypeAnnotation::FalseOr { inner, .. } => {
-                DeclaredType::FalseOr(Box::new(DeclaredType::from(inner.as_ref())))
-            }
             TypeAnnotation::Difference { base, excluded, .. } => DeclaredType::Difference {
                 base: Box::new(DeclaredType::from(base.as_ref())),
                 excluded: Box::new(DeclaredType::from(excluded.as_ref())),
@@ -743,23 +735,6 @@ mod tests {
     #[test]
     fn round_trip_union_of_generics() {
         assert_round_trip("List(Integer) | Dictionary(String, Integer)");
-    }
-
-    #[test]
-    fn round_trip_false_or_rendering() {
-        // `DeclaredType::FalseOr` can't be produced by `parse` (the string
-        // grammar doesn't distinguish it from a plain `Union`), but its
-        // `Display` form must still match `TypeAnnotation::type_name`'s
-        // exactly — pinned directly against a `TypeAnnotation` built via the
-        // real parser in `display_parity_false_or` below. Here we only check
-        // that re-parsing the *displayed* text is stable (round-trips to the
-        // same text), since `Simple`/`Union` are what parsing that text
-        // actually yields.
-        let false_or = DeclaredType::FalseOr(Box::new(DeclaredType::Simple("Integer".into())));
-        let text = false_or.to_string();
-        assert_eq!(text, "Integer | False");
-        let reparsed = DeclaredType::parse(&text);
-        assert_eq!(reparsed.to_string(), text);
     }
 
     #[test]
@@ -985,25 +960,6 @@ mod tests {
         );
     }
 
-    /// `FalseOr` is only built by the `false_or` constructor, never parsed, so
-    /// pin the union-inner parenthesisation across all three renderers.
-    #[test]
-    fn display_parity_false_or_with_union_inner() {
-        let sp = Span::default();
-        let id = |n: &str| TypeAnnotation::Simple(Identifier::new(EcoString::from(n), sp));
-        let ann = TypeAnnotation::false_or(
-            TypeAnnotation::union(vec![id("Integer"), id("String")], sp),
-            sp,
-        );
-        let expected = "(Integer | String) | False";
-        assert_eq!(ann.type_name(), expected);
-        assert_eq!(DeclaredType::from(&ann).to_string(), expected);
-        assert_eq!(
-            crate::unparse::unparse_type_annotation_display(&ann),
-            expected
-        );
-    }
-
     #[test]
     fn display_parity_simple() {
         assert_display_parity("Object subclass: Foo\n  bar -> Integer => 1\n");
@@ -1025,7 +981,7 @@ mod tests {
     }
 
     #[test]
-    fn display_parity_false_or() {
+    fn display_parity_union_with_false() {
         assert_display_parity("Object subclass: Foo\n  bar -> Integer | False => 1\n");
     }
 
@@ -1274,13 +1230,13 @@ mod tests {
 ///
 /// `DeclaredType::parse`'s grammar (see its doc comment) is strictly weaker
 /// than `Display`'s output range — it has no representation for `\`
-/// (difference), `&` (intersection), or `FalseOr`, so `parse` can't always
+/// (difference) or `&` (intersection), so `parse` can't always
 /// invert `Display` on the first try. What it *can* do, and what these
 /// properties pin, is reach a stable fixed point: re-displaying what
 /// `parse` recovers, then re-parsing that, always lands on exactly the same
 /// structured value and text it started converging toward — the round trip
 /// never drifts, loses a branch, or panics, no matter how deeply
-/// union/intersection/difference/`FalseOr`/generic shapes are nested
+/// union/intersection/difference/generic shapes are nested
 /// (grouping-paren shapes included).
 ///
 /// An intersection/difference whose right/excluded operand needs
@@ -1304,7 +1260,7 @@ mod property_tests {
         #![proptest_config(proptest_config_default())]
 
         /// `parse ∘ Display` never panics on any generated shape, including
-        /// the ones (`\`, `&`, `FalseOr`) the parser can't fully represent.
+        /// the ones (`\`, `&`) the parser can't fully represent.
         #[test]
         fn parse_display_never_panics(dt in arb_declared_type()) {
             let text = dt.to_string();

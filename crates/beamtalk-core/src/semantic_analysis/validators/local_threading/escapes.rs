@@ -37,8 +37,9 @@ pub(super) enum Escape {
     /// it in place (BT-3798: its receiver is statically not a `Dictionary`,
     /// or the lookup is not in a producer position).
     Lookup(EcoString),
-    /// An argument of this class-side selector, which runs in the class's
-    /// process (not a direct-called `class sealed` method, ADR 0129 Phase 0b).
+    /// An argument of a process-bound class-side selector (`new`, `spawn`,
+    /// `startLink`, ...), which runs in the class's process rather than the
+    /// caller's (ADR 0153). Every other class method runs in the caller.
     ClassMethod(EcoString),
     /// An argument of an Erlang FFI send (`Erlang <module> <selector>`): the
     /// block is handed to Erlang as a plain fun (BT-3917).

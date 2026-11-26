@@ -32,11 +32,10 @@ defmodule BtAttach.Facade do
 
   # The authorized op vocabulary and its capability class (ADR 0091 Decision 3/4).
   # `eval`/`load_source`/`save`/`flush`/`reload` inject or run code (execute);
-  # the read ops trigger no user code; `kill`/`rotate_cookie` are admin.
-  # `actors`, `info`, `kill`, `load_source`, `rotate_cookie`, `sessions` and
-  # `subscribe_actors` are declared here (the ADR 0091 RBAC vocabulary) but have
-  # no `invoke/3` clause yet: they are kept as reserved vocabulary and answer
-  # `{:error, {:unsupported_op, op}}` once authorized.
+  # the read ops trigger no user code; `kill` is admin. Every op here has an
+  # `invoke/3` clause: there is no reserved vocabulary (BT-5206 removed
+  # `rotate_cookie`, which belongs in the release tooling, not the editor).
+  # Each class is checked against the runtime's op table (`@wire_ops` below).
   @ops %{
     eval: :execute,
     # BT-5081: stop the eval running in the caller's own session (the dock's
@@ -186,7 +185,7 @@ defmodule BtAttach.Facade do
     # code, so it is `:read`, safe for the Observer role.
     subscribe_classes: :read,
     # ADR 0105 Phase 1 (BT-2779): reload-induced findings. `reload_findings`
-    # reads the current live snapshot (`beamtalk_workspace_findings_store:all/0`)
+    # reads the current live snapshot (the `reload-findings` operation)
     # — pure reflection, no user code — so it is `:read`, safe for the
     # Observer role, scoped exactly like `changes`. `subscribe_reload_check`
     # registers the LiveView pid on the `reload_check` push stream so a
@@ -231,9 +230,94 @@ defmodule BtAttach.Facade do
     git_unstage: :execute,
     git_commit: :execute,
     git_revert_file: :execute,
-    kill: :admin,
-    rotate_cookie: :admin
+    kill: :admin
   }
+
+  # The runtime operation each op dispatches, so its capability class can be
+  # checked against the one table every surface shares
+  # (`beamtalk_repl_op_table`'s `access` column; `facade_parity_test.exs` reads
+  # its JSON snapshot). The class of an op that dispatches wire operations must
+  # equal the class of each of them. A new op cannot be added to `@ops` without
+  # an entry here, and one with an entry cannot differ from the table.
+  #
+  #   * a list: the wire operations the op sends;
+  #   * `:local`: no wire operation, so nothing to check. A push-stream
+  #     subscription (the subscription facade), or a term API that is not a wire
+  #     op (session bindings, BT-2369);
+  #   * `:fixed_eval`: `eval` of an expression this module builds, with no
+  #     caller text in it (`ProcessNavigation ... tree`, `Node connected ...`).
+  #     It is not `eval`'s class: the caller cannot run code through it, and
+  #     `processes_system` is held to `:execute` on its own account (ADR 0092).
+  @wire_ops %{
+    eval: ["eval"],
+    interrupt: ["interrupt"],
+    load_source: ["load-source"],
+    save: ["save-method"],
+    new_class: ["save-class"],
+    revert: ["revert-method"],
+    flush: ["flush"],
+    autoflush: ["info"],
+    reload: ["reload-file"],
+    info: ["info"],
+    inspect: ["inspect", "process-info", "children"],
+    bindings: :local,
+    actors: ["actors"],
+    processes: :fixed_eval,
+    processes_system: :fixed_eval,
+    nodes: :fixed_eval,
+    sessions: ["sessions"],
+    complete: ["complete"],
+    hover: ["hover"],
+    diagnostics: ["diagnostics"],
+    changes: ["changes"],
+    browse_classes: ["browse-classes"],
+    browse_protocols: ["browse-protocols"],
+    browse_method_source: ["browse-method-source"],
+    browse_class_definition: ["browse-class-definition"],
+    browse_native_source: ["browse-native-source"],
+    browse_native_modules: ["browse-native-modules"],
+    browse_native_module_source: ["browse-native-source"],
+    browse_type_aliases: ["browse-type-aliases"],
+    browse_alias_source: ["browse-alias-source"],
+    browse_categories: ["browse-categories"],
+    save_section: ["save-section"],
+    save_native_source: ["save-native-source"],
+    senders: ["nav-query"],
+    implementors: ["nav-query"],
+    required_methods: ["nav-query"],
+    conforming_classes: ["nav-query"],
+    callers_of_native_module: ["nav-query"],
+    keyword_selector: ["nav-query"],
+    symbols: ["nav-symbols"],
+    subscribe_transcript: :local,
+    subscribe_bindings: :local,
+    subscribe_actors: :local,
+    subscribe_classes: :local,
+    subscribe_reload_check: :local,
+    subscribe_object: :local,
+    unsubscribe_object: :local,
+    reload_findings: ["reload-findings"],
+    pid_stats: ["pid-stats"],
+    list_tests: ["list-tests"],
+    run_tests: ["test", "test-all"],
+    load_tests: ["load-tests"],
+    git_status: ["git-status"],
+    git_diff: ["git-diff"],
+    git_log: ["git-log"],
+    git_stage: ["git-stage"],
+    git_unstage: ["git-unstage"],
+    git_commit: ["git-commit"],
+    git_revert_file: ["git-revert-file"],
+    kill: ["kill"]
+  }
+
+  @doc """
+  What `op` dispatches in the runtime: the wire operations it sends, `:local` (no
+  wire operation) or `:fixed_eval` (an expression this module builds). `nil` for an
+  op outside the vocabulary. See `@wire_ops`.
+  """
+  @spec wire_ops(atom()) :: [String.t()] | :local | :fixed_eval | nil
+  def wire_ops(op), do: Map.get(@wire_ops, op)
 
   @doc "The full authorized op vocabulary (catalog keys)."
   @spec ops() :: [atom()]
@@ -285,13 +369,31 @@ defmodule BtAttach.Facade do
     end
   end
 
-  # Route the ops the IDE drives today to the workspace client. Catalog ops with
-  # no UI binding yet return `:unsupported_op` rather than silently no-op'ing.
+  # Route each op to the workspace client. Every op in `@ops` has a clause
+  # (`facade_parity_test.exs`); the catch-all below answers `:unsupported_op` for
+  # an op called with params no clause accepts, rather than silently no-op'ing.
   defp invoke(:eval, %{session_pid: pid, code: code}, _ctx), do: client().eval(pid, code)
   defp invoke(:interrupt, %{session_pid: pid}, _ctx), do: client().interrupt(pid)
+
+  # BT-5203: compile source into the live image through the `load-source`
+  # operation, in the caller's session. The source is a value, never spliced
+  # into an expression.
+  defp invoke(:load_source, %{session_pid: pid, source: source}, _ctx) do
+    if is_binary(source),
+      do: client().load_source(pid, source),
+      else: {:error, :invalid_params}
+  end
+
   defp invoke(:inspect, %{term: term}, _ctx), do: client().inspect_value(term)
   defp invoke(:bindings, %{session_pid: pid}, _ctx), do: client().list_bindings(pid)
   defp invoke(:changes, _params, _ctx), do: client().change_history()
+
+  # BT-5199: the Inspector's "Kill actor" action and the actor/session lists,
+  # each the wire operation of the same name through `beamtalk_repl_ops`.
+  # `kill` is `:admin` (Owner-only); `actors`/`sessions` are Observer reads.
+  defp invoke(:kill, %{term: term}, _ctx), do: client().kill_actor(term)
+  defp invoke(:actors, _params, _ctx), do: client().actors()
+  defp invoke(:sessions, _params, _ctx), do: client().sessions()
 
   # ADR 0105 Phase 1 (BT-2779): current live snapshot of reload-induced
   # findings — the workspace/cockpit UI's initial-load / manual-refresh
@@ -567,7 +669,19 @@ defmodule BtAttach.Facade do
   # catalogue + System Browser "Tests" group are populated (no args).
   defp invoke(:load_tests, _params, _ctx), do: client().load_tests()
 
-  defp invoke(:flush, _params, _ctx), do: client().flush()
+  # BT-5204: `flush` dispatches the `flush` operation. The optional scope
+  # (`:class`, `:file`, `:kind` or `:selector`) and `:confirm_destructive` ride through as the
+  # operation's own params; an absent key is not sent. The confirmation rule is
+  # the operation's: only a boolean `true` applies the destructive tier.
+  defp invoke(:flush, params, _ctx),
+    do:
+      client().flush(
+        Keyword.new(Map.take(params, [:class, :file, :kind, :selector, :confirm_destructive]))
+      )
+
+  # BT-5204: the workspace's version, node, workspace id and settings, through
+  # the `info` operation.
+  defp invoke(:info, _params, _ctx), do: client().info()
 
   # BT-2590: the workspace `autoflush` boolean. Returns the flag directly (never a
   # `{:ok, _}` tuple — the client defaults a degraded read to `false`), so the
@@ -599,6 +713,11 @@ defmodule BtAttach.Facade do
 
   defp invoke(:subscribe_transcript, %{pid: pid}, _ctx), do: client().subscribe_transcript(pid)
   defp invoke(:subscribe_bindings, %{pid: pid}, _ctx), do: client().subscribe_bindings(pid)
+
+  # BT-5205: the actor-lifecycle push stream. Registers the LiveView pid on the
+  # `actors` stream so an `ActorSpawned`/`ActorStopped` pushes a refresh trigger;
+  # the subscriber then re-reads `actors`. `:read`: a subscription runs no user code.
+  defp invoke(:subscribe_actors, %{pid: pid}, _ctx), do: client().subscribe_actors(pid)
 
   # BT-2598: the class-lifecycle push stream. Registers the LiveView pid on the
   # `classes` stream so a `ClassLoaded`/`ClassRemoved` (including any hot

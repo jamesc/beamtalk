@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5177: a typed caller of `asJson` on a JsonMappable class. Returning the
+// answer directly as `-> Dictionary` only type-checks when `JsonMappable asJson`
+// answers Dictionary, so adopters need no `asJson -> Dictionary` override.
+
+Object subclass: JsonMappedTypedCaller
+
+  class encode: usage :: JsonMappedTokenUsage -> Dictionary => usage asJson

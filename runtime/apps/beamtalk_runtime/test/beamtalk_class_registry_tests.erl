@@ -457,9 +457,9 @@ whereis_class_registered_test() ->
 
 all_classes_test() ->
     beamtalk_class_registry:ensure_pg_started(),
-    %% all_classes returns whatever is in the pg group
+    %% all_classes returns this node's members of the pg group (BT-5192)
     Result = beamtalk_class_registry:all_classes(),
-    ?assertEqual(lists:sort(pg:get_members(beamtalk_classes)), lists:sort(Result)).
+    ?assertEqual(lists:sort(pg:get_local_members(beamtalk_classes)), lists:sort(Result)).
 
 %%% ============================================================================
 %%% live_class_entries tests
@@ -2548,21 +2548,16 @@ bt4794_rebuild_at(Mod, Fun, When, Super) ->
 %% a fun, method record, flag and edge: each of those deletes then runs against
 %% the rebuilt class's entries and must leave them.
 bt4808_rebuild_inside_cleanup_keeps_dependents_test() ->
-    bt4808_rebuild_inside_cleanup('BT4808Inside', 'Object', true).
+    bt4808_rebuild_inside_cleanup('BT4808Inside', 'Object').
 
 %% Same, rebuilt under another superclass: the old edge goes, the new stays.
 bt4808_rebuild_inside_cleanup_other_superclass_test() ->
-    bt4808_rebuild_inside_cleanup('BT4808InsideValue', 'Value', true).
+    bt4808_rebuild_inside_cleanup('BT4808InsideValue', 'Value').
 
-%% Rebuilt without class variables over a class that declared some: the dead
-%% owner's `class_vars` flag goes, nothing of the rebuild's is touched.
-bt4808_rebuild_inside_cleanup_without_class_vars_test() ->
-    bt4808_rebuild_inside_cleanup('BT4808InsideNoCv', 'Object', false).
-
-bt4808_rebuild_inside_cleanup(Name, Super, RebuildHasClassVars) ->
+bt4808_rebuild_inside_cleanup(Name, Super) ->
     bt4646_with_announce_spy(Name, fun() ->
-        OldPid = bt4808_builder_class(Name, 'Object', true),
-        ?assert(beamtalk_class_shadow_flags:is_set(class_vars, Name)),
+        OldPid = bt4808_builder_class(Name, 'Object'),
+        ?assert(beamtalk_class_shadow_flags:is_set(runtime_fun, Name)),
         ok = beamtalk_class_monitor:unwatch(Name),
         MRef = monitor(process, OldPid),
         exit(OldPid, kill),
@@ -2576,7 +2571,7 @@ bt4808_rebuild_inside_cleanup(Name, Super, RebuildHasClassVars) ->
                     case get({bt4808_fired, Name}) of
                         undefined ->
                             put({bt4808_fired, Name}, true),
-                            NewPid = bt4808_builder_class(Name, Super, RebuildHasClassVars),
+                            NewPid = bt4808_builder_class(Name, Super),
                             ok = beamtalk_class_monitor:unwatch(Name),
                             Test ! {bt4808_rebuilt, NewPid};
                         _ ->
@@ -2595,21 +2590,20 @@ bt4808_rebuild_inside_cleanup(Name, Super, RebuildHasClassVars) ->
                     P
                 end,
             ?assertEqual({ok, NewPid}, Result),
-            bt4808_assert_dependents_intact(Name, Super, NewPid, RebuildHasClassVars),
+            bt4808_assert_dependents_intact(Name, Super, NewPid),
             ok = gen_server:stop(NewPid)
         after
             meck:unload(Mod)
         end
     end).
 
-bt4808_assert_dependents_intact(Name, Super, NewPid, HasClassVars) ->
+bt4808_assert_dependents_intact(Name, Super, NewPid) ->
     ?assertEqual({ok, NewPid}, beamtalk_class_metadata:lookup_owner(Name)),
     ?assert(beamtalk_class_metadata:has_runtime_class_methods(Name)),
     ?assertMatch({ok, _}, beamtalk_class_metadata:lookup_class_method_fun(Name, make)),
     ?assertMatch({ok, _}, beamtalk_class_metadata:lookup_method_record(Name, instance, ping)),
     ?assertMatch({ok, _}, beamtalk_class_metadata:lookup_method_record(Name, class, make)),
     ?assert(beamtalk_class_shadow_flags:is_set(runtime_fun, Name)),
-    ?assertEqual(HasClassVars, beamtalk_class_shadow_flags:is_set(class_vars, Name)),
     ?assertEqual([Name], [N || N <- beamtalk_class_metadata:match_subclasses(Super), N =:= Name]),
     %% The superclass the rebuild left has no edge from the dead class.
     case Super of
@@ -2623,15 +2617,15 @@ bt4808_assert_dependents_intact(Name, Super, NewPid, HasClassVars) ->
 %% has the dead owner's leftovers restamped or replaced, never deleted.
 bt4808_claim_lost_leaves_rebuilt_dependents_test() ->
     Name = 'BT4808ClaimLost',
-    OldPid = bt4808_builder_class(Name, 'Object', true),
+    OldPid = bt4808_builder_class(Name, 'Object'),
     ok = beamtalk_class_monitor:unwatch(Name),
     MRef = monitor(process, OldPid),
     exit(OldPid, kill),
     bt4646_await_down(OldPid, MRef),
-    NewPid = bt4808_builder_class(Name, 'Object', true),
+    NewPid = bt4808_builder_class(Name, 'Object'),
     ok = beamtalk_class_monitor:unwatch(Name),
     ?assertNot(beamtalk_class_metadata:delete_if_owner(Name, OldPid)),
-    bt4808_assert_dependents_intact(Name, 'Object', NewPid, true),
+    bt4808_assert_dependents_intact(Name, 'Object', NewPid),
     %% One edge, not one per owner.
     ?assertEqual(
         1, length([N || N <- beamtalk_class_metadata:match_subclasses('Object'), N =:= Name])
@@ -2705,27 +2699,26 @@ bt4808_rebuild_drops_dead_owners_leftover_entries_test() ->
 %% stamped (funs, records, flags, edge); a row naming another owner is left.
 bt4808_delete_if_owner_without_row_drops_own_dependents_test() ->
     Name = 'BT4808NoRow',
-    Pid = bt4808_builder_class(Name, 'Object', true),
+    Pid = bt4808_builder_class(Name, 'Object'),
     ok = beamtalk_class_monitor:unwatch(Name),
     true = ets:delete(beamtalk_class_metadata, Name),
     ?assertNot(beamtalk_class_metadata:delete_if_owner(Name, Pid)),
     ?assertEqual([], ets:match_object(beamtalk_class_method_funs, {{Name, '_'}, '_', '_'})),
     ?assertNot(beamtalk_class_shadow_flags:is_set(runtime_fun, Name)),
-    ?assertNot(beamtalk_class_shadow_flags:is_set(class_vars, Name)),
     ?assertNot(lists:member(Name, beamtalk_class_metadata:match_subclasses('Object'))),
     gen_server:stop(Pid).
 
-%% `call_rename_class` copies the class-variable fact (and the rest) from the
-%% old name. A class registered under the old name between the unregister and
+%% `call_rename_class` copies the process-bound selector list (and the rest)
+%% from the old name. A class registered under the old name between the unregister and
 %% the copy must not supply them. The interloper is created while the renaming
 %% class is parked at `sync_identity` (just after the old name is released):
 %% the facts have to come from the renaming class itself.
 bt4808_rename_copies_its_own_facts_not_a_same_name_class_test() ->
     Old = 'BT4808RenameOld',
     New = 'BT4808RenameNew',
-    Pid = bt4808_builder_class(Old, 'Object', false),
+    Pid = bt4808_builder_class(Old, 'Object'),
     ok = beamtalk_class_monitor:unwatch(Old),
-    ?assertEqual(false, beamtalk_class_metadata:lookup_has_class_variables(Old)),
+    ok = beamtalk_class_metadata:put_process_bound_selectors(Old, [ping]),
     Test = self(),
     ok = meck:new(beamtalk_class_publish, [passthrough, no_link]),
     ok = meck:expect(beamtalk_class_publish, sync_identity, fun(N, M, S, A, C, Mode) ->
@@ -2747,18 +2740,18 @@ bt4808_rename_copies_its_own_facts_not_a_same_name_class_test() ->
                 ?awaitMessage({bt4808_parked, P}),
                 P
             end,
-        %% The old name is free now: a class with class variables takes it.
-        Interloper = bt4808_builder_class(Old, 'Object', true),
+        %% The old name is free now: a class with a process-bound list takes it.
+        Interloper = bt4808_builder_class(Old, 'Object'),
         ok = beamtalk_class_monitor:unwatch(Old),
-        ?assertEqual(true, beamtalk_class_metadata:lookup_has_class_variables(Old)),
+        ok = beamtalk_class_metadata:put_process_bound_selectors(Old, [make]),
+        ?assertEqual({ok, [make]}, beamtalk_class_metadata:lookup_process_bound_selectors(Old)),
         Parked ! bt4808_go,
         ?awaitMessage({bt4808_renamed, Result}),
         ?assertEqual({ok, Pid}, Result),
-        ?assertEqual(false, beamtalk_class_metadata:lookup_has_class_variables(New)),
-        ?assertNot(beamtalk_class_shadow_flags:is_set(class_vars, New)),
+        ?assertEqual({ok, [ping]}, beamtalk_class_metadata:lookup_process_bound_selectors(New)),
         %% And the same-name class keeps its own row and fact.
         ?assertEqual({ok, Interloper}, beamtalk_class_metadata:lookup_owner(Old)),
-        ?assertEqual(true, beamtalk_class_metadata:lookup_has_class_variables(Old)),
+        ?assertEqual({ok, [make]}, beamtalk_class_metadata:lookup_process_bound_selectors(Old)),
         _ = Renamer,
         ok = gen_server:stop(Interloper),
         ok = gen_server:stop(Pid)
@@ -2766,24 +2759,18 @@ bt4808_rename_copies_its_own_facts_not_a_same_name_class_test() ->
         meck:unload(beamtalk_class_publish)
     end.
 
-bt4808_builder_class(Name, Super, HasClassVars) ->
+bt4808_builder_class(Name, Super) ->
     beamtalk_class_registry:ensure_pg_started(),
     beamtalk_class_metadata:new(),
     beamtalk_class_registry:ensure_pid_table(),
     InstFun = fun(Self, _Args, State) -> {reply, inst_ok, State, Self} end,
     ClassFun = fun(_ClassSelf) -> class_ok end,
-    ClassState =
-        case HasClassVars of
-            true -> #{count => 0};
-            false -> #{}
-        end,
     {ok, Pid} = beamtalk_class_builder:register(#{
         className => Name,
         superclassRef => Super,
         fieldSpecs => #{},
         methodSpecs => #{ping => InstFun},
-        classMethods => #{make => ClassFun},
-        classState => ClassState
+        classMethods => #{make => ClassFun}
     }),
     Pid.
 
@@ -2820,24 +2807,19 @@ bt4758_class_object_tag_memoised_test() ->
         persistent_term:get({beamtalk_class_registry, class_object_tag, Name})
     ).
 
-bt4758_snapshot_if_changed_writes_only_on_change_test() ->
-    ok = beamtalk_class_registry:ensure_class_state_table(),
-    Pid = spawn(fun() ->
-        receive
-            stop -> ok
-        end
-    end),
-    Old = #{a => 1},
-    %% Changed map: written.
-    ok = beamtalk_class_registry:record_class_state_snapshot_if_changed(Pid, #{}, Old),
-    ?assertEqual({ok, Old}, beamtalk_class_registry:class_state_snapshot_lookup(Pid)),
-    %% Unchanged map: no write (a sentinel row proves the skip).
-    ets:insert(beamtalk_class_state_snapshot, {Pid, sentinel}),
-    ok = beamtalk_class_registry:record_class_state_snapshot_if_changed(Pid, Old, Old),
-    ?assertEqual({ok, sentinel}, beamtalk_class_registry:class_state_snapshot_lookup(Pid)),
-    %% A later change overwrites again.
-    New = Old#{b => 2},
-    ok = beamtalk_class_registry:record_class_state_snapshot_if_changed(Pid, Old, New),
-    ?assertEqual({ok, New}, beamtalk_class_registry:class_state_snapshot_lookup(Pid)),
-    ets:delete(beamtalk_class_state_snapshot, Pid),
-    Pid ! stop.
+%% ADR 0153 Phase 3e: the class-state snapshot rows are gone. A class has no
+%% state of its own, so the registry exports no snapshot API and no
+%% `beamtalk_class_state_snapshot` table exists after the runtime boots.
+snapshot_rows_removed_test() ->
+    Exports = beamtalk_class_registry:module_info(exports),
+    [
+        ?assertEqual(false, lists:keymember(F, 1, Exports))
+     || F <- [
+            ensure_class_state_table,
+            record_class_state_snapshot,
+            record_class_state_snapshot_if_changed,
+            class_state_snapshot_lookup,
+            forget_class_state_snapshot
+        ]
+    ],
+    ?assertEqual(undefined, ets:info(beamtalk_class_state_snapshot)).

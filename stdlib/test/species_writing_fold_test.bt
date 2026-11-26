@@ -1,0 +1,82 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5136: a writing `collect:`/`select:`/`reject:` answers the same class as
+// the pure path, or is refused with `stateful_block_dispatch`. A Bag takes the
+// species path on the pure send, so the writing fold refuses it rather than
+// answering a List. Interval and Ets answer a List both ways.
+
+TestCase subclass: SpeciesWritingFoldTest
+  field: table = nil
+
+  tearDown =>
+    self.table isNil ifFalse: [[self.table delete] on: Error do: [:e | nil]]
+
+  bagSelect =>
+    n := 0
+    (Bag withAll: #(1, 1, 2))
+      select: [:x |
+        n := n + 1
+        x > 1
+      ]
+
+  bagReject =>
+    n := 0
+    (Bag withAll: #(1, 1, 2))
+      reject: [:x |
+        n := n + 1
+        x > 1
+      ]
+
+  bagCollect =>
+    n := 0
+    (Bag withAll: #(1, 1, 2))
+      collect: [:x |
+        n := n + 1
+        x
+      ]
+
+  testBagPureSelectAnswersBag =>
+    r := (Bag withAll: #(1, 1, 2)) select: [:x | x > 1]
+    self assert: r class equals: Bag
+
+  testBagWritingSelectRefused =>
+    self should: [self bagSelect] raise: #stateful_block_dispatch
+
+  testBagWritingRejectRefused =>
+    self should: [self bagReject] raise: #stateful_block_dispatch
+
+  testBagWritingCollectRefused =>
+    self should: [self bagCollect] raise: #stateful_block_dispatch
+
+  testIntervalWritingMatchesPure =>
+    n := 0
+    r := (1 to: 4)
+      select: [:x |
+        n := n + 1
+        x > 2
+      ]
+    self assert: r equals: ((1 to: 4) select: [:x | x > 2])
+    self assert: n equals: 4
+
+  testEtsWritingMatchesPure =>
+    self.table := Ets new: #speciesWritingFold type: #set
+    self.table at: "a" put: 1
+    n := 0
+    r := self.table
+      select: [:x |
+        n := n + 1
+        x > 0
+      ]
+    self assert: r equals: (self.table select: [:x | x > 0])
+    self assert: n equals: 1
+
+  testSetWritingStillAnswersSet =>
+    n := 0
+    r := (Set withAll: #(1, 2, 3))
+      select: [:x |
+        n := n + 1
+        x > 1
+      ]
+    self assert: r class equals: Set
+    self assert: n equals: 3

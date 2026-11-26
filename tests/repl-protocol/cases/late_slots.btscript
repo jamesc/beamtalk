@@ -5,7 +5,7 @@
 // required validation (BT-3558/B10): "unit and BUnit tests alone have
 // shipped non-functional features before" (ADR 0069's tracing epic), and
 // `late` touches parser, codegen, runtime reflection, hot reload and the
-// REPL — so this drives `late state:`/`late classState:` through a real
+// REPL — so this drives `late state:` through a real
 // REPL session end to end: define, spawn, read-before-assign (error text),
 // printString's `<unassigned>` rendering (BT-3557/B8), assign, `fieldKinds`,
 // `clearField:`, `spawnWith:` injection, and a hot reload that flips a
@@ -44,7 +44,7 @@
 // with other cases.
 
 // ===========================================================================
-// DEFINE v1: `late state:` and `late classState:` together, one inline
+// DEFINE v1: `late state:` with one inline
 // method, the rest added via `>>`.
 // ===========================================================================
 
@@ -52,7 +52,6 @@ typed Actor subclass: LateSlotsReplActor
   shapeVersion: 1
   late state: proc :: Integer
   state: count :: Integer = 0
-  late classState: current :: Integer
   getProc -> Integer => self.proc
 // => "LateSlotsReplActor"
 
@@ -61,12 +60,6 @@ LateSlotsReplActor >> setProc: value :: Integer -> Integer => self.proc := value
 
 LateSlotsReplActor >> getCount -> Integer => self.count
 // => "LateSlotsReplActor>>getCount"
-
-LateSlotsReplActor class >> getCurrent -> Integer => self.current
-// => "LateSlotsReplActor>>getCurrent"
-
-LateSlotsReplActor class >> setCurrent: value :: Integer -> Integer => self.current := value
-// => "LateSlotsReplActor>>setCurrent:"
 
 // ===========================================================================
 // SPAWN + READ BEFORE ASSIGN — `hasField:` is false, the direct read raises
@@ -163,32 +156,6 @@ a getProc
 // => 7
 
 // ===========================================================================
-// `late classState:` — via class methods, and from outside (Cls hasField:/
-// Cls clearField:).
-// ===========================================================================
-
-LateSlotsReplActor hasField: #current
-// => false
-
-[LateSlotsReplActor getCurrent] on: Exception do: [:e | e kind]
-// => uninitialized_state_error
-
-LateSlotsReplActor setCurrent: 99
-// => 99
-
-LateSlotsReplActor getCurrent
-// => 99
-
-LateSlotsReplActor hasField: #current
-// => true
-
-LateSlotsReplActor clearField: #current
-// => LateSlotsReplActor
-
-LateSlotsReplActor hasField: #current
-// => false
-
-// ===========================================================================
 // spawnWith: injection — supplying a `late` slot by key counts as assigned
 // (ADR 0124 Implementation, the `spawnWith:`-injection clause).
 // ===========================================================================
@@ -224,7 +191,6 @@ typed Actor subclass: LateSlotsReplActor
   late state: proc :: Integer
   state: count :: Integer = 0
   state: extra :: Integer = 11
-  late classState: current :: Integer
   getProc -> Integer => self.proc
 // => "LateSlotsReplActor"
 
@@ -236,12 +202,6 @@ LateSlotsReplActor >> getCount -> Integer => self.count
 
 LateSlotsReplActor >> getExtra -> Integer => self.extra
 // => "LateSlotsReplActor>>getExtra"
-
-LateSlotsReplActor class >> getCurrent -> Integer => self.current
-// => "LateSlotsReplActor>>getCurrent"
-
-LateSlotsReplActor class >> setCurrent: value :: Integer -> Integer => self.current := value
-// => "LateSlotsReplActor>>setCurrent:"
 
 LateSlotsReplActor shapeVersion
 // => 2
@@ -279,7 +239,6 @@ typed Actor subclass: LateSlotsReplActor
   state: proc :: Integer = 100
   state: count :: Integer = 0
   state: extra :: Integer = 11
-  late classState: current :: Integer
   getProc -> Integer => self.proc
 // => "LateSlotsReplActor"
 
@@ -291,12 +250,6 @@ LateSlotsReplActor >> getCount -> Integer => self.count
 
 LateSlotsReplActor >> getExtra -> Integer => self.extra
 // => "LateSlotsReplActor>>getExtra"
-
-LateSlotsReplActor class >> getCurrent -> Integer => self.current
-// => "LateSlotsReplActor>>getCurrent"
-
-LateSlotsReplActor class >> setCurrent: value :: Integer -> Integer => self.current := value
-// => "LateSlotsReplActor>>setCurrent:"
 
 LateSlotsReplActor shapeVersion
 // => 3

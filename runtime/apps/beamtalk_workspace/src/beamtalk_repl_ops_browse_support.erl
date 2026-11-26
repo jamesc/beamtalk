@@ -26,8 +26,6 @@ atom_or_null(A) when is_atom(A) -> atom_to_binary(A, utf8).
 
 -spec safe_bool(fun(() -> boolean())) -> boolean().
 safe_bool(F) ->
-    %% bt-catcher-audit: not-applicable-no-block - F is an Erlang reflection predicate, not a
-    %% Beamtalk block
     try F() of
         B when is_boolean(B) -> B
     catch

@@ -17,8 +17,14 @@ defmodule BtAttach.FacadeTest do
     def inspect_value(term), do: record({:inspect, term}) && {:ok, %{a: 1}}
     def list_bindings(pid), do: record({:bindings, pid}) && [{"x", 1}]
     def change_history, do: record({:changes}) && []
-    def flush, do: record({:flush}) && {:ok, %{}}
+
+    # BT-5199: the wire `kill`, `actors` and `sessions` operations.
+    def kill_actor(term), do: record({:kill, term}) && :ok
+    def actors, do: record({:actors}) && {:ok, []}
+    def sessions, do: record({:sessions}) && {:ok, [%{id: "s1"}]}
+    def flush(opts \\ []), do: record({:flush, opts}) && {:ok, %{}}
     def save_method(c, s, src), do: record({:save, c, s, src}) && {:ok, c}
+    def load_source(pid, src), do: record({:load_source, pid, src}) && {:ok, [], []}
 
     # ADR 0082 Phase 5 (BT-2293): the New File + ChangeLog revert affordances.
     # `side` (ADR 0112, BT-3187): the entry's disambiguating side, or nil.
@@ -27,6 +33,7 @@ defmodule BtAttach.FacadeTest do
 
     def subscribe_transcript(pid), do: record({:sub_t, pid}) && :ok
     def subscribe_bindings(pid), do: record({:sub_b, pid}) && :ok
+    def subscribe_actors(pid), do: record({:sub_a, pid}) && :ok
 
     # ADR 0095 §5 (BT-2489): the live-Inspector per-object tracking ops.
     def subscribe_object_changes(term, pid), do: record({:sub_obj, term, pid}) && :ok
@@ -152,6 +159,7 @@ defmodule BtAttach.FacadeTest do
 
     # BT-2590: the autoflush flag read returns a bare boolean (not a tuple).
     def autoflush, do: record({:autoflush}) && true
+    def info, do: record({:info}) && {:ok, %{node: "ws@host"}}
   end
 
   setup do
@@ -205,7 +213,8 @@ defmodule BtAttach.FacadeTest do
       assert Facade.capability(:processes_system) == :execute
 
       assert Facade.capability(:kill) == :admin
-      assert Facade.capability(:rotate_cookie) == :admin
+      # BT-5206: cookie rotation belongs in the release tooling, not the editor.
+      refute Facade.known?(:rotate_cookie)
     end
 
     test "known?/1 and an unknown op" do
@@ -243,11 +252,38 @@ defmodule BtAttach.FacadeTest do
                MapSet.new([:eval, :inspect, :bindings, :changes, :flush, :save, :sub_t, :sub_b])
     end
 
-    test "a catalog op with no UI binding is unsupported, not a dist call" do
-      # `kill` is in the vocabulary (so RBAC can reason about it) but has no route
-      # yet — it must not silently no-op or hit the client.
-      assert Facade.dispatch(:kill, %{}) == {:error, {:unsupported_op, :kill}}
+    test "subscribe_actors registers the pid on the actors stream (BT-5205)" do
+      assert Facade.dispatch(:subscribe_actors, %{pid: self()}) == :ok
+      assert RecordingClient.calls() == [{:sub_a, self()}]
+    end
+
+    test "a dropped op is forbidden, and a known op with unusable params is not a dist call" do
+      # BT-5206: `rotate_cookie` left the vocabulary, so it is off-catalog.
+      assert Facade.dispatch(:rotate_cookie, %{}) == {:error, :forbidden_op}
+
+      # A known op whose params no clause accepts must not silently no-op or hit
+      # the client.
+      assert Facade.dispatch(:eval, %{}) == {:error, {:unsupported_op, :eval}}
       assert RecordingClient.calls() == []
+    end
+
+    test "kill, actors and sessions route to the client's wire operations (BT-5199)" do
+      term = {:beamtalk_object, :Counter, :counter, self()}
+
+      assert Facade.dispatch(:kill, %{term: term}) == :ok
+      assert Facade.dispatch(:actors, %{}) == {:ok, []}
+      assert Facade.dispatch(:sessions, %{}) == {:ok, [%{id: "s1"}]}
+
+      assert Enum.reverse(RecordingClient.calls()) == [{:kill, term}, {:actors}, {:sessions}]
+    end
+
+    test "an Observer may list actors but not kill one (kill is :admin)" do
+      term = {:beamtalk_object, :Counter, :counter, self()}
+      observer = %{role: :observer}
+
+      assert Facade.dispatch(:kill, %{term: term}, observer) == {:error, :unauthorized}
+      assert Facade.dispatch(:actors, %{}, observer) == {:ok, []}
+      assert RecordingClient.calls() == [{:actors}]
     end
   end
 
@@ -517,6 +553,22 @@ defmodule BtAttach.FacadeTest do
     test "git_log defaults to 20 commits when count is omitted" do
       assert Facade.dispatch(:git_log, %{}) == {:ok, []}
       assert {:git_log, 20} in RecordingClient.calls()
+    end
+
+    test "flush forwards its scope and confirmation as client opts, and nothing else (BT-5204)" do
+      assert Facade.dispatch(:flush, %{class: "Foo", confirm_destructive: true, junk: 1}) ==
+               {:ok, %{}}
+
+      flushes = fn -> for {:flush, opts} <- RecordingClient.calls(), do: Enum.sort(opts) end
+      assert flushes.() == [[class: "Foo", confirm_destructive: true]]
+
+      assert Facade.dispatch(:flush, %{}) == {:ok, %{}}
+      assert Enum.sort(flushes.()) == [[], [class: "Foo", confirm_destructive: true]]
+    end
+
+    test "info is implemented by dispatch (BT-5204)" do
+      assert Facade.dispatch(:info, %{}) == {:ok, %{node: "ws@host"}}
+      assert {:info} in RecordingClient.calls()
     end
 
     test "autoflush routes to the client and returns the bare boolean (BT-2590)" do
@@ -800,6 +852,28 @@ defmodule BtAttach.FacadeTest do
 
       assert Facade.dispatch(:revert, %{class: "Counter", selector: :value}) ==
                {:error, :invalid_params}
+
+      assert RecordingClient.calls() == []
+    end
+
+    test "load_source routes to the client with the caller's session and the source as a value" do
+      assert Facade.dispatch(:load_source, %{session_pid: self(), source: "Object subclass: G"}) ==
+               {:ok, [], []}
+
+      assert {:load_source, self(), "Object subclass: G"} in RecordingClient.calls()
+    end
+
+    test "load_source with a non-binary source is invalid params, with no dist call" do
+      assert Facade.dispatch(:load_source, %{session_pid: self(), source: 42}) ==
+               {:error, :invalid_params}
+
+      assert RecordingClient.calls() == []
+    end
+
+    test "the observer role is denied load_source, with no dist call" do
+      assert Facade.dispatch(:load_source, %{session_pid: self(), source: "x"}, %{
+               role: :observer
+             }) == {:error, :unauthorized}
 
       assert RecordingClient.calls() == []
     end

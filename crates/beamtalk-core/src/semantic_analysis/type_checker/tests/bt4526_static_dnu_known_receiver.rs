@@ -9,16 +9,15 @@
 //!   selector and receiver, and is the only diagnostic for the send — so a
 //!   `type = error` table no longer fails the build on a misleading `Type`
 //!   error while the real problem is a hint.
-//! * `Open` receiver (the pre-WS3 dependency guard, ADR 0100 Rule 2 — the
-//!   `beamtalk-buccaneer` repro): DNU stays suppressed, and the typed-class
-//!   warning says the selector is unresolved and names it.
+//! * `Open` receiver (here a class from a file with parse errors, so its
+//!   surface may be incomplete; ADR 0100 Rule 1): DNU stays suppressed, and
+//!   the typed-class warning says the selector is unresolved and names it.
 //! * A genuinely dynamic receiver still infers `Dynamic` with no DNU.
 
 use super::common::*;
 use crate::compilation::diagnostics_policy::{
     DiagnosticSeverityOverride, DiagnosticsTable, apply_diagnostics_table,
 };
-use crate::semantic_analysis::receiver_knowledge::KnowledgeScope;
 use crate::source_analysis::Severity;
 
 /// The `hpack 0.1.1` shape: `HPACK` is sealed and no longer defines
@@ -31,12 +30,11 @@ typed Object subclass: Stream
     nil
 ";
 
-fn diagnostics(source: &str, with_dependencies: bool) -> Vec<Diagnostic> {
+fn diagnostics(source: &str, open_surface: bool) -> Vec<Diagnostic> {
     let module = parse_source(source);
-    let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    if with_dependencies {
-        hierarchy.set_knowledge_scope(KnowledgeScope::ProjectComplete);
-        hierarchy.set_dependency_extensions_unknown(true);
+    let mut hierarchy = ClassHierarchy::build(&module).0;
+    if open_surface {
+        hierarchy.mark_module_classes_surface_incomplete(&module);
     }
     run_with_expect(&module, &hierarchy)
 }
@@ -87,9 +85,9 @@ fn type_error_table_surfaces_only_the_dnu_on_closed_class() {
 
 #[test]
 fn absent_selector_on_open_class_names_the_unresolved_selector() {
-    // A package with dependencies: an unseen extension could define the
-    // selector, so no DNU — but the typed-class warning must name the
-    // selector instead of blaming an unannotated return.
+    // An incomplete surface could still define the selector, so no DNU — but
+    // the typed-class warning must name the selector instead of blaming an
+    // unannotated return.
     let diags = diagnostics(REPRO, true);
     assert_eq!(diags.len(), 1, "got: {diags:#?}");
     let d = &diags[0];
@@ -151,14 +149,14 @@ typed Object subclass: Stream
     HPACK new
     nil
 ";
-    for with_dependencies in [false, true] {
-        let diags = diagnostics(source, with_dependencies);
+    for open_surface in [false, true] {
+        let diags = diagnostics(source, open_surface);
         assert!(
             !diags
                 .iter()
                 .any(|d| d.category == Some(DiagnosticCategory::Dnu)
                     || d.message.contains("unresolved selector")),
-            "deps={with_dependencies}: {diags:#?}"
+            "open_surface={open_surface}: {diags:#?}"
         );
     }
 }

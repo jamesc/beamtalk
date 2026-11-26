@@ -1,0 +1,77 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5281: a `match:` whose arm assigns a local in a nested `ifTrue:`, after
+// two guard-style `^` returns (BT-4415), lowers in a frame with a private
+// scratch map. Used by stdlib/test/bt5281match_private_scratch_test.bt.
+
+Actor subclass: Bt5281MatchPrivateScratchActor
+  state: total = 0
+
+  total => self.total
+
+  reload: items =>
+    items isNil ifTrue: [^nil]
+    items isEmpty ifTrue: [^nil]
+    items
+      do: [:item |
+        item match: [
+          Result ok: v -> v > 0
+            ifTrue: [
+              parsed := v * 10
+              parsed > 0 ifTrue: [self.total := self.total + parsed]
+            ];
+          Result error: _ -> nil
+        ]
+      ]
+    self.total
+
+  classify: items =>
+    items isNil ifTrue: [^#none]
+    items isEmpty ifTrue: [^#empty]
+    head := items first
+    head match: [
+      Result ok: v -> v > 0
+        ifTrue: [
+          doubled := v * 2
+          self.total := doubled
+        ];
+      Result error: _ -> nil
+    ]
+    self.total
+
+  // `classify:` with the scrutinee sent in place (BT-5289): the sent
+  // scrutinee's `SyncedCall` is sequenced into the arm frame ahead of the
+  // `match:`.
+  classifySent: items =>
+    items isNil ifTrue: [^#none]
+    items isEmpty ifTrue: [^#empty]
+    items first match: [
+      Result ok: v -> v > 0
+        ifTrue: [
+          doubled := v * 2
+          self.total := doubled
+        ];
+      Result error: _ -> nil
+    ]
+    self.total
+
+  // `cond` is a non-Boolean (`NonBooleanCondCalling`): the inner conditional
+  // sends `ifTrue:ifFalse:` to it, whose false block (a plain closure, the
+  // private-scratch frame) runs the `match:`. Its field write goes through
+  // the actor-state cell.
+  nested: cond with: x =>
+    x isNil
+      ifTrue: [nil]
+      ifFalse: [
+        cond
+          ifTrue: [nil]
+          ifFalse: [
+            x match: [_ -> x > 0
+              ifTrue: [
+                d := x
+                self.total := d
+              ]]
+            self.total
+          ]
+      ]

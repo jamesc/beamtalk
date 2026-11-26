@@ -32,6 +32,14 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               # git panel results, so a test can exercise the post-save refresh
               # gate and the async git load without a real workspace node.
               autoflush: false,
+              # BT-5204: the opts of the most recent `flush/1`, so a test can
+              # assert the scope and confirmation the caller sent.
+              last_flush_opts: nil,
+              # BT-5206: warnings the next `save_method/3` replies with (nil = none).
+              save_warnings: nil,
+              # BT-5206: the summary the next `flush/1` answers (nil = the canned
+              # clean one), so a test can drive the conflicts path.
+              flush_summary: nil,
               git_status: nil,
               git_log: nil,
               # BT-2597: seeded test-runner pane results so the async run/load
@@ -182,12 +190,25 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   def session_alive?(_pid), do: true
   def close_session(_pid), do: :ok
 
+  # BT-5199: the Inspector's "Kill actor" and the actor/session lists. `kill`
+  # records the call; `actors` answers whatever `put_actors/1` seeded.
+  def kill_actor(term), do: record({:kill_actor, term}) && :ok
+  def actors, do: {:ok, get(:actors) || []}
+  def sessions, do: {:ok, [%{id: "sess-1"}]}
+
+  @doc "Test helper (BT-5199): seed the actor list the `actors` op answers."
+  def put_actors(actors) when is_list(actors), do: put(:actors, actors)
+
   # ── Subscription ops ─────────────────────────────────────────────────────
 
   def subscribe_transcript(_pid), do: :ok
   def unsubscribe_transcript(_pid), do: :ok
+  # BT-5206: every exit path drops the pid from every stream through one call.
+  def unsubscribe_all(pid), do: record({:unsubscribe_all, pid}) && :ok
   def subscribe_bindings(_pid), do: :ok
   def unsubscribe_bindings(_pid), do: :ok
+  def subscribe_actors(_pid), do: :ok
+  def unsubscribe_actors(_pid), do: :ok
   # BT-2598: the class-lifecycle push stream. Records the subscribe so a test can
   # assert it is wired at mount; returns :ok (the real facade's success reply).
   def subscribe_classes(_pid), do: record({:subscribe_classes}) && :ok
@@ -211,6 +232,9 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # ── Eval + session ops ───────────────────────────────────────────────────
 
   def interrupt(_pid), do: :ok
+
+  # BT-5203: `load_source` compiles source into the image; the stub records it.
+  def load_source(pid, source), do: record({:load_source, pid, source}) && {:ok, [], []}
 
   def attach_session(_session_pid, _client_pid), do: :ok
 
@@ -258,14 +282,17 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   def inspect_value({:beamtalk_supervisor, class, _module, pid} = _term) when is_pid(pid) do
     case to_string(class) do
       "EmptySup" ->
-        {:ok, {:supervisor_children, []}}
+        {:ok, {:supervisor_children, [], false}}
 
       "DeadSup" ->
         {:error,
          {:beamtalk_error, :stale_handle, :Inspector, :children, "supervisor is not alive"}}
 
+      "CutSup" ->
+        {:ok, {:supervisor_children, stub_supervisor_children(), true}}
+
       _ ->
-        {:ok, {:supervisor_children, stub_supervisor_children()}}
+        {:ok, {:supervisor_children, stub_supervisor_children(), false}}
     end
   end
 
@@ -344,7 +371,7 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   for a live supervisor pid.
   """
   def supervisor_children(sup_pid) when is_pid(sup_pid),
-    do: {:ok, stub_supervisor_children()}
+    do: {:ok, stub_supervisor_children(), false}
 
   defp extract_class_name(code) do
     case Regex.run(~r/(?:Actor|Object)\s+subclass:\s+(\w+)/, code) do
@@ -368,8 +395,18 @@ defmodule BtAttachWeb.StubWorkspaceClient do
       Map.put(sources, {class, selector}, source)
     end)
 
-    {:ok, class}
+    case get(:save_warnings) do
+      [_ | _] = warnings -> {:ok, class, warnings}
+      _ -> {:ok, class}
+    end
   end
+
+  @doc """
+  Test helper (BT-5206): the next `save_method/3` replies `{:ok, class, warnings}`,
+  as the workspace does when the method is live but its ChangeLog entry could not
+  be recorded.
+  """
+  def put_save_warnings(warnings) when is_list(warnings), do: put(:save_warnings, warnings)
 
   @doc """
   Test helper (BT-3321): drop every recorded `:changes` entry WITHOUT the
@@ -384,19 +421,31 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   """
   def clear_changes, do: put(:changes, %{})
 
-  def flush do
+  def flush(opts \\ []) do
+    put(:last_flush_opts, opts)
     changes = get(:changes)
     put(:changes, %{})
 
-    summary = %{
-      flushed: map_size(changes),
-      files: Map.values(changes) |> Enum.uniq(),
-      conflicts: [],
-      skipped: []
-    }
+    summary =
+      get(:flush_summary) ||
+        %{
+          flushed: map_size(changes),
+          files: Map.values(changes) |> Enum.uniq(),
+          conflicts: [],
+          skipped: []
+        }
 
     {:ok, summary}
   end
+
+  @doc """
+  Test helper (BT-5206): the next `flush/1` answers `summary`, so a test can drive
+  the conflicts path (`conflicts: [%{"file" => ..., "reason" => ...}]`).
+  """
+  def put_flush_summary(summary) when is_map(summary), do: put(:flush_summary, summary)
+
+  @doc "Test helper: the opts of the most recent `flush/1` (nil before any)."
+  def last_flush_opts, do: get(:last_flush_opts)
 
   def change_history do
     diffs = get(:change_diffs) || %{}
@@ -459,6 +508,22 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # image only and the post-save git refresh is skipped — unless a test flips it
   # via `set_autoflush/1`.
   def autoflush, do: get(:autoflush) || false
+
+  # BT-5204: the `info` operation's reply, in `BtAttach.Workspace.info/0`'s shape.
+  def info do
+    {:ok,
+     %{
+       version: %{
+         runtime_version: "stub",
+         protocol_version: "2.0",
+         otp_release: "stub",
+         erts_version: "stub"
+       },
+       node: "stub@localhost",
+       workspace_id: "stub",
+       settings: %{autoflush: autoflush()}
+     }}
+  end
 
   @doc "Test helper: set the simulated `autoflush` flag."
   def set_autoflush(flag) when is_boolean(flag), do: put(:autoflush, flag)

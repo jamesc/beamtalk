@@ -8,14 +8,14 @@
 //! Shared project/workspace discovery logic for Beamtalk tooling (CLI, LSP, etc.):
 //! project roots, package source files, `[dependencies]` parsing
 //! ([`dependencies`]), the on-disk dependency graph ([`dependency_graph`]) and
-//! the dependency-extension completeness rule ([`dependency_extensions`]).
+//! the dependency alias-expansion helpers ([`dependency_aliases`]).
 //!
 //! A standalone crate (ADR 0117 Decision step 2) depending only on
 //! `beamtalk-core::file_walker`, so the boundary is `cargo`-enforced rather
 //! than a convention within `beamtalk-core`.
 
 pub mod dependencies;
-pub mod dependency_extensions;
+pub mod dependency_aliases;
 pub mod dependency_graph;
 pub mod package;
 pub mod package_name;
@@ -60,8 +60,15 @@ fn is_global_config_dir(candidate: &Path) -> bool {
 /// project marker, or `start_dir` if no marker is found.
 #[must_use]
 pub fn discover_project_root(start_dir: &Path) -> PathBuf {
+    find_project_root(start_dir).unwrap_or_else(|| start_dir.to_path_buf())
+}
+
+/// [`discover_project_root`] without the fallback: `None` when no ancestor
+/// of `start_dir` carries a project marker.
+#[must_use]
+pub fn find_project_root(start_dir: &Path) -> Option<PathBuf> {
     let Ok(meta) = fs::metadata(start_dir) else {
-        return start_dir.to_path_buf();
+        return None;
     };
 
     let mut current = if meta.is_dir() {
@@ -79,7 +86,7 @@ pub fn discover_project_root(start_dir: &Path) -> PathBuf {
                 if *marker == ".beamtalk" && is_global_config_dir(&candidate) {
                     continue;
                 }
-                return current;
+                return Some(current);
             }
         }
 
@@ -87,15 +94,13 @@ pub fn discover_project_root(start_dir: &Path) -> PathBuf {
         if let Some(marker) = PROJECT_MARKERS.last()
             && current.join(marker).exists()
         {
-            return current;
+            return Some(current);
         }
 
         if !current.pop() {
-            break;
+            return None;
         }
     }
-
-    start_dir.to_path_buf()
 }
 
 #[cfg(test)]

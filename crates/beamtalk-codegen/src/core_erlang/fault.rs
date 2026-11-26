@@ -143,6 +143,19 @@ mod registry {
         /// was sequenced (`(self flip: p) ifTrue: [^8]`), as BT-4532's first
         /// cut did for the runtime dispatch's operands (`StalePrestore`).
         PrestoreReadsBeforeOperands,
+        /// BT-5210: the bracket classification (`classify_binary`) reads
+        /// only the receiver of an ordering comparison, as before ADR 0116
+        /// § Addendum, so `0 < x` (whose right operand is now tested and may
+        /// be sent a reflected hook) is not bracketed
+        /// (`UnbracketedGuardedOperator`).
+        ComparisonBracketIgnoresRightOperand,
+
+        // ── Guard-return rewrite (`guard_returns.rs`) ───────────────────
+        /// BT-5210: the rewrite takes a literal-receiver comparison for a
+        /// Boolean by construction whatever its right operand, as before ADR
+        /// 0116 § Addendum, so the BT-4452 backstop
+        /// (`unconfirmed_boolean_comparisons`) can be shown to refuse it.
+        LiteralComparisonTrustsRightOperand,
 
         // ── Local-rebind producers (ADR 0131; `threaded_expr.rs` & co) ──
         /// `sequence_children` reads a plain-variable sibling in place even
@@ -174,6 +187,20 @@ mod registry {
         /// BT-5117: a `select:`/`reject:` accumulator conses the included item
         /// onto the result list twice (`FoldResultListConsMismatch`).
         FilterConsTwice,
+        /// BT-5190: a `select:`/`reject:` accumulator conses in neither arm
+        /// (`FoldResultListUndeclared`).
+        FilterConsNothing,
+        /// BT-5190: a `select:`/`reject:` accumulator conses in both arms
+        /// (`FoldResultListUndeclared`).
+        FilterConsBothArms,
+        /// BT-5190: a `select:`/`reject:` accumulator conses on the arm taken
+        /// when the block answers the other boolean
+        /// (`FoldResultListUndeclared`).
+        FilterArmsSwapped,
+        /// BT-5190: a `select:`/`reject:` accumulator conses the predicate's
+        /// answer instead of the lambda's element
+        /// (`FoldResultListWrongItem`).
+        FilterConsWrongItem,
         /// BT-3857: the producer's last `MapPut` rebind is rewritten into a
         /// `MapHeld` over the version that rebind would have produced, read
         /// through it. That version is never produced (a held rebind steps
@@ -226,7 +253,8 @@ mod registry {
         /// sequenced ahead, as before BT-4000: its prelude is rendered into
         /// the conditional's own tuple document, out of the frame's sight, so
         /// in a loop body the conditional's `State` extraction reads a version
-        /// the frame never binds (`UnboundVersion`).
+        /// the frame never binds (`UnboundVersion`). Also covers a `match:`
+        /// scrutinee, as before BT-5289.
         ReceiverPreludeInTuple,
         /// BT-4015: a `whileTrue:`/`whileFalse:` condition's outer-local (in
         /// the REPL, binding) write is not a carried effect, as before BT-4015,
@@ -257,7 +285,10 @@ mod registry {
         /// BT-4206: a `match:` producer reads its base `State` and seeds its
         /// scratch map before compiling its scrutinee, as before BT-4196, so
         /// the arms thread from the `State` the scrutinee's spliced prelude
-        /// has already stepped past (`StaleConstructSeed`).
+        /// has already stepped past (`StaleConstructSeed`). Since BT-5289 an
+        /// actor `match:`'s state-advancing scrutinee is sequenced ahead of
+        /// the producer, so this fault also restores the pre-BT-5289 routing
+        /// that let the producer compile it.
         SeedBeforeScrutinee,
         /// BT-4178: a tuple-accumulator fold does not capture its entry
         /// state for its body, as before BT-4178, so a field read there

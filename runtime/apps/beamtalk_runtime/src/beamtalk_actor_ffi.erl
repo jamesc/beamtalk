@@ -414,7 +414,8 @@ unregister(#beamtalk_object{pid = {registered, Name0, Node0}} = Self) when
             ?BT_ACTOR_WIRE_MODULE,
             unregister,
             [Self#beamtalk_object{pid = {registered, Name0}}],
-            ?BT_REMOTE_CALL_TIMEOUT
+            ?BT_REMOTE_CALL_TIMEOUT,
+            fun(Answer) -> Answer =:= ok end
         )
     of
         {ok, ok} ->

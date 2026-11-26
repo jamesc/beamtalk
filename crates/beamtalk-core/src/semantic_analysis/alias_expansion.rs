@@ -128,9 +128,6 @@ impl InternalAliasExpander {
                     .map(|p| self.expand_inner(p, active, shadowed))
                     .collect(),
             },
-            DeclaredType::FalseOr(inner) => {
-                DeclaredType::FalseOr(Box::new(self.expand_inner(inner, active, shadowed)))
-            }
             DeclaredType::Shape { fields, open } => DeclaredType::Shape {
                 fields: fields
                     .iter()
@@ -285,11 +282,6 @@ impl InternalAliasExpander {
         }
         for ty in info.state_types.values_mut() {
             *ty = self.expand(ty);
-        }
-        for var in &mut info.class_variables {
-            if let Some(ty) = &mut var.ty {
-                *ty = self.expand(ty);
-            }
         }
     }
 

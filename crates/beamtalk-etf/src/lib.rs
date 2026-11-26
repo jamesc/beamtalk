@@ -161,31 +161,74 @@ pub fn term_to_usize(term: &Term) -> Option<usize> {
 }
 
 /// Extract a list of strings from a `List` term.
+///
+/// `None` if the term is not a list or any element is not a UTF-8 binary; see
+/// [`term_to_string_list_checked`] for the reason.
 #[must_use]
 pub fn term_to_string_list(term: &Term) -> Option<Vec<String>> {
-    match term {
-        Term::List(list) => list.elements.iter().map(term_to_string).collect(),
-        _ => None,
-    }
+    term_to_string_list_checked(term, "list").ok()
+}
+
+/// Extract a list of strings from a `List` term, saying which element is bad.
+///
+/// `field_name` names the field in the error message.
+///
+/// # Errors
+///
+/// The term is not a list, or an element is not a UTF-8 binary.
+pub fn term_to_string_list_checked(term: &Term, field_name: &str) -> Result<Vec<String>, String> {
+    let Term::List(list) = term else {
+        return Err(format!(
+            "{field_name} must be a list of strings, got: {term:?}"
+        ));
+    };
+    list.elements
+        .iter()
+        .enumerate()
+        .map(|(i, element)| {
+            term_to_string(element).ok_or_else(|| {
+                format!("{field_name} element {i} is not a UTF-8 string: {element:?}")
+            })
+        })
+        .collect()
 }
 
 /// Extract a `String -> String` map from an ETF `Map` term.
 ///
-/// Returns `None` if the term is not a map or contains non-string keys/values.
+/// Returns `None` if the term is not a map or contains non-string keys/values;
+/// see [`term_to_string_map_checked`] for the reason.
 #[must_use]
 pub fn term_to_string_map(term: &Term) -> Option<HashMap<String, String>> {
-    match term {
-        Term::Map(m) => {
-            let mut result = HashMap::new();
-            for (k, v) in &m.map {
-                let key = term_to_string(k)?;
-                let val = term_to_string(v)?;
-                result.insert(key, val);
-            }
-            Some(result)
-        }
-        _ => None,
+    term_to_string_map_checked(term, "map").ok()
+}
+
+/// Extract a `String -> String` map from an ETF `Map` term, saying which
+/// entry is bad.
+///
+/// `field_name` names the field in the error message, so callers can surface
+/// the problem rather than silently falling back.
+///
+/// # Errors
+///
+/// The term is not a map, or a key or value is not a UTF-8 binary.
+pub fn term_to_string_map_checked(
+    term: &Term,
+    field_name: &str,
+) -> Result<HashMap<String, String>, String> {
+    let Term::Map(m) = term else {
+        return Err(format!(
+            "{field_name} must be a map of string->string, got: {term:?}"
+        ));
+    };
+    let mut result = HashMap::new();
+    for (k, v) in &m.map {
+        let key =
+            term_to_string(k).ok_or_else(|| format!("{field_name} key is not a string: {k:?}"))?;
+        let val = term_to_string(v)
+            .ok_or_else(|| format!("{field_name} value for '{key}' is not a string: {v:?}"))?;
+        result.insert(key, val);
     }
+    Ok(result)
 }
 
 /// Look up a key (atom name) in an ETF `Map`.
@@ -455,5 +498,45 @@ mod tests {
             }
             _ => panic!("expected Tuple, got {decoded:?}"),
         }
+    }
+    // ── Checked list / map decoding (BT-5195) ───────────────────
+
+    #[test]
+    fn string_list_checked_names_the_bad_element() {
+        let list = Term::from(eetf::List::from(vec![binary(b"ok"), binary(&[0xff, 0xfe])]));
+        let err = term_to_string_list_checked(&list, "args").unwrap_err();
+        assert!(err.contains("args element 1"), "{err}");
+        assert_eq!(term_to_string_list(&list), None);
+
+        let atoms = Term::from(eetf::List::from(vec![atom("not_a_binary")]));
+        assert!(term_to_string_list_checked(&atoms, "args").is_err());
+        assert!(term_to_string_list_checked(&atom("x"), "args").is_err());
+    }
+
+    #[test]
+    fn string_list_checked_accepts_empty_and_valid_lists() {
+        let empty = Term::from(eetf::List::nil());
+        assert_eq!(term_to_string_list_checked(&empty, "args"), Ok(vec![]));
+        let list = Term::from(eetf::List::from(vec![binary(b"a"), binary(b"b")]));
+        assert_eq!(
+            term_to_string_list_checked(&list, "args"),
+            Ok(vec!["a".to_string(), "b".to_string()])
+        );
+    }
+
+    #[test]
+    fn string_map_checked_names_the_bad_entry() {
+        let bad_value = Term::from(Map::from([(binary(b"K"), atom("v"))]));
+        let err = term_to_string_map_checked(&bad_value, "env").unwrap_err();
+        assert!(err.contains("env value for 'K'"), "{err}");
+        let bad_key = Term::from(Map::from([(int_term(1), binary(b"v"))]));
+        assert!(term_to_string_map_checked(&bad_key, "env").is_err());
+        assert!(term_to_string_map_checked(&atom("x"), "env").is_err());
+        assert_eq!(term_to_string_map(&bad_value), None);
+        let good = Term::from(Map::from([(binary(b"K"), binary(b"v"))]));
+        assert_eq!(
+            term_to_string_map_checked(&good, "env").unwrap().get("K"),
+            Some(&"v".to_string())
+        );
     }
 }

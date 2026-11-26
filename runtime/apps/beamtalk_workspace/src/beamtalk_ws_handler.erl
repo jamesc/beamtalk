@@ -26,6 +26,8 @@ accepting any protocol operations.
 ]).
 
 -export([check_upgrade_headers/3]).
+%% BT-5188: the pre-auth identity proof, shared with the Rust clients.
+-export([identity_proof/2]).
 
 -ifdef(TEST).
 -export([actor_snapshot_frames/0]).
@@ -54,22 +56,25 @@ init(Req, Opts) ->
     Peer = cowboy_req:peer(Req),
     case check_upgrade_headers(Origin, Host, BindAddr) of
         ok ->
-            {cowboy_websocket, Req,
-                #ws_state{
-                    authenticated = false,
-                    peer = Peer,
-                    pending_eval = undefined,
-                    io_capture_pid = undefined,
-                    stdin_ref = undefined,
-                    log_subscribed = false
-                },
-                #{idle_timeout => ?AUTH_DEADLINE_MS, max_frame_size => ?PRE_AUTH_MAX_FRAME}};
+            upgrade(Req, Peer);
         {error, Reason} ->
             ?LOG_WARNING("WebSocket upgrade rejected", #{
                 reason => Reason, peer => Peer, domain => [beamtalk, runtime]
             }),
             {ok, cowboy_req:reply(403, #{}, <<"Forbidden">>, Req), []}
     end.
+
+upgrade(Req, Peer) ->
+    {cowboy_websocket, Req,
+        #ws_state{
+            authenticated = false,
+            peer = Peer,
+            pending_eval = undefined,
+            io_capture_pid = undefined,
+            stdin_ref = undefined,
+            log_subscribed = false
+        },
+        #{idle_timeout => ?AUTH_DEADLINE_MS, max_frame_size => ?PRE_AUTH_MAX_FRAME}}.
 
 -doc """
 Validate the `Origin` and `Host` upgrade headers (ADR 0020).
@@ -80,6 +85,12 @@ Validate the `Origin` and `Host` upgrade headers (ADR 0020).
 * `Host` must be a loopback name, the address the listener is bound to, or —
   for a wildcard bind — any IP literal. A DNS-rebinding page reaches the port
   under an attacker-controlled *name*, which this refuses.
+* Operators who reach the port by name (a reverse proxy forwarding `Host`, a
+  Tailscale MagicDNS name) list those names in `BEAMTALK_WS_ALLOWED_HOSTS`
+  (comma-separated hostnames, no ports) or the `beamtalk_workspace` app env
+  `ws_allowed_hosts`. A listed name is accepted for both `Host` and `Origin`
+  (BT-5127). Cookie auth still applies; the list only widens which *names*
+  pass the rebinding check.
 """.
 -spec check_upgrade_headers(binary() | undefined, binary() | undefined, inet:ip_address()) ->
     ok | {error, bad_origin | bad_host}.
@@ -98,7 +109,7 @@ origin_ok(undefined) ->
     true;
 origin_ok(Origin) ->
     case uri_string:parse(Origin) of
-        #{host := H} -> is_loopback_host(H);
+        #{host := H} -> is_loopback_host(H) orelse is_allowed_name(H);
         _ -> false
     end.
 
@@ -108,7 +119,7 @@ host_ok(undefined, _BindAddr) ->
 host_ok(HostHeader, BindAddr) ->
     case uri_string:parse(<<"//", HostHeader/binary>>) of
         #{host := H} ->
-            is_loopback_host(H) orelse is_bound_host(H, BindAddr);
+            is_loopback_host(H) orelse is_bound_host(H, BindAddr) orelse is_allowed_name(H);
         _ ->
             false
     end.
@@ -126,6 +137,35 @@ is_loopback_host(H0) ->
             end
     end.
 
+%% BT-5127: operator-listed hostnames (see `check_upgrade_headers/3`).
+is_allowed_name(H0) ->
+    H = string:lowercase(H0),
+    lists:member(H, allowed_names()).
+
+allowed_names() ->
+    FromEnv =
+        case os:getenv("BEAMTALK_WS_ALLOWED_HOSTS") of
+            false -> [];
+            Str -> string:tokens(Str, ", ")
+        end,
+    FromApp = application:get_env(beamtalk_workspace, ws_allowed_hosts, []),
+    [Name || Raw <- FromEnv ++ FromApp, {ok, Name} <- [allowed_name(Raw)]].
+
+%% BT-5185: one name as a lowercase UTF-8 binary, or `skip`. An entry that is
+%% not valid Unicode (or not a string at all) is ignored, not a crash on every
+%% upgrade: `list_to_binary/1` raised on any character above 255. A non-ASCII
+%% name can never equal a `Host` header (those are ASCII/IDNA), so skipping it
+%% loses nothing.
+allowed_name(Raw) when is_list(Raw); is_binary(Raw) ->
+    try unicode:characters_to_binary(Raw) of
+        Bin when is_binary(Bin), Bin =/= <<>> -> {ok, string:lowercase(Bin)};
+        _ -> skip
+    catch
+        error:badarg -> skip
+    end;
+allowed_name(_) ->
+    skip.
+
 is_bound_host(H, BindAddr) ->
     case inet:parse_address(binary_to_list(H)) of
         {ok, Addr} ->
@@ -140,6 +180,26 @@ WebSocket connection initialized — send auth challenge.
 Session is NOT created yet; deferred until after successful auth (security).
 """.
 websocket_init(State) ->
+    %% BT-5127: count this connection (ranch stops counting it at upgrade). This
+    %% must run here, not in `init/2`: `init/2` runs in cowboy's short-lived
+    %% request process, while this and `terminate/3` run in the process that
+    %% owns the socket. Over the cap: close with 1013 (try again later).
+    %% Monitor the cap table's owner first, so an owner restart between the
+    %% two calls still reaches this handler (BT-5185).
+    OwnerMon = beamtalk_ws_conn_cap:monitor_owner(),
+    case beamtalk_ws_conn_cap:acquire() of
+        ok ->
+            websocket_init_accepted(State#ws_state{cap_owner_mon = OwnerMon});
+        {error, at_capacity} ->
+            ?LOG_WARNING("WebSocket refused: unauthenticated connection budget full", #{
+                peer => State#ws_state.peer,
+                limit => beamtalk_ws_conn_cap:preauth_limit(),
+                domain => [beamtalk, runtime]
+            }),
+            {[{close, 1013, <<"Too many connections">>}], State}
+    end.
+
+websocket_init_accepted(State) ->
     %% Send a minimal welcome so clients know the connection is alive.
     %% Session details are sent after successful authentication.
     Welcome = iolist_to_binary(json:encode(#{<<"op">> => <<"auth-required">>})),
@@ -172,6 +232,16 @@ websocket_handle(_Frame, State) ->
 Handle Erlang messages sent to the handler process.
 Streaming stdout chunk from eval
 """.
+websocket_info({beamtalk_ws_conn_cap, evicted}, State = #ws_state{authenticated = false}) ->
+    %% BT-5185: the pre-auth budget was full and this was the oldest
+    %% unauthenticated socket; a newer one has taken its slot.
+    {[{close, 1013, <<"Too many unauthenticated connections">>}], State};
+websocket_info(
+    {'DOWN', Ref, process, _Owner, _Reason}, State = #ws_state{cap_owner_mon = Ref}
+) when Ref =/= undefined ->
+    %% BT-5185: the REPL server (and its connection-cap table) restarted; this
+    %% connection would live on uncounted, so close it (1012: service restart).
+    {[{close, 1012, <<"Server restarting">>}], State#ws_state{cap_owner_mon = undefined}};
 websocket_info(auth_deadline, State = #ws_state{authenticated = false}) ->
     ?LOG_WARNING("WebSocket closed: auth deadline", #{
         peer => State#ws_state.peer, domain => [beamtalk, runtime]
@@ -448,8 +518,10 @@ session_close_code(_Unexpected) -> 1011.
 
 -doc "Connection terminated — clean up or keep session for resume.".
 terminate(_Reason, _Req, #ws_state{session_id = undefined}) ->
-    ok;
+    beamtalk_ws_conn_cap:release();
 terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = SessionPid, peer = Peer}) ->
+    %% BT-5127: give the connection-cap slot back.
+    beamtalk_ws_conn_cap:release(),
     ?LOG_INFO("WebSocket client disconnected", #{
         session => SessionId,
         session_pid => SessionPid,
@@ -459,9 +531,9 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
     %% Unsubscribe from all live push streams (Transcript, actors,
     %% classes, bindings, flush) via the stable facade.
     beamtalk_repl_subscriptions:unsubscribe_all(),
-    %% Unsubscribe from log streaming — a separate diagnostic stream,
-    %% not part of the workspace push-stream facade.
-    beamtalk_ws_log_handler:unsubscribe(),
+    %% Unsubscribe from log streaming — a separate diagnostic stream, named by
+    %% the same facade (`subscribe_logs/1`, BT-5206).
+    beamtalk_repl_subscriptions:unsubscribe_logs(),
     %% Keep the session alive so the client can resume it, but don't stop it or
     %% delete its table row here. The shell monitors this connection process
     %% (`beamtalk_repl_shell:attach/2`), so it notices the disconnect itself: it
@@ -499,6 +571,31 @@ decode_auth_frame(Data) ->
         error:_ -> error
     end.
 
+-doc """
+The identity proof for `Challenge` (BT-5188): lowercase hex SHA-256 of
+`beamtalk-workspace-identity`, the port-file `Nonce` and `Challenge`,
+newline-separated. Must match `beamtalk_repl_protocol::handshake::identity_proof`
+in Rust; both are pinned to the `identity_reply` vector in
+`ws_auth_handshake_wire_corpus.json`.
+""".
+-spec identity_proof(binary(), binary()) -> binary().
+identity_proof(Nonce, Challenge) ->
+    Digest = crypto:hash(
+        sha256, <<"beamtalk-workspace-identity\n", Nonce/binary, "\n", Challenge/binary>>
+    ),
+    binary:encode_hex(Digest, lowercase).
+
+%% The nonce this node wrote to its port file, or `error` while the REPL
+%% server is not running (the identify request then fails like a malformed
+%% one, and the client does not send its cookie).
+-spec current_nonce() -> {ok, binary()} | error.
+current_nonce() ->
+    try beamtalk_repl_server:get_nonce() of
+        {ok, Nonce} -> {ok, Nonce}
+    catch
+        exit:_ -> error
+    end.
+
 -doc "Reject an auth frame that did not parse: one generic reply, then close.".
 -spec auth_malformed(#ws_state{}) -> {list(), #ws_state{}}.
 auth_malformed(State) ->
@@ -514,6 +611,37 @@ auth_malformed(State) ->
     {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}.
 
 -spec handle_auth_message(term(), #ws_state{}) -> {list(), #ws_state{}}.
+handle_auth_message(
+    #{<<"type">> := <<"identify">>, <<"challenge">> := Challenge}, State
+) when
+    is_binary(Challenge), byte_size(Challenge) >= 16, byte_size(Challenge) =< 256
+->
+    %% BT-5188: prove, before any cookie is sent, that this node is the
+    %% workspace whose port file names this port. Only the node that wrote
+    %% the port file knows its nonce; the client's fresh challenge makes an
+    %% observed proof useless for a later connection. The connection stays
+    %% unauthenticated (the pre-auth deadline and frame cap still apply).
+    case current_nonce() of
+        {ok, Nonce} ->
+            Reply = iolist_to_binary(
+                json:encode(#{
+                    <<"type">> => <<"identity">>,
+                    <<"proof">> => identity_proof(Nonce, Challenge)
+                })
+            ),
+            {[{text, Reply}], State};
+        error ->
+            ?LOG_WARNING("WebSocket identify failed: REPL server nonce unavailable", #{
+                peer => State#ws_state.peer, domain => [beamtalk, runtime]
+            }),
+            Reply = iolist_to_binary(
+                json:encode(#{
+                    <<"type">> => <<"auth_error">>,
+                    <<"message">> => <<"Workspace identity unavailable">>
+                })
+            ),
+            {[{text, Reply}, {close, 1011, <<"Identity unavailable">>}], State}
+    end;
 handle_auth_message(Decoded, State) ->
     case Decoded of
         #{<<"type">> := <<"auth">>, <<"cookie">> := ProvidedCookie} = AuthMsg when
@@ -565,7 +693,7 @@ handle_auth_message(Decoded, State) ->
                                 peer => format_peer(State#ws_state.peer),
                                 connected_at => erlang:system_time(microsecond)
                             },
-                            start_or_resume_session(
+                            admit_and_start(
                                 ResumeId, Meta, State#ws_state{shutdown_only = ShutdownOnly}
                             );
                         {error, VersionMessage} ->
@@ -606,6 +734,28 @@ handle_auth_message(Decoded, State) ->
                 })
             ),
             {[{text, Reply}, {close, 1008, <<"Authentication required">>}], State}
+    end.
+
+-doc """
+Take an authenticated connection slot, then start or resume the session
+(BT-5185). The slot comes first, so a socket refused at the authenticated cap
+(or evicted from the pre-auth budget meanwhile) never starts a session.
+""".
+-spec admit_and_start(binary() | undefined, map(), #ws_state{}) -> {list(), #ws_state{}}.
+admit_and_start(ResumeId, Meta, State) ->
+    case beamtalk_ws_conn_cap:promote() of
+        ok ->
+            start_or_resume_session(ResumeId, Meta, State);
+        {error, at_capacity} ->
+            ?LOG_WARNING("WebSocket refused after auth: authenticated connection cap reached", #{
+                peer => State#ws_state.peer,
+                limit => beamtalk_ws_conn_cap:limit(),
+                domain => [beamtalk, runtime]
+            }),
+            {[{close, 1013, <<"Too many connections">>}], State};
+        {error, evicted} ->
+            %% Evicted from the pre-auth budget while this auth was in flight.
+            {[{close, 1013, <<"Too many unauthenticated connections">>}], State}
     end.
 
 -doc """
@@ -829,7 +979,9 @@ start_or_resume_session(ResumeId, Meta, State) when is_binary(ResumeId) ->
         {ok, Pid} ->
             %% attach/2 is a call (BT-5084): `gone` means the shell stopped (idle
             %% timeout) between the lookup and now, so fall back to a new session.
-            case is_process_alive(Pid) andalso beamtalk_repl_shell:attach(Pid, self()) =:= ok of
+            case
+                is_process_alive(Pid) andalso beamtalk_repl_ops:attach_session(Pid, self()) =:= ok
+            of
                 true ->
                     MonRef = erlang:monitor(process, Pid),
                     ?LOG_INFO("WebSocket session resumed", #{
@@ -892,7 +1044,7 @@ maybe_subscribe_all(_State) -> beamtalk_repl_subscriptions:subscribe_all().
 
 -doc "Create a fresh session and send auth_ok + session-started messages.".
 create_session(SessionId, Meta, State) ->
-    case beamtalk_session_sup:start_session(SessionId, Meta) of
+    case beamtalk_repl_ops:start_session(SessionId, Meta) of
         {ok, SessionPid} ->
             MonRef = erlang:monitor(process, SessionPid),
             beamtalk_session_table:insert(SessionId, SessionPid),
@@ -902,7 +1054,7 @@ create_session(SessionId, Meta, State) ->
                 peer => State#ws_state.peer,
                 domain => [beamtalk, runtime]
             }),
-            _ = beamtalk_repl_shell:attach(SessionPid, self()),
+            _ = beamtalk_repl_ops:attach_session(SessionPid, self()),
             beamtalk_workspace_meta:update_activity(),
             %% Subscribe to all live push streams (Transcript, actors,
             %% classes, bindings, flush) via the stable facade. ADR 0082 Phase 3:
@@ -1454,7 +1606,7 @@ do_subscribe_logs(Msg, State) ->
     Params = beamtalk_repl_protocol:get_params(Msg),
     case parse_log_level(maps:get(<<"level">>, Params, undefined)) of
         {ok, Level} ->
-            beamtalk_ws_log_handler:subscribe(Level),
+            beamtalk_repl_subscriptions:subscribe_logs(Level),
             Response = beamtalk_repl_protocol:encode_status(
                 ok, Msg, fun beamtalk_repl_json:term_to_json/1
             ),
@@ -1466,7 +1618,7 @@ do_subscribe_logs(Msg, State) ->
     end.
 
 handle_unsubscribe_logs(Msg, State) ->
-    beamtalk_ws_log_handler:unsubscribe(),
+    beamtalk_repl_subscriptions:unsubscribe_logs(),
     Response = beamtalk_repl_protocol:encode_status(
         ok, Msg, fun beamtalk_repl_json:term_to_json/1
     ),

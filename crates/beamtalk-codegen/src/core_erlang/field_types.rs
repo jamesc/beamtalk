@@ -26,12 +26,11 @@
 //!   general guard instead, which dispatches `nil` to a
 //!   `does_not_understand` (BT-3924). Every other shape
 //!   (generic, singleton, false-or, …) is an object type and is guarded.
-//! * An **untyped** field — `state:`, `field:` or `classState:`, of any class
+//! * An **untyped** field — `state:` or `field:`, of any class
 //!   kind, whatever its default — is always guarded
 //!   ([`FieldTypeFact::Untyped`]). A field's writers are not all in its class
 //!   source: `spawnWith:`, a Value's keyword constructor, `fieldAt:put:`, a
-//!   subclass assigning an inherited field, an inherited class method running
-//!   over a redeclared `classState:` (ADR 0130) or a class-side extension can
+//!   subclass assigning an inherited field, or a class-side extension can
 //!   each store an object in a field whose default is `0` (BT-3925). The
 //!   guard is a type test on the hot path and measured no slower than the
 //!   bare BIF on the Actor counter benchmark
@@ -59,15 +58,16 @@ pub(in crate::core_erlang) const NUMERIC_TYPES: &[&str] = &["Integer", "Float", 
 /// silently (`nil > 10` → `true`).
 ///
 /// Never empty: the fields are private and only [`Self::of_type_name`] and
-/// [`Self::of_declared_type`] build a value, so [`Self::type_tests`] always
-/// has a test to emit.
+/// [`Self::of_declared_type`] build a value, so the comparison guard always
+/// has a test to emit (a number test, a `String` test, or both).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) struct ComparisonKinds {
     /// `Integer`, `Float` or `Number`: tested with `is_number`.
     number: bool,
     /// `Character` (a codepoint integer at runtime): tested with `is_integer`.
     character: bool,
-    /// `String` (a binary at runtime): tested with `is_binary`.
+    /// `String` (the tagged `{beamtalk_string, Bin}` term at runtime,
+    /// BT-4170): tested with the `String` routing guard (BT-5261).
     string: bool,
 }
 
@@ -100,24 +100,31 @@ impl ComparisonKinds {
         }
     }
 
-    /// The `erlang` type-test BIFs that together accept exactly these kinds:
-    /// the first, and a second to `or` with it when a `String` is also held.
-    /// `is_number` covers a `Character`'s `is_integer`, so a numeric
-    /// declaration needs no separate codepoint test.
-    pub(in crate::core_erlang) fn type_tests(self) -> (&'static str, Option<&'static str>) {
-        let numeric = if self.number {
+    /// Whether a number or a `Character` (a codepoint integer) is held: the
+    /// kinds a comparison's number arm accepts.
+    pub(in crate::core_erlang) fn has_number_kind(self) -> bool {
+        self.number || self.character
+    }
+
+    /// The `erlang` type-test BIF of the kinds' number arm, if any:
+    /// `is_number` for a number (it covers a `Character`'s codepoint
+    /// integer too), else `is_integer` for a `Character` alone.
+    pub(in crate::core_erlang) fn number_test(self) -> Option<&'static str> {
+        if self.number {
             Some("is_number")
         } else if self.character {
             Some("is_integer")
         } else {
             None
-        };
-        let string = self.string.then_some("is_binary");
-        match (numeric, string) {
-            (Some(first), second) => (first, second),
-            (None, Some(only)) => (only, None),
-            (None, None) => unreachable!("a ComparisonKinds always holds a kind"),
         }
+    }
+
+    /// Whether a `String` is held: the guard then has a `String` arm, tested
+    /// with the `String` routing guard (the tagged `{beamtalk_string, Bin}`
+    /// term, BT-4170), never `is_binary` (a raw binary is a `Binary`,
+    /// BT-5261).
+    pub(in crate::core_erlang) fn holds_string(self) -> bool {
+        self.string
     }
 
     fn union(self, other: Self) -> Self {
@@ -197,7 +204,7 @@ fn is_nil_type(ty: &DeclaredType) -> bool {
     matches!(ty, DeclaredType::Simple(name) if name == "Nil" || name == "UndefinedObject")
 }
 
-/// Classifies every field in `decls` (`state:`/`field:` or `classState:`) by
+/// Classifies every field in `decls` (`state:`/`field:`) by
 /// its declaration alone: an annotated field records its declared type, an
 /// untyped one is [`FieldTypeFact::Untyped`] (BT-3925).
 pub(in crate::core_erlang) fn classify_fields(
@@ -292,10 +299,6 @@ mod tests {
         classify_fields(&parse_class(src).state)
     }
 
-    fn class_side_facts(src: &str) -> HashMap<String, FieldTypeFact> {
-        classify_fields(&parse_class(src).class_variables)
-    }
-
     fn numeric(facts: &HashMap<String, FieldTypeFact>, f: &str) -> bool {
         facts[f].is_numeric()
     }
@@ -326,20 +329,6 @@ mod tests {
     }
 
     #[test]
-    fn untyped_class_variables_are_never_trusted_even_in_a_sealed_class() {
-        for src in [
-            "Object subclass: H\n  classState: hits = 0\n  \
-             class bump => self.hits := self.hits + 1\n",
-            "sealed Object subclass: H\n  classState: hits = 0\n  \
-             class bump => self.hits := self.hits + 1\n",
-        ] {
-            let facts = class_side_facts(src);
-            assert_eq!(facts["hits"], FieldTypeFact::Untyped, "{src}");
-            assert!(!numeric(&facts, "hits"));
-        }
-    }
-
-    #[test]
     fn numeric_annotation_is_the_fast_path() {
         let facts = instance_facts(
             "Actor subclass: C\n  state: count :: Integer = 0\n  \
@@ -348,9 +337,6 @@ mod tests {
         for f in ["count", "total", "n"] {
             assert!(numeric(&facts, f) && comparable(&facts, f), "{f}");
         }
-        let class_side =
-            class_side_facts("Object subclass: H\n  classState: hits :: Integer = 0\n");
-        assert!(numeric(&class_side, "hits"));
     }
 
     #[test]

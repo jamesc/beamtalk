@@ -1,0 +1,85 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+name: Dependabot auto-merge
+
+# BT-5254: main requires `ci-ok`, "Claude BeamTalk Review" and one approval, with
+# no admin bypass. The Claude review skips bot authors (its `if` only admits the
+# trusted authors), and a skipped job counts as a passing required check, so a
+# dependabot PR was only ever missing the approval. This workflow supplies it:
+# for a dependabot PR whose every updated dependency is a patch or minor bump, it
+# approves the PR and turns on squash auto-merge. Majors, and anything the
+# dependency metadata cannot classify, are left for the weekly fold-in session.
+# With the merge queue (BT-5247) auto-merge enqueues the PR once `ci-ok` is green.
+#
+# Safety (the `pull_request_target` pitfall): that trigger gives a write token and
+# runs the workflow file from the base branch, so nothing here may run PR code.
+# * No checkout, no action that builds or runs the PR's files. fetch-metadata
+#   reads the PR's title/body/commits through the API only.
+# * Every job runs only when both the PR author and the event's actor are
+#   `dependabot[bot]` and the head branch is in this repo. A person pushing to a
+#   dependabot branch makes the actor a person, so the job skips.
+# * Values from the event reach the shell only through `env:`, never `${{ }}`
+#   inside `run:`.
+# Repo settings needed: "Allow GitHub Actions to create and approve pull requests"
+# (Settings -> Actions -> General) and "Allow auto-merge" (Settings -> General).
+# CI (`ci-ok`) is the only gate on a bump: a 0.x minor counts as a minor. Pinned by scripts/ci/test_dependabot_auto.py.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+jobs:
+  auto-merge:
+    name: Dependabot approve and auto-merge
+    runs-on: ubuntu-latest
+    if: |
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    timeout-minutes: 5
+    # On the job, not the workflow: a skipped job (a person reopening the PR, say)
+    # never joins the group, so it cannot cancel a dependabot run mid-approval.
+    concurrency:
+      group: dependabot-auto-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: write       # `gh pr merge --auto` (enable auto-merge)
+      pull-requests: write  # approve the PR
+    steps:
+      - name: Fetch dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@21025c705c08248db411dc16f3619e6b5f9ea21a # v2.5.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Grouped PRs carry several dependencies; every one must be patch or minor.
+      - name: Classify the update
+        id: classify
+        env:
+          UPDATED: ${{ steps.metadata.outputs.updated-dependencies-json }}
+        run: |
+          if printf '%s' "$UPDATED" | jq -e '
+              type == "array" and length > 0 and
+              all(.[]; .updateType == "version-update:semver-patch"
+                       or .updateType == "version-update:semver-minor")' >/dev/null; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "Not auto-merging: a dependency is a major bump or has no semver update type."
+          fi
+
+      - name: Approve
+        if: steps.classify.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr review --approve "$PR_URL"
+
+      - name: Enable squash auto-merge
+        if: steps.classify.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"

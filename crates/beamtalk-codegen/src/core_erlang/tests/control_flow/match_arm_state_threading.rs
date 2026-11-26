@@ -707,3 +707,128 @@ fn test_value_type_field_write_in_match_arm_value_block_local_assign_wrapped_is_
         ),
     }
 }
+
+/// BT-5281: a `match:` whose arm needs `State` threading (here a nested
+/// `ifTrue:` that assigns a local) lowered in a frame whose scratch map is
+/// private: the plain closure the inner conditional's non-Boolean fallback
+/// sends (BT-3912's closure body frame). It keeps its `{Value, State}` tuple
+/// private there, as a conditional producer does, rather than raising the
+/// ADR 0131 §3 internal error. Two guard-style `^nil`s (BT-4415) nest the
+/// rest of the method exactly like this, which is how beamtalk-exdura hit it.
+#[test]
+fn test_match_in_private_scratch_closure_frame_compiles() {
+    let nested = concat!(
+        "Actor subclass: MatchPrivateScratch\n",
+        "  state: n = 0\n\n",
+        "  run: x =>\n",
+        "    x isNil ifTrue: [nil] ifFalse: [\n",
+        "      x isNil ifTrue: [nil] ifFalse: [\n",
+        "        x match: [_ -> x > 0 ifTrue: [p := x. self.n := p]]\n",
+        "        self.n]]\n",
+    );
+    let guards = concat!(
+        "Actor subclass: MatchPrivateScratch\n",
+        "  state: n = 0\n\n",
+        "  run: x =>\n",
+        "    x isNil ifTrue: [^nil]\n",
+        "    x isNil ifTrue: [^nil]\n",
+        "    x match: [_ -> x > 0 ifTrue: [p := x. self.n := p]]\n",
+        "    self.n\n",
+    );
+    // A direct-params loop body and a fold body are private-scratch frames
+    // too (`conditional_has_private_scratch`); the same `match:` in each.
+    let direct_params_loop = concat!(
+        "Actor subclass: MatchPrivateScratch\n",
+        "  state: n = 0\n\n",
+        "  run =>\n",
+        "    count := 0\n",
+        "    1 to: 3 do: [:i | count := count + 1. i match: [_ -> i > 0 ifTrue: [p := i]]]\n",
+        "    count\n",
+    );
+    let fold = concat!(
+        "Actor subclass: MatchPrivateScratch\n",
+        "  state: n = 0\n\n",
+        "  run: xs =>\n",
+        "    xs inject: 0 into: [:a :i | i match: [_ -> i > 0 ifTrue: [p := i]]. a + i]\n",
+    );
+    for src in [direct_params_loop, fold] {
+        assert_parses(src);
+        let code = codegen_named(src, "matchprivatescratch");
+        assert_compiles_through_erlc("matchprivatescratch", &code);
+    }
+    for src in [nested, guards] {
+        assert_parses(src);
+        // A debug-build verifier finding panics, so this also proves the
+        // lowering is `verify()`-clean.
+        let code = codegen_named(src, "matchprivatescratch");
+        assert_compiles_through_erlc("matchprivatescratch", &code);
+        // The arm's field write inside the fallback closure goes through the
+        // actor-state cell, not into the private scratch map nothing adopts.
+        assert_has(
+            "fallback closure writes the field through the cell",
+            &code,
+            &["call 'beamtalk_actor_state':'put'(Self, 'n'"],
+        );
+    }
+}
+
+/// BT-5281: the invariant behind keeping a private-scratch `match:` tuple
+/// private: no field write is lowered on a private scratch map outside an
+/// actor closure's cell mode (`VerifyError::FieldWriteOnPrivateScratch`). A
+/// loop whose body holds a `match:` with a field-writing arm threads `State`
+/// and is verifier-clean; forced onto the direct-params shape (fault
+/// `StatelessFieldWrites`), the arm's write would be dropped with the scratch
+/// map, and the verifier reports it where it is lowered.
+#[test]
+fn test_match_arm_field_write_on_private_scratch_is_reported() {
+    use crate::core_erlang::fault::Fault;
+    for (name, body) in [
+        (
+            "to_do_nested_arm",
+            "1 to: 2 do: [:x | t := t + x. x match: [_ -> x > 0 ifTrue: [d := x. self.n := d]]]",
+        ),
+        (
+            "while_nested_arm",
+            "m := 0. [m < 2] whileTrue: [m := m + 1. t := t + m. m match: [_ -> m > 0 ifTrue: [d := m. self.n := d]]]",
+        ),
+    ] {
+        let src = format!(
+            "Actor subclass: MatchLoopWrite\n  state: n = 0\n\n  run =>\n    t := 0\n    {body}\n    #[t, self.n]\n"
+        );
+        assert_parses(&src);
+        assert_eq!(
+            verifier_report(&src, None),
+            None,
+            "{name}: clean without the fault:\n{src}"
+        );
+        let report = verifier_report(&src, Some(Fault::StatelessFieldWrites))
+            .unwrap_or_else(|| panic!("{name}: faulted compile should report:\n{src}"));
+        assert!(
+            report.contains("FieldWriteOnPrivateScratch"),
+            "{name}: expected FieldWriteOnPrivateScratch, got:\n{report}\n{src}"
+        );
+    }
+}
+
+/// BT-5289: a `match:` whose scrutinee advances `State` (a send run in a
+/// `SyncedCall` window, a self-send) and whose arm writes a field, as a
+/// statement of a conditional arm (the issue's repro, and the two-guard form
+/// BT-4415 nests the same way) and of a loop body. Its scrutinee is sequenced
+/// into the statement's frame (`sequenced_construct_operand`), so each is
+/// `verify()`-clean and compiles through erlc. The generated corpus is
+/// `tests/match_scrutinee_frame_corpus.rs`.
+#[test]
+fn test_match_with_state_advancing_scrutinee_in_nested_frames_compiles() {
+    let header = "Actor subclass: MatchSentScrutinee\n  state: total = 0\n\n  bump =>\n    self.total := self.total + 1\n    self.total\n\n";
+    for body in [
+        "    items isNil ifTrue: [nil] ifFalse: [items first match: [_ -> items > 0 ifTrue: [self.total := items]]]\n    self.total\n",
+        "    items isNil ifTrue: [^nil]\n    items isNil ifTrue: [^nil]\n    items first match: [_ -> items > 0 ifTrue: [self.total := items]]\n    self.total\n",
+        "    1 to: 3 do: [:i | self bump match: [k :: Integer -> self.total := self.total + k; _ -> nil]]\n    self.total\n",
+    ] {
+        let src = format!("{header}  classify: items =>\n{body}");
+        assert_parses(&src);
+        assert_eq!(verifier_report(&src, None), None, "{src}");
+        let code = codegen_named(&src, "matchsentscrutinee");
+        assert_compiles_through_erlc("matchsentscrutinee", &code);
+    }
+}

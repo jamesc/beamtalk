@@ -536,7 +536,7 @@ mod tests {
     fn sig_help_at(source: &str, position: Position) -> Option<SignatureHelp> {
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
         compute_signature_help(&module, source, position, &hierarchy, None, None, None)
     }
 
@@ -570,7 +570,7 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, diags) = parse(tokens);
         assert!(diags.is_empty(), "Parse errors: {diags:?}");
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         // Position in `self add: 1 to: 2` — cursor on `to:` (line 2, col 23)
         // Line 2: "  run => self add: 1 to: 2"
@@ -605,7 +605,7 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (module, diags) = parse(tokens);
         assert!(diags.is_empty(), "Parse errors: {diags:?}");
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         // Cursor right after `add:` — should be param 0
         // Line 2: "  run => self add: 1 to: 2"
@@ -657,7 +657,7 @@ mod tests {
         let source = "Erlang lists seq: 1 to: 10";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         let mut registry = NativeTypeRegistry::new();
         registry.register_module(
@@ -713,7 +713,7 @@ mod tests {
         let source = "Erlang lists seq: 1 to: 10";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let hierarchy = ClassHierarchy::build(&module).0;
 
         // Without registry, signature help should still work (falls through to normal resolution)
         let result = compute_signature_help(
@@ -900,7 +900,7 @@ mod tests {
     fn ordinary_receiver_unchanged_with_project_registry() {
         let source = "Protocol define: Wire\n  class label -> String\n\nObject subclass: Calc\n  add: a :: Integer to: b :: Integer -> Integer => a + b\n  run => self add: 1 to: 2\n";
         let (module, _) = parse(lex_with_eof(source));
-        let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut hierarchy = ClassHierarchy::build(&module).0;
         hierarchy.register_protocol_classes(&module);
         let mut registry = ProtocolRegistry::new();
         let _ = registry.seed_and_register_module(&module, Vec::new(), &hierarchy, None);

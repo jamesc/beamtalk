@@ -8,8 +8,9 @@ defmodule BtAttach.SessionTeardownTest do
   The `e2e` job's "closing a tab tears down its session" test checks the same
   guarantee against a real workspace, but it can only observe the workspace-wide
   session count, which every other tab also moves. These tests mock the one
-  workspace call the registry makes (`beamtalk_session_sup:stop_session/1`, via
-  `:erpc`) and assert exactly WHICH session it is asked to stop and when.
+  workspace call the registry makes (the `close` operation dispatched through
+  `beamtalk_repl_ops:request/3` with the session as its SessionPid, BT-5199 and
+  BT-5201, via `:erpc`) and assert exactly WHICH session it is asked to stop and when.
 
   `async: false`: `:meck` replaces `:erpc` for the whole VM (see
   `workspace_rpc_test.exs` for the same arrangement and why it is safe).
@@ -25,9 +26,9 @@ defmodule BtAttach.SessionTeardownTest do
     :meck.new(:erpc, [:unstick, :passthrough])
 
     :meck.expect(:erpc, :call, fn
-      _node, :beamtalk_session_sup, :stop_session, [pid], _timeout ->
+      _node, :beamtalk_repl_ops, :request, ["close", _params, pid], _timeout ->
         send(test, {:stop_session, pid})
-        :ok
+        {:status, :ok}
 
       node, mod, fun, args, timeout ->
         :meck.passthrough([node, mod, fun, args, timeout])
@@ -88,6 +89,21 @@ defmodule BtAttach.SessionTeardownTest do
     assert_receive {:stop_session, ^closed_session}, 1_000
     refute_receive {:stop_session, ^open_session}, 4 * @reap_ms
     assert {:resumed, "s-open", ^open_session} = SessionRegistry.checkout(reg, "open")
+  end
+
+  test "a graceful registry stop closes every live session before exit (BT-5129)" do
+    name = :"graceful_reg_#{System.unique_integer([:positive])}"
+    start_supervised!({SessionRegistry, name: name, reap_after_ms: 60_000}, id: :graceful)
+    a = session()
+    b = session()
+    lv = liveview()
+    :ok = via(lv, fn -> SessionRegistry.register(name, "a", "s-a", a) end)
+    :ok = via(lv, fn -> SessionRegistry.register(name, "b", "s-b", b) end)
+
+    :ok = stop_supervised(:graceful)
+
+    assert_receive {:stop_session, ^a}, 1_000
+    assert_receive {:stop_session, ^b}, 1_000
   end
 
   test "a tab that reconnects within the grace window keeps its session", %{reg: reg} do

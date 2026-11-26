@@ -72,9 +72,8 @@ pub(crate) fn fixture_module_name(fixture_path: &Utf8Path) -> Result<String> {
 
 /// The checker scope for a test/fixture file (BT-4334): by the shared
 /// [`manifest::package_checker_scope`](beamtalk_package::manifest::package_checker_scope)
-/// rule, a file inside a package is analysed with project-complete knowledge and
-/// "has dependencies" as unknown-extension surface, a manifest-less file keeps
-/// the conservative `ModuleOnly` default - the same split `build` makes.
+/// rule, a file inside a package is analysed with project-complete knowledge, a
+/// manifest-less file keeps the conservative `ModuleOnly` default - the same split `build` makes.
 pub(crate) fn test_compile_scope(
     source_path: &Utf8Path,
 ) -> beamtalk_package::manifest::PackageCheckerScope {
@@ -125,9 +124,7 @@ impl FixtureCompiler<'_> {
                 // BT-4334: declare the checker scope `build` does. Without
                 // `ProjectComplete`, cross-file receivers stay `Open` and their
                 // DNU/Type diagnostics are suppressed, so `test
-                // --warnings-as-errors` would pass code the REPL rejects. The
-                // pre-WS3 dependency guard starts on whenever the package has
-                // dependencies (ADR 0070 WS3, BT-4608), as for `build`; and
+                // --warnings-as-errors` would pass code the REPL rejects.
                 // `current_package: Some(_)` makes the E0401/E0402 visibility
                 // checks fire.
                 let scope = test_compile_scope(source_path);
@@ -138,7 +135,6 @@ impl FixtureCompiler<'_> {
                     suppress_warnings: *suppress_warnings,
                     current_package: current_package.map(str::to_string),
                     knowledge_scope: scope.knowledge_scope,
-                    dependency_extensions_unknown: scope.has_package_dependencies,
                     // ADR 0070 Phase 2: `pkg@Class` must name a declared
                     // dependency, the package itself or the stdlib.
                     known_packages: scope.known_packages.clone(),
@@ -164,7 +160,6 @@ impl FixtureCompiler<'_> {
                     warnings_as_errors: self.warnings_as_errors,
                     current_package: None,
                     knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope::default(),
-                    dependency_extensions_unknown: false,
                     // No manifest, so no package set to validate against.
                     known_packages: None,
                     // No project on disk whose dependency/native modules could

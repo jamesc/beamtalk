@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5213: an actor whose methods order a String and a Symbol against an
+// argument, so `string_symbol_comparison_test.bt` can check that the
+// wrong-kind `type_error` crosses the actor boundary intact.
+
+Actor subclass: StringCompareActor
+
+  lt: x => "m" < x
+
+  symGt: x => #m > x

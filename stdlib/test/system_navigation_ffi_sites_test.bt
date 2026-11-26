@@ -50,7 +50,6 @@ TestCase subclass: SystemNavigationFfiSitesTest
     self assert: (SystemNavigation class includesSelector: #parseFfiSpec:)
     self assert: (SystemNavigation class includesSelector: #collectFfiSitesFor:function:arity:in:into:)
     self assert: (SystemNavigation class includesSelector: #appendFfiSitesIn:module:function:arity:owner:methodSelector:into:)
-    self assert: (SystemNavigation class includesSelector: #collectExtensionFfiSitesFor:function:arity:into:)
 
   // --- spec validation (decided by parseFfiSpec:, not the compiler port) ---
   //

@@ -13,7 +13,7 @@ Tests class-side method dispatch, metaclass lookup, and class object behaviour.
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
--export([class_lcRead/1, class_lcWrite/1, class_lcSelf/1]).
+-export([class_lcSelf/1]).
 
 %%====================================================================
 %% Setup/Teardown
@@ -104,8 +104,6 @@ teardown(_) ->
             beamtalk_class_DocDefaultTest,
             beamtalk_class_DocSetGetTest,
             beamtalk_class_MethodDocTest,
-            beamtalk_class_ClassVarDefaultTest,
-            beamtalk_class_ClassVarSetGetTest,
             beamtalk_class_ConstructibleDefaultTest,
             beamtalk_class_HandleInfoTest,
             beamtalk_class_InstanceMethodsTest,
@@ -165,10 +163,9 @@ all_groups_test_() ->
             fun new_on_primitive_not_double_wrapped_group/0,
             fun qualified_drain_isolates_packages_group/0,
             fun apply_class_info_corrects_stale_superclass_group/0,
-            fun local_call_snapshot_group/0,
+            fun local_call_group/0,
             fun put_class_method_arity_group/0,
             fun crash_recovery_restart_group/0,
-            fun bt1982_set_class_var_unknown_raises_group/0,
             fun bt1982_new_on_abstract_class_errors_group/0,
             fun bt1982_update_class_unknown_group/0,
             fun bt1982_code_change_delegates_group/0,
@@ -1372,8 +1369,7 @@ test_local_call_success() ->
         name => 'LocalCallTestClass',
         module => beamtalk_class_dispatch_test_helper,
         superclass => none,
-        class_methods => #{testSuccess => <<>>},
-        class_state => #{}
+        class_methods => #{testSuccess => <<>>}
     },
     {ok, Pid} = beamtalk_object_class:start_link('LocalCallTestClass', ClassInfo),
     ClassObj = #beamtalk_object{
@@ -1389,8 +1385,7 @@ test_local_call_keyword_arg() ->
         name => 'LocalCallKwTestClass',
         module => beamtalk_class_dispatch_test_helper,
         superclass => none,
-        class_methods => #{'testWith:' => <<>>},
-        class_state => #{}
+        class_methods => #{'testWith:' => <<>>}
     },
     {ok, Pid} = beamtalk_object_class:start_link('LocalCallKwTestClass', ClassInfo),
     ClassObj = #beamtalk_object{
@@ -1406,8 +1401,7 @@ test_local_call_method_not_found() ->
         name => 'LocalCallDnuTestClass',
         module => beamtalk_class_dispatch_test_helper,
         superclass => none,
-        class_methods => #{},
-        class_state => #{}
+        class_methods => #{}
     },
     {ok, Pid} = beamtalk_object_class:start_link('LocalCallDnuTestClass', ClassInfo),
     ClassObj = #beamtalk_object{
@@ -1426,43 +1420,35 @@ test_local_call_non_class_receiver() ->
         class_mod = counter,
         pid = self()
     },
-    ?assertBtError(type_error, beamtalk_object_class:local_call(FakeActor, testSuccess, [])).
+    ?assertBtError(
+        type_error, _, testSuccess, beamtalk_object_class:local_call(FakeActor, testSuccess, [])
+    ).
 
 test_local_call_non_object() ->
-    ?assertBtError(type_error, beamtalk_object_class:local_call(not_an_object, testSuccess, [])).
+    ?assertBtError(
+        type_error, _, testSuccess, beamtalk_object_class:local_call(not_an_object, testSuccess, [])
+    ).
 
 %%====================================================================
-%% local_call/3 class-variable snapshot region (ADR 0130 §5, BT-3708)
+%% local_call/3 runs in the caller (ADR 0153)
 %%====================================================================
 
-%% Class methods the local_call/3 snapshot tests reach (`class_mod = ?MODULE`).
-class_lcRead(ClassSelf) -> beamtalk_class_vars:get(ClassSelf, n).
-class_lcWrite(ClassSelf) -> beamtalk_class_vars:put(ClassSelf, n, 99).
+%% Class methods the local_call/3 tests reach (`class_mod = ?MODULE`).
 class_lcSelf(ClassSelf) -> ClassSelf.
 
-local_call_snapshot_group() ->
+local_call_group() ->
     {foreach, fun setup/0, fun teardown/1, [
-        {"passes the receiver as ClassSelf, not nil", fun test_local_call_passes_receiver/0},
-        {"reads the mirror snapshot", fun test_local_call_reads_snapshot/0},
-        {"write raises class_state_read_only and erases the snapshot",
-            fun test_local_call_write_raises/0},
-        {"mid-invocation on the same class reads and writes the live map",
-            fun test_local_call_live_same_class/0},
-        {"mid-invocation of X calling performLocally: on Y keeps X's home",
-            fun test_local_call_other_class_keeps_home/0}
+        {"passes the receiver as ClassSelf, not nil", fun test_local_call_passes_receiver/0}
     ]}.
 
-lc_class(Name, N) ->
+lc_class(Name) ->
     ClassInfo = #{
         name => Name,
         module => ?MODULE,
         superclass => none,
-        %% BT-4300: performLocally: resolves through the published class-method
+        %% BT-4300: local_call/3 resolves through the published class-method
         %% selectors (the class-method chain), not any export of the module.
-        class_methods => #{
-            lcRead => #{arity => 0}, lcWrite => #{arity => 0}, lcSelf => #{arity => 0}
-        },
-        class_state => #{n => N}
+        class_methods => #{lcSelf => #{arity => 0}}
     },
     {ok, Pid} = beamtalk_object_class:start_link(Name, ClassInfo),
     #beamtalk_object{
@@ -1472,50 +1458,8 @@ lc_class(Name, N) ->
     }.
 
 test_local_call_passes_receiver() ->
-    Obj = lc_class('BT3708LcSelf', 1),
+    Obj = lc_class('BT3708LcSelf'),
     ?assertEqual(Obj, beamtalk_object_class:local_call(Obj, lcSelf, [])).
-
-test_local_call_reads_snapshot() ->
-    Obj = lc_class('BT3708LcRead', 5),
-    ?assertEqual(5, beamtalk_object_class:local_call(Obj, lcRead, [])).
-
-test_local_call_write_raises() ->
-    Obj = lc_class('BT3708LcWrite', 5),
-    ?assertBtError(class_state_read_only, beamtalk_object_class:local_call(Obj, lcWrite, [])),
-    ?assertEqual(undefined, erlang:get(beamtalk_class_vars:key('BT3708LcWrite'))),
-    ?assertEqual(5, beamtalk_object_class:local_call(Obj, lcRead, [])).
-
-test_local_call_live_same_class() ->
-    Obj = lc_class('BT3708LcLive', 5),
-    Key = beamtalk_class_vars:key('BT3708LcLive'),
-    ok = beamtalk_class_vars:install(Key, #{n => 123}),
-    try
-        ?assertEqual(123, beamtalk_object_class:local_call(Obj, lcRead, [])),
-        ?assertEqual(99, beamtalk_object_class:local_call(Obj, lcWrite, [])),
-        ?assertEqual(#{n => 99}, erlang:get(Key))
-    after
-        beamtalk_class_vars:uninstall(Key)
-    end.
-
-test_local_call_other_class_keeps_home() ->
-    _X = lc_class('BT3708LcX', 1),
-    Y = lc_class('BT3708LcY', 2),
-    KeyX = beamtalk_class_vars:key('BT3708LcX'),
-    ok = beamtalk_class_vars:install(KeyX, #{n => 10}),
-    try
-        %% Y is read through its mirror; X's home entry is untouched.
-        Snap = beamtalk_class_vars:snapshot(),
-        ?assertEqual(2, beamtalk_object_class:local_call(Y, lcRead, [])),
-        ?assertEqual(KeyX, beamtalk_class_vars_test_support:home_key()),
-        ?assertEqual(#{n => 10}, erlang:get(KeyX)),
-        ?assertEqual(undefined, erlang:get(beamtalk_class_vars:key('BT3708LcY'))),
-        %% X's restore still works afterwards.
-        erlang:put(KeyX, #{n => 11}),
-        ok = beamtalk_class_vars:restore(Snap),
-        ?assertEqual(#{n => 10}, erlang:get(KeyX))
-    after
-        beamtalk_class_vars:uninstall(KeyX)
-    end.
 
 %%====================================================================
 %% put_class_method/4 arity gate (ADR 0130 §3, BT-3708)
@@ -1532,8 +1476,7 @@ pcm_class(Name) ->
         name => Name,
         module => bt3708_no_module,
         superclass => none,
-        class_methods => #{},
-        class_state => #{}
+        class_methods => #{}
     },
     {ok, Pid} = beamtalk_object_class:start_link(Name, ClassInfo),
     Pid.
@@ -1777,114 +1720,6 @@ crash_recovery_restart_group() ->
             ?assertEqual(<<"Does something.">>, maps:get('__doc__', Result))
         end),
         %%% ============================================================================
-        %%% Class Variable Tests
-        %%% ============================================================================
-        ?_test(begin
-            ClassInfo = #{
-                name => 'ClassVarDefaultTest',
-                module => test_class,
-                superclass => 'Object',
-                instance_methods => #{},
-                class_methods => #{}
-            },
-            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-            ?assertEqual(nil, gen_server:call(Pid, {get_class_var, someVar}))
-        end),
-        %% BT-3807: the class-side `get_class_var` of an absent name follows the
-        %% method-body read rule: a class whose own declared set lacks the name replies
-        %% a safe `{error, undeclared_class_variable}` (process survives); a declared
-        %% name still answers nil; a class with no readable metadata (the test above)
-        %% stays lenient and answers nil.
-        ?_test(begin
-            Mod = beamtalk_test_module:meta_module(
-                bt3807_undeclared_classvar_mod,
-                #{class_field_kinds => #{count => eager}}
-            ),
-            try
-                ClassInfo = #{
-                    name => 'BT3807UndeclaredClassVar',
-                    module => Mod,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                ?assertMatch(
-                    {error, #beamtalk_error{kind = undeclared_class_variable}},
-                    gen_server:call(Pid, {get_class_var, typo})
-                ),
-                ?assert(is_process_alive(Pid)),
-                %% Declared but unassigned: nil, as before.
-                ?assertEqual(nil, gen_server:call(Pid, {get_class_var, count})),
-                ?assertEqual(3, gen_server:call(Pid, {set_class_var, count, 3})),
-                ?assertEqual(3, gen_server:call(Pid, {get_class_var, count}))
-            after
-                beamtalk_test_module:unload(Mod)
-            end
-        end),
-        ?_test(begin
-            ClassInfo = #{
-                name => 'ClassVarSetGetTest',
-                module => test_class,
-                superclass => 'Object',
-                instance_methods => #{},
-                class_methods => #{}
-            },
-            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-            ?assertEqual(42, gen_server:call(Pid, {set_class_var, count, 42})),
-            ?assertEqual(42, gen_server:call(Pid, {get_class_var, count}))
-        end),
-        %% ADR 0124 §1/§4i/B4: `get_class_var` on a declared-`late` unassigned class
-        %% variable replies `{error, #beamtalk_error{kind = uninitialized_state_error}}`
-        %% rather than answering `nil` — and, critically, the class gen_server
-        %% itself survives the call (a business error, not a crash): `get_class_var`
-        %% is a raw `handle_call` clause outside the
-        %% `dispatch_class_method`/`apply_class_method_in_context` machinery that
-        %% normally catches a `#beamtalk_error{}` raise from a class-method body, so
-        %% an uncaught `beamtalk_error:raise/1` here would take down the whole
-        %% class instead of just answering the caller.
-        %%
-        %% `class_var_declared_late/2` needs real `__beamtalk_meta/0` metadata
-        %% (`class_field_kinds => #{current => late}`) to take the "declared late"
-        %% branch — a bare `module => test_class` fixture (as every other test in
-        %% this section uses) has none and always degrades to `eager`/`nil`, so this
-        %% builds a real meta-carrying module via `beamtalk_test_module:meta_module/2`, mirroring
-        %% `bt1982_has_class_new_in_chain_test_` above.
-        ?_test(begin
-            Mod = beamtalk_test_module:meta_module(
-                bt3551_late_classvar_mod,
-                #{class_field_kinds => #{current => late}}
-            ),
-            try
-                ClassInfo = #{
-                    name => 'BT3551LateClassVar',
-                    module => Mod,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                %% Unassigned + declared late -> a safe {error, _} reply.
-                Result = gen_server:call(Pid, {get_class_var, current}),
-                ?assertMatch(
-                    {error, #beamtalk_error{kind = uninitialized_state_error}}, Result
-                ),
-                ?assert(is_process_alive(Pid)),
-                %% Assigned -> answers the value, same declared-late branch.
-                ?assertEqual(7, gen_server:call(Pid, {set_class_var, current, 7})),
-                ?assertEqual(7, gen_server:call(Pid, {get_class_var, current})),
-                %% BT-4061: a stored `nil` is present, so it answers
-                %% `nil` — agreeing with `beamtalk_class_vars:has_value/2`
-                %% (the presence test `hasField:` uses) — not an error.
-                ?assertEqual(nil, gen_server:call(Pid, {set_class_var, current, nil})),
-                ?assertEqual(nil, gen_server:call(Pid, {get_class_var, current})),
-                {ok, Snapshot} = beamtalk_class_registry:class_state_snapshot_lookup(Pid),
-                ?assertEqual(true, beamtalk_class_vars:has_value(Snapshot, current))
-            after
-                beamtalk_test_module:unload(Mod)
-            end
-        end),
-        %%% ============================================================================
         %%% is_constructible Tests
         %%% ============================================================================
         ?_test(begin
@@ -1989,32 +1824,8 @@ crash_recovery_restart_group() ->
             ?assertEqual('CompiledMethod', maps:get('$beamtalk_class', MethodObj)),
             ?assertEqual('greet', maps:get('__selector__', MethodObj)),
             ?assertEqual(<<"">>, maps:get('__source__', MethodObj))
-        end),
-        %% set_class_var/3 on a registered class updates the class var map (0% → covered).
-        ?_test(begin
-            ClassInfo = #{
-                name => 'BT1982SetClassVar',
-                module => test_class,
-                superclass => 'Object',
-                instance_methods => #{},
-                class_methods => #{},
-                class_state => #{counter => 0}
-            },
-            {ok, Pid} = beamtalk_object_class:start_link('BT1982SetClassVar', ClassInfo),
-            %% Name-based set_class_var resolves via the registry.
-            Result = beamtalk_object_class:set_class_var('BT1982SetClassVar', counter, 42),
-            ?assertEqual(42, Result),
-            %% Verify it persisted.
-            ?assertEqual(42, gen_server:call(Pid, {get_class_var, counter}))
         end)
     ]}.
-
-%% set_class_var/3 on an unknown class raises class_not_found (0% → covered).
-bt1982_set_class_var_unknown_raises_group() ->
-    ?_assertError(
-        _,
-        beamtalk_object_class:set_class_var('BT1982NoSuchClass', foo, 1)
-    ).
 
 %% new/1 and new/2 constructor entry points go through {new, Args} handle_call (0% → covered).
 %% Abstract class refuses construction — exercises the handle_call({new, []}, ... is_abstract=true)
@@ -2539,40 +2350,3 @@ safe_name_lookups_do_not_message_class_process_group() ->
             )
         end)
     ]}.
-
-class_var_reflection_selectors_match_shared_fixture_test() ->
-    %% BT-4148: the runtime's class-variable reflection selector set
-    %% (`is_class_var_reflection_selector/1`, and the `class_var_reflection_op/2`
-    %% decision behind `is_class_var_reflection_send/2`) agrees with the
-    %% compile-time `ClassInfo::is_class_var_reflection_selector`. Both sides
-    %% are pinned to the same shared fixture; the Rust half is
-    %% `class_hierarchy::tests::class_var_reflection_selectors_match_shared_fixture`.
-    Fixture = beamtalk_test_corpus:load_json_fixture([
-        "runtime",
-        "apps",
-        "beamtalk_runtime",
-        "test",
-        "fixtures",
-        "class_var_reflection_selectors_conformance.json"
-    ]),
-    ToAtom = fun(Bin) -> binary_to_atom(Bin, utf8) end,
-    Members = [ToAtom(B) || B <- maps:get(<<"selectors">>, Fixture)],
-    NonMembers = [ToAtom(B) || B <- maps:get(<<"non_selectors">>, Fixture)],
-    ?assertNotEqual([], Members),
-    SymbolArgs = fun(Sel) ->
-        lists:duplicate(beamtalk_class_builder:selector_arity(Sel), x)
-    end,
-    lists:foreach(
-        fun(Sel) ->
-            ?assert(beamtalk_object_class:is_class_var_reflection_selector(Sel)),
-            ?assert(beamtalk_object_class:is_class_var_reflection_send(Sel, SymbolArgs(Sel)))
-        end,
-        Members
-    ),
-    lists:foreach(
-        fun(Sel) ->
-            ?assertNot(beamtalk_object_class:is_class_var_reflection_selector(Sel)),
-            ?assertNot(beamtalk_object_class:is_class_var_reflection_send(Sel, SymbolArgs(Sel)))
-        end,
-        NonMembers
-    ).

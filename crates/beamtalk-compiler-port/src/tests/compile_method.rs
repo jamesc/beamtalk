@@ -221,9 +221,9 @@ fn compile_method_rejects_multi_class_source_cleanly() {
 #[test]
 fn compile_method_replaces_class_side_method_without_duplicating() {
     // The instance/class side is chosen by which method list the
-    // backend merges into (driven by `is_class_method`), NOT by `MethodKind`.
+    // backend merges into (driven by `is_class_method`).
     // A class-side patch must REPLACE the existing class method, never push a
-    // duplicate alongside it — there is no "kind trap".
+    // duplicate alongside it.
     let class_source = "Actor subclass: Counter\n  state: count = 0\n\n  class create -> Nil =>\n    Counter new\n\n  increment => count := count + 1";
     let request = Term::from(Map::from([
         (atom("command"), atom("compile_method")),

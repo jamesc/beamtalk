@@ -302,7 +302,7 @@ impl SimpleLanguageService {
         if let Some(ident) = Self::find_identifier_in_type_params(&class.type_params, offset_val) {
             return Some(ident);
         }
-        for state in class.state.iter().chain(class.class_variables.iter()) {
+        for state in &class.state {
             if let Some(type_annotation) = &state.type_annotation
                 && let Some(ident) =
                     Self::find_identifier_in_type_annotation(type_annotation, offset_val)
@@ -484,9 +484,6 @@ impl SimpleLanguageService {
                 parameters
                     .iter()
                     .find_map(|ty| Self::find_identifier_in_type_annotation(ty, offset_val))
-            }
-            TypeAnnotation::FalseOr { inner, .. } => {
-                Self::find_identifier_in_type_annotation(inner, offset_val)
             }
             TypeAnnotation::Difference { base, excluded, .. } => {
                 Self::find_identifier_in_type_annotation(base, offset_val)

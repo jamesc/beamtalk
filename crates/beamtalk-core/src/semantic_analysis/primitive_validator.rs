@@ -37,8 +37,6 @@ pub const STRUCTURAL_INTRINSICS: &[&str] = &[
     // way — `class sealed new` / `new:` send `Exception
     // signalKind:class:selector:hint:` instead of an `@intrinsic` marker.
     // Reflection
-    "classOf",
-    "doesNotUnderstand",
     "dynamicSend",
     "dynamicSendWithArgs",
     "respondsTo",
@@ -49,15 +47,8 @@ pub const STRUCTURAL_INTRINSICS: &[&str] = &[
     "hasField",
     "clearField",
     // Object protocol
-    "printString",
     "hash",
     // Control flow
-    "conditional",
-    "conditionalTrue",
-    "conditionalFalse",
-    "shortCircuitAnd",
-    "shortCircuitOr",
-    "booleanNot",
     "blockValue",
     "blockValue1",
     "blockValue2",
@@ -68,17 +59,7 @@ pub const STRUCTURAL_INTRINSICS: &[&str] = &[
     "unaryWhileTrue",
     "unaryWhileFalse",
     "repeat",
-    // Iteration
     // Note: timesRepeat/toDo/toByDo are not intrinsics
-    "listDo",
-    "listCollect",
-    "listSelect",
-    "listReject",
-    "listInjectInto",
-    // Async
-    "futureAwait",
-    "futureAwaitTimeout",
-    "futureAwaitForever",
     // Exception handling
     "onDo",
     "ensure",

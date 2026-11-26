@@ -302,14 +302,12 @@ Beamtalk code raised the error. When the call site is not in `Stack` (a
 callee deeper than the stacktrace depth) every frame is the callee's, as on
 the proxy path when its frame is cut off.
 
-A scalar argument makes the `badarg` charlist retry a no-op (nothing to
-convert), so `ffi_call_raised/8` passes no snapshot. A binary argument
-(BT-4759) does not: a `badarg` retries once with the binary as a charlist,
-here, exactly as on the proxy path (the retry result is coerced the same way),
-and such a call site uses `ffi_call_raised/9` to pass the class-variable
-snapshot it read before the call. So does a map argument (BT-4770): the retry
-deep-unwraps Strings nested in it, and a map may hold a Beamtalk block, so the
-first attempt may have written class variables. A tagged `String` (what a
+A binary argument (BT-4759) makes a `badarg` retry once with the binary as a
+charlist, here, exactly as on the proxy path (the retry result is coerced the
+same way); a map argument (BT-4770) retries with nested Strings deep-unwrapped.
+Compiled call sites call `/8`, or `/10` with `none` in its former
+class-variable snapshot slot (ADR 0153); `/9` stays only for modules built by an
+older compiler. The slot is ignored. A tagged `String` (what a
 Beamtalk `String` is at run time) fails the call site's `is_binary` guard and
 takes `direct_call/4`, which unwraps it.
 """.
@@ -320,13 +318,10 @@ ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site) ->
     ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site, none).
 
 -doc """
-`ffi_call_raised/8` for a call site with a binary argument (BT-4759).
-
-`Snap` is `beamtalk_class_vars:snapshot()` read by the call site before the
-call, as `apply_with_coercion/6` reads it. The `badarg` charlist retry restores
-it first, so class-variable writes a failed first attempt made (a callee that
-called back into Beamtalk) do not survive into the retry (ADR 0130 §4,
-BT-3728).
+`ffi_call_raised/8` with a class-variable snapshot slot (BT-4759). Only
+modules built before ADR 0153 Phase 2 call it; current codegen never does.
+The slot is ignored: class variables are gone (ADR 0153), so a retry has
+nothing to restore.
 """.
 -spec ffi_call_raised(
     error | exit | throw,
@@ -337,7 +332,7 @@ BT-3728).
     list(),
     coercion_mode(),
     term(),
-    beamtalk_class_vars:snapshot() | none
+    term()
 ) -> term().
 ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site, Snap) ->
     ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site, Snap, none).
@@ -346,9 +341,10 @@ ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site, Snap) -
 `ffi_call_raised/9` for a `self delegate` call site (BT-4765).
 
 `Context` is the `{Class, Selector}` that `native_call/5` would have been given,
-so a wrapped error reads `Class>>selector` exactly as on the proxy path. `Snap`
-is `none` when no argument can be a binary (the call never retries); otherwise
-it is the class-variable snapshot, as for `ffi_call_raised/9`.
+so a wrapped error reads `Class>>selector` exactly as on the proxy path. The
+ninth argument is the former class-variable snapshot slot: `none` from current
+codegen, a snapshot from a module built by an older compiler, and ignored
+either way (ADR 0153).
 """.
 -spec ffi_call_raised(
     error | exit | throw,
@@ -359,10 +355,10 @@ it is the class-variable snapshot, as for `ffi_call_raised/9`.
     list(),
     coercion_mode(),
     term(),
-    beamtalk_class_vars:snapshot() | none,
+    term(),
     error_context()
 ) -> term().
-ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site, Snap, Context) when
+ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site, _Snap, Context) when
     Mode =:= stock; Mode =:= beamtalk
 ->
     classify_ffi_exception(
@@ -375,7 +371,7 @@ ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site, Snap, C
         Args,
         FunName,
         Context,
-        fun(R, M, F, A, Sel, Ctx, St) -> maybe_retry(R, M, F, A, Sel, Ctx, St, Snap, Mode) end
+        fun(R, M, F, A, Sel, Ctx, St) -> maybe_retry(R, M, F, A, Sel, Ctx, St, Mode) end
     ).
 
 -doc """
@@ -419,22 +415,11 @@ and `native_call/4`:
 `error_context()`. `Mode` selects the result-coercion rule without a per-call
 module-name scan — see `coercion_mode()`. The wrapping helpers
 (`ensure_wrapped`-style) run only on the error path; the happy path pays
-nothing beyond the `try` frame, coercion and one class-variable snapshot read.
+nothing beyond the `try` frame and coercion.
 """.
 -spec apply_with_coercion(atom(), atom(), list(), atom(), error_context(), coercion_mode()) ->
     term().
 apply_with_coercion(Module, FunName, Args, OrigSelector, Context, Mode) ->
-    %% The first attempt can run a Beamtalk block passed as an argument. If it
-    %% raises `badarg` and the charlist retry runs, the retry is a fresh attempt:
-    %% class-variable writes the failed first attempt made must not survive into
-    %% it (ADR 0130 §4, BT-3728), so remember the pre-call state.
-    %% BT-4770: a call with no arguments has nothing for the retry to convert
-    %% (`CoercedArgs =/= Args` never holds), so it never restores and reads none.
-    Snap =
-        case Args of
-            [] -> none;
-            _ -> beamtalk_class_vars:snapshot()
-        end,
     %% BT-4170: stock Erlang modules cannot handle tagged `String` terms, so
     %% top-level `String` args are unwrapped to raw binaries before the first
     %% attempt. Beamtalk-owned modules own the representation themselves (their
@@ -445,8 +430,6 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context, Mode) ->
             stock -> unwrap_string_args(Args);
             beamtalk -> Args
         end,
-    %% bt-catcher-audit: converted - snapshot taken here is restored before the badarg / function_clause retry
-    %% (BT-3728)
     try
         coerce_ffi_result(Module, erlang:apply(Module, FunName, CallArgs), Mode)
     catch
@@ -466,7 +449,7 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context, Mode) ->
                 OrigSelector,
                 Context,
                 fun(R, M, F, A, Sel, Ctx, St) ->
-                    maybe_retry(R, M, F, A, Sel, Ctx, St, Snap, Mode)
+                    maybe_retry(R, M, F, A, Sel, Ctx, St, Mode)
                 end
             )
     end.
@@ -495,10 +478,6 @@ Many Erlang functions (os:cmd/1, file:read_file/1, …) expect charlists but
 Beamtalk strings are binaries. Applies the same unified catch policy on the
 retry; if the retry still fails (or no args were coercible) the error is
 wrapped per `apply_with_coercion/6`.
-
-`Snap` is the class-variable snapshot taken before the first attempt. A retry
-restores it first, so writes made by a block run inside the failed attempt are
-discarded, the same rule `beamtalk_class_vars:protect/1` applies (BT-3728).
 """.
 -spec maybe_retry(
     retry_reason(),
@@ -508,18 +487,14 @@ discarded, the same rule `beamtalk_class_vars:protect/1` applies (BT-3728).
     atom(),
     error_context(),
     list(),
-    beamtalk_class_vars:snapshot(),
     coercion_mode()
 ) -> term().
-maybe_retry(Reason, Module, FunName, Args, OrigSelector, Context, Stack, Snap, Mode) ->
+maybe_retry(Reason, Module, FunName, Args, OrigSelector, Context, Stack, Mode) ->
     {Tried, RetryArgs} = retry_args(Reason, Mode, Args),
     %% Never retry a call that was passed a fun (a Beamtalk block): the retry
     %% would run caller code a second time, side effects included (BT-4055).
     case RetryArgs =/= Tried andalso not lists:any(fun erlang:is_function/1, Args) of
         true ->
-            beamtalk_class_vars:restore(Snap),
-            %% bt-catcher-audit: converted - restores the pre-call snapshot before retrying; the
-            %% retry re-raises
             try
                 coerce_ffi_result(Module, erlang:apply(Module, FunName, RetryArgs), Mode)
             catch
@@ -577,7 +552,7 @@ raise_retry_terminal(function_clause, Module, FunName, Args, OrigSelector, Conte
 -doc """
 The single FFI exception classifier shared by the apply and badarg-retry paths.
 
-Both `apply_with_coercion/6` and `maybe_retry/9` used to inline a copy of
+Both `apply_with_coercion/6` and `maybe_retry/8` used to inline a copy of
 this clause set; they only differed in what `badarg` does (retry vs. raise). That
 divergence is now the `OnRetry` continuation — a `fun/7` invoked as
 `OnRetry(Reason, Module, FunName, Args, OrigSelector, Context, Stack)` — so adding a new
@@ -606,7 +581,7 @@ Policy (ADR 0101 Part 2), matching the doc on `apply_with_coercion/6`:
 """.
 %% Returns `term()`, not `no_return()`: every classified-exception clause raises,
 %% but the `badarg` clause defers to `OnRetry`, and the first-pass continuation
-%% (`maybe_retry/9`) can *return* the charlist-coerced retry result on
+%% (`maybe_retry/8`) can *return* the charlist-coerced retry result on
 %% success. That value flows back through here to `apply_with_coercion/6`.
 -spec classify_ffi_exception(
     error | exit | throw,
@@ -794,7 +769,6 @@ Returns {ok, [{Function, Arity}]} or {error, not_loaded}.
 """.
 -spec get_exports(atom()) -> {ok, [{atom(), non_neg_integer()}]} | {error, not_loaded}.
 get_exports(Module) ->
-    %% bt-catcher-audit: not-applicable-no-block - module_info/1 BIF
     try
         {ok, Module:module_info(exports)}
     catch
@@ -948,7 +922,7 @@ applies. A stacktrace with neither is classified as before.
 
 Best effort: a tail call out of Beamtalk code into a raising Erlang function, or
 a raise more than `backtrace_depth` frames below the block, hides the Beamtalk
-frame, and the error is then classified as the call's. `maybe_retry/9`
+frame, and the error is then classified as the call's. `maybe_retry/8`
 does not rely on this: it never retries a call with a fun as a direct
 argument. A fun nested inside a list, map or tuple argument is not detected.
 """.
@@ -1322,7 +1296,10 @@ module-name scan is skipped.
 Fast path (BT-4153): results whose coercion is the identity in *every* mode —
 scalars, binaries and bitstrings, pids, ports, references, funs, maps, `[]`,
 atoms other than `ok`/`error`, and tuples that are not `{ok, _}`/`{error, _}`
-— pass through with no module check and no allocation. Only non-empty lists,
+— pass through with no module check and no allocation. The one exception is a
+top-level class object whose class process is on another node (BT-5274): it
+is resolved to this node's class of the same name (`beamtalk_wire:localise_class_object/1`),
+or raises `class_not_found`. Only non-empty lists,
 ok/error-tagged results and the bare `ok`/`error` atoms reach the slow path,
 which keeps the exact `coerce_ffi_result/2` semantics per mode.
 
@@ -1357,6 +1334,18 @@ coerce_ffi_result(_Module, [], _Mode) ->
     [];
 coerce_ffi_result(_Module, Result, _Mode) when is_atom(Result), Result =/= ok, Result =/= error ->
     Result;
+coerce_ffi_result(_Module, #beamtalk_object{pid = Pid} = Obj, _Mode) when
+    is_pid(Pid), node(Pid) =/= node()
+->
+    %% BT-5274: an FFI result skips the wire codec, so a class object answered
+    %% by a raw FFI call or an `rpc`/`erpc` into a peer can carry the peer's
+    %% class pid. Resolve it by name here, as `beamtalk_wire:decode/1` would.
+    %% Top level only (the coercion stays shallow, see above); a class object
+    %% nested in a returned container is resolved when it is sent a message
+    %% (`beamtalk_message_dispatch:local_class_pid/3`). An `{ok, _}` payload is
+    %% resolved by `beamtalk_result:from_tagged_tuple/1`. Only a pid on another
+    %% node takes this clause; every other object keeps the fast path below.
+    beamtalk_wire:ensure_local_class_object(Obj);
 coerce_ffi_result(_Module, Result, _Mode) when
     is_tuple(Result),
     (tuple_size(Result) =/= 2 orelse

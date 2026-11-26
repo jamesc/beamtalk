@@ -452,7 +452,7 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
         <'controlFlowMutationFallback:'> when 'true' ->
             case Args of
                 <[_coll@4]> when 'true' ->
-                    let _ExitReply@41 = let Count@ = 0 in let _Tuple@5 = let _Packed@9 = call 'maps':'put'('__local__count', Count@, State) in let _temp@6 = _coll@4 in let _temp@7 = case call 'erlang':'is_list'(_temp@6) of <'true'> when 'true' -> _temp@6 <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(_temp@6) end in let _temp@8 = fun (Each@, StateAcc) -> let Count@ = call 'maps':'get'('__local__count', StateAcc) in let _BinLeft@10 = Each@ in let _BinRight@11 = 0 in let <_Synced@15, StateAcc1> = case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft@10), call 'erlang':'is_binary'(_BinLeft@10)) of <'true'> when 'true' -> <call 'erlang':'>'(_BinLeft@10, _BinRight@11), StateAcc> <_> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(StateAcc) in let _SyncedSlow@13 = case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft@10), call 'erlang':'is_binary'(_BinLeft@10)) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft@10, _BinRight@11) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@10, '>', [_BinRight@11]) <_BinOpNoMatch@12> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@12}) end in let _SyncedSlowState@14 = call 'beamtalk_actor_state':'take'() in <_SyncedSlow@13, _SyncedSlowState@14> end in let _CF@32 = let _Cond@16 = _Synced@15 in case _Cond@16 of <'true'> when 'true' -> let StateAcc = StateAcc1 in let _BinLeft@17 = call 'maps':'get'('n', StateAcc) in let _BinRight@18 = 1 in let <_Synced@22, StateAcc1> = case call 'erlang':'is_number'(_BinLeft@17) of <'true'> when 'true' -> <call 'erlang':'+'(_BinLeft@17, _BinRight@18), StateAcc> <_> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(StateAcc) in let _SyncedSlow@20 = case call 'erlang':'is_number'(_BinLeft@17) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@17, _BinRight@18) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@17, '+', [_BinRight@18]) <_BinOpNoMatch@19> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@19}) end in let _SyncedSlowState@21 = call 'beamtalk_actor_state':'take'() in <_SyncedSlow@20, _SyncedSlowState@21> end in let _Val@23 = _Synced@22 in let StateAcc2 = call 'maps':'put'('n', _Val@23, StateAcc1) in {_Val@23, StateAcc2} <'false'> when 'true' -> {_Cond@16, StateAcc1} <_CondNoMatch@29> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(StateAcc1) in let _Synced@30 = call 'beamtalk_message_dispatch':'send'(_Cond@16, 'ifTrue:', [fun () -> let _ASVal@27 = let _BinLeft@24 = call 'beamtalk_actor_state':'get'(Self, 'n', StateAcc1) in let _BinRight@25 = 1 in case call 'erlang':'is_number'(_BinLeft@24) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@24, _BinRight@25) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@24, '+', [_BinRight@25]) <_BinOpNoMatch@26> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@26}) end in let _ASOk@28 = call 'beamtalk_actor_state':'put'(Self, 'n', _ASVal@27) in _ASVal@27]) in let _FallbackState@31 = call 'beamtalk_actor_state':'take'() in {_Synced@30, _FallbackState@31} end in let StateAcc2 = call 'erlang':'element'(2, _CF@32) in let _ = call 'erlang':'element'(1, _CF@32) in let _BinLeft@34 = Count@ in let _BinRight@35 = 1 in let <_Synced@39, StateAcc3> = case call 'erlang':'is_number'(_BinLeft@34) of <'true'> when 'true' -> <call 'erlang':'+'(_BinLeft@34, _BinRight@35), StateAcc2> <_> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(StateAcc2) in let _SyncedSlow@37 = case call 'erlang':'is_number'(_BinLeft@34) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@34, _BinRight@35) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@34, '+', [_BinRight@35]) <_BinOpNoMatch@36> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@36}) end in let _SyncedSlowState@38 = call 'beamtalk_actor_state':'take'() in <_SyncedSlow@37, _SyncedSlowState@38> end in let _Val@33 = _Synced@39 in let StateAcc4 = call 'maps':'put'('__local__count', _Val@33, StateAcc3) in  StateAcc4 in let _FoldResult@40 = call 'lists':'foldl'(_temp@8, _Packed@9, _temp@7) in let Count@ = call 'maps':'get'('__local__count', _FoldResult@40) in {'nil', _FoldResult@40} in let State1 = call 'erlang':'element'(2, _Tuple@5) in let Count@ = call 'maps':'get'('__local__count', State1) in let _Result = Count@ in {'reply', _Result, State1} in case _ExitReply@41 of <{'reply', _, _ExitState@42}> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(_ExitState@42) in _ExitReply@41 <_> when 'true' -> _ExitReply@41 end
+                    let _ExitReply@41 = let Count@ = 0 in let _Tuple@5 = let _Packed@9 = call 'maps':'put'('__local__count', Count@, State) in let _temp@6 = _coll@4 in let _temp@7 = case call 'erlang':'is_list'(_temp@6) of <'true'> when 'true' -> _temp@6 <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(_temp@6) end in let _temp@8 = fun (Each@, StateAcc) -> let Count@ = call 'maps':'get'('__local__count', StateAcc) in let _BinLeft@10 = Each@ in let _BinRight@11 = 0 in let <_Synced@15, StateAcc1> = case call 'erlang':'is_number'(_BinLeft@10) of <'true'> when 'true' -> <call 'erlang':'>'(_BinLeft@10, _BinRight@11), StateAcc> <_> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(StateAcc) in let _SyncedSlow@13 = case call 'erlang':'is_number'(_BinLeft@10) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft@10, _BinRight@11) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@10, '>', [_BinRight@11]) <_BinOpNoMatch@12> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@12}) end in let _SyncedSlowState@14 = call 'beamtalk_actor_state':'take'() in <_SyncedSlow@13, _SyncedSlowState@14> end in let _CF@32 = let _Cond@16 = _Synced@15 in case _Cond@16 of <'true'> when 'true' -> let StateAcc = StateAcc1 in let _BinLeft@17 = call 'maps':'get'('n', StateAcc) in let _BinRight@18 = 1 in let <_Synced@22, StateAcc1> = case call 'erlang':'is_number'(_BinLeft@17) of <'true'> when 'true' -> <call 'erlang':'+'(_BinLeft@17, _BinRight@18), StateAcc> <_> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(StateAcc) in let _SyncedSlow@20 = case call 'erlang':'is_number'(_BinLeft@17) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@17, _BinRight@18) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@17, '+', [_BinRight@18]) <_BinOpNoMatch@19> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@19}) end in let _SyncedSlowState@21 = call 'beamtalk_actor_state':'take'() in <_SyncedSlow@20, _SyncedSlowState@21> end in let _Val@23 = _Synced@22 in let StateAcc2 = call 'maps':'put'('n', _Val@23, StateAcc1) in {_Val@23, StateAcc2} <'false'> when 'true' -> {_Cond@16, StateAcc1} <_CondNoMatch@29> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(StateAcc1) in let _Synced@30 = call 'beamtalk_message_dispatch':'send'(_Cond@16, 'ifTrue:', [fun () -> let _ASVal@27 = let _BinLeft@24 = call 'beamtalk_actor_state':'get'(Self, 'n', StateAcc1) in let _BinRight@25 = 1 in case call 'erlang':'is_number'(_BinLeft@24) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@24, _BinRight@25) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@24, '+', [_BinRight@25]) <_BinOpNoMatch@26> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@26}) end in let _ASOk@28 = call 'beamtalk_actor_state':'put'(Self, 'n', _ASVal@27) in _ASVal@27]) in let _FallbackState@31 = call 'beamtalk_actor_state':'take'() in {_Synced@30, _FallbackState@31} end in let StateAcc2 = call 'erlang':'element'(2, _CF@32) in let _ = call 'erlang':'element'(1, _CF@32) in let _BinLeft@34 = Count@ in let _BinRight@35 = 1 in let <_Synced@39, StateAcc3> = case call 'erlang':'is_number'(_BinLeft@34) of <'true'> when 'true' -> <call 'erlang':'+'(_BinLeft@34, _BinRight@35), StateAcc2> <_> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(StateAcc2) in let _SyncedSlow@37 = case call 'erlang':'is_number'(_BinLeft@34) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@34, _BinRight@35) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@34, '+', [_BinRight@35]) <_BinOpNoMatch@36> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@36}) end in let _SyncedSlowState@38 = call 'beamtalk_actor_state':'take'() in <_SyncedSlow@37, _SyncedSlowState@38> end in let _Val@33 = _Synced@39 in let StateAcc4 = call 'maps':'put'('__local__count', _Val@33, StateAcc3) in  StateAcc4 in let _FoldResult@40 = call 'lists':'foldl'(_temp@8, _Packed@9, _temp@7) in let Count@ = call 'maps':'get'('__local__count', _FoldResult@40) in {'nil', _FoldResult@40} in let State1 = call 'erlang':'element'(2, _Tuple@5) in let Count@ = call 'maps':'get'('__local__count', State1) in let _Result = Count@ in {'reply', _Result, State1} in case _ExitReply@41 of <{'reply', _, _ExitState@42}> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(_ExitState@42) in _ExitReply@41 <_> when 'true' -> _ExitReply@41 end
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <'destructureLastExprFallback:'> when 'true' ->
@@ -474,41 +474,9 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                     <{'compiled', InhOwner, InhModule}> when 'true' ->
                         call 'beamtalk_dispatch':'invoke_resolved'(InhOwner, InhModule, OtherSelector, Args, Self, State)
                     <_InhSlow> when 'true' ->
-                        %% BT-229/ADR 0005: Check extension registry before hierarchy walk
-                        let ExtLookup = try call 'beamtalk_extensions':'lookup'('FoldFallbackCtr', OtherSelector)
-                            of ExtLookupResult -> ExtLookupResult
-                            catch <_EType, _EReason, _EStack> -> 'not_found'
-                        in
-                        case ExtLookup of
-                            <{'ok', ExtFun, _ExtOwner}> when 'true' ->
-                                %% BT-1512/BT-2250: Invoke via the runtime helper, which
-                                %% accepts both the 3-arity actor shape
-                                %% (fun(Args, Self, State) -> {Result, NewState}) and the
-                                %% 2-arity value shape (fun(Args, Self) -> Result), so a
-                                %% foreign extension whose codegen-time arity could not be
-                                %% resolved still dispatches correctly. Returns {reply, _, _}.
-                                %% BT-3199: Selector/ClassName are threaded through so a
-                                %% crashing extension body is caught and converted to a
-                                %% structured error naming what was sent, instead of
-                                %% re-raising a bare Erlang exception.
-                                %% BT-3920: that structured error comes back as the
-                                %% lookup-shaped 2-tuple {error, E}; lift it to the dispatch/4
-                                %% own {error, E, State} contract (state rolled back, as for a
-                                %% crashing method body) so handle_call replies with it
-                                %% instead of crashing the actor on an unmatched result.
-                                %% ADR 0137 §2: the extension fun is Erlang that does not bracket
-                                %% what it calls, so it runs through call_foreign/3.
-                                case call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', 'invoke_extension', 6), [ExtFun, OtherSelector, 'FoldFallbackCtr', Args, Self, State]) of
-                                    <{'reply', ExtResult, ExtState}> when 'true' ->
-                                        {'reply', ExtResult, ExtState}
-                                    <{'error', ExtError}> when 'true' ->
-                                        {'error', ExtError, State}
-                                end
-                            <'not_found'> when 'true' ->
-                                %% ADR 0006: Try hierarchy walk before DNU
-                                %% ADR 0137 §2: inherited runtime methods run through call_foreign/3.
-                                call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', 'super', 5), [OtherSelector, Args, Self, State, 'FoldFallbackCtr'])
-                        end
+                        %% ADR 0006: Try hierarchy walk before DNU
+                        %% ADR 0137 §2: inherited runtime methods run through call_foreign/3.
+                        call 'beamtalk_actor_state':'call_foreign'(State, call 'erlang':'make_fun'('beamtalk_dispatch', 'super', 5), [OtherSelector, Args, Self, State, 'FoldFallbackCtr'])
                 end
             in
             case InheritedOutcome of
@@ -537,8 +505,8 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                         <'false'> when 'true' ->
                             call 'beamtalk_exception_handler':'reraise'(DispatchError)
                     end
-                <{'error', ExtError, ExtErrorState}> when 'true' ->
-                    {'error', ExtError, ExtErrorState}
+                <{'error', MethodError, MethodErrorState}> when 'true' ->
+                    {'error', MethodError, MethodErrorState}
             end
     end
 
@@ -554,21 +522,13 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
 'has_method'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['controlFlowMutationFallback:', 'destructureLastExprFallback:', 'nestedListOpInConditional:with:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('FoldFallbackCtr', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
-            end
+        <'false'> when 'true' -> call 'beamtalk_dispatch':'responds_to'(Selector, 'Actor')
     end
 
 'has_method_local'/1 = fun (Selector) ->
     case call 'lists':'member'(Selector, ['controlFlowMutationFallback:', 'destructureLastExprFallback:', 'nestedListOpInConditional:with:']) of
         <'true'> when 'true' -> 'true'
-        <'false'> when 'true' ->
-            case call 'beamtalk_extensions':'has'('FoldFallbackCtr', Selector) of
-                <'true'> when 'true' -> 'true'
-                <'false'> when 'true' -> 'false'
-            end
+        <'false'> when 'true' -> 'false'
     end
 
 
@@ -584,7 +544,6 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
       'package' => 'none',
       'kind' => 'actor',
       'fields' => ['n'],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'false',
@@ -596,11 +555,10 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
       'field_types' => ~{'n' => 'none'}~,
       'field_has_default' => ~{'n' => 'true'}~,
       'field_kinds' => ~{'n' => 'eager'}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'controlFlowMutationFallback:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'destructureLastExprFallback:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'nestedListOpInConditional:with:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
       'defines_user_class_new0' => 'false',
@@ -619,7 +577,6 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
             'classMethodSignatures' => ~{}~,
             'methodXref' => [~{'class_side' => 'false', 'selector' => 'controlFlowMutationFallback:', 'line' => 1, 'sends' => [~{'selector' => 'do:', 'line' => 4, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => 'ifTrue:', 'line' => 5, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => '>', 'line' => 5, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => '+', 'line' => 5, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => '+', 'line' => 6, 'recv_kind' => 'other', 'recv_type' => 'Integer'}~], 'references' => [~{'class' => 'Integer', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'destructureLastExprFallback:', 'line' => 1, 'sends' => [~{'selector' => 'do:', 'line' => 4, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => '+', 'line' => 5, 'recv_kind' => 'other', 'recv_type' => 'Integer'}~, ~{'selector' => 'withAll:', 'line' => 6, 'recv_kind' => 'other', 'recv_type' => 'Tuple class'}~], 'references' => [~{'class' => 'Integer', 'line' => 1}~, ~{'class' => 'Tuple', 'line' => 6}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'nestedListOpInConditional:with:', 'line' => 1, 'sends' => [~{'selector' => 'ifTrue:', 'line' => 3, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => 'do:', 'line' => 3, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => '+', 'line' => 3, 'recv_kind' => 'other', 'recv_type' => 'Integer'}~], 'references' => [~{'class' => 'Integer', 'line' => 1}~], 'source_status' => 'indexed'}~],
             'stateVarXref' => [],
-            'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,
             'classMethodDocs' => ~{}~,
@@ -628,7 +585,6 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
       'package' => 'none',
       'kind' => 'actor',
       'fields' => ['n'],
-      'class_fields' => [],
       'is_sealed' => 'false',
       'is_abstract' => 'false',
       'is_value' => 'false',
@@ -640,11 +596,10 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
       'field_types' => ~{'n' => 'none'}~,
       'field_has_default' => ~{'n' => 'true'}~,
       'field_kinds' => ~{'n' => 'eager'}~,
-      'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
       'method_info' => ~{'controlFlowMutationFallback:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'destructureLastExprFallback:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'nestedListOpInConditional:with:' => ~{'arity' => 2, 'param_types' => ['none', 'none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_method_info' => ~{'supervisionSpec' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'SupervisionSpec', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_var_abi' => 3,
+      'module_abi' => 4,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
       'defines_user_class_new0' => 'false',

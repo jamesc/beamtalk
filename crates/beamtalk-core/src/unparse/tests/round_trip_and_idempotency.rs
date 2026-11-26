@@ -168,13 +168,6 @@ fn idempotent_late_state_declaration() {
 }
 
 #[test]
-fn idempotent_late_class_state_declaration() {
-    assert_idempotent(
-        "typed Actor subclass: TranscriptStream\n  late classState: current :: TranscriptStream\n\n  class current => self.current\n",
-    );
-}
-
-#[test]
 fn round_trip_late_state_slot_kind() {
     let source = "typed Actor subclass: CodexClient\n  late state: proc :: Subprocess\n  state: nextId :: Integer\n";
     let module = parse_source(source);
@@ -590,4 +583,21 @@ fn binary_pattern_new_spellings_round_trip() {
     ] {
         assert_idempotent(source);
     }
+}
+
+// --- Round-trip: annotated destructuring elements (BT-5284) ---
+
+#[test]
+fn round_trip_typed_tuple_destructure() {
+    assert_annotation_round_trip("{_, sid :: Integer, es :: Boolean} := frame\n");
+}
+
+#[test]
+fn round_trip_typed_array_destructure() {
+    assert_annotation_round_trip("#[a :: Integer, b, c :: String] := xs\n");
+}
+
+#[test]
+fn round_trip_typed_map_destructure() {
+    assert_annotation_round_trip("#{#id => i :: Integer, #name => n} := m\n");
 }

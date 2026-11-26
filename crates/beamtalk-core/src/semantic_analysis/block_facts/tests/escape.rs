@@ -37,8 +37,7 @@ fn returned_blocks(src: &str) -> (Vec<String>, Vec<String>) {
 
 /// `escape_sites` (ADR 0131 §6) follows a returned value through a local
 /// assignment and the value arms of inlined constructs; `escaping_blocks`
-/// (the census and the class-state-abroad lint) keeps taking it as
-/// written, so their counts do not move.
+/// (the census) keeps taking it as written, so its counts do not move.
 #[test]
 fn escape_sites_follow_returned_values_and_escaping_blocks_do_not() {
     for (src, followed) in [

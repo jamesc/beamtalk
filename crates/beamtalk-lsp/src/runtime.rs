@@ -7,7 +7,7 @@
 //! **DDD Context:** Language Service ↔ REPL (Workspace) bridge
 //!
 //! Mirrors the shape of `beamtalk-mcp`'s `ReplClient` but trimmed to the LSP
-//! surface: `evaluate` for `workspace/executeCommand` dispatch, plus a
+//! surface: `send_call` for `workspace/executeCommand` dispatch, plus a
 //! background listener for `flush_completed` push frames so the LSP can emit
 //! `workspace/applyEdit` per touched file.
 //!
@@ -37,7 +37,7 @@ use beamtalk_language_service::{
 use beamtalk_repl_protocol::{ReplResponse, RequestBuilder, handshake, ws_client};
 
 /// How long to wait for individual WebSocket reads / writes during the auth
-/// handshake and per `evaluate` call. Generous enough that a slow local
+/// handshake and per `send_call`. Generous enough that a slow local
 /// workspace startup doesn't time out, tight enough that LSP commands return
 /// in a reasonable time when the workspace has gone away.
 const IO_TIMEOUT: Duration = Duration::from_secs(30);
@@ -299,7 +299,7 @@ pub struct RuntimeClient {
 
 struct RuntimeInner {
     /// Sender half of the writer task channel. The LSP side calls
-    /// `evaluate(...)` which sends a request + correlation oneshot here; the
+    /// `send_call(...)` which sends a request + correlation oneshot here; the
     /// writer task serialises to the socket and the reader task fulfills the
     /// oneshot when the reply arrives.
     sender: mpsc::Sender<EvalRequest>,
@@ -455,25 +455,27 @@ impl RuntimeClient {
         })
     }
 
-    /// Submit `code` as an `eval` request and wait for the reply.
-    ///
-    /// Returns the parsed [`ReplResponse`]; the caller checks `is_error()` to
-    /// distinguish between a structured `#beamtalk_error{}` and a successful
-    /// value. A transport-level failure (socket closed, timeout) surfaces as
-    /// [`RuntimeError::Protocol`].
-    pub async fn evaluate(&self, code: &str) -> Result<ReplResponse, RuntimeError> {
-        let request = RequestBuilder::eval(code);
+    /// Send the request for an `executeCommand` call (`eval`, or `save-class`
+    /// for `beamtalk.saveClass`) and wait for the reply. Returns the parsed
+    /// [`ReplResponse`]; the caller checks `is_error()` to tell a structured
+    /// `#beamtalk_error{}` from a value. Transport failures (socket closed,
+    /// timeout) surface as [`RuntimeError::Protocol`].
+    pub(crate) async fn send_call(
+        &self,
+        call: &crate::server::CommandCall,
+    ) -> Result<ReplResponse, RuntimeError> {
+        let request = call.request();
         let id = request
             .get("id")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| RuntimeError::Protocol("eval request missing id".to_string()))?
+            .ok_or_else(|| RuntimeError::Protocol(format!("{} request missing id", call.op())))?
             .to_string();
-        self.dispatch_request(request, &id, "eval").await
+        self.dispatch_request(request, &id, call.op()).await
     }
 
     /// Submit a structured `nav-query` request and decode the typed reply.
     ///
-    /// Unlike [`Self::evaluate`], this op bypasses the Beamtalk inspect-string
+    /// Unlike `eval`, this op bypasses the Beamtalk inspect-string
     /// formatter — the runtime serialises `beamtalk_xref` site records as
     /// plain JSON arrays/objects, so the reply decodes directly into typed
     /// [`NavSite`] records.
@@ -1744,12 +1746,15 @@ mod tests {
     // --- request/response ops -----------------------------------------
 
     #[tokio::test]
-    async fn evaluate_round_trips_a_value() {
+    async fn send_call_eval_round_trips_a_value() {
         let ws = spawn_workspace(Handshake::Ok, reply_with(json!("42"))).await;
         let sinks = Sinks::new();
         let client = connect_client(&ws, &sinks).await;
 
-        let response = client.evaluate("40 + 2").await.expect("eval reply");
+        let response = client
+            .send_call(&crate::server::CommandCall::Eval("40 + 2".to_string()))
+            .await
+            .expect("eval reply");
         assert!(!response.is_error());
         assert_eq!(response.value, Some(json!("42")));
 
@@ -1760,8 +1765,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn evaluate_surfaces_a_structured_error_reply_as_ok() {
-        // `evaluate` does not decode — a `#beamtalk_error{}` reply comes back
+    async fn send_call_save_class_sends_the_save_class_op() {
+        use crate::server::CommandCall;
+        let ws = spawn_workspace(Handshake::Ok, reply_with(json!({"path": "src/x.bt"}))).await;
+        let sinks = Sinks::new();
+        let client = connect_client(&ws, &sinks).await;
+
+        let response = client
+            .send_call(&CommandCall::SaveClass {
+                source: "Object subclass: X \"{q}\"".to_string(),
+                path: "src/x.bt".to_string(),
+            })
+            .await
+            .expect("save-class reply");
+        assert!(!response.is_error());
+
+        let seen = ws.seen.lock().await;
+        let request = seen.last().expect("save-class request");
+        assert_eq!(request["op"], "save-class");
+        assert_eq!(request["source"], "Object subclass: X \"{q}\"");
+        assert_eq!(request["path"], "src/x.bt");
+        assert!(request.get("code").is_none());
+    }
+
+    #[tokio::test]
+    async fn send_call_surfaces_a_structured_error_reply_as_ok() {
+        // `send_call` does not decode — a `#beamtalk_error{}` reply comes back
         // as a successful transport result the caller inspects with
         // `is_error()`. Only transport failures are `Err`.
         let ws = spawn_workspace(
@@ -1778,7 +1807,10 @@ mod tests {
         let sinks = Sinks::new();
         let client = connect_client(&ws, &sinks).await;
 
-        let response = client.evaluate("1 nope").await.expect("transport ok");
+        let response = client
+            .send_call(&crate::server::CommandCall::Eval("1 nope".to_string()))
+            .await
+            .expect("transport ok");
         assert!(response.is_error());
         assert_eq!(
             response.error.as_deref(),
@@ -1992,7 +2024,10 @@ mod tests {
         let sinks = Sinks::new();
         let client = connect_client(&ws, &sinks).await;
 
-        let response = client.evaluate("3 + 4").await.expect("reply arrives");
+        let response = client
+            .send_call(&crate::server::CommandCall::Eval("3 + 4".to_string()))
+            .await
+            .expect("reply arrives");
         assert_eq!(response.value, Some(json!("7")));
     }
 
@@ -2008,7 +2043,10 @@ mod tests {
         let sinks = Sinks::new();
         let client = connect_client(&ws, &sinks).await;
 
-        let err = client.evaluate("1").await.expect_err("malformed reply");
+        let err = client
+            .send_call(&crate::server::CommandCall::Eval("1".to_string()))
+            .await
+            .expect_err("malformed reply");
         let msg = err.to_string();
         assert!(
             msg.starts_with("runtime protocol error: failed to parse runtime reply:"),
@@ -2038,7 +2076,10 @@ mod tests {
         let mut sinks = Sinks::new();
         let client = connect_client(&ws, &sinks).await;
 
-        client.evaluate("Counter new").await.expect("reply");
+        client
+            .send_call(&crate::server::CommandCall::Eval("Counter new".to_string()))
+            .await
+            .expect("reply");
         let event = sinks.class_rx.recv().await.expect("class_changed event");
         assert_eq!(event.class_name, "Counter");
         assert!(sinks.flush_rx.try_recv().is_err());
@@ -2051,7 +2092,10 @@ mod tests {
         let sinks = Sinks::new();
         let client = connect_client(&ws, &sinks).await;
 
-        let err = client.evaluate("1").await.expect_err("socket closed");
+        let err = client
+            .send_call(&crate::server::CommandCall::Eval("1".to_string()))
+            .await
+            .expect_err("socket closed");
         assert_eq!(
             err.to_string(),
             "runtime protocol error: runtime websocket closed before reply"
@@ -2070,9 +2114,14 @@ mod tests {
         let client = connect_client(&ws, &sinks).await;
 
         tokio::time::pause();
-        let err = client.evaluate("Program sleepForever").await.expect_err(
-            "a workspace that never replies must surface a timeout, not hang the command",
-        );
+        let err = client
+            .send_call(&crate::server::CommandCall::Eval(
+                "Program sleepForever".to_string(),
+            ))
+            .await
+            .expect_err(
+                "a workspace that never replies must surface a timeout, not hang the command",
+            );
         let msg = err.to_string();
         assert!(
             msg.starts_with("runtime protocol error: eval timed out after 30s waiting for reply"),
@@ -2089,7 +2138,10 @@ mod tests {
         let ws = spawn_workspace(Handshake::Ok, reply_with(json!("1"))).await;
         let sinks = Sinks::new();
         let client = connect_client(&ws, &sinks).await;
-        client.evaluate("1").await.expect("works before close");
+        client
+            .send_call(&crate::server::CommandCall::Eval("1".to_string()))
+            .await
+            .expect("works before close");
 
         client.close().await;
         // `close` aborts the writer task, which drops the request receiver.
@@ -2106,7 +2158,10 @@ mod tests {
         }
         assert!(client.inner.sender.is_closed(), "writer task did not stop");
 
-        let err = client.evaluate("1").await.expect_err("client is shut down");
+        let err = client
+            .send_call(&crate::server::CommandCall::Eval("1".to_string()))
+            .await
+            .expect_err("client is shut down");
         assert_eq!(
             err.to_string(),
             "runtime protocol error: runtime client shut down"
@@ -2122,11 +2177,17 @@ mod tests {
         let sinks = Sinks::new();
         let client = connect_client(&ws, &sinks).await;
         let clone = client.clone();
-        client.evaluate("1").await.expect("connected");
+        client
+            .send_call(&crate::server::CommandCall::Eval("1".to_string()))
+            .await
+            .expect("connected");
 
         drop(client);
         // One handle still alive: the connection must survive.
-        clone.evaluate("1").await.expect("clone keeps it alive");
+        clone
+            .send_call(&crate::server::CommandCall::Eval("1".to_string()))
+            .await
+            .expect("clone keeps it alive");
 
         drop(clone);
         // `RuntimeInner::drop` aborts both tasks, so the server sees EOF.
@@ -2252,7 +2313,10 @@ mod tests {
         .await
         .expect("discovery + handshake");
 
-        let response = client.evaluate("1").await.expect("reply");
+        let response = client
+            .send_call(&crate::server::CommandCall::Eval("1".to_string()))
+            .await
+            .expect("reply");
         assert_eq!(response.value, Some(json!("discovered")));
 
         // The cookie read from disk is the one presented to the workspace,

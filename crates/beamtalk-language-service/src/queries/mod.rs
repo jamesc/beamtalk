@@ -61,7 +61,9 @@ use std::sync::Arc;
 
 /// Re-exported from [`beamtalk_core::method_source_walker`] so sibling query modules
 /// (`senders_query`, `all_sends_query`, `announce_sites_query`, `ffi_sites_query`)
-/// can reach it via `super::selector_span` without importing across layers.
+/// can reach them via `super::selector_span` / `super::selector_line` without
+/// importing across layers.
+pub(crate) use beamtalk_core::method_source_walker::selector_line;
 pub(crate) use beamtalk_core::method_source_walker::selector_span;
 
 /// The type `type_map` gives `expr`, a node of the **parsed** module.

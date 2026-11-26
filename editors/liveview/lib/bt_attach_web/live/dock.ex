@@ -121,8 +121,9 @@ defmodule BtAttachWeb.Live.Dock do
   # eval error. The call is bounded (see `BtAttach.Workspace`'s timeout tiers).
   def handle_event("eval_interrupt", _params, %{assigns: %{session_pid: pid}} = socket)
       when is_pid(pid) do
-    # Stop cancels what is queued behind the running eval too.
-    socket = assign(socket, eval_queue: [])
+    # Stop cancels what is queued behind the running eval too, and tells every
+    # dropped operation's own UI it never ran (BT-5189).
+    socket = drop_queued_evals(socket, "Stopped before it ran.", :stop)
 
     case Facade.dispatch(:interrupt, %{session_pid: pid}, RequestContext.build(socket)) do
       :ok -> {:noreply, socket}
@@ -533,7 +534,7 @@ defmodule BtAttachWeb.Live.Dock do
 
   # Fold a finished eval task (see `start_eval/4`) back into the socket.
   def handle_async(:eval, {:ok, {job, result}}, socket) do
-    socket = assign(socket, eval_running: false)
+    socket = socket |> assign(eval_running: false, eval_current: nil) |> release_job(job)
 
     {:noreply,
      socket |> fold_eval(job, result) |> WorkspaceLive.refresh_bindings() |> run_next_eval()}
@@ -542,13 +543,16 @@ defmodule BtAttachWeb.Live.Dock do
   def handle_async(:eval, {:exit, :cancelled}, socket), do: {:noreply, socket}
 
   # The task crashed (never a workspace error — those come back as values).
-  # Leave the tab usable and say so.
+  # Leave the tab usable and say so — in the crashed job's own UI, and in the
+  # UI of every job that was queued behind it and now never runs (BT-5189).
   def handle_async(:eval, {:exit, reason}, socket) do
+    message = "The evaluation failed unexpectedly: #{inspect(reason)}"
+
     {:noreply,
-     assign(socket,
-       eval_running: false,
-       eval_queue: [],
-       error: "The evaluation failed unexpectedly: #{inspect(reason)}"
+     abandon_evals(
+       socket,
+       message,
+       "Cancelled: an evaluation ahead of it failed unexpectedly."
      )}
   end
 
@@ -589,7 +593,142 @@ defmodule BtAttachWeb.Live.Dock do
   defp reject_eval(socket, %{kind: :repl, expr: expr}, message),
     do: repl_append_error(socket, expr, message)
 
+  defp reject_eval(socket, %{kind: :fold, reject: reject}, message) when is_function(reject, 2),
+    do: reject.(socket, message)
+
   defp reject_eval(socket, _job, message), do: assign(socket, error: message)
+
+  # A job that never ran (or whose task died) is told so through `reject_eval`
+  # and stops counting as pending.
+  defp fail_job(socket, job, message), do: socket |> release_job(job) |> reject_eval(job, message)
+
+  @doc """
+  Run `code` in the session off the LiveView process and fold the raw
+  `Facade.dispatch(:eval, …)` result back with `fold.(socket, result)` on the
+  LiveView (BT-5129). The single off-process eval path for every non-dock site
+  (method editor, inspector pokes, class modals, git revert): it shares the
+  dock's serialisation, timeout-then-interrupt, Stop control and `DOWN` reset,
+  so a hung eval never freezes the tab and is stoppable from anywhere.
+
+  `reject` (`(socket, message -> socket)`, required, BT-5189) writes a failure
+  to the caller's own UI whenever `fold` will never run: the eval was refused
+  at submit (workspace lost, queue full, too large), dropped from the queue
+  (Stop, workspace `DOWN`, an earlier eval's task crashed), or its own task
+  crashed.
+
+  Options:
+
+    * `:key` — marks the operation pending under `key` from submit until it
+      folds or is rejected, so its UI can disable a second submit
+      (`eval_pending?/2`). A submit whose `key` is already pending is ignored.
+  """
+  def eval_async(socket, pid, code, fold, reject, opts \\ [])
+      when is_function(fold, 2) and is_function(reject, 2) do
+    key = Keyword.get(opts, :key)
+
+    if key != nil and eval_pending?(socket, key) do
+      socket
+    else
+      job = %{kind: :fold, fold: fold, reject: reject, key: key}
+      start_eval(socket, job, pid, code)
+    end
+  end
+
+  @doc """
+  Like `eval_async/6`, but runs the facade op `op` with `params` instead of an
+  evaluation (BT-5204). The operation takes its turn in the same queue (one at a
+  time, in submit order, behind a running eval), shares the Stop control, the
+  `DOWN` reset and the `:key` pending marker, and is rejected through `reject`
+  by the same paths. `fold` receives the raw `Facade.dispatch(op, params, ctx)`
+  result. `pid` is the session the operation waits behind; the op itself does not
+  use it.
+  """
+  def dispatch_async(socket, pid, op, params, fold, reject, opts \\ [])
+      when is_atom(op) and is_map(params) and is_function(fold, 2) and is_function(reject, 2) do
+    key = Keyword.get(opts, :key)
+
+    if key != nil and eval_pending?(socket, key) do
+      socket
+    else
+      job = %{kind: :fold, fold: fold, reject: reject, key: key, op: {op, params}}
+      start_eval(socket, job, pid, "")
+    end
+  end
+
+  @doc """
+  Whether an `eval_async/6` operation submitted under `key` is still queued or
+  running (BT-5189). Takes a socket or its assigns, so templates can gate a
+  submit control with it.
+  """
+  def eval_pending?(%Phoenix.LiveView.Socket{assigns: assigns}, key),
+    do: eval_pending?(assigns, key)
+
+  def eval_pending?(assigns, key), do: MapSet.member?(pending_keys(assigns), key)
+
+  @doc """
+  How many evaluations are queued behind the running one — the cockpit-wide
+  pending indicator's count (BT-5189).
+  """
+  def queued_count(assigns), do: length(Map.get(assigns, :eval_queue, []))
+
+  defp pending_keys(assigns), do: Map.get(assigns, :eval_pending) || MapSet.new()
+
+  defp hold_job(socket, %{key: key}) when key != nil,
+    do: assign(socket, eval_pending: MapSet.put(pending_keys(socket.assigns), key))
+
+  defp hold_job(socket, _job), do: socket
+
+  defp release_job(socket, %{key: key}) when key != nil,
+    do: assign(socket, eval_pending: MapSet.delete(pending_keys(socket.assigns), key))
+
+  defp release_job(socket, _job), do: socket
+
+  # Drop every queued eval, telling each one's own UI it never ran (BT-5189).
+  # `reason` `:stop` also leaves a summary in `eval_notice` (shown beside the
+  # cockpit-wide Stop), so Stop reports what it cancelled even when the dropped
+  # operations' own UIs are out of view. Its own line, not the dock's `error`:
+  # the interrupted eval's result lands there right after.
+  defp drop_queued_evals(socket, message, reason) do
+    queue = Map.get(socket.assigns, :eval_queue, [])
+    socket = assign(socket, eval_queue: [])
+
+    socket =
+      Enum.reduce(queue, socket, fn {job, _pid, _code}, acc -> fail_job(acc, job, message) end)
+
+    case {reason, length(queue)} do
+      {:stop, 0} ->
+        socket
+
+      {:stop, 1} ->
+        assign(socket, eval_notice: "Stopped. 1 waiting evaluation was cancelled.")
+
+      {:stop, n} ->
+        assign(socket, eval_notice: "Stopped. #{n} waiting evaluations were cancelled.")
+
+      _ ->
+        socket
+    end
+  end
+
+  @doc """
+  Give up on the running eval and everything queued behind it (BT-5189): each
+  job's own UI is told why through its rejection (`running_message` for the
+  running one, `queued_message` for those that never started), and the eval
+  state is reset. Used when the running task crashed and when the session went
+  `DOWN` (the caller cancels the task first, so its late result never folds).
+  """
+  def abandon_evals(socket, running_message, queued_message) do
+    current = Map.get(socket.assigns, :eval_current)
+
+    # The queued jobs first: dock evals share one error line, and the running
+    # job's message (e.g. why its task crashed) is the one that must stay.
+    socket =
+      socket
+      |> assign(eval_running: false, eval_current: nil)
+      |> drop_queued_evals(queued_message, :abandon)
+
+    if current, do: fail_job(socket, current, running_message), else: socket
+  end
 
   # Cap the backlog (BT-5108): each queued entry holds its source text, and a
   # stuck eval would otherwise let a runaway client grow the LiveView's heap
@@ -599,17 +738,31 @@ defmodule BtAttachWeb.Live.Dock do
   @doc false
   def max_eval_queue, do: @max_eval_queue
 
+  # ...and the queued source text too (BT-5129): 25 entries of a huge paste
+  # would still pin megabytes of heap.
+  @max_eval_queue_bytes 1_000_000
+
   defp enqueue_eval(socket, job, pid, code) do
     queue = Map.get(socket.assigns, :eval_queue, [])
+    queued_bytes = Enum.reduce(queue, 0, fn {_job, _pid, c}, acc -> acc + byte_size(c) end)
 
-    if length(queue) >= @max_eval_queue do
-      reject_eval(
-        socket,
-        job,
-        "Too many evaluations are waiting (#{@max_eval_queue}). Wait for the running one to finish or press Stop."
-      )
-    else
-      assign(socket, eval_queue: queue ++ [{job, pid, code}])
+    cond do
+      length(queue) >= @max_eval_queue ->
+        reject_eval(
+          socket,
+          job,
+          "Too many evaluations are waiting (#{@max_eval_queue}). Wait for the running one to finish or press Stop."
+        )
+
+      queued_bytes + byte_size(code) > @max_eval_queue_bytes ->
+        reject_eval(
+          socket,
+          job,
+          "The waiting evaluations are too large. Wait for the running one to finish or press Stop."
+        )
+
+      true ->
+        socket |> hold_job(job) |> assign(eval_queue: queue ++ [{job, pid, code}])
     end
   end
 
@@ -628,13 +781,14 @@ defmodule BtAttachWeb.Live.Dock do
     ctx = RequestContext.build(socket)
 
     task = fn ->
-      result = Facade.dispatch(:eval, %{session_pid: pid, code: code}, ctx)
+      result = dispatch_job(job, pid, code, ctx)
 
       if eval_timed_out?(result), do: Facade.dispatch(:interrupt, %{session_pid: pid}, ctx)
       {job, result}
     end
 
-    socket = assign(socket, eval_running: true)
+    socket =
+      socket |> hold_job(job) |> assign(eval_running: true, eval_current: job, eval_notice: nil)
 
     if Phoenix.LiveView.connected?(socket) do
       start_async(socket, :eval, task)
@@ -644,8 +798,16 @@ defmodule BtAttachWeb.Live.Dock do
     end
   end
 
+  # What a queued job runs: its own facade op (`dispatch_async/7`), else an eval.
+  defp dispatch_job(%{op: {op, params}}, _pid, _code, ctx), do: Facade.dispatch(op, params, ctx)
+
+  defp dispatch_job(_job, pid, code, ctx),
+    do: Facade.dispatch(:eval, %{session_pid: pid, code: code}, ctx)
+
   defp eval_timed_out?({:error, {:unreachable, :timeout}, _output, _warnings}), do: true
   defp eval_timed_out?(_result), do: false
+
+  defp fold_eval(socket, %{kind: :fold, fold: fold}, result), do: fold.(socket, result)
 
   defp fold_eval(socket, %{kind: :eval, action: action, expr: expr}, result) do
     case result do

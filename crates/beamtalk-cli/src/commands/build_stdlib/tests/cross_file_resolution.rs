@@ -234,7 +234,6 @@ fn test_internal_alias_resolves_cross_file_within_stdlib() {
     let source_b = fs::read_to_string(&file_b).unwrap();
     let tokens_b = beamtalk_core::source_analysis::lex_with_eof(&source_b);
     let (module_b, _diags) = beamtalk_core::source_analysis::parse(tokens_b);
-    let extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::default();
 
     let mismatched = beamtalk_core::CompilerOptions {
         current_package: Some("not_stdlib".into()),
@@ -244,8 +243,7 @@ fn test_internal_alias_resolves_cross_file_within_stdlib() {
         &module_b,
         beamtalk_core::semantic_analysis::AnalysisContext::default()
             .with_options(&mismatched)
-            .with_pre_loaded_aliases(pre_loaded_aliases.clone())
-            .with_cross_file_extensions(&extensions),
+            .with_pre_loaded_aliases(pre_loaded_aliases.clone()),
     );
     assert!(
         !result.alias_registry.has_alias("Direction"),
@@ -257,8 +255,7 @@ fn test_internal_alias_resolves_cross_file_within_stdlib() {
         &module_b,
         beamtalk_core::semantic_analysis::AnalysisContext::default()
             .with_options(&options)
-            .with_pre_loaded_aliases(pre_loaded_aliases)
-            .with_cross_file_extensions(&extensions),
+            .with_pre_loaded_aliases(pre_loaded_aliases),
     );
     assert!(
         result.alias_registry.has_alias("Direction"),
@@ -361,14 +358,12 @@ fn test_cross_file_protocol_resolution_seeds_pre_loaded_protocols() {
     let source_b = fs::read_to_string(&file_b).unwrap();
     let tokens_b = beamtalk_core::source_analysis::lex_with_eof(&source_b);
     let (module_b, _diags) = beamtalk_core::source_analysis::parse(tokens_b);
-    let extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::default();
 
     let result = beamtalk_core::semantic_analysis::analyse_full(
         &module_b,
         beamtalk_core::semantic_analysis::AnalysisContext::default()
             .with_options(&options)
-            .with_pre_loaded_protocols(protocol_infos)
-            .with_cross_file_extensions(&extensions),
+            .with_pre_loaded_protocols(protocol_infos),
     );
     assert!(
         result.protocol_registry.has_protocol("ProtocolFixtureA"),
@@ -381,9 +376,7 @@ fn test_cross_file_protocol_resolution_seeds_pre_loaded_protocols() {
     // assertion above exercises the fix rather than a tautology.
     let result_unfixed = beamtalk_core::semantic_analysis::analyse_full(
         &module_b,
-        beamtalk_core::semantic_analysis::AnalysisContext::default()
-            .with_options(&options)
-            .with_cross_file_extensions(&extensions),
+        beamtalk_core::semantic_analysis::AnalysisContext::default().with_options(&options),
     );
     assert!(
         !result_unfixed

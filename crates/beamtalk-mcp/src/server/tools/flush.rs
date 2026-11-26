@@ -6,7 +6,7 @@
 //! Phase 3; the destructive tier is ADR 0113 Phase 2/4) and inspecting or
 //! re-validating the workspace's pending-change state.
 
-use beamtalk_core::tool_expr::{FlushFilter, flush_expr_with_confirm_destructive};
+use beamtalk_repl_protocol::FlushScope;
 use rmcp::{handler::server::wrapper::Parameters, model::CallToolResult, tool, tool_router};
 
 use crate::server::params::FlushParams;
@@ -22,9 +22,9 @@ impl BeamtalkMcp {
     /// flushIncludingDestructive` / `Workspace flush: <selector>
     /// confirmDestructive: true` (Tier 1 + Tier 2). The optional `class`,
     /// `file`, and `kind` filters are mutually exclusive; at most one may be
-    /// supplied.
+    /// supplied. A `selector` scopes to one method, alone or with a `class`.
     #[tool(
-        description = "Write pending durable ChangeLog entries to disk via byte-span splice + atomic rename, with external-edit conflict detection. With no arguments, flushes every pending durable Tier-1 change ('Workspace flush'). At most one of 'class', 'file', or 'kind' may be supplied: 'class' scopes to one class ('Workspace flush: ClassName'), 'file' scopes to one source file ('Workspace flush: #{ #file => \"path\" }'), and 'kind' scopes to a ChangeEntry kind such as \"new-class\" ('Workspace flush: #'new-class'). DESTRUCTIVE when 'confirm_destructive' is true: pending 'remove-class' entries (from 'remove_class') delete their .bt file from disk — see 'confirm_destructive's own description for the required-argument gate. Returns a FlushResult summary listing files written and any conflicts; a skipped destructive entry is reported distinctly as 'skipped: destructive', not applied. (ADR 0082 Phase 3 / ADR 0113 Phase 2, BT-2288/BT-3207.)",
+        description = "Write pending durable ChangeLog entries to disk via byte-span splice + atomic rename, with external-edit conflict detection. With no arguments, flushes every pending durable Tier-1 change ('Workspace flush'). At most one of 'class', 'file', or 'kind' may be supplied, except that 'selector' (a method selector such as \"increment\" or \"at:put:\") scopes the flush to that method and may be combined with 'class' to flush one method of one class (not with 'file' or 'kind'): 'class' scopes to one class ('Workspace flush: ClassName'), 'file' scopes to one source file ('Workspace flush: #{ #file => \"path\" }'), and 'kind' scopes to one ChangeEntry kind: \"new-class\", \"remove-method\", \"remove-class\", \"rename-class\" or \"rename-method\" ('Workspace flush: #'new-class'). An empty string for any of these is refused, not read as unscoped. DESTRUCTIVE when 'confirm_destructive' is true: pending 'remove-class' entries (from 'remove_class') delete their .bt file from disk — see 'confirm_destructive's own description for the required-argument gate. Returns a FlushResult summary listing files written and any conflicts; a skipped destructive entry is reported distinctly as 'skipped: destructive', not applied. (ADR 0082 Phase 3 / ADR 0113 Phase 2, BT-2288/BT-3207.)",
         annotations(read_only_hint = false, destructive_hint = true)
     )]
     pub(crate) async fn flush(
@@ -32,16 +32,39 @@ impl BeamtalkMcp {
         Parameters(params): Parameters<FlushParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let mut timer = ToolTimer::start_quiet("flush");
-        // Mutual exclusivity: at most one filter.
+        // An empty filter is refused, not read as "no filter": flushing every
+        // pending change because a scope came through blank would widen it.
+        for (name, value) in [
+            ("class", params.class.as_deref()),
+            ("file", params.file.as_deref()),
+            ("kind", params.kind.as_deref()),
+            ("selector", params.selector.as_deref()),
+        ] {
+            if value.is_some_and(str::is_empty) {
+                return Err(rmcp::ErrorData::invalid_params(
+                    format!("flush: '{name}' must not be empty — omit it to flush everything."),
+                    None,
+                ));
+            }
+        }
+        // Mutual exclusivity: at most one of class/file/kind, and a selector
+        // combines only with a class.
         let provided = [
             params.class.as_deref(),
             params.file.as_deref(),
             params.kind.as_deref(),
         ]
         .into_iter()
-        .filter(|v| v.is_some_and(|s| !s.is_empty()))
+        .flatten()
         .count();
-        if provided > 1 {
+        if params.selector.is_some() {
+            if params.file.is_some() || params.kind.is_some() {
+                return Err(rmcp::ErrorData::invalid_params(
+                    "flush: 'selector' combines only with 'class' — not with 'file' or 'kind'.",
+                    None,
+                ));
+            }
+        } else if provided > 1 {
             return Err(rmcp::ErrorData::invalid_params(
                 "flush: 'class', 'file', and 'kind' are mutually exclusive — pass at most one.",
                 None,
@@ -53,25 +76,42 @@ impl BeamtalkMcp {
             class = ?params.class,
             file = ?params.file,
             kind = ?params.kind,
+            selector = ?params.selector,
             confirm_destructive,
             "tool invoked"
         );
 
-        let expr = match (
-            params.class.as_deref().filter(|s| !s.is_empty()),
-            params.file.as_deref().filter(|s| !s.is_empty()),
-            params.kind.as_deref().filter(|s| !s.is_empty()),
+        let selector = params.selector.as_deref().map(|s| {
+            let s = s.trim();
+            s.strip_prefix('#').unwrap_or(s).trim_matches('\'')
+        });
+        if selector.is_some_and(str::is_empty) {
+            return Err(rmcp::ErrorData::invalid_params(
+                "flush: 'selector' must not be empty — omit it to flush everything.",
+                None,
+            ));
+        }
+
+        let scope = match (
+            params.class.as_deref(),
+            params.file.as_deref(),
+            params.kind.as_deref(),
         ) {
+            (Some(class), None, None) if selector.is_some() => {
+                validate_class_name(class)?;
+                FlushScope::ClassSelector(class, selector.unwrap_or_default())
+            }
+            (None, None, None) if selector.is_some() => {
+                FlushScope::Selector(selector.unwrap_or_default())
+            }
             (Some(class), None, None) => {
                 validate_class_name(class)?;
-                flush_expr_with_confirm_destructive(FlushFilter::Class(class), confirm_destructive)
+                FlushScope::Class(class)
             }
-            (None, Some(file), None) => {
-                flush_expr_with_confirm_destructive(FlushFilter::File(file), confirm_destructive)
-            }
+            (None, Some(file), None) => FlushScope::File(file),
             (None, None, Some(kind)) => {
-                // Allow either bare `new-class` or `#'new-class'`. We always
-                // emit a quoted-symbol literal so hyphenated kinds parse.
+                // Allow either bare `new-class` or `#'new-class'`; the operation
+                // takes the bare kind name.
                 let bare = kind.strip_prefix('#').unwrap_or(kind);
                 let bare = bare.trim_matches('\'');
                 if bare.is_empty()
@@ -86,27 +126,29 @@ impl BeamtalkMcp {
                         None,
                     ));
                 }
-                flush_expr_with_confirm_destructive(FlushFilter::Kind(bare), confirm_destructive)
+                FlushScope::Kind(bare)
             }
-            _ => flush_expr_with_confirm_destructive(FlushFilter::None, confirm_destructive),
+            _ => FlushScope::All,
         };
 
+        // The `flush` operation: the one implementation LiveView and wire
+        // clients share, including the destructive-tier confirmation rule.
         let response = self
             .client
-            .evaluate_with_options(&expr, false)
+            .flush(scope, confirm_destructive)
             .await
             .internal_err()?;
 
         check_response!(response, "Flush failed");
 
-        let text = {
-            let v = response.value_string();
-            if v.is_empty() {
-                "Flushed".to_string()
-            } else {
-                v
-            }
-        };
+        // The `FlushResult` summary (`flushed`, `files`, `skipped`,
+        // `conflicts`, ...) as JSON, so a withheld destructive entry shows as
+        // `"reason":"destructive"` and a conflict is visible.
+        let text = response
+            .value
+            .as_ref()
+            .and_then(|v| serde_json::to_string(v).ok())
+            .unwrap_or_else(|| "Flushed".to_string());
 
         timer.ok_text(format!("{text}\n{}", self.workspace_note()))
     }

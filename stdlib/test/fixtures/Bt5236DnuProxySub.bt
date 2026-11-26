@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5236: inherits the `doesNotUnderstand:args:` override of its superclass.
+
+Bt5236DnuProxy subclass: Bt5236DnuProxySub

@@ -435,14 +435,8 @@ impl Analyser {
                     self.define_pattern_variables_in_scope(binding);
                 }
             }
-            // Defensive parity with `Pattern::Constructor` above —
-            // the parser currently never produces a `Pattern::Type` here
-            // (`identifier :: Type := expr` is rejected as "Type annotations
-            // on destructuring assignments are not yet supported"), so this
-            // arm is unreachable today. Handling it the same way `Variable`
-            // is handled keeps this function correct-by-construction if that
-            // parser restriction is ever lifted, rather than silently
-            // leaving `binding` unbound in scope.
+            // `x :: T` element of a destructuring pattern (BT-5284) binds
+            // the name like a plain variable.
             Pattern::Type { binding, .. } => {
                 if self.scope.lookup_immut(&binding.name).is_none() {
                     self.scope

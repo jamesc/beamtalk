@@ -220,6 +220,15 @@ TestCase subclass: BinaryConstructionTest
     frame := <<(payload size):16, payload/binary>>
     self assert: frame toBytes equals: #(0, 3, 97, 98, 99)
 
+  testSizeExpressionWithSend =>
+    // BT-5285: a construction size may contain a message send; it is
+    // evaluated before the binary is built (unlike a pattern size, which
+    // must be a guard expression).
+    payload := Binary fromBytes: #(1, 2, 3, 4)
+    head := <<payload:(payload size - 1)/binary>>
+    self assert: head toBytes equals: #(1, 2, 3)
+    self assert: <<7:(payload size * 4)>> bitSize equals: 16
+
   testBitsTailRoundTrip =>
     tail := (Binary fromBytes: #(234)) match: [
       <<_:3, r/bitstring>> -> r;
@@ -364,3 +373,58 @@ TestCase subclass: BinaryConstructionTest
       <<"é"/utf16, 1:8, (w size):8, w:8>>
     ] on: Error do: [:e | e message]
     self assert: message2 equals: "binary construction: segment 4 of type 'integer': expected an integer but got: ""hi"""
+
+  // --- Integer literals beyond i64 (BT-5239) ---
+  testBignumSegmentRoundTrip =>
+    // 10^20 needs 67 bits.
+    bin := <<100000000000000000000:72>>
+    self assert: bin toBytes size equals: 9
+    result := bin match: [
+      <<100000000000000000000:72>> -> #matched;
+      _ -> #other
+    ]
+    self assert: result equals: #matched
+    self
+      assert: (bin match: [
+        <<v:72>> -> v;
+        _ -> nil
+      ])
+      equals: 100000000000000000000
+
+  testNegativeBignumSegmentRoundTrip =>
+    bin := <<-100000000000000000000:72/signed>>
+    self
+      assert: (bin match: [
+        <<v:72/signed>> -> v;
+        _ -> nil
+      ])
+      equals: -100000000000000000000
+
+  testHexBignumSegment =>
+    bin := <<16rFFFFFFFFFFFFFFFFFF:72>>
+    self assert: bin toBytes equals: #(255, 255, 255, 255, 255, 255, 255, 255, 255)
+
+  testBignumSegmentWithVariableSize =>
+    n := 72
+    bin := <<100000000000000000000:n>>
+    self
+      assert: (bin match: [
+        <<v:72>> -> v;
+        _ -> nil
+      ])
+      equals: 100000000000000000000
+
+  testInexactBignumFloatSegmentIsConvertedByTheRuntime =>
+    // 166153499473114502559719956244594689 is not a float. The BEAM's
+    // `float/1` on a bignum rounds differently across OTP versions (OTP 28
+    // gives 2^117, OTP 29 the nearest float, 2^117 + 2^65), so the literal is
+    // not folded at compile time: it must build whatever the runtime builds
+    // for the same integer held in a variable.
+    v := 166153499473114502559719956244594689
+    expected := <<v:64/float>>
+    bin := <<166153499473114502559719956244594689:64/float>>
+    self assert: bin toBytes equals: expected toBytes
+
+  testExactBignumFloatSegmentIsFolded =>
+    bin := <<100000000000000000000/float>>
+    self assert: bin toBytes equals: #(68, 21, 175, 29, 120, 181, 140, 64)

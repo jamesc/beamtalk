@@ -7,7 +7,7 @@
 //! questions about class relationships (is-actor, is-value, is-typed, etc.)
 //! and aggregate inherited state/class-variable information.
 
-use crate::ast::{ClassDefinition, ClassKind, MethodKind, Module, SlotKind};
+use crate::ast::{ClassDefinition, ClassKind, Module, SlotKind};
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use ecow::EcoString;
 use std::collections::{BTreeSet, HashSet};
@@ -686,9 +686,6 @@ impl ClassHierarchy {
         let Some(auto_ctors) = info.auto_ctors.as_ref() else {
             return result;
         };
-        if !info.class_variables.is_empty() {
-            return result;
-        }
         result.keyword.clone_from(&auto_ctors.keyword_constructor);
         if info.is_abstract || info.is_native {
             return result;
@@ -760,17 +757,17 @@ impl ClassHierarchy {
     ///   stdlib (`AtomicCounter new:`) creates a named ETS table owned by
     ///   whichever process runs it, which must stay the class process;
     /// - a direct `(Erlang mod) fn` FFI call whose arguments are all literals
-    ///   (or, for `new:`, the method's own parameter) and which is not a row
-    ///   of the curated class-method FFI table read by the
-    ///   `class-process-ffi` / `class-method-process-resource` lints
-    ///   (`ets new:`, `erlang self`, `spawn_link`, `gen_udp open:`, ...):
-    ///   those keep the class process, which owns what they create. FFI
-    ///   outside that table is not recognised, exactly as for the lints, and
-    ///   runs in the caller like any other in-caller class method;
+    ///   (or, for `new:`, the method's own parameter) and which is not a row of
+    ///   the curated class-method FFI table read by the
+    ///   `class-method-process-resource` lint (`ets new:`, `erlang self`,
+    ///   `spawn_link`, `gen_udp open:`, ...): those keep the class process,
+    ///   which owns what they create. FFI outside that table is not recognised,
+    ///   exactly as for the lint, and runs in the caller like any other
+    ///   in-caller class method;
     /// - (`new:` only) a send to `self`, with literal or parameter
     ///   arguments, of one of the class's own class methods that already runs
-    ///   in the caller ([`Self::is_direct_call_eligible`]: not process-bound,
-    ///   no class variables in the chain) and whose own body passes this test
+    ///   in the caller ([`Self::is_direct_call_eligible`]: not process-bound)
+    ///   and whose own body passes this test
     ///   one level down: a plain FFI forward as above, or its own selector
     ///   primitive (`class withAll: list => @primitive`, the target of the
     ///   `List class new: elements => self withAll: elements` shape). The
@@ -783,11 +780,12 @@ impl ClassHierarchy {
     /// so it reads no class variable and nothing from the class process's
     /// dictionary (`basicNew` does, which is why `self basicNew` is never
     /// eligible). The class must also be concrete, compile as a non-actor,
-    /// have a fully known surface, no instance-side method of the same
-    /// selector and no class variables in its chain. This only makes the
-    /// class eligible to *try* the in-caller path: a class-side extension or
-    /// ADR 0084 runtime fun of the selector still reaches the class process
-    /// through the run-time guard. As for any in-caller class method
+    /// have a fully known surface and no instance-side method of the same
+    /// selector. This only makes the
+    /// class eligible to *try* the in-caller path: an ADR 0084 runtime fun of
+    /// the selector turns the direct call off through the run-time guard, and
+    /// the dynamic send that answers instead runs the fun (in the caller, as
+    /// the selector is not process-bound; ADR 0153 §5). As for any in-caller class method
     /// (ADR 0142), a resource the body creates belongs to the caller.
     #[must_use]
     pub fn explicit_class_constructor_builds_in_caller(
@@ -801,10 +799,11 @@ impl ClassHierarchy {
 
     /// The chain-dependent half of
     /// [`Self::explicit_class_constructor_builds_in_caller`], and the one place
-    /// the rule lives: no class variables in the chain, not an actor, a fully
-    /// known surface. Evaluated at query time against whatever hierarchy is in
-    /// hand, so a sibling-file ancestor injected later is seen (BT-4640); both
-    /// codegen (through that method) and cross-file callers
+    /// the rule lives: not an actor, a fully known surface, and a chain that
+    /// resolves to its root ([`Self::chain_resolves_to_root`]; BT-4644).
+    /// Evaluated at query time against whatever hierarchy is in hand, so a
+    /// sibling-file ancestor injected later is seen (BT-4640); both codegen
+    /// (through that method) and cross-file callers
     /// ([`Self::runs_class_method_in_caller`], from the published
     /// [`ClassInfo::in_caller_new1`] shape) call it. `supervisor_kind` and
     /// `is_abstract` are AST facts already folded into the shape.
@@ -813,12 +812,28 @@ impl ClassHierarchy {
             return false;
         };
         !info.surface_incomplete
-            && !self.chain_has_class_variables(class_name)
+            && self.chain_resolves_to_root(class_name)
             && match self.resolve_class_kind(class_name) {
                 ClassKind::Actor => false,
                 ClassKind::Value => true,
                 ClassKind::Object => !self.has_cross_file_parent(class_name),
             }
+    }
+
+    /// Whether `class_name`'s superclass chain can be followed to its root:
+    /// every link is a known class, none is a superclass-index stub
+    /// ([`ClassInfo::is_superclass_index_stub`]), and there is no cycle. Any
+    /// doubt answers `false`, so an in-caller constructor verdict fails
+    /// closed on a chain this hierarchy cannot see (BT-4644).
+    fn chain_resolves_to_root(&self, class_name: &str) -> bool {
+        let mut last = None;
+        for info in self.ancestors(class_name) {
+            if info.is_superclass_index_stub() {
+                return false;
+            }
+            last = Some(info);
+        }
+        last.is_some_and(|info| info.superclass.is_none())
     }
 
     /// The chain-independent half of
@@ -834,9 +849,7 @@ impl ClassHierarchy {
             methods: &'m [crate::ast::MethodDefinition],
             selector: &str,
         ) -> Option<&'m crate::ast::MethodDefinition> {
-            methods
-                .iter()
-                .find(|m| m.kind == MethodKind::Primary && m.selector.name() == selector)
+            methods.iter().find(|m| m.selector.name() == selector)
         }
         let keyword = match selector {
             "new" => false,
@@ -881,7 +894,6 @@ impl ClassHierarchy {
                 .iter()
                 .all(|arg| plain_argument(method, arg, keyword))
             && !ClassInfo::is_process_bound_class_selector(&sent)
-            && !ClassInfo::is_class_var_reflection_selector(&sent)
             && primary(&class.class_methods, &sent).is_some_and(|target| {
                 matches!(target.body.as_slice(), [only] if
                 plain_ffi_forward(target, &only.expression, true)
@@ -1091,49 +1103,6 @@ impl ClassHierarchy {
             .any(|n| self.is_subclass_of(class_name, n))
     }
 
-    /// Returns the class variables `class_name` itself declares with
-    /// `classState:` — own declarations only, never an ancestor's.
-    ///
-    /// Class variables are per class, not inherited (ADR 0013 §1; ADR 0130
-    /// amendment "Not inherited, per-class ownership", BT-3762). This is the
-    /// single answer to "which class variables does the class being compiled
-    /// have?", shared by class-side extensions, the `class-state-abroad` lint
-    /// and the `classState:` / migration checks, so codegen and the lint cannot
-    /// disagree. An inherited method running through a subclass reads and writes
-    /// the *subclass's* variables, which is why the subclass redeclares them.
-    #[must_use]
-    pub fn own_class_variable_names(&self, class_name: &str) -> Vec<EcoString> {
-        self.classes
-            .get(class_name)
-            .map(|info| {
-                info.class_variables
-                    .iter()
-                    .map(|cv| cv.name.clone())
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    /// The nearest strict ancestor of `class_name` that declares the class
-    /// variable `var_name`, if any. Diagnostic-only: it names the class whose
-    /// variable a subclass method tried to reach, so the error can say "redeclare
-    /// it with `classState:`" (BT-3762). It never makes `var_name` accessible.
-    #[must_use]
-    pub fn inherited_class_variable_owner(
-        &self,
-        class_name: &str,
-        var_name: &str,
-    ) -> Option<EcoString> {
-        self.ancestors(class_name)
-            .skip(1)
-            .find(|info| {
-                info.class_variables
-                    .iter()
-                    .any(|cv| cv.name.as_str() == var_name)
-            })
-            .map(|info| info.name.clone())
-    }
-
     /// Returns all state (instance variable) names for a class,
     /// including inherited state from the superclass chain.
     ///
@@ -1160,11 +1129,10 @@ impl ClassHierarchy {
         state
     }
 
-    /// Shared superclass-chain walk behind [`Self::state_field_type`],
-    /// [`Self::state_field_kind`], [`Self::class_variable_kind`] and
-    /// [`Self::class_variable_type`] (AGENTS.md "No duplicate
-    /// implementations": these four used to each hand-roll the identical
-    /// `visited`/`current` cycle-guarded loop below).
+    /// Shared superclass-chain walk behind [`Self::state_field_type`] and
+    /// [`Self::state_field_kind`] (AGENTS.md "No duplicate implementations":
+    /// they used to each hand-roll the identical `visited`/`current`
+    /// cycle-guarded loop below).
     ///
     /// Calls `settle` on each ancestor's [`ClassInfo`] in order (`class_name`
     /// itself first, then each superclass). `settle` returns
@@ -1260,44 +1228,6 @@ impl ClassHierarchy {
             }
         })
         .unwrap_or(SlotKind::Eager)
-    }
-
-    /// Returns the slot kind (`#eager` | `#late`, ADR 0124 §1) for a class
-    /// variable (`classState:` declaration), walking the superclass chain.
-    ///
-    /// Class-side counterpart to [`Self::state_field_kind`]; same shadowing
-    /// and missing-metadata-degrades-to-`#eager` rules.
-    #[must_use]
-    pub fn class_variable_kind(&self, class_name: &str, var_name: &str) -> SlotKind {
-        self.walk_superclass_chain(class_name, |info| {
-            info.class_variables
-                .iter()
-                .find(|cv| cv.name == var_name)
-                .map_or(ControlFlow::Continue(()), |cv| {
-                    ControlFlow::Break(Some(cv.kind))
-                })
-        })
-        .unwrap_or(SlotKind::Eager)
-    }
-
-    /// Returns the declared type annotation for a class variable
-    /// (`classState:` declaration), walking the superclass chain.
-    ///
-    /// Class-side counterpart to [`Self::state_field_type`]; same shadowing
-    /// rule (a subclass redeclaring the variable is its owner) and `None`
-    /// result for an untyped variable, a variable that doesn't exist, or an
-    /// unknown class. ADR 0124 B3 uses this to name the declared type in a
-    /// `late` class variable's `UninitializedStateError` hint.
-    #[must_use]
-    pub fn class_variable_type(&self, class_name: &str, var_name: &str) -> Option<DeclaredType> {
-        self.walk_superclass_chain(class_name, |info| {
-            info.class_variables
-                .iter()
-                .find(|cv| cv.name == var_name)
-                .map_or(ControlFlow::Continue(()), |cv| {
-                    ControlFlow::Break(cv.ty.clone())
-                })
-        })
     }
 
     /// Composed "`initialize` definitely assigns" summary for a class,

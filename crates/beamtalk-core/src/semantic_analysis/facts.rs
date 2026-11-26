@@ -9,9 +9,7 @@
 //! Codegen consumes it via hash-map lookup instead of re-deriving facts
 //! inline at every call site.
 
-use crate::ast::{
-    Block, BlockId, Expression, ExpressionStatement, MessageSelector, MethodKind, Module,
-};
+use crate::ast::{Block, BlockId, Expression, ExpressionStatement, MessageSelector, Module};
 use crate::ast_walker::for_each_child;
 use crate::semantic_analysis::block_facts::{BlockMutationAnalysis, analyze_block};
 use crate::source_analysis::{MethodSide, Span};
@@ -53,11 +51,11 @@ pub enum DispatchKind {
 /// a self-send or field write inside a real closure does not make the
 /// closure's *call site* itself state-effecting.
 ///
-/// `actor_self_send`/`field_write` and `class_self_send`/`class_var_write`
+/// `actor_self_send`/`field_write` and `class_self_send`/`class_field_write`
 /// are deliberately separate pairs rather than one context-agnostic
 /// "self-send"/"field-write" flag: the same AST shape (`self foo`, `self.f
 /// := …`) means "this needs an Actor `State` thread" inside an instance
-/// method but "this is a class-variable access" inside a class method, and a
+/// method but "this is a class-side field access" inside a class method, and a
 /// context-aware consumer reads only the pair matching its current context.
 ///
 /// **Not the same question as [`crate::state_threading_selectors::state_threaded_block_arg_indices`].**
@@ -82,7 +80,7 @@ pub enum DispatchKind {
 /// where codegen has none.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 // Four fields, each a distinct effect kind named directly in ADR 0118 §7
-// (`actor_self_send`/`field_write`/`class_var_write`/`class_self_send`) —
+// (`actor_self_send`/`field_write`/`class_field_write`/`class_self_send`) —
 // a state machine or nested enum would obscure that a node can have any
 // combination of them (e.g. both a self-send AND a field write) at once.
 #[allow(clippy::struct_excessive_bools)]
@@ -93,10 +91,10 @@ pub struct StateEffects {
     /// A `self.field := …` write (instance context) — needs the Actor
     /// `State` thread (or, for a Value type, the field's own threading).
     pub field_write: bool,
-    /// A `self.classVar := …` write reachable from a class method — a
-    /// class-variable write (an in-place `put` in the class process, ADR
-    /// 0130).
-    pub class_var_write: bool,
+    /// A `self.field := …` write reachable from a class method. A class has no
+    /// state of its own (ADR 0153), so this is a compile error elsewhere; the
+    /// fact stays so a consumer reading it in a class context sees the write.
+    pub class_field_write: bool,
     /// A synchronous self-send (`self foo`) reachable from a class method
     /// — a class-side send (passes and rebinds nothing, ADR 0130).
     pub class_self_send: bool,
@@ -106,7 +104,7 @@ impl StateEffects {
     /// `true` if any effect is set.
     #[must_use]
     pub fn any(self) -> bool {
-        self.actor_self_send || self.field_write || self.class_var_write || self.class_self_send
+        self.actor_self_send || self.field_write || self.class_field_write || self.class_self_send
     }
 
     /// Unions two facts field-by-field (used when folding sub-expression
@@ -116,7 +114,7 @@ impl StateEffects {
         Self {
             actor_self_send: self.actor_self_send || other.actor_self_send,
             field_write: self.field_write || other.field_write,
-            class_var_write: self.class_var_write || other.class_var_write,
+            class_field_write: self.class_field_write || other.class_field_write,
             class_self_send: self.class_self_send || other.class_self_send,
         }
     }
@@ -128,8 +126,6 @@ impl StateEffects {
 /// Turns O(n) method scans in codegen into O(1) hash-map lookups.
 #[derive(Debug, Clone, Default)]
 pub struct ClassFacts {
-    /// Whether the class has any primary instance method.
-    pub has_primary_method: bool,
     /// Whether the class has any selector-based `@primitive` instance method.
     ///
     /// A method is "primitive" when its body is a single quoted `@primitive` expression
@@ -375,9 +371,6 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
         for (i, method) in class.methods.iter().enumerate() {
             cf.instance_methods_by_selector
                 .insert(method.selector.name().to_string(), i);
-            if method.kind == MethodKind::Primary {
-                cf.has_primary_method = true;
-            }
             if method.body.len() == 1
                 && matches!(
                     &method.body[0].expression,
@@ -543,7 +536,7 @@ fn compute_state_effects(
             if let Expression::FieldAccess { receiver, .. } = target.as_ref() {
                 if receiver.is_self() {
                     if in_class_method {
-                        eff.class_var_write = true;
+                        eff.class_field_write = true;
                     } else {
                         eff.field_write = true;
                     }
@@ -1150,7 +1143,6 @@ mod tests {
         );
         let standalone = StandaloneMethodDefinition {
             class_name: Identifier::new("Counter", ts()),
-            package: None,
             is_class_method: false,
             method,
             span: ts(),
@@ -1206,7 +1198,7 @@ mod tests {
         assert!(eff.actor_self_send);
         assert!(!eff.class_self_send);
         assert!(!eff.field_write);
-        assert!(!eff.class_var_write);
+        assert!(!eff.class_field_write);
     }
 
     #[test]
@@ -1237,14 +1229,14 @@ mod tests {
         let expr = field_write("count", lit(1), ts());
         let eff = compute_state_effects_for_expr(&expr, false);
         assert!(eff.field_write);
-        assert!(!eff.class_var_write);
+        assert!(!eff.class_field_write);
     }
 
     #[test]
-    fn state_effects_class_method_field_write_sets_class_var_write() {
+    fn state_effects_class_method_field_write_sets_class_field_write() {
         let expr = field_write("total", lit(1), ts());
         let eff = compute_state_effects_for_expr(&expr, true);
-        assert!(eff.class_var_write);
+        assert!(eff.class_field_write);
         assert!(!eff.field_write);
     }
 
@@ -1405,7 +1397,7 @@ mod tests {
         let combined = a.union(b);
         assert!(combined.actor_self_send);
         assert!(combined.field_write);
-        assert!(!combined.class_var_write);
+        assert!(!combined.class_field_write);
         assert!(!combined.class_self_send);
     }
 

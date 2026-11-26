@@ -1313,13 +1313,11 @@ browse_xref() ->
         protocol_method_row('between:and:', 200, 'Comparable'),
         protocol_method_row('clampFrom:to:', 202, 'Comparable'),
         method_row('min:', 204, indexed, class_body),
-        %% Name-heuristic buckets (no declared category, not extension):
+        %% Name-heuristic buckets (no declared category):
         method_row('isEmpty', 90, indexed, class_body),
         method_row('asString', 92, indexed, class_body),
         method_row('printString', 94, indexed, class_body),
         method_row('setTo:', 96, indexed, class_body),
-        %% Source fact: extension provenance → "extensions", outranks the name.
-        method_row('describe', 98, indexed, extension),
         %% Synthetic compiler-generated accessor → "accessing" by construction.
         method_row('step', 100, synthetic, class_body),
         %% A synthetic accessor registered as a real method (signature +
@@ -1328,10 +1326,6 @@ browse_xref() ->
         %% camelCase word-boundary guard: `address` must NOT match the `add`
         %% prefix (no uppercase/`:` boundary), so it stays "as yet unclassified".
         method_row('address', 102, indexed, class_body),
-        %% Precedence overlap: synthetic AND extension. The synthetic source
-        %% status (a compiler-generated accessor) is decided before the extension
-        %% provenance, so this must bucket "accessing", not "extensions".
-        method_row('syntheticExt', 104, synthetic, extension),
         %% print* prefix path (distinct from the exact-name `printString` match):
         %% `printDetails` must reach the prefix heuristic and land in "printing".
         method_row('printDetails', 106, indexed, class_body),
@@ -1662,12 +1656,11 @@ browse_tests(#{class_name := Class}) ->
             ?assertEqual(null, maps:get(<<"doc">>, IncRow))
         end},
         {"browse-protocols categorizes selectors by real protocol buckets", fun() ->
-            %% protocol_for_selector decides pragma → xref-extension
-            %% source → name heuristic. With no declared category, the seed
+            %% protocol_for_selector decides pragma → synthetic-accessor
+            %% source fact → name heuristic. With no declared category, the seed
             %% selectors land in meaningful buckets (not all "as yet
-            %% unclassified"): name conventions for is*/as*/print*, the
-            %% extension-provenance selector in "extensions", and a synthetic
-            %% accessor in "accessing".
+            %% unclassified"): name conventions for is*/as*/print*, and a
+            %% synthetic accessor in "accessing".
             Value = decode_value(
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-protocols">>,
@@ -1684,14 +1677,10 @@ browse_tests(#{class_name := Class}) ->
             ?assertEqual(<<"converting">>, protocol_of(Protocols, <<"asString">>)),
             ?assertEqual(<<"printing">>, protocol_of(Protocols, <<"printString">>)),
             ?assertEqual(<<"operations">>, protocol_of(Protocols, <<"setTo:">>)),
-            %% Source fact (extension provenance) outranks the name heuristic.
-            ?assertEqual(<<"extensions">>, protocol_of(Protocols, <<"describe">>)),
             %% Synthetic source_status → "accessing" by construction.
             ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"step">>)),
             %% Word-boundary discipline: `address` is not an `add` mutator.
             ?assertEqual(<<"as yet unclassified">>, protocol_of(Protocols, <<"address">>)),
-            %% Precedence: synthetic status decided before extension provenance.
-            ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"syntheticExt">>)),
             %% print* prefix path (not the exact-name `printString` match):
             %% `printDetails` must reach the prefix heuristic and land in "printing".
             ?assertEqual(<<"printing">>, protocol_of(Protocols, <<"printDetails">>)),

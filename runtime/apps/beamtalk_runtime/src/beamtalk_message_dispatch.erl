@@ -49,6 +49,12 @@ delegates to send/3, and on a `does_not_understand` for the exact
 original operator before it reaches the caller. Any other exception
 propagates unchanged.
 
+### send_number_comparison/4 (sync — returns value) (ADR 0116 addendum)
+
+The same as send_number_coercion/4, for a number on the left of `<`, `<=`,
+`>` or `>=` (`3 < aThing`). The two share one body; only the hint wording
+differs ("order a number against" rather than "combine a number with").
+
 ## Usage (from generated Core Erlang)
 
 ```erlang
@@ -56,11 +62,13 @@ call 'beamtalk_message_dispatch':'send'(Receiver, 'selector', [Args])
 call 'beamtalk_message_dispatch':'cast'(Receiver, 'selector', [Args])
 call 'beamtalk_message_dispatch':'send_number_coercion'(
     Right, 'plusFromNumber:', [Left], '+')
+call 'beamtalk_message_dispatch':'send_number_comparison'(
+    Right, 'lessThanFromNumber:', [Left], '<')
 ```
 
 See: ADR 0006 (Unified Method Dispatch), ADR 0043 (Sync-by-Default Actor Messaging)
 """.
--export([send/3, send/4, cast/3, send_number_coercion/4]).
+-export([send/3, send/4, cast/3, send_number_coercion/4, send_number_comparison/4]).
 
 %% A receiver whose dynamic send is answered by its class's compiled
 %% `dispatch/3` in the caller: a raw-term primitive or a `String`. The fast
@@ -137,14 +145,12 @@ send({beamtalk_supervisor, ClassName, _Module, _Pid} = Self, Selector, Args) ->
 send(Receiver, 'equals:', [Arg]) when ?IS_PRIMITIVE_RECEIVER(Receiver) ->
     %% BT-4416: `=:=` fast path for `equals:` on a primitive receiver, which
     %% otherwise walks the whole dispatch chain to reach `Object>>equals:`.
-    %% An override on the receiver's class — compiled or an extension — still
-    %% wins; see `beamtalk_equality:primitive_equals/2`.
+    %% An override on the receiver's class still wins; see `beamtalk_equality:primitive_equals/2`.
     beamtalk_equality:primitive_equals(Receiver, Arg);
 send(Receiver, 'isKindOf:', [Arg]) when ?IS_PRIMITIVE_RECEIVER(Receiver) ->
     %% BT-4473: `isKindOf:` on a primitive receiver, which otherwise walks the
     %% dispatch chain (and an `inherited_target` lookup) to reach
-    %% `Object>>isKindOf:`. An override on the receiver's chain — compiled or
-    %% an extension — still wins; see
+    %% `Object>>isKindOf:`. An override on the receiver's chain still wins; see
     %% `beamtalk_behaviour_intrinsics:primitiveIsKindOf/2`.
     beamtalk_behaviour_intrinsics:primitiveIsKindOf(Receiver, Arg);
 send(Receiver, Selector, Args) ->
@@ -157,7 +163,9 @@ send(Receiver, Selector, Args) ->
             %% as regular actor instances.
             beamtalk_primitive:send(Receiver, Selector, Args);
         {class, ClassPid} ->
-            beamtalk_object_class:class_send(ClassPid, Selector, Args);
+            beamtalk_object_class:class_send(
+                local_class_pid(Receiver, ClassPid, Selector), Selector, Args
+            );
         {actor, Ref, ActorClass} ->
             %% ADR 0043: sync-by-default — use gen_server:call so the send
             %% returns the value directly, not a Future. The record's class
@@ -195,7 +203,9 @@ send(Receiver, Selector, Args, Timeout) ->
         metaclass ->
             beamtalk_primitive:send(Receiver, Selector, Args);
         {class, ClassPid} ->
-            beamtalk_object_class:class_send(ClassPid, Selector, Args, Timeout);
+            beamtalk_object_class:class_send(
+                local_class_pid(Receiver, ClassPid, Selector), Selector, Args, Timeout
+            );
         {actor, Ref, ActorClass} ->
             beamtalk_actor:sync_send_known(Ref, ActorClass, Selector, Args, Timeout);
         {dead, ClassName} ->
@@ -233,8 +243,8 @@ cast(Receiver, Selector, Args) ->
     end.
 
 -doc """
-Send a reflected number-on-the-left coercion message, hinting the DNU if the
-reflected method is genuinely missing (ADR 0116 § Dispatch mechanism).
+Send a reflected number-on-the-left arithmetic hook, hinting the DNU if the
+hook is genuinely missing (ADR 0116 § Dispatch mechanism).
 
 Wraps send/3 for the `<verb>FromNumber:` call sites codegen emits for
 `5 + aVector`-shaped expressions: `Right` is the non-numeric right operand,
@@ -242,13 +252,43 @@ Wraps send/3 for the `<verb>FromNumber:` call sites codegen emits for
 `Args` its argument list (the original left operand), and `OrigOp` the
 original source operator symbol (e.g. `'+'`) used only for the hint text.
 
+On a missing hook the hint reads, for `3 + nil`: "'+' cannot combine a
+number with UndefinedObject — the right operand must be a number, or a value
+whose class implements 'plusFromNumber:'". Everything else is
+send_reflected/5's contract, shared with send_number_comparison/4.
+""".
+-spec send_number_coercion(term(), atom(), list(), atom()) -> term().
+send_number_coercion(Right, Selector, Args, OrigOp) ->
+    send_reflected(Right, Selector, Args, OrigOp, arithmetic).
+
+-doc """
+Send a reflected number-on-the-left comparison hook, hinting the DNU if the
+hook is genuinely missing (ADR 0116 § Addendum (2026-11-25)).
+
+The comparison counterpart of send_number_coercion/4, with the same
+arguments (`Right, Selector, Args, OrigOp`), for `3 < aThing`-shaped
+expressions whose right operand is not a number. Codegen chooses this entry
+point for `<`, `<=`, `>` and `>=`; the runtime keeps no table of which
+operators are comparisons, and the entry point only chooses the hint wording.
+
+On a missing hook the hint reads, for `3 <= nil`: "'<=' cannot order a
+number against UndefinedObject — the right operand must be a number, or a
+value whose class implements 'lessOrEqualFromNumber:'". Everything else is
+send_reflected/5's contract, shared with send_number_coercion/4.
+""".
+-spec send_number_comparison(term(), atom(), list(), atom()) -> term().
+send_number_comparison(Right, Selector, Args, OrigOp) ->
+    send_reflected(Right, Selector, Args, OrigOp, comparison).
+
+-doc """
+The one body behind send_number_coercion/4 and send_number_comparison/4.
+`Wording` (`arithmetic` or `comparison`) only chooses the hint's verb.
+
 On success, returns send/3's result unchanged. On a `does_not_understand`
 whose class and selector match `Right`'s actual class and this exact
-`Selector` — i.e. the reflected method is genuinely absent from `Right`'s
+`Selector` — i.e. the reflected hook is genuinely absent from `Right`'s
 class — re-raises the same error with a hint naming the original operator,
-so `5 + aThing` fails with something closer to "`Thing` has no
-`plusFromNumber:` — implement it to support `number + Thing` arithmetic"
-than an unexplained DNU referencing a selector the caller never typed.
+instead of an unexplained DNU referencing a selector the caller never typed.
 
 Any other exception propagates unchanged via erlang:raise/3: a DNU for a
 *different* selector or class (e.g. a bug inside a *present* reflected
@@ -265,8 +305,8 @@ beamtalk_class_dispatch.erl) — the catch clause below matches that wrapped
 shape, not the bare record, and the re-raise re-wraps the hinted error the
 same way.
 """.
--spec send_number_coercion(term(), atom(), list(), atom()) -> term().
-send_number_coercion(Right, Selector, Args, OrigOp) ->
+-spec send_reflected(term(), atom(), list(), atom(), arithmetic | comparison) -> term().
+send_reflected(Right, Selector, Args, OrigOp, Wording) ->
     RightClass = beamtalk_primitive:class_of(Right),
     try
         send(Right, Selector, Args)
@@ -281,13 +321,22 @@ send_number_coercion(Right, Selector, Args, OrigOp) ->
         }:Stack ->
             Hint = unicode:characters_to_binary(
                 io_lib:format(
-                    "~s has no '~s' — implement it to support 'number ~s ~s' arithmetic",
-                    [RightClass, Selector, OrigOp, RightClass]
+                    "'~ts' cannot ~s a number ~s ~ts — the right operand must be a number, "
+                    "or a value whose class implements '~ts'",
+                    [OrigOp, hint_verb(Wording), hint_preposition(Wording), RightClass, Selector]
                 )
             ),
             HintedError = beamtalk_error:with_hint(Error, Hint),
             erlang:raise(error, beamtalk_exception_handler:wrap(HintedError), Stack)
     end.
+
+-spec hint_verb(arithmetic | comparison) -> string().
+hint_verb(arithmetic) -> "combine";
+hint_verb(comparison) -> "order".
+
+-spec hint_preposition(arithmetic | comparison) -> string().
+hint_preposition(arithmetic) -> "with";
+hint_preposition(comparison) -> "against".
 
 -doc """
 Classify a receiver for dispatch, shared by send/3, send/4, cast/3.
@@ -324,6 +373,25 @@ classify_receiver(Receiver) ->
                     end
             end
     end.
+
+-doc """
+The class process a send to the class object `Receiver` goes to (BT-5274).
+
+A class object reached this node through the wire is already this node's
+(`beamtalk_wire:decode/1`), but one that skipped the wire (a raw FFI or
+`rpc`/`erpc` result, a raw message, a ref nested in either) can still carry a
+peer's class pid. Such a ref is resolved by name to this node's class
+(`beamtalk_wire:localise_class_object/1`, ADR 0126 §5.1/§5.5), so the send never
+reaches the peer's class process; a class not registered here raises
+`class_not_found`. A local pid (the common case) costs one `node/1` test.
+""".
+-spec local_class_pid(#beamtalk_object{}, term(), atom()) -> term().
+local_class_pid(_Receiver, ClassPid, _Selector) when
+    not is_pid(ClassPid); node(ClassPid) =:= node()
+->
+    ClassPid;
+local_class_pid(Receiver, _ClassPid, Selector) ->
+    (beamtalk_wire:ensure_local_class_object(Receiver, Selector))#beamtalk_object.pid.
 
 -doc """
 Raise the structured `actor_dead` error, shared by send/3 and send/4 so

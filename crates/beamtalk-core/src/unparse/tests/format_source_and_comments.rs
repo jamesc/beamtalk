@@ -10,10 +10,10 @@ use super::common::*;
 // --- format_source ---
 
 #[test]
-fn format_source_parse_error_returns_none() {
-    // Source with a parse error must return None.
+fn format_source_parse_error_returns_parse_errors() {
+    // Source with a parse error must be refused, not formatted.
     let result = format_source("@@@invalid beamtalk source@@@");
-    assert!(result.is_none(), "parse error should return None");
+    assert_eq!(result, Err(FormatError::ParseErrors));
 }
 
 #[test]
@@ -21,7 +21,10 @@ fn format_source_valid_source_is_formatted() {
     // Valid source must be returned formatted (with trailing newline).
     let source = "Object subclass: Foo\n  bar => 42\n";
     let result = format_source(source);
-    assert!(result.is_some(), "valid source should return Some");
+    assert!(
+        result.is_ok(),
+        "valid source should be formatted: {result:?}"
+    );
     let formatted = result.unwrap();
     assert!(formatted.ends_with('\n'), "output must end with newline");
     assert!(
@@ -231,9 +234,21 @@ fn line_comment_document() {
 }
 
 #[test]
-fn block_comment_document() {
-    let c = Comment::block("block text", span());
-    assert_eq!(unparse_comment(&c).to_pretty_string(), "/* block text */");
+fn doc_comment_document() {
+    let c = Comment::doc("doc text", span());
+    assert_eq!(unparse_comment(&c).to_pretty_string(), "/// doc text");
+}
+
+#[test]
+fn error_expression_prints_as_a_line_comment() {
+    // BT-5229: block comments no longer exist, so an error node is a `//` line.
+    let e = Expression::Error {
+        message: "bad */ input\nmore".into(),
+        span: span(),
+    };
+    let out = unparse_expression(&e).to_pretty_string();
+    assert!(out.starts_with("// error: bad */ input more"), "{out:?}");
+    assert!(!out.contains("/*"), "{out:?}");
 }
 
 // --- Expression statement with comments ---
@@ -517,14 +532,6 @@ fn literal_comments_list_array_map() {
     assert_literal_formats(
         "m := #{\n  #a => 1, // a\n  // b next\n  #b => 2\n}\n",
         "m := #{\n  #a => 1, // a\n  // b next\n  #b => 2\n}\n",
-    );
-}
-
-#[test]
-fn literal_comments_block_comments_kept() {
-    assert_literal_formats(
-        "t := {\n  /* first */\n  #a,\n  #b\n  /* end */\n}\n",
-        "t := {\n  /* first */\n  #a,\n  #b\n  /* end */\n}\n",
     );
 }
 

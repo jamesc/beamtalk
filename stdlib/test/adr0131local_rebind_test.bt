@@ -181,12 +181,6 @@ TestCase subclass: Adr0131LocalRebindTest
   // ADR 0131 Phase 3 (BT-3738): conditionals as local-threading producers
   testO3Class => self assert: (Adr0131LocalRebindClass o3) equals: #[2, 1]
 
-  testO12Class =>
-    self assert: (Adr0131LocalRebindClass o12: false) equals: #[2, 1]
-
-  testO13Class =>
-    self assert: (Adr0131LocalRebindClass o13: false) equals: #[1, 1]
-
   testS7Class => self assert: (Adr0131LocalRebindClass s7) equals: #[1, 1]
 
   testSeqArgClass =>
@@ -258,8 +252,6 @@ TestCase subclass: Adr0131LocalRebindTest
 
   testO2Actor =>
     self assert: ((Adr0131LocalRebindActor spawn) o2) equals: #[2, 2]
-
-  testO5Class => self assert: (Adr0131LocalRebindClass o5) equals: #[1, 1]
 
   testO5Value => self assert: ((Adr0131LocalRebindValue new) o5) equals: #[1, 1]
 

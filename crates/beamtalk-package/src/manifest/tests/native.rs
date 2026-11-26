@@ -232,7 +232,7 @@ const NATIVE_REJECTIONS: &[(&str, &str, &str)] = &[
     ),
     (
         "too_many_segments",
-        "[native.dependencies]\ngun = \"1.2.3.4\"\n",
+        "[native.dependencies]\ngun = \"1.2.3.4.5\"\n",
         "too many segments",
     ),
     (

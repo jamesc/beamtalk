@@ -8,8 +8,8 @@
 //! - [`hover_and_stdlib`] — hover `SymbolKind` disambiguation, stdlib
 //!   source-dir resolution and policy notes, hover class-name extraction
 //! - [`content_fetch`] — `load_type_cache` and stdlib `fetch_content`
-//! - [`dependency_guard`] — loading dependency extensions (path
-//!   dependencies included) and lifting the pre-WS3 dependency guard (BT-4611)
+//! - [`dependency_preload`] — preloading dependency source (path
+//!   dependencies included, BT-4611)
 //! - [`diagnostics_table`] — `beamtalk.toml` `[diagnostics]` table
 //! - [`preload_racing`] — sibling-root package stamps and didOpen-vs-preload
 //!   races
@@ -36,6 +36,7 @@
 //!   capability set
 //! - [`panic_resilience`] — a panic in one request leaves the server usable (BT-5078)
 //! - [`panic_resilience`] — a panic in one request leaves the server usable (BT-5078)
+//! - [`stale_state_recovery`] — preload panics, failed watched batches, the create watcher (BT-5188)
 //! - [`index_freshness`] — watched files, cross-file republish, open/close races (BT-5078)
 //! - [`type_hierarchy`] — goto-implementation and
 //!   `prepare_type_hierarchy/supertypes/subtypes`
@@ -187,7 +188,7 @@ mod call_hierarchy;
 mod code_actions;
 mod command_builders;
 mod content_fetch;
-mod dependency_guard;
+mod dependency_preload;
 mod diagnostics_table;
 mod did_close_racing;
 mod flush_and_rename_edits;
@@ -201,6 +202,7 @@ mod preload_files;
 mod preload_racing;
 mod references;
 mod rename;
+mod stale_state_recovery;
 mod stdlib_ffi_registry;
 mod symbol_unification;
 mod type_hierarchy;

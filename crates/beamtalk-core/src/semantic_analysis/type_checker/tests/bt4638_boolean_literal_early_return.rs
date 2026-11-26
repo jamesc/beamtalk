@@ -113,7 +113,7 @@ typed Object subclass: Repro
 ";
     let hinted = run_with_expect(
         &parse_source(source),
-        &ClassHierarchy::build(&parse_source(source)).0.unwrap(),
+        &ClassHierarchy::build(&parse_source(source)).0,
     )
     .iter()
     .any(|d| d.message.contains("can never be true"));

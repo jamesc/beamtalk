@@ -17,12 +17,11 @@ use super::super::nlr::NlrArmShape;
 use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary};
 use super::fold_acc::{ACC_LIST, LeafConses};
 use super::ir::{
-    BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, ConsPerCall,
-    EnsureCleanup, EnsureForeignNlr, EnsureNlrRelay, FoldAccShape, FoldCarry, FoldResultList,
-    ForeignCleanupBody, FrameId, KeyedFoldCall, LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape,
-    OnDoCatchVars, RebindFrame, RebindFrameKind, RebindLowering, RebindShape, RethrowSlot,
-    StateAccFallbackReason, ThreadedStmt, ThreadingMode, UserCodeRegion, ValueRef, VersionPrefix,
-    VersionedVar,
+    BindOp, CarrierSlot, CatchClause, CatchStep, CellBoundary, ConsPerCall, EnsureCleanup,
+    EnsureForeignNlr, EnsureNlrRelay, FoldAccShape, FoldCarry, FoldResultList, ForeignCleanupBody,
+    FrameId, KeyedFoldCall, LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape, RebindFrame,
+    RebindFrameKind, RebindLowering, RebindShape, RethrowSlot, StateAccFallbackReason,
+    ThreadedStmt, ThreadingMode, UserCodeRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -166,12 +165,22 @@ pub(in crate::core_erlang) enum VerifyError {
     /// BT-5117: one leaf arm of a result-list fold's accumulator conses into
     /// the result-list slot the wrong number of times, or into another slot.
     /// `slot_conses` is the conses stacked on the result-list slot,
-    /// `stray_slots` the other (1-based) slots that cons. `AtMostOne` allows
-    /// 0 or 1 into the slot, `ExactlyOne` requires 1; no other slot may cons.
+    /// `stray_slots` the other (1-based) slots that cons. `Filter` requires
+    /// 1 on the arm taken when the block's answer is `keep_when` and 0 on the
+    /// other, `ExactlyOne` requires 1; no other slot may cons.
     FoldResultListConsMismatch {
         expected: ConsPerCall,
         slot_conses: usize,
         stray_slots: Vec<usize>,
+        at: Span,
+    },
+
+    /// BT-5190: one leaf arm of a `select:`/`reject:` accumulator conses
+    /// `found` onto the result list where the lambda's element `expected`
+    /// belongs (the predicate's answer, or another local).
+    FoldResultListWrongItem {
+        expected: String,
+        found: String,
         at: Span,
     },
 
@@ -227,33 +236,26 @@ pub(in crate::core_erlang) enum VerifyError {
     /// test-only `ThreadedValue::close`.
     StateEffectEscapesExpression { prefix: VersionPrefix, at: Span },
 
-    /// ADR 0130 §4: a compiled `on:do:`'s catch is a class-variable catch
-    /// boundary, and its [`ThreadedStmt::OnDoCatch`] node does not honour the
-    /// obligation — the entry `let Snap = beamtalk_class_vars:snapshot() in`
-    /// is missing, the non-NLR clause does not begin with
-    /// `beamtalk_class_vars:restore(Snap)`, or it is missing, or the two
-    /// `$bt_nlr` pass-through clauses (3-tuple and actor 4-tuple) are not both
-    /// ordered before it. A wrong restore is wrong-value Core Erlang, not an
-    /// unbound variable: an error keeps the writes made inside the protected
-    /// region, or a `^` throw discards writes it must keep. See
-    /// [`CatchRestoreDefect`].
+    /// A compiled `on:do:`'s [`ThreadedStmt::OnDoCatch`] node does not pass
+    /// both `$bt_nlr` throw shapes (3-tuple and actor 4-tuple) through ahead
+    /// of its non-NLR clause, or has no non-NLR clause. A `^` of a shape that
+    /// is not passed through first reaches the handler (or the cell restore)
+    /// as if it were an error: wrong-value Core Erlang, not an unbound
+    /// variable. See [`CatchNlrDefect`].
     ///
     /// **What it guards:** today one builder (`on_do_catch_boundary`) makes
     /// every node, verifies it as a one-element IR and renders it at once, so
     /// a well-formed builder cannot trip this. The check exists for a second
-    /// constructor, or an edit to that builder, that drops either half; the
-    /// `catch_boundary.rs` tests build such nodes directly.
-    CatchWithoutClassVarRestore {
-        defect: CatchRestoreDefect,
-        at: Span,
-    },
+    /// constructor, or an edit to that builder, that drops or reorders an arm;
+    /// the `catch_boundary.rs` tests build such nodes directly.
+    CatchNlrNotPassedThrough { defect: CatchNlrDefect, at: Span },
 
     /// ADR 0137 §5: a compiled `on:do:` in an actor instance method or an actor
     /// closure is an actor-state catch boundary, and its
     /// [`ThreadedStmt::OnDoCatch`] node does not honour the obligation: its
     /// non-NLR clause must restore the cell to the region's pre-region state
-    /// ([`CellBoundary`]) right after the class-variable restore, before the
-    /// exception is wrapped and the handler runs. Without it a closure or
+    /// ([`CellBoundary`]) as its first step, before the exception is wrapped
+    /// and the handler runs. Without it a closure or
     /// callee in the handler reads the writes the failed region made. Inside a
     /// loop that brackets guarded operators (BT-4179,
     /// [`StateRestoreDefect::PreStateOverLiveCell`]) the boundary must
@@ -262,7 +264,7 @@ pub(in crate::core_erlang) enum VerifyError {
     /// against its own bracket decision, and reported through the same
     /// `report_threaded_ir_verify_errors` path as the loop's other findings.
     ///
-    /// **What it guards:** like [`Self::CatchWithoutClassVarRestore`], the one
+    /// **What it guards:** like [`Self::CatchNlrNotPassedThrough`], the one
     /// builder (`on_do_catch_boundary`) cannot trip it; the check is for a
     /// second constructor or an edit that drops the step.
     CatchWithoutStateRestore {
@@ -655,17 +657,14 @@ pub(in crate::core_erlang) enum VerifyError {
     /// scope whose catch arm answers anything but the bare value
     /// ([`NlrArmShape`](crate::core_erlang::nlr::NlrArmShape)). Invariant, per
     /// scope kind: the function an NLR boundary closes answers what its
-    /// callers take as the send's result. A value-type method (or value-type
-    /// extension fun) and a class method answer the bare value: `dispatch/3`'s
-    /// arm, the own-module typed direct call of the function (BT-4473) and
-    /// the runtime's extension apply
-    /// (`beamtalk_dispatch:apply_extension_by_arity/4`) all take the return
-    /// as is. An actor method answers the `gen_server` reply and a REPL eval its
+    /// callers take as the send's result. A value-type method and a class
+    /// method answer the bare value: `dispatch/3`'s arm and the own-module
+    /// typed direct call of the function (BT-4473) both take the return as
+    /// is. An actor method answers the `gen_server` reply and a REPL eval its
     /// `{Value, Bindings}` pair; those scopes are not constrained here. The
     /// repro: every value-type method with a block `^` answered `{Result,
     /// Self}`, which only its own `dispatch/3` arm and the BT-4473 direct
-    /// call unwrapped, so a value-type
-    /// extension with a block `^` answered the pair to the sender.
+    /// call unwrapped, so any other caller received the pair.
     MethodNlrAnswersPair { boundary: NlrBoundary, at: Span },
 
     /// ADR 0146 (BT-4535): an [`ThreadedStmt::NlrCatch`] whose actor reply
@@ -939,6 +938,19 @@ pub(in crate::core_erlang) enum VerifyError {
     /// verified without its ancestor frames.
     SyncedCallOnPrivateScratch { at: Span },
 
+    /// BT-5281 (ADR 0131 §3): an actor field write lowered, outside an actor
+    /// closure's cell mode, in a frame whose `StateAcc` is a private scratch
+    /// map (`CoreErlangGenerator::in_private_scratch`: a direct-params or
+    /// tuple-accumulator loop frame, or an arm frame nested in one). Nothing
+    /// adopts such a scratch map as the next `State` (a producer there binds
+    /// no `State` family, `conditional_families`), so the write would be
+    /// silently lost. The invariant, for every scope kind: a frame that holds
+    /// a field write holds the actor's whole `State` (mode selection keeps a
+    /// body that writes a field off the direct-params and tuple-acc shapes),
+    /// or writes through the cell (an actor closure). Reported from
+    /// `note_field_write`, the one hook every field-write lowering calls.
+    FieldWriteOnPrivateScratch { field: String, at: Span },
+
     /// BT-4279: a [`ThreadedStmt::SyncedCall`] carries a
     /// [`FastPath`](super::ir::FastPath) but is not a value bracket that
     /// reloads (`result` and `load` both set, no Tier 2 rebinds): the fast
@@ -1100,22 +1112,15 @@ pub(in crate::core_erlang) enum ForeignStoreDefect {
     SharedWithoutCellRelay,
 }
 
-/// What is wrong with an [`ThreadedStmt::OnDoCatch`] node
-/// ([`VerifyError::CatchWithoutClassVarRestore`]).
+/// What is wrong with an [`ThreadedStmt::OnDoCatch`] node's clause order
+/// ([`VerifyError::CatchNlrNotPassedThrough`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::core_erlang) enum CatchRestoreDefect {
-    /// The entry half is missing: no `let Snap = beamtalk_class_vars:snapshot()
-    /// in` before the `try`, so the restore reads an unbound variable.
-    NoSnapshotEntry,
+pub(in crate::core_erlang) enum CatchNlrDefect {
     /// There is no non-NLR clause at all.
     NoNonNlrClause,
-    /// The non-NLR clause does not begin with the class-variable restore.
-    RestoreNotFirst,
-    /// The restore reads a variable other than the node's snapshot variable.
-    RestoreReadsWrongSnapshot,
     /// An NLR pass-through shape is missing before the non-NLR clause (it is
-    /// absent, or ordered after it): a `^` of that shape would be restored.
-    NlrArmNotBeforeRestore(NlrThrowShape),
+    /// absent, or ordered after it): a `^` of that shape would be handled.
+    NlrArmNotBeforeNonNlr(NlrThrowShape),
 }
 
 /// BT-4180: the codegen site that emitted an actor-state read source
@@ -1180,9 +1185,8 @@ pub(in crate::core_erlang) enum StaleReadDefect {
 /// ([`VerifyError::CatchWithoutStateRestore`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum StateRestoreDefect {
-    /// The non-NLR clause does not have the cell restore right after the
-    /// class-variable restore.
-    NotAfterClassVarRestore,
+    /// The non-NLR clause does not begin with the cell restore.
+    NotFirst,
     /// The cell restore reads a different variable than the node's entry binds.
     RestoresWrongVariable,
     /// BT-4179: the node sits inside a loop whose checkout brackets guarded
@@ -1435,10 +1439,15 @@ pub(in crate::core_erlang) fn verify_keyed_fold_call(call: &KeyedFoldCall) -> Ve
 
 /// BT-5097, [`VerifyError::FoldResultListUndeclared`] over one fold lambda
 /// body: when its kind has a result list (`expected`), the last statement
-/// must be the accumulator that declares exactly it.
+/// must be the accumulator that declares exactly it. BT-5190: the declaration
+/// is what the accumulator's own shape builds (`FoldAccValue::inferred_result_list`),
+/// so a `select:` that skips or keeps on the wrong boolean, conses in neither
+/// or both arms, or an arm-swapped `reject:`, disagrees with `expected`; `item`
+/// is the lambda's element a filter must cons ([`VerifyError::FoldResultListWrongItem`]).
 pub(in crate::core_erlang) fn verify_fold_result_list_declared(
     body: &[ThreadedStmt],
     expected: Option<FoldResultList>,
+    item: Option<&str>,
     at: Span,
 ) -> Vec<VerifyError> {
     let Some(expected) = expected else {
@@ -1480,8 +1489,18 @@ pub(in crate::core_erlang) fn verify_fold_result_list_declared(
                 slot_conses,
                 stray_slots,
                 slot_base,
+                slot_item,
                 ..
             } => {
+                if let (Some(want), Some(got)) = (item, slot_item.as_deref())
+                    && want != got
+                {
+                    errors.push(VerifyError::FoldResultListWrongItem {
+                        expected: want.to_string(),
+                        found: got.to_string(),
+                        at,
+                    });
+                }
                 if let Some(found) = slot_base.filter(|b| *b != ACC_LIST) {
                     errors.push(VerifyError::FoldResultListWrongBase {
                         slot: expected.slot,
@@ -1490,7 +1509,7 @@ pub(in crate::core_erlang) fn verify_fold_result_list_declared(
                     });
                 }
                 let count_ok = match expected.cons {
-                    ConsPerCall::AtMostOne => slot_conses <= 1,
+                    ConsPerCall::Filter { .. } => slot_conses <= 1,
                     ConsPerCall::ExactlyOne => slot_conses == 1,
                 };
                 if !count_ok || !stray_slots.is_empty() {
@@ -2424,16 +2443,14 @@ impl VerifyWalk<'_> {
                 self.frame_stack.pop();
             }
             ThreadedStmt::OnDoCatch {
-                vars,
-                entry,
                 cell,
                 clauses,
                 span,
                 ..
             } => {
-                if let Some(defect) = check_catch_restore(vars, *entry, clauses) {
+                if let Some(defect) = check_catch_nlr_order(clauses) {
                     self.errors
-                        .push(VerifyError::CatchWithoutClassVarRestore { defect, at: *span });
+                        .push(VerifyError::CatchNlrNotPassedThrough { defect, at: *span });
                 }
                 if let Some(defect) = check_cell_restore(cell.as_ref(), clauses) {
                     self.errors
@@ -2626,48 +2643,29 @@ fn check_ensure_foreign_store(
     }
 }
 
-/// ADR 0130 §4 catch-boundary obligation of one [`ThreadedStmt::OnDoCatch`]:
-/// the first defect found, or `None` when the entry binds the snapshot, the
-/// non-NLR clause begins with the restore of that same snapshot and both NLR
+/// Clause-order obligation of one [`ThreadedStmt::OnDoCatch`]: the first
+/// defect found, or `None` when there is a non-NLR clause and both NLR
 /// pass-through shapes are ordered before it.
-fn check_catch_restore(
-    vars: &OnDoCatchVars,
-    entry: Option<CatchEntry>,
-    clauses: &[CatchClause],
-) -> Option<CatchRestoreDefect> {
-    match entry {
-        Some(CatchEntry::ClassVarSnapshot) => {}
-        None => return Some(CatchRestoreDefect::NoSnapshotEntry),
-    }
+fn check_catch_nlr_order(clauses: &[CatchClause]) -> Option<CatchNlrDefect> {
     let Some(non_nlr_at) = clauses
         .iter()
         .position(|c| matches!(c, CatchClause::NonNlr { .. }))
     else {
-        return Some(CatchRestoreDefect::NoNonNlrClause);
+        return Some(CatchNlrDefect::NoNonNlrClause);
     };
-    for shape in [NlrThrowShape::Tuple3, NlrThrowShape::Tuple4] {
-        let before = clauses[..non_nlr_at]
-            .iter()
-            .any(|c| matches!(c, CatchClause::NlrPassThrough(s) if *s == shape));
-        if !before {
-            return Some(CatchRestoreDefect::NlrArmNotBeforeRestore(shape));
-        }
-    }
-    let CatchClause::NonNlr { steps } = &clauses[non_nlr_at] else {
-        return Some(CatchRestoreDefect::NoNonNlrClause);
-    };
-    match steps.first() {
-        Some(CatchStep::ClassVarRestore { snapshot }) if *snapshot == vars.snapshot_var => None,
-        Some(CatchStep::ClassVarRestore { .. }) => {
-            Some(CatchRestoreDefect::RestoreReadsWrongSnapshot)
-        }
-        _ => Some(CatchRestoreDefect::RestoreNotFirst),
-    }
+    [NlrThrowShape::Tuple3, NlrThrowShape::Tuple4]
+        .into_iter()
+        .find(|shape| {
+            !clauses[..non_nlr_at]
+                .iter()
+                .any(|c| matches!(c, CatchClause::NlrPassThrough(s) if s == shape))
+        })
+        .map(CatchNlrDefect::NlrArmNotBeforeNonNlr)
 }
 
 /// ADR 0137 §5 obligation of one [`ThreadedStmt::OnDoCatch`] that carries a
 /// [`CellBoundary`]: its non-NLR clause has the matching cell restore as its
-/// second step, right after the class-variable restore.
+/// first step.
 fn check_cell_restore(
     cell: Option<&CellBoundary>,
     clauses: &[CatchClause],
@@ -2677,17 +2675,17 @@ fn check_cell_restore(
         CatchClause::NonNlr { steps } => Some(steps),
         CatchClause::NlrPassThrough(_) => None,
     })?;
-    match steps.get(1) {
+    match steps.first() {
         Some(CatchStep::CellRestore(found)) if found == boundary => None,
         Some(CatchStep::CellRestore(_)) => Some(StateRestoreDefect::RestoresWrongVariable),
-        _ => Some(StateRestoreDefect::NotAfterClassVarRestore),
+        _ => Some(StateRestoreDefect::NotFirst),
     }
 }
 
 /// Whether the non-NLR clause of a [`ThreadedStmt::OnDoCatch`] closes the class
 /// filter it opens: `ClassFilter`, then `FilterHandler`, then `FilterMiss`, the
 /// last three steps in that order. A node with no non-NLR clause has no filter
-/// to close (the restore check reports that).
+/// to close (the clause-order check reports that).
 fn catch_filter_closed(clauses: &[CatchClause]) -> bool {
     clauses.iter().all(|clause| match clause {
         CatchClause::NlrPassThrough(_) => true,

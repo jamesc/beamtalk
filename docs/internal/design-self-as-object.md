@@ -190,6 +190,8 @@ Object
 
 **Extension Registry Design (Pharo-style):**
 
+> **Removed (ADR 0152).** The extension registry described here, `beamtalk_extensions`, no longer exists. This section is the 2026-02 design, kept as history.
+
 Extensions use a global namespace with conflict tracking (following Pharo's proven approach):
 
 ```erlang

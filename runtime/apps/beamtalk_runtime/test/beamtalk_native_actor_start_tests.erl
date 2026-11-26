@@ -54,8 +54,8 @@ global_named_start_test() ->
 
 %% BT-4956: a `native:` actor registered `#global` has a start time, written by
 %% the runtime's registration path (the backing module has no `init/1` of ours),
-%% so a name conflict keeps the older one instead of falling back to
-%% `random_exit_name/3`.
+%% so a name conflict keeps the older one instead of falling back to the
+%% lower-node / lower-pid tie-break.
 global_native_actor_records_start_time_test() ->
     Before = erlang:system_time(microsecond),
     {ok, Pid} = beamtalk_actor_registry:'spawnAsGlobal'(
@@ -86,7 +86,7 @@ global_native_conflict_keeps_the_older_test() ->
     [unlink(P) || P <- [Older, Younger1, Younger2]],
     Mon1 = erlang:monitor(process, Younger1),
     Mon2 = erlang:monitor(process, Younger2),
-    %% On one node `random_exit_name/3` keeps its second argument, so only a
+    %% Untimed, the one-node tie-break would keep the lower pid, so only a
     %% start-time rule keeps the older whichever order the pids arrive in.
     ?assertEqual(Older, beamtalk_actor_registry:resolve_global_conflict(name, Older, Younger1)),
     ?assertEqual(Older, beamtalk_actor_registry:resolve_global_conflict(name, Younger2, Older)),

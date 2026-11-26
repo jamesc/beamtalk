@@ -130,21 +130,9 @@ warning in this process (`beamtalk_refactor_support:note_changelog_result/1`).
 -spec with_changelog_warnings(fun(() -> Result)) -> Result when
     Result :: tuple().
 with_changelog_warnings(Fun) ->
-    ok = beamtalk_refactor_support:begin_changelog_warnings(),
-    %% bt-catcher-audit: not-applicable-reraises - the catch only clears the
-    %% collection marker and re-raises, so the next boundary restores class variables.
-    Result =
-        try
-            Fun()
-        catch
-            Class:Reason:Stack ->
-                %% A raise must not leave the process marked as collecting.
-                _ = beamtalk_refactor_support:end_changelog_warnings(),
-                erlang:raise(Class, Reason, Stack)
-        end,
-    case beamtalk_refactor_support:end_changelog_warnings() of
-        [] -> Result;
-        Extra -> setelement(4, Result, element(4, Result) ++ Extra)
+    case beamtalk_refactor_support:collect_changelog_warnings(Fun) of
+        {Result, []} -> Result;
+        {Result, Extra} -> setelement(4, Result, element(4, Result) ++ Extra)
     end.
 
 -spec do_eval_expression(string(), beamtalk_repl_state:state(), pid() | undefined) ->
@@ -569,8 +557,6 @@ do_eval_trace_expression(Expression, State) ->
                 {module, ModuleName} ->
                     CaptureRef = beamtalk_io_capture:start(undefined),
                     EvalResult =
-                        %% bt-catcher-audit: not-applicable-other-process - traced eval runs in
-                        %% the session eval worker, no home entry
                         try
                             {RawSteps, UpdatedBindings} = apply(ModuleName, eval, [
                                 Bindings
@@ -695,8 +681,8 @@ etc.). `Path` is a project-relative `.bt` path (the same form git restored).
 """.
 -spec reload_file(string()) -> {ok, [binary()]} | {error, term()}.
 reload_file(Path) ->
-    %% Called over RPC from the LiveView client, bypassing the REPL op seam,
-    %% so it consults the capability check itself (ADR 0125 §1.5).
+    %% The `reload-file` op's chokepoint. The op seam already gates it, but the
+    %% function keeps its own check so a direct caller is gated too (ADR 0125 §1.5).
     case beamtalk_capability:check(reload, 'Workspace', <<"Reloading a file">>) of
         ok -> do_reload_file(Path);
         {error, _} = Refusal -> Refusal
@@ -827,21 +813,10 @@ run_self_eval_module(ModuleName, Binary, Bindings) ->
     purge_eval_module(ModuleName),
     case code:load_binary(ModuleName, "", Binary) of
         {module, ModuleName} ->
-            %% bt-catcher-audit: converted - the eval runs under protect/1, which restores on
-            %% error (BT-3728)
             try
-                %% The evaluated source runs in this process, which may be a class
-                %% invocation process (Inspector `evaluate:` called from a class
-                %% method), and a block it runs may write class variables. This
-                %% catch swallows the error, so the writes must be rolled back
-                %% like any other protected region (ADR 0130 §4, BT-3728). A `^`
-                %% (`$bt_nlr`) unwinding out of a block run here is re-raised below
-                %% to its home frame; `protect/1` passes it through without
-                %% restoring, so the writes made before the `^` are kept, as for
-                %% any `^` crossing a protected region (ADR 0130 §4, BT-3735).
-                {RawResult, _UpdatedBindings} = beamtalk_class_vars:protect(fun() ->
-                    apply(ModuleName, eval, [Bindings])
-                end),
+                %% A `^` (`$bt_nlr`) unwinding out of a block run here is
+                %% re-raised below to its home frame (BT-3735).
+                {RawResult, _UpdatedBindings} = apply(ModuleName, eval, [Bindings]),
                 case maybe_await_future(RawResult) of
                     {future_rejected, FutureReason} ->
                         %% An awaited future that rejected/timed out is an error,
@@ -1198,8 +1173,20 @@ do_compile_method(ClassNameBin, SelectorBin, Source, Intent, Author, AuthorKind,
             IsClassMethod
         )
     of
-        {ok, _Result, _Output, _W, _S} -> {ok, ClassNameBin};
-        {error, Reason, _Output, _W, _S} -> {error, Reason}
+        {ok, _Result, _Output, Warnings, _S} ->
+            %% The install reply carries a ChangeLog append failure as a String
+            %% warning (BT-5013). Queue it for the caller's collector
+            %% (`beamtalk_refactor_support:collect_changelog_warnings/1`, used by
+            %% the `save-method` operation) instead of dropping it; outside a
+            %% collector this is a no-op and the ERROR log is the report. Compiler
+            %% warnings (maps) are not ChangeLog warnings and stay out.
+            lists:foreach(
+                fun(W) -> beamtalk_refactor_support:note_changelog_result({warning, W}) end,
+                [W || W <- Warnings, is_binary(W)]
+            ),
+            {ok, ClassNameBin};
+        {error, Reason, _Output, _W, _S} ->
+            {error, Reason}
     end.
 
 %% `{ok, Module}' when `ClassNameBin' names a loaded built-in (stdlib) class,

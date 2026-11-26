@@ -69,37 +69,3 @@ GskTarget class removeSelector: #answer
 
 [target answer] on: Error do: [:e | e kind]
 // => does_not_understand
-
-// ===========================================================================
-// (d) A SUPERCLASS THAT GAINS classState: ON RELOAD: THE WARMED CALL SITE
-// TAKES THE CLASS PROCESS, AS THE DYNAMIC SEND DOES
-// ===========================================================================
-
-Object subclass: GskParent
-  class tag => #parent
-// => "GskParent"
-
-GskParent subclass: GskChild
-  class whoRuns => Erlang erlang self
-// => "GskChild"
-
-Object subclass: GskChildCaller
-  class run => GskChild whoRuns
-// => "GskChildCaller"
-
-GskChildCaller run == Erlang erlang self
-// => true
-
-Object subclass: GskParent
-  classState: count :: Integer = 0
-  class tag => #parent
-// => "GskParent"
-
-GskChildCaller run == Erlang erlang self
-// => false
-
-child := GskChild
-// => GskChild
-
-child whoRuns == Erlang erlang self
-// => false

@@ -151,7 +151,7 @@ classify_source_origin(SourceFile) ->
     end.
 
 %% Per-selector origin from xref provenance: a runtime-installed selector
-%% (put_method, class_builder) is runtime-only; a class_body / extension selector
+%% (put_method, class_builder) is runtime-only; a class_body selector
 %% in a file-backed class is `both`.
 -spec origin_for_provenance(beamtalk_xref:provenance(), binary() | null) -> binary().
 origin_for_provenance(put_method, _SourceFile) -> <<"runtime">>;
@@ -192,15 +192,13 @@ origin_module(ClassName, ModName) ->
 %%      one (a `<category: ...>`-style pragma or an xref `category` field). Until
 %%      then the key is absent, the lookup is `undefined`, and the decision falls
 %%      through to the source-fact / name tiers.
-%%   2. **xref-extension source** — `provenance = extension` (ADR 0066 package
-%%      extension) is a *source* fact: the selector was added to this class from
-%%      another package, so it belongs in the "extensions" bucket regardless of
-%%      its name. This outranks the name heuristic (a fact beats a guess).
+%%   2. **Source fact** — a compiler-generated accessor (`source_status =
+%%      synthetic`) is "accessing" by construction.
 %%   3. **Heuristic** — a Pharo-convention bucket derived from the *selector name*
 %%      (accessors → "accessing", `is`/`has` tests → "testing", `print*` →
 %%      "printing", …). This is what gives ordinary `class_body` methods a
-%%      meaningful protocol instead of collapsing every non-extension selector
-%%      into one bucket. Selectors that match no convention fall into Pharo's
+%%      meaningful protocol instead of collapsing every selector into one
+%%      bucket. Selectors that match no convention fall into Pharo's
 %%      "as yet unclassified".
 -spec protocol_for_selector(
     atom(),
@@ -270,7 +268,7 @@ declared_protocol(_Info) ->
 
 %% Tiers 2–3: no declared category, so decide from the source facts we do have.
 %% A compiler-generated accessor (source_status = synthetic) is "accessing" by
-%% construction. An extension-provenance selector is "extensions" (source fact).
+%% construction.
 %% Otherwise fall to the selector-name heuristic.
 -spec protocol_from_source(
     atom(), beamtalk_xref:provenance(), beamtalk_xref:source_status(), boolean()
@@ -291,10 +289,6 @@ protocol_from_source(_Selector, _Provenance, synthetic, ClassSide) ->
         true -> <<"instance creation">>;
         false -> <<"accessing">>
     end;
-protocol_from_source(_Selector, extension, _SourceStatus, _ClassSide) ->
-    %% Tier 2 — package-extension provenance (ADR 0066) is a source fact that
-    %% outranks the name heuristic.
-    <<"extensions">>;
 protocol_from_source(Selector, _Provenance, _SourceStatus, _ClassSide) ->
     %% Tier 3 — Pharo-convention name heuristic.
     protocol_from_name(Selector).

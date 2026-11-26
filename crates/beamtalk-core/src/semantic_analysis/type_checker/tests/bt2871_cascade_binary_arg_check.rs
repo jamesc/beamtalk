@@ -44,7 +44,7 @@ typed Value subclass: Thing
     nil
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let arg_warnings: Vec<_> = diags
         .iter()
@@ -74,7 +74,7 @@ typed Value subclass: Thing
     nil
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let arg_warnings: Vec<_> = diags
         .iter()
@@ -104,7 +104,7 @@ typed Value subclass: Thing
     nil
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
         type_category_of(&diags).is_empty(),
@@ -133,7 +133,7 @@ typed Value subclass: Thing
     nil
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let arg_warnings: Vec<_> = diags
         .iter()

@@ -18,7 +18,8 @@
 //!   — the shared, user-level registry cache at
 //!   `~/.beamtalk/registry/` lives outside `_build/` entirely and is cleared
 //!   by deleting that directory directly).
-//! - `--all`: the entire `_build/` directory, including any shared caches.
+//! - `--all`: the entire `_build/` directory, including any shared caches
+//!   (on Windows the empty `_build/.build.lock` stays: see `clean_all_holding`).
 //! - `--dry-run`: list what would be removed without deleting anything.
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -71,12 +72,32 @@ pub fn run(deps: bool, all: bool, dry_run: bool) -> Result<()> {
     if scope != CleanScope::All || is_symlink(&layout.build_root())? {
         return clean_with_layout(&layout, scope, dry_run);
     }
-    // `--all` removes the whole of `_build/`, the lock file included — which
-    // Windows refuses while it is open, and which on Unix would let a waiter
-    // lock a file nobody else will ever open. So empty `_build/` while holding
-    // the lock, then release it and remove the lock file and directory.
+    clean_all_holding(&layout, lock, || {})
+}
+
+/// `clean --all` with the project build lock held: empty `_build/` except the
+/// lock file, then remove the lock file and `_build/` *while still holding the
+/// lock*, and only then release it (BT-5186).
+///
+/// Unlinking after the release would race a waiter: it could take the lock on
+/// the old file and pass its "the path still names my file" check before the
+/// unlink, then hold a lock on a file no newcomer will ever open. Unlinked
+/// under the lock, a waiter only wakes once the path no longer names its file,
+/// and `open_and_lock` sends it to the new one.
+///
+/// Windows cannot unlink a file another process has open, and has no cheap way
+/// for a waiter to notice it holds a deleted file, so there the lock file (and
+/// with it `_build/`) is kept; it is an empty, harmless file.
+///
+/// `before_unlink` runs just before the lock file is unlinked; tests use it to
+/// widen the window a release-then-unlink ordering would leave open.
+fn clean_all_holding(
+    layout: &BuildLayout,
+    lock: super::dir_lock::ProjectBuildLock,
+    before_unlink: impl FnOnce(),
+) -> Result<()> {
     let build_root = layout.build_root();
-    let keep = super::dir_lock::project_build_lock_path(&project_root);
+    let keep = super::dir_lock::project_build_lock_path(layout.project_root());
     let mut first_error: Option<miette::Report> = None;
     for entry in std::fs::read_dir(&build_root)
         .into_diagnostic()
@@ -96,17 +117,15 @@ pub fn run(deps: bool, all: bool, dry_run: bool) -> Result<()> {
             }
         }
     }
-    lock.release();
-    if first_error.is_none() {
-        // Best effort: a build that raced in after the release keeps its lock
-        // file, and `_build/` then simply stays. A process already blocked on
-        // the unlinked file re-checks the path after it wakes (`open_and_lock`)
-        // and retries on the new file.
-        let _ = std::fs::remove_file(&keep);
+    before_unlink();
+    if first_error.is_none() && cfg!(unix) && std::fs::remove_file(&keep).is_ok() {
+        // Best effort: a newcomer that arrived after the unlink has already
+        // created a fresh lock file here, and `_build/` then simply stays.
         if std::fs::remove_dir(&build_root).is_ok() {
             println!("Removed {build_root}");
         }
     }
+    lock.release();
     first_error.map_or(Ok(()), Err)
 }
 
@@ -245,6 +264,60 @@ mod tests {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(path, b"artifact").unwrap();
+    }
+
+    /// BT-5186: a process waiting on the build lock while `clean --all` runs
+    /// must end up holding the lock on the file the path names, so the next
+    /// process to come along waits for it instead of taking a fresh file.
+    #[test]
+    fn clean_all_leaves_a_waiter_holding_the_live_lock_file() {
+        use fs2::FileExt as _;
+        use std::time::Duration;
+
+        let temp = TempDir::new().unwrap();
+        let layout = layout_in(&temp);
+        let root = layout.project_root().to_path_buf();
+        fs::create_dir_all(layout.profile_dir()).unwrap();
+        fs::write(layout.profile_dir().join("artifact.beam"), b"x").unwrap();
+
+        let lock = crate::commands::dir_lock::lock_project_build(&root).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let waiter = std::thread::spawn({
+            let root = root.clone();
+            move || {
+                let guard = crate::commands::dir_lock::lock_project_build(&root).unwrap();
+                tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                drop(guard);
+            }
+        });
+        // sleep: let the waiter block on the lock before `clean --all` runs
+        std::thread::sleep(Duration::from_millis(300));
+        // sleep: give a waiter woken too early time to pass its path check
+        clean_all_holding(&layout, lock, || {
+            std::thread::sleep(Duration::from_millis(300));
+        })
+        .unwrap();
+        rx.recv_timeout(Duration::from_secs(30))
+            .expect("the waiter gets the lock after clean");
+        assert!(!layout.profile_dir().exists(), "artifacts removed");
+
+        // A newcomer must find the waiter's lock, not a free file.
+        let path = crate::commands::dir_lock::project_build_lock_path(&root);
+        let newcomer = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&path)
+            .unwrap();
+        assert!(
+            newcomer.try_lock_exclusive().is_err(),
+            "the waiter holds a lock on a file the path no longer names"
+        );
+        drop(newcomer);
+        release_tx.send(()).unwrap();
+        waiter.join().unwrap();
     }
 
     #[test]

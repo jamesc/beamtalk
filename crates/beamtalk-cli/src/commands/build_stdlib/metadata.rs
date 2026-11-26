@@ -93,9 +93,6 @@ pub(super) struct ClassMeta {
     pub(super) methods: Vec<MethodMeta>,
     /// Class-side method signatures.
     pub(super) class_methods: Vec<MethodMeta>,
-    /// Class variables (`classState:` declarations) — name, declared type,
-    /// default-value presence and slot kind (ADR 0124 B5a).
-    pub(super) class_variables: Vec<ClassVarMeta>,
     /// Type parameters for generic classes (e.g., `["T", "E"]` for `Result(T, E)`).
     pub(super) type_params: Vec<String>,
     /// Type arguments passed to the superclass, e.g. `["E"]` for
@@ -135,19 +132,6 @@ pub(super) fn sorted_by_class_name(class_metadata: &[ClassMeta]) -> Vec<&ClassMe
     sorted
 }
 
-/// Metadata for a single class variable (`classState:` declaration),
-/// extracted from the AST — mirrors `ClassVarInfo` (ADR 0124 B5a).
-pub(super) struct ClassVarMeta {
-    /// The class variable name.
-    pub(super) name: String,
-    /// Declared type annotation, if any.
-    pub(super) ty: Option<DeclaredType>,
-    /// Whether this class variable carries an explicit default value.
-    pub(super) has_default: bool,
-    /// Slot kind (`#eager` | `#late`, ADR 0124 §1).
-    pub(super) kind: beamtalk_core::ast::SlotKind,
-}
-
 /// Metadata for a single method, extracted from the AST.
 #[allow(clippy::struct_excessive_bools)] // independent per-method flags, each documented
 pub(super) struct MethodMeta {
@@ -155,8 +139,6 @@ pub(super) struct MethodMeta {
     pub(super) selector: String,
     /// Number of arguments the method accepts.
     pub(super) arity: usize,
-    /// Method dispatch kind.
-    pub(super) kind: MethodKindMeta,
     /// Whether this method is sealed (cannot be overridden).
     pub(super) is_sealed: bool,
     /// Whether this method is internal (package-scoped visibility, ADR 0071).
@@ -180,28 +162,6 @@ pub(super) struct MethodMeta {
     pub(super) answers_receiver: bool,
 }
 
-/// Simplified method kind for code generation.
-pub(super) enum MethodKindMeta {
-    /// Standard method dispatch.
-    Primary,
-}
-
-impl MethodKindMeta {
-    /// Convert from the AST method kind representation.
-    fn from_ast(kind: beamtalk_core::ast::MethodKind) -> Self {
-        match kind {
-            beamtalk_core::ast::MethodKind::Primary => Self::Primary,
-        }
-    }
-
-    /// Return the Rust expression string for this kind (used in codegen output).
-    pub(super) fn to_rust_expr(&self) -> &'static str {
-        match self {
-            Self::Primary => "MethodKind::Primary",
-        }
-    }
-}
-
 /// Convert an AST method definition to `MethodMeta`; `class_side` selects the
 /// side's constant rule ([`MethodInfo::recorded_constant`]).
 fn method_def_to_meta(
@@ -212,7 +172,6 @@ fn method_def_to_meta(
     MethodMeta {
         selector: m.selector.name().to_string(),
         arity: m.selector.arity(),
-        kind: MethodKindMeta::from_ast(m.kind),
         is_sealed: class.is_method_sealed(m),
         is_internal: m.is_internal,
         spawns_block: false,
@@ -268,7 +227,6 @@ pub(super) fn synthesize_value_auto_methods(
             methods.push(MethodMeta {
                 selector: slot_name.to_string(),
                 arity: 0,
-                kind: MethodKindMeta::Primary,
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
@@ -293,7 +251,6 @@ pub(super) fn synthesize_value_auto_methods(
             methods.push(MethodMeta {
                 selector: with_sel,
                 arity: 1,
-                kind: MethodKindMeta::Primary,
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
@@ -337,7 +294,6 @@ pub(super) fn synthesize_value_auto_methods(
     class_methods.push(MethodMeta {
         selector: kw_sel.clone(),
         arity,
-        kind: MethodKindMeta::Primary,
         is_sealed: false,
         is_internal: false,
         spawns_block: false,
@@ -765,9 +721,7 @@ pub(super) fn extract_class_metadata(
     let initialize_assigns = class
         .methods
         .iter()
-        .find(|m| {
-            m.kind == beamtalk_core::ast::MethodKind::Primary && m.selector.name() == "initialize"
-        })
+        .find(|m| m.selector.name() == "initialize")
         .map(|m| {
             beamtalk_core::semantic_analysis::analyze_initialize_assigns(&m.body)
                 .into_iter()
@@ -780,17 +734,6 @@ pub(super) fn extract_class_metadata(
     // a slot via `fieldAt:put:`/`perform:` — see the `ClassMeta` field doc.
     let has_dynamic_field_writer =
         beamtalk_core::semantic_analysis::has_dynamic_field_writer(&class.methods);
-
-    let class_variables = class
-        .class_variables
-        .iter()
-        .map(|cv| ClassVarMeta {
-            name: cv.name.name.to_string(),
-            ty: cv.type_annotation.as_ref().map(DeclaredType::from),
-            has_default: cv.default_value.is_some(),
-            kind: cv.slot_kind,
-        })
-        .collect();
 
     let class_name = class.name.name.to_string();
 
@@ -845,9 +788,8 @@ pub(super) fn extract_class_metadata(
                 &module, true,
             );
         hierarchy
-            .ok()
-            .and_then(|h| h.get_class(&class_name).map(|c| c.in_caller_new1))
-            .unwrap_or(false)
+            .get_class(&class_name)
+            .is_some_and(|c| c.in_caller_new1)
     };
 
     Ok(ClassMeta {
@@ -869,7 +811,6 @@ pub(super) fn extract_class_metadata(
         has_dynamic_field_writer,
         methods,
         class_methods,
-        class_variables,
         type_params,
         superclass_type_args,
         handle_scope: class.handle_scope.as_ref().map(|s| s.name.to_string()),

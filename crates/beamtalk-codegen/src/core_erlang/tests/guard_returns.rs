@@ -111,8 +111,26 @@ fn expect_directive_in_absorbed_statements_compiles() {
 
 #[test]
 fn typed_comparison_guard_needs_no_helper() {
-    // BT-4452: a literal left operand lowers `0 < x` to a bare BIF, a Boolean
-    // by construction, so the condition needs no helper.
+    // BT-4452: a literal left operand and a proven numeric right one lower
+    // `0 < 5` to a bare BIF, a Boolean by construction, so the condition
+    // needs no helper.
+    let code = codegen(
+        "Object subclass: G\n\
+         \x20 sign: x :: Integer =>\n\
+         \x20   0 < 5 ifTrue: [^1]\n\
+         \x20   0 > 2.5 ifTrue: [^-1]\n\
+         \x20   x\n",
+    );
+    assert_no_nlr_frame(&code);
+    assert!(!code.contains("beamtalk_guard_return"), "{code}");
+}
+
+#[test]
+fn literal_receiver_guard_with_an_unproven_right_operand_is_decided_by_the_helper() {
+    // ADR 0116 § Addendum (BT-5176): `0 < x` tests `x` (declared, so tested,
+    // not trusted) and sends a non-number its reflected hook, which may
+    // answer a non-Boolean. The guard stays a direct return, its condition
+    // decided by `beamtalk_guard_return` as on a declared receiver.
     let code = codegen(
         "Object subclass: G\n\
          \x20 sign: x :: Integer =>\n\
@@ -121,7 +139,11 @@ fn typed_comparison_guard_needs_no_helper() {
          \x20   0\n",
     );
     assert_no_nlr_frame(&code);
-    assert!(!code.contains("beamtalk_guard_return"), "{code}");
+    assert!(
+        code.contains("'send_number_comparison'(")
+            && code.contains("call 'beamtalk_guard_return':'if_true'"),
+        "{code}"
+    );
 }
 
 #[test]
@@ -174,9 +196,25 @@ fn guard_with_effectful_return_on_non_boolean_receiver_keeps_its_frame() {
 
 #[test]
 fn guard_with_effectful_return_on_typed_comparison_has_no_frame() {
-    // BT-4452: with a literal left operand, `0 > x` is a bare BIF, so the
-    // effectful `^self withN: 0` (and every other guard shape) is exact as
-    // rewritten.
+    // BT-4452: with a literal left operand and a proven numeric right one,
+    // `0 > 1` is a bare BIF, so the effectful `^self withN: 0` (and every
+    // other guard shape) is exact as rewritten.
+    let code = codegen(
+        "Value subclass: W\n\
+         \x20 field: n :: Integer = 0\n\
+         \x20 clamp: x :: Integer =>\n\
+         \x20   0 > 1 ifTrue: [^self withN: 0]\n\
+         \x20   100 < $a ifTrue: [^self withN: 100] ifFalse: [self withN: x]\n",
+    );
+    assert_no_nlr_frame(&code);
+    assert!(!code.contains("beamtalk_guard_return"), "{code}");
+}
+
+#[test]
+fn literal_receiver_two_branch_guard_with_an_unproven_right_operand_keeps_its_frame() {
+    // ADR 0116 § Addendum (BT-5176): `100 < x` is no longer a Boolean by
+    // construction, and no helper decides a two-branch conditional whose
+    // values have effects, so the frame stays, as on a declared receiver.
     let code = codegen(
         "Value subclass: W\n\
          \x20 field: n :: Integer = 0\n\
@@ -184,8 +222,7 @@ fn guard_with_effectful_return_on_typed_comparison_has_no_frame() {
          \x20   0 > x ifTrue: [^self withN: 0]\n\
          \x20   100 < x ifTrue: [^self withN: 100] ifFalse: [self withN: x]\n",
     );
-    assert_no_nlr_frame(&code);
-    assert!(!code.contains("beamtalk_guard_return"), "{code}");
+    assert!(code.contains("make_ref"), "{code}");
 }
 
 #[test]
@@ -322,20 +359,33 @@ fn ffi_receiver_of_state_threading_actor_conditional_compiles() {
 
 #[test]
 fn typed_comparison_guard_on_every_method_kind_has_no_frame() {
-    // BT-4452: class-side, a String-literal left operand, and a foreign
-    // extension method all lower the comparison bare, so every guard shape
-    // compiles as a direct return.
+    // BT-4452: class-side and a String-literal left operand both lower the
+    // comparison bare, so every guard shape compiles as a direct return. A
+    // number literal receiver needs a proven right operand too (ADR 0116
+    // § Addendum, BT-5176); with a declared one the helper decides it.
     let class_side = codegen(
+        "Object subclass: K\n\
+         \x20 class sealed one => 1\n\
+         \x20 class sealed pick: x :: Integer =>\n\
+         \x20   0 < 1 ifTrue: [^self one]\n\
+         \x20   x\n",
+    );
+    assert_no_nlr_frame(&class_side);
+    assert!(
+        !class_side.contains("beamtalk_guard_return"),
+        "{class_side}"
+    );
+    let class_side_tested = codegen(
         "Object subclass: K\n\
          \x20 class sealed one => 1\n\
          \x20 class sealed pick: x :: Integer =>\n\
          \x20   0 < x ifTrue: [^self one]\n\
          \x20   2\n",
     );
-    assert_no_nlr_frame(&class_side);
+    assert_no_nlr_frame(&class_side_tested);
     assert!(
-        !class_side.contains("beamtalk_guard_return"),
-        "{class_side}"
+        class_side_tested.contains("beamtalk_guard_return"),
+        "{class_side_tested}"
     );
 
     let literal_left = codegen(
@@ -349,14 +399,6 @@ fn typed_comparison_guard_on_every_method_kind_has_no_frame() {
         !literal_left.contains("beamtalk_guard_return"),
         "{literal_left}"
     );
-
-    let extension = codegen(
-        "Integer >> bt4452Pick: x :: Integer =>\n\
-         \x20   0 < x ifTrue: [^self abs]\n\
-         \x20   2\n",
-    );
-    assert!(extension.contains("bt4452Pick"), "{extension}");
-    assert_no_nlr_frame(&extension);
 }
 
 #[test]
@@ -430,7 +472,7 @@ fn and_or_guard_of_booleans_has_no_frame() {
         "Value subclass: A\n\
          \x20 field: n :: Integer = 0\n\
          \x20 clamp: x :: Integer =>\n\
-         \x20   (0 > x or: [100 < x]) ifTrue: [^self withN: 0]\n\
+         \x20   (0 > 1 or: [100 < 2.5]) ifTrue: [^self withN: 0]\n\
          \x20   (x =:= 5 and: [x == 5]) ifTrue: [^self withN: 5] ifFalse: [self withN: x]\n",
     );
     assert_no_nlr_frame(&code);

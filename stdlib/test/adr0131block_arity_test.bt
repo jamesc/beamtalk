@@ -106,29 +106,5 @@ TestCase subclass: Adr0131BlockArityTest
       self.a missingArgOperand
     ] on: Error do: [:e | e kind]) equals: #arity_mismatch
 
-  testFieldDrop =>
-    self assert: ([
-      Adr0131BlockArityClass fieldDrop
-    ] on: Error do: [:e | e kind]) equals: #arity_mismatch
-    self assert: ([
-      self.a fieldDrop
-    ] on: Error do: [:e | e kind]) equals: #arity_mismatch
-    self assert: #[Adr0131BlockArityClass fieldN, self.a fieldN] equals: #[0, 0]
-
-  testFieldDropValue =>
-    self assert: ([
-      Adr0131BlockArityClass fieldDropValue
-    ] on: Error do: [:e | e kind]) equals: #arity_mismatch
-    self assert: Adr0131BlockArityClass fieldN equals: 0
-
-  testFieldMissing =>
-    self assert: ([
-      Adr0131BlockArityClass fieldMissing
-    ] on: Error do: [:e | e kind]) equals: #arity_mismatch
-    self assert: ([
-      self.a fieldMissing
-    ] on: Error do: [:e | e kind]) equals: #arity_mismatch
-    self assert: #[Adr0131BlockArityClass fieldN, self.a fieldN] equals: #[0, 0]
-
   testMatchedArityStillInlines =>
     self assert: #[(Adr0131BlockArityValue new) matched, self.a matched] equals: #[5, 5]

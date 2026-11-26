@@ -9,16 +9,22 @@ on:
   push:
     branches: [main]
     paths:
+      - 'scripts/ci/liveview-server-smoke.sh'
       - 'editors/liveview/**'
       - 'tests/conformance/**'
       - 'runtime/apps/beamtalk_runtime/test/fixtures/beamtalk_root_dir_conformance.json'
+      # BT-5201: the allowlist test pins this inventory table to its allowlist.
+      - 'docs/development/surface-parity.md'
       - '.github/workflows/liveview.yml'
   pull_request:
     branches: [main]
     paths:
+      - 'scripts/ci/liveview-server-smoke.sh'
       - 'editors/liveview/**'
       - 'tests/conformance/**'
       - 'runtime/apps/beamtalk_runtime/test/fixtures/beamtalk_root_dir_conformance.json'
+      # BT-5201: the allowlist test pins this inventory table to its allowlist.
+      - 'docs/development/surface-parity.md'
       - '.github/workflows/liveview.yml'
 
 concurrency:
@@ -94,6 +100,52 @@ jobs:
       # mix.exs test_coverage (BT-3288) — a real CI gate, not just a report.
       - name: Run tests with coverage
         run: mix test --cover
+
+  # BT-5189: build the real release and run its `bin/server <workspace-id>`
+  # once, the way a user does (the launcher resolves the workspace through the
+  # release's own `bin/bt_attach eval`, generates a SECRET_KEY_BASE and boots
+  # the endpoint). The release lane (liveview-release.yml) only runs on a
+  # release or by hand, so without this a broken launcher reaches users.
+  release-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Erlang/OTP + Elixir
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version-file: .tool-versions
+          cache: npm
+          cache-dependency-path: editors/liveview/assets/package-lock.json
+
+      - name: Cache Mix deps and build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: |
+            editors/liveview/deps
+            editors/liveview/_build
+          key: ${{ runner.os }}-linux-x86_64-liveview-rel-${{ hashFiles('editors/liveview/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-linux-x86_64-liveview-rel-
+
+      - name: Install just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Build release
+        run: just dist-liveview
+
+      - name: Run bin/server <workspace-id>
+        run: scripts/ci/liveview-server-smoke.sh dist-liveview
 
   coverage:
     needs: liveview

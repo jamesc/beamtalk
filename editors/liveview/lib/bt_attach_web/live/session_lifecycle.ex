@@ -13,7 +13,7 @@ defmodule BtAttachWeb.Live.SessionLifecycle do
 
   use BtAttachWeb, :html
 
-  import Phoenix.LiveView, only: [start_async: 3, stream: 3]
+  import Phoenix.LiveView, only: [start_async: 3, stream: 4]
   require Logger
 
   alias BtAttach.Facade
@@ -177,6 +177,14 @@ defmodule BtAttachWeb.Live.SessionLifecycle do
       # The tab stays interactive; the dock shows a Stop control meanwhile.
       |> assign(:eval_running, false)
       |> assign(:eval_queue, [])
+      # BT-5189: the job whose task is running (so a crash or `DOWN` can tell
+      # its own UI) and the keys of `Dock.eval_async/6` operations still queued
+      # or running (so their submit controls stay disabled meanwhile).
+      |> assign(:eval_current, nil)
+      |> assign(:eval_pending, MapSet.new())
+      # BT-5189: what the last Stop cancelled ("Stopped. N waiting evaluations
+      # were cancelled."), shown beside the cockpit-wide Stop.
+      |> assign(:eval_notice, nil)
       |> assign(:output, nil)
       |> assign(:eval_warnings, nil)
       |> assign(:error, nil)
@@ -204,6 +212,10 @@ defmodule BtAttachWeb.Live.SessionLifecycle do
       # `phx-disable-with` alone reverts as soon as the (now-immediate) event
       # handler re-renders, since the work moved off-socket to `start_async`.
       |> assign(:tests_running, false)
+      # BT-5189: the running `:test_op` task's pid (announced by the task) and
+      # the token of the run it belongs to — Stop kills its workspace worker.
+      |> assign(:test_op_token, nil)
+      |> assign(:test_op_pid, nil)
       # BT-2599: a transient flag for the off-socket `:test_discover` catalogue
       # discovery — true only while a partial-load re-discovery is in flight so
       # `TestRunner.handle_async(:test_discover, …)` keeps the partial-load
@@ -494,18 +506,15 @@ defmodule BtAttachWeb.Live.SessionLifecycle do
       |> assign(:git_error, nil)
       |> assign(:git_diff, nil)
       |> assign(:git_diff_path, nil)
-      |> stream(:transcript, [])
-      |> stream(:repl, [])
+      |> stream(:transcript, [], reset: true)
+      |> stream(:repl, [], reset: true)
     else
       other ->
         Logger.error("subscribe failed: #{inspect(other)}")
         # Drop whichever subscription may have succeeded, then release the
         # session through the registry (which closes it) so we don't leave a
         # dangling subscriber or an orphaned session behind.
-        Workspace.unsubscribe_transcript(self())
-        Workspace.unsubscribe_bindings(self())
-        Workspace.unsubscribe_classes(self())
-        Workspace.unsubscribe_reload_check(self())
+        ws_client().unsubscribe_all(self())
         force_close(socket.assigns[:token], pid)
 
         assign(socket,
@@ -534,6 +543,40 @@ defmodule BtAttachWeb.Live.SessionLifecycle do
 
         :ok
     end
+  end
+
+  # BT-5129: the session this tab's UI state belongs to is gone. Clear every
+  # surface tied to it (REPL + transcript streams, the `repl-N` dom ids the new
+  # session would reuse, the Inspect terms that point at dead objects) and the
+  # eval state (a stale `eval_running` hides Stop and wedges the queue; a queued
+  # eval would drain into dead-pid errors). Called on `DOWN`; `bind_session`
+  # does the same via its fresh assigns on Reconnect.
+  @doc false
+  def reset_session_ui(socket) do
+    # Cancel the in-flight eval task too: its late completion would otherwise
+    # clear `eval_running` while a post-Reconnect eval runs and start a second
+    # concurrent one.
+    #
+    # BT-5189: every internal operation that was running or queued is told so
+    # in its own UI (a rename modal, the method editor's status, a poke bar)
+    # before the eval state is cleared, rather than silently never running.
+    socket
+    |> Phoenix.LiveView.cancel_async(:eval)
+    |> BtAttachWeb.Live.Dock.abandon_evals(
+      "The workspace connection was lost before it finished; it may not have run.",
+      "Cancelled: the workspace connection was lost."
+    )
+    |> Phoenix.LiveView.stream(:transcript, [], reset: true)
+    |> Phoenix.LiveView.stream(:repl, [], reset: true)
+    |> assign(
+      repl_seq: 0,
+      repl_terms: %{},
+      repl_history_pos: nil,
+      eval_running: false,
+      eval_current: nil,
+      eval_queue: [],
+      eval_pending: MapSet.new()
+    )
   end
 
   # The single place the "workspace lost" state is resolved. The banner's

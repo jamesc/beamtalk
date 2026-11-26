@@ -36,7 +36,13 @@ always_available_ops() ->
         %% `complete` and `describe` need no compiler themselves;
         %% `complete`'s compiler fallback is classified separately below.
         <<"complete">>,
-        <<"describe">>
+        <<"describe">>,
+        %% BT-5205: git reads and process navigation need no compiler or working tree.
+        <<"git-status">>,
+        <<"git-diff">>,
+        <<"git-log">>,
+        <<"children">>,
+        <<"process-info">>
     ].
 
 %% Rows 2-4: operations that compile source.
@@ -48,6 +54,9 @@ compiler_ops() ->
         <<"load-tests">>,
         <<"show-codegen">>,
         <<"diagnostics">>,
+        <<"save-method">>,
+        <<"save-class">>,
+        <<"reload-file">>,
         'compile:source:',
         'tryCompile:source:',
         'precheckCompile:source:',
@@ -66,6 +75,13 @@ workspace_ops() ->
         <<"unload">>,
         <<"save-native-source">>,
         <<"save-section">>,
+        <<"revert-method">>,
+        <<"flush">>,
+        %% BT-5205: the git writes change the index, working tree or history.
+        <<"git-stage">>,
+        <<"git-unstage">>,
+        <<"git-commit">>,
+        <<"git-revert-file">>,
         flush,
         'flush:',
         'flush:confirmDestructive:',

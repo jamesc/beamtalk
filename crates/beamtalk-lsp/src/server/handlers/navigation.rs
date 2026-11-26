@@ -296,7 +296,7 @@ impl Backend {
     /// forwards an `ImplementorsOf` [`NavQuery`] through
     /// [`Backend::delegate_nav_query`]; the runtime answers via
     /// `beamtalk_xref` (one site per implementing class, instance- and
-    /// class-side both reported) and includes ADR-0066 extension methods
+    /// class-side both reported) and includes methods defined live
     /// the AST walker can't see.
     ///
     /// Otherwise (flag off, no workspace, runtime error), falls back to the

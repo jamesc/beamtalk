@@ -170,9 +170,6 @@ fn collect_type_lines(
                 collect_type_lines(ty, class_name, source, lines);
             }
         }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            collect_type_lines(inner, class_name, source, lines);
-        }
         TypeAnnotation::Difference { base, excluded, .. } => {
             collect_type_lines(base, class_name, source, lines);
             collect_type_lines(excluded, class_name, source, lines);
@@ -414,6 +411,13 @@ mod tests {
             "classify: x =>\n  x match: [\n    v :: Counter -> v;\n    _ -> nil]",
             "Counter",
             &[3],
+        ),
+        // BT-5284: an annotated destructuring element names a class too.
+        (
+            "finds_reference_in_destructure_type_pattern",
+            "classify: x =>\n  {_, v :: Counter} := x\n  v",
+            "Counter",
+            &[2],
         ),
         (
             "finds_reference_in_union_type_annotation",

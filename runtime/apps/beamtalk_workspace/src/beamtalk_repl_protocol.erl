@@ -24,6 +24,7 @@ requests, "type"-keyed responses) has been removed.
 
 -export([
     decode/1,
+    decode_map/1,
     encode_result/3, encode_result/4, encode_result/5, encode_result/6,
     encode_script_exit/4,
     encode_error/3, encode_error/4, encode_error/5, encode_error/6,

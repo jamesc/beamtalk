@@ -16,6 +16,9 @@ use beamtalk_repl_protocol::RequestBuilder;
 use super::ReplResponse;
 use crate::commands::protocol::ProtocolClient;
 
+/// How long `:exit` / Ctrl-D wait for the node to answer `close` (BT-5199).
+const CLOSE_REPLY_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// REPL client that wraps [`ProtocolClient`] with REPL-specific operations.
 pub(crate) struct ReplClient {
     inner: ProtocolClient,
@@ -377,6 +380,26 @@ impl ReplClient {
         ))
     }
 
+    /// End this client's session on the node (`close`), for `:exit` and Ctrl-D
+    /// (BT-5199). Without it the session stays resumable until the idle bound
+    /// (4 h by default) after the REPL has gone. Best effort and bounded: sent
+    /// on the current connection only (a dead connection is not reconnected
+    /// just to close a session the node reaps anyway), and each read of the
+    /// reply is bounded by [`CLOSE_REPLY_TIMEOUT`], so a wedged node or a
+    /// half-open socket cannot keep the REPL from exiting. (Push frames that
+    /// arrive first each start a fresh read; the node sends none while it runs
+    /// the `close` op.)
+    pub(crate) fn close_session(&mut self) {
+        if self
+            .inner
+            .set_read_timeout(Some(CLOSE_REPLY_TIMEOUT))
+            .is_err()
+        {
+            return;
+        }
+        let _ = self.inner.send_raw(&RequestBuilder::close());
+    }
+
     /// List running actors.
     pub(crate) fn list_actors(&mut self) -> Result<ReplResponse> {
         self.send_request(&RequestBuilder::actors())
@@ -426,6 +449,17 @@ impl ReplClient {
     /// Unload a class from the workspace by name.
     pub(crate) fn unload(&mut self, class_name: &str) -> Result<ReplResponse> {
         self.send_request(&RequestBuilder::unload(class_name))
+    }
+
+    /// Send the `flush` operation (BT-5204): the one implementation the REPL,
+    /// MCP and LiveView share, including the destructive-tier confirmation
+    /// rule. `confirm_destructive` also applies Tier 2 entries.
+    pub(crate) fn flush(
+        &mut self,
+        scope: beamtalk_repl_protocol::FlushScope<'_>,
+        confirm_destructive: bool,
+    ) -> Result<ReplResponse> {
+        self.send_request(&RequestBuilder::flush(scope, confirm_destructive))
     }
 }
 
@@ -549,6 +583,43 @@ mod tests {
         let mut client = ReplClient::connect("127.0.0.1", port, "cookie").expect("connect");
         let resp = client.list_actors().expect("list_actors should succeed");
         assert!(resp.actors.is_some_and(|a| a.is_empty()));
+    }
+
+    /// BT-5199: `:exit` / Ctrl-D end the session with a `close` request.
+    #[test]
+    fn close_session_sends_close_on_the_current_connection() {
+        let close_seen = Arc::new(AtomicBool::new(false));
+        let close_seen_srv = Arc::clone(&close_seen);
+        let port = spawn_auth_ok_server(move |req, ws| {
+            if req.get("op").and_then(|v| v.as_str()) == Some("close") {
+                close_seen_srv.store(true, Ordering::SeqCst);
+                let _ = ws.send(Message::Text(
+                    serde_json::json!({"status": ["done"], "value": "ok"})
+                        .to_string()
+                        .into(),
+                ));
+            }
+        });
+        let mut client = ReplClient::connect("127.0.0.1", port, "cookie").expect("connect");
+        client.close_session();
+        assert!(
+            close_seen.load(Ordering::SeqCst),
+            "no `close` request reached the node"
+        );
+    }
+
+    /// A node that never answers `close` must not keep the REPL from exiting.
+    #[test]
+    fn close_session_returns_when_the_node_never_answers() {
+        let port = spawn_auth_ok_server(|_req, _ws| {});
+        let mut client = ReplClient::connect("127.0.0.1", port, "cookie").expect("connect");
+        let started = std::time::Instant::now();
+        client.close_session();
+        assert!(
+            started.elapsed() < CLOSE_REPLY_TIMEOUT + Duration::from_secs(3),
+            "close_session waited {:?}",
+            started.elapsed()
+        );
     }
 
     #[test]

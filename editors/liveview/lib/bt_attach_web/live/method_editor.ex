@@ -368,20 +368,12 @@ defmodule BtAttachWeb.Live.MethodEditor do
                RequestContext.build(socket)
              ) do
           {:ok, saved_class} ->
-            # The patch is live + logged; refresh the change-history pane so
-            # the new entry is visible (ChangeLog coherence). A successful
-            # compile also clears the active tab's dirty dot and re-bases it
-            # on the compiled source.
-            socket
-            |> assign(
-              save_result: "Saved #{selector} on #{saved_class}",
-              save_error: nil,
-              flush_result: nil,
-              flush_error: nil
-            )
-            |> compile_clean(tab_id, source)
-            |> promote_new_method_tab(tab_id, saved_class, selector)
-            |> WorkspaceLive.assign_changes()
+            method_saved(socket, tab_id, source, selector, saved_class, nil)
+
+          # The method is live but its ChangeLog entry was not recorded, so `flush`
+          # will not write it: say so beside the success status (BT-5206).
+          {:ok, saved_class, warnings} ->
+            method_saved(socket, tab_id, source, selector, saved_class, warnings)
 
           {:error, reason} ->
             # `reason` may be a facade RBAC denial (`:unauthorized`) for a
@@ -390,6 +382,24 @@ defmodule BtAttachWeb.Live.MethodEditor do
             assign(socket, save_result: nil, save_error: FacadeError.render(reason))
         end
     end
+  end
+
+  # The patch is live + logged; refresh the change-history pane so the new entry is
+  # visible (ChangeLog coherence). A successful compile also clears the active
+  # tab's dirty dot and re-bases it on the compiled source.
+  defp method_saved(socket, tab_id, source, selector, saved_class, warnings) do
+    saved = "Saved #{selector} on #{saved_class}"
+
+    socket
+    |> assign(
+      save_result: if(warnings, do: saved <> " — " <> Enum.join(warnings, "; "), else: saved),
+      save_error: nil,
+      flush_result: nil,
+      flush_error: nil
+    )
+    |> compile_clean(tab_id, source)
+    |> promote_new_method_tab(tab_id, saved_class, selector)
+    |> WorkspaceLive.assign_changes()
   end
 
   # Compile a class-definition tab (BT-2494) by evaluating its definition
@@ -415,30 +425,45 @@ defmodule BtAttachWeb.Live.MethodEditor do
   end
 
   defp save_definition_eval(socket, tab, source, pid) do
-    case Facade.dispatch(:eval, %{session_pid: pid, code: source}, RequestContext.build(socket)) do
-      {:ok, _term, _output, _warnings} ->
-        socket
-        |> assign(
-          save_result: "Compiled #{tab.class}",
-          save_error: nil,
-          flush_result: nil,
-          flush_error: nil
+    BtAttachWeb.Live.Dock.eval_async(
+      socket,
+      pid,
+      source,
+      fn socket, result ->
+        case result do
+          {:ok, _term, _output, _warnings} ->
+            socket
+            |> assign(
+              save_result: "Compiled #{tab.class}",
+              save_error: nil,
+              flush_result: nil,
+              flush_error: nil
+            )
+            |> compile_clean(tab.id, source)
+            |> WorkspaceLive.assign_changes()
+            # BT-2586/BT-2590: refresh the git panel when it is open AND
+            # autoflush is on — only then did the save write through to disk.
+            # With autoflush off the save patches the live image only, so the
+            # on-disk working tree is unchanged and the git shell-out is skipped
+            # (no redundant refresh).
+            |> WorkspaceLive.maybe_refresh_git_after_save()
+
+          {:error, _, _, _} = err ->
+            assign(socket, save_result: nil, save_error: FacadeError.render_eval_error(err))
+
+          {:error, _} = err ->
+            assign(socket, save_result: nil, save_error: FacadeError.render_eval_error(err))
+        end
+      end,
+      fn socket, message ->
+        # BT-5189: refused, dropped from the queue, or its task died — say so
+        # where the compile result would have landed.
+        assign(socket,
+          save_result: nil,
+          save_error: "Compiling #{tab.class} did not complete: #{message}"
         )
-        |> compile_clean(tab.id, source)
-        |> WorkspaceLive.assign_changes()
-        # BT-2586/BT-2590: refresh the git panel when it is open AND
-        # autoflush is on — only then did the save write through to disk.
-        # With autoflush off the save patches the live image only, so the
-        # on-disk working tree is unchanged and the git shell-out is skipped
-        # (no redundant refresh).
-        |> WorkspaceLive.maybe_refresh_git_after_save()
-
-      {:error, _, _, _} = err ->
-        assign(socket, save_result: nil, save_error: FacadeError.render_eval_error(err))
-
-      {:error, _} = err ->
-        assign(socket, save_result: nil, save_error: FacadeError.render_eval_error(err))
-    end
+      end
+    )
   end
 
   # BT-2670: save (edit → compile → reload → write-back) the active native
