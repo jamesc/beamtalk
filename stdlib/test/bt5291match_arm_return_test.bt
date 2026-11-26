@@ -1,0 +1,45 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5291: see stdlib/test/fixtures/Bt5291MatchArmReturnActor.bt.
+
+TestCase subclass: Bt5291MatchArmReturnTest
+
+  testSelfSendScrutineeReturnInLoop =>
+    a := Bt5291MatchArmReturnActor spawn
+    self assert: a loopBump equals: 30
+    self assert: a f equals: 3
+
+  testSelfSendScrutineeReturnAtRoot =>
+    a := Bt5291MatchArmReturnActor spawn
+    self assert: a rootBump equals: 10
+    self assert: a f equals: 1
+
+  testSelfSendScrutineeReturnInConditionalArm =>
+    a := Bt5291MatchArmReturnActor spawn
+    self assert: (a armBump: nil) equals: 0
+    self assert: (a armBump: 1) equals: 10
+    self assert: a f equals: 1
+
+  testConditionalReceiverNestedReturnInLoop =>
+    a := Bt5291MatchArmReturnActor spawn
+    self assert: a receiverBump equals: 30
+    self assert: a f equals: 3
+
+  testReturnKeepsTheFieldWrittenBeforeTheMatch =>
+    a := Bt5291MatchArmReturnActor spawn
+    self assert: (a writeThenMatch: 4) equals: 40
+    self assert: a f equals: 50
+    self assert: (a writeThenMatch: 0) equals: 50
+
+  testReturnInLoopKeepsTheFieldWrittenThisPass =>
+    a := Bt5291MatchArmReturnActor spawn
+    self assert: (a loopWriteThenMatch: 2) equals: 20
+    self assert: a f equals: 100
+    self assert: (a loopWriteThenMatch: 0) equals: 400
+
+  testReturnAfterReceiverBindingKeepsTheFieldWrite =>
+    a := Bt5291MatchArmReturnActor spawn
+    self assert: (a receiverBindsThenReturns: 3) equals: 30
+    self assert: a f equals: 7
+    self assert: (a receiverBindsThenReturns: 0) equals: 7

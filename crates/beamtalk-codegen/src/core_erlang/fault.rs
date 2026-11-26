@@ -107,6 +107,14 @@ mod registry {
         ReplBoundaryOff,
 
         // ── Synced-call brackets and loop modes (`synced_call.rs`) ──────
+        /// BT-5291: `classify_inlined` caches a conditional's class under its
+        /// span alone and classifies with its receiver's own bindings unbound,
+        /// as before BT-5291, so a class decided by a probe run before an
+        /// enclosing `match:` arm or loop (or the conditional's receiver)
+        /// binds the names the conditional reads outlives the probe: the
+        /// window brackets nothing while the lowering runs the `^` block as a
+        /// closure (`UnbracketedNlrClosure`).
+        InlinedClassScopeBlind,
         /// No call is bracketed (every user-code call is a gap), so the
         /// invariant probe can be shown to see a missing bracket.
         NoBrackets,

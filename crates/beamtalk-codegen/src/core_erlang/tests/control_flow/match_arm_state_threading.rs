@@ -832,3 +832,34 @@ fn test_match_with_state_advancing_scrutinee_in_nested_frames_compiles() {
         assert_compiles_through_erlc("matchsentscrutinee", &code);
     }
 }
+
+/// BT-5291: a `^` out of a nested conditional in a `match:` arm, the issue's
+/// repro (a loop body) and its method-root, conditional-arm and
+/// conditional-receiver forms, plus a scrutinee that advances nothing and a
+/// conditional whose own receiver binds the name its `^` block reads. The
+/// conditional's class is decided in the arm's own scope
+/// (`InlinedClassScope`), so its `^` closure is bracketed and each is
+/// `verify()`-clean and compiles through erlc. The generated corpora are
+/// `tests/match_scrutinee_frame_corpus.rs` and
+/// `tests/loop_body_conditional_receiver_corpus.rs`.
+#[test]
+fn test_match_arm_nested_conditional_return_compiles() {
+    let header = "Actor subclass: MatchArmReturn\n  state: f = 0\n\n  bump =>\n    self.f := self.f + 1\n    self.f\n\n";
+    for body in [
+        "    1 to: 5 do: [:i | self bump match: [k -> k > 2 ifTrue: [^ k * 10]]]\n    self.f\n",
+        "    self bump match: [k -> k > 2 ifTrue: [^ k * 10]]\n    self.f\n",
+        "    xs isNil ifTrue: [nil] ifFalse: [self bump match: [k -> k > 2 ifTrue: [^ k * 10]]]\n    self.f\n",
+        "    1 to: 5 do: [:i | (self bump) ifTrue: [i > 2 ifTrue: [^ i * 10]]]\n    self.f\n",
+        "    self.f := 50\n    xs match: [k -> k > 0 ifTrue: [^ k * 10]]\n    self.f\n",
+        // The conditional's own receiver binds the name its `^` block reads.
+        "    (y := xs) > 0 ifTrue: [^ y * 10]\n    self.f\n",
+        "    (y := self bump) > 0 ifTrue: [^ y * 10]\n    self.f\n",
+        "    xs match: [k -> (y := k) > 0 ifTrue: [^ y * 10]]\n    self.f\n",
+    ] {
+        let src = format!("{header}  g: xs =>\n{body}");
+        assert_parses(&src);
+        assert_eq!(verifier_report(&src, None), None, "{src}");
+        let code = codegen_named(&src, "matcharmreturn");
+        assert_compiles_through_erlc("matcharmreturn", &code);
+    }
+}
