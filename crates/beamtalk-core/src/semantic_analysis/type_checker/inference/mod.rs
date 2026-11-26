@@ -453,6 +453,8 @@ impl TypeChecker {
         // is checked, so an undeclared method's inferred type is unchanged.
         if method.return_type.is_some() {
             let mut seen: Vec<InferredType> = tail_returned;
+            // A body that ends in `^expr` is already checked as the body type.
+            seen.push(body_type.clone());
             for ty in collected_returns {
                 if matches!(ty, InferredType::Dynamic(_) | InferredType::Never)
                     || seen.contains(&ty)

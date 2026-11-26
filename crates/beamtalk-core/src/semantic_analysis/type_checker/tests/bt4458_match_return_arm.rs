@@ -306,3 +306,19 @@ fn shape_early_return_is_checked() {
         "a shape early `^` must be checked: {diags:?}"
     );
 }
+
+// BT-5283 review: a body ending in `^expr` is reported once, not twice.
+#[test]
+fn tail_return_expression_is_reported_once() {
+    let diags = type_messages(
+        r#"typed Object subclass: ZzOnce
+  class foo -> Integer =>
+    ^"oops"
+"#,
+    );
+    let n = diags
+        .iter()
+        .filter(|m| m.contains("declares return type Integer"))
+        .count();
+    assert_eq!(n, 1, "expected exactly one warning: {diags:?}");
+}

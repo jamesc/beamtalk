@@ -632,8 +632,9 @@ pub struct TypeChecker {
     /// BT-5283: the inferred type of every `^expr` visited while checking the
     /// current method body — early returns, `^` inside blocks (non-local
     /// return) and inside match arms alike. Each one answers the method, so
-    /// [`check_return_type`](Self::check_return_type) unions them into the
-    /// body type. Drained per method in `check_method_body_inner`.
+    /// `check_method_body_inner` checks each distinct type against the
+    /// declared return type on its own. Cleared at method entry (and before
+    /// top-level module expressions, whose `^`s are never read).
     pub(super) collected_returns: Vec<InferredType>,
     /// BT-4636: set while a send's arguments are being inferred, so a block
     /// argument's writes to outer locals are collected in
