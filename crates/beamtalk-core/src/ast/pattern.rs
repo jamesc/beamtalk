@@ -334,13 +334,15 @@ pub fn guard_operator_bif(op: &str) -> Option<&'static str> {
     })
 }
 
-/// Whether `op` may appear in a binary-pattern segment size: the integer
-/// arithmetic operators of [`guard_operator_bif`]. `/` (always a float in
-/// Erlang) and the comparisons (booleans) are guard-safe but can never
-/// produce a size, so they are rejected rather than silently never matching.
+/// Whether `op` may appear in a binary-pattern segment size: the operators
+/// of [`guard_operator_bif`] that lower to an integer-arithmetic BIF. A
+/// filter over that table, so every size operator has a guard lowering by
+/// construction. `/` (always a float in Erlang) and the comparisons
+/// (booleans) are guard-safe but can never produce a size, so they are
+/// rejected rather than silently never matching.
 #[must_use]
 pub fn is_pattern_size_operator(op: &str) -> bool {
-    matches!(op, "+" | "-" | "*")
+    guard_operator_bif(op).is_some_and(|bif| matches!(bif, "+" | "-" | "*"))
 }
 
 /// The first sub-expression of a binary-pattern segment size that is not a
