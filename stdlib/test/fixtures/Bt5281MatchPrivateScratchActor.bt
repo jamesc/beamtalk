@@ -3,7 +3,7 @@
 
 // BT-5281: a `match:` whose arm assigns a local in a nested `ifTrue:`, after
 // two guard-style `^` returns (BT-4415), lowers in a frame with a private
-// scratch map. Used by stdlib/test/bt5281_match_private_scratch_test.bt.
+// scratch map. Used by stdlib/test/bt5281match_private_scratch_test.bt.
 
 Actor subclass: Bt5281MatchPrivateScratchActor
   state: total = 0
@@ -13,22 +13,24 @@ Actor subclass: Bt5281MatchPrivateScratchActor
   reload: items =>
     items isNil ifTrue: [^nil]
     items isEmpty ifTrue: [^nil]
-    items do: [:item |
-      item match: [
-        Result ok: v -> v > 0
-          ifTrue: [
-            parsed := v * 10
-            parsed > 0 ifTrue: [self.total := self.total + parsed]
-          ];
-        Result error: _ -> nil
+    items
+      do: [:item |
+        item match: [
+          Result ok: v -> v > 0
+            ifTrue: [
+              parsed := v * 10
+              parsed > 0 ifTrue: [self.total := self.total + parsed]
+            ];
+          Result error: _ -> nil
+        ]
       ]
-    ]
     self.total
 
   classify: items =>
     items isNil ifTrue: [^#none]
     items isEmpty ifTrue: [^#empty]
-    items first match: [
+    head := items first
+    head match: [
       Result ok: v -> v > 0
         ifTrue: [
           doubled := v * 2
