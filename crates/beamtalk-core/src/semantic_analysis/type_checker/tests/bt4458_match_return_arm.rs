@@ -252,3 +252,21 @@ fn early_return_in_undeclared_method_is_not_checked() {
     );
     assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 }
+
+// BT-5283: a `^` in a block that escapes the method still answers the home
+// method, so it is checked against the declared return type (pinned design).
+#[test]
+fn escaping_block_return_counts_as_method_return() {
+    let diags = type_messages(
+        r"typed Object subclass: ZzEscape
+  class finder: n :: Integer -> Block =>
+    [:x :: Integer | x > n ifTrue: [^x]. nil]
+",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|m| m.contains("declares return type Block") && m.contains("Integer")),
+        "`^x` in an escaping block must be checked as a method return: {diags:?}"
+    );
+}
