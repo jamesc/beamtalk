@@ -170,7 +170,7 @@ pub struct ClassDefinition {
     pub methods: Vec<MethodDefinition>,
     /// Class-side method definitions (defined with `class` prefix).
     pub class_methods: Vec<MethodDefinition>,
-    /// Non-doc comments (`//` and `/* */`) appearing before this class.
+    /// Non-doc comments (`//`) appearing before this class.
     pub comments: CommentAttachment,
     /// Doc comment attached to this class (`///` lines).
     pub doc_comment: Option<String>,
@@ -538,7 +538,7 @@ pub struct ProtocolDefinition {
     /// `pkg`'s protocols only, even when another dependency declares a
     /// same-named one. `None` therefore means "the current package".
     pub package: Option<EcoString>,
-    /// Non-doc comments (`//` and `/* */`) appearing before this protocol.
+    /// Non-doc comments (`//`) appearing before this protocol.
     pub comments: CommentAttachment,
     /// Doc comment attached to this protocol (`///` lines).
     pub doc_comment: Option<String>,
@@ -564,7 +564,7 @@ pub struct ProtocolMethodSignature {
     pub parameters: Vec<ParameterDefinition>,
     /// Optional return type annotation.
     pub return_type: Option<TypeAnnotation>,
-    /// Non-doc comments (`//` and `/* */`) appearing before this signature.
+    /// Non-doc comments (`//`) appearing before this signature.
     pub comments: CommentAttachment,
     /// Doc comment attached to this signature (`///` lines).
     pub doc_comment: Option<String>,
@@ -648,7 +648,7 @@ pub struct TypeAliasDefinition {
     /// Whether this alias is package-private (ADR 0071 `internal` modifier,
     /// ADR 0108 Phase 5). `internal type Foo = ...`.
     pub is_internal: bool,
-    /// Non-doc comments (`//` and `/* */`) appearing before this declaration.
+    /// Non-doc comments (`//`) appearing before this declaration.
     pub comments: CommentAttachment,
     /// Doc comment attached to this declaration (`///` lines).
     pub doc_comment: Option<String>,
@@ -689,7 +689,7 @@ pub struct NativeDeclaration {
     pub module: Identifier,
     /// Typed function signatures for this module.
     pub method_signatures: Vec<ProtocolMethodSignature>,
-    /// Non-doc comments (`//` and `/* */`) appearing before this declaration.
+    /// Non-doc comments (`//`) appearing before this declaration.
     pub comments: CommentAttachment,
     /// Doc comment attached to this declaration (`///` lines).
     pub doc_comment: Option<String>,
@@ -771,7 +771,7 @@ pub struct StateDeclaration {
     /// directive itself (for stale warnings). The optional reason string is
     /// included in stale warnings for context.
     pub expect: Option<(Vec<ExpectCategory>, Option<EcoString>, Span)>,
-    /// Non-doc comments (`//` and `/* */`) appearing before this field.
+    /// Non-doc comments (`//`) appearing before this field.
     pub comments: CommentAttachment,
     /// Doc comment attached to this field (`///` lines).
     pub doc_comment: Option<String>,

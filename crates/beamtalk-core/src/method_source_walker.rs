@@ -539,7 +539,7 @@ fn split_keyword_parts(selector: &str) -> Vec<String> {
 /// `pos`, translated back into `source`'s own absolute coordinates.
 ///
 /// Re-lexes `source[pos..]` rather than scanning bytes for whitespace: a
-/// `BeamTalk` `//`/`/* */` comment is lexer TRIVIA attached to the token that
+/// `BeamTalk` `//` comment is lexer TRIVIA attached to the token that
 /// follows it, not a token of its own (`Token::span()` excludes trivia by
 /// construction — see `token.rs`), so this is exact regardless of how much
 /// whitespace *or* how many comments sit between `pos` and the real next
@@ -802,7 +802,7 @@ fn selector_send_spans_for_match(
             // Neither shape carries its own selector span from the parser
             // (unlike `Keyword`'s per-part spans) — re-lex from just after
             // the receiver and take the first real token. This is exact
-            // even when a `//`/`/* */` comment sits between the receiver
+            // even when a `//` comment sits between the receiver
             // and the selector (review finding on PR #3529: a prior
             // whitespace-only byte scan swallowed such a comment into the
             // splice span, silently deleting it on rewrite) — see

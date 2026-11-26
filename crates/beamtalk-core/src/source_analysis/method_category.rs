@@ -26,7 +26,7 @@
 //!
 //! # Divider format (locked down here for every consumer)
 //!
-//! A leading `//` line comment (not `///`, not `/* */`) is a divider when its
+//! A leading `//` line comment (not `///`) is a divider when its
 //! text, trimmed, has the shape:
 //!
 //! ```text
@@ -81,7 +81,7 @@
 //!   this is almost certainly a source mistake the author would notice by
 //!   reading their own file.
 //! - **A near-miss divider is not diagnosed.** `=== Name ====` (mismatched
-//!   run lengths), `== Name ==` (too short), or a `///`/`/* */` divider-
+//!   run lengths), `== Name ==` (too short), or a `///` divider-
 //!   shaped comment all silently fail to parse as a divider and fall back to
 //!   an ordinary leading comment — so the run of methods below it is
 //!   silently absorbed into whatever category was already open, with no

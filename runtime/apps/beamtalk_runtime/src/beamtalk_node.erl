@@ -84,6 +84,10 @@ selectors (ADR 0126 Phase 2) apply the same rule rather than re-deriving it.
 
 %% Upper bound on the `global:sync/0` every successful `connect` waits for (BT-5173, BT-5179).
 -define(GLOBAL_SYNC_TIMEOUT_MS, 5000).
+
+%% Default upper bound on each address family's host lookup `connect_policy/2`
+%% makes (BT-5192); `node_resolve_timeout_ms` (application env) overrides it.
+-define(HOST_RESOLVE_TIMEOUT_MS, 2000).
 -define(INVALID_NAME_HINT, <<"expected name@host">>).
 -define(INSECURE_HINT,
     <<"configure TLS distribution with peer verification (ADR 0126 §9) or use a tunnel"/utf8>>
@@ -495,10 +499,11 @@ remote_shape_manifest(Name) ->
 The ADR 0126 §9 item 2 connect guard, as a pure-ish decision: `ok` if a
 connection to `Node` may be attempted, or `{error, #beamtalk_error{kind =
 insecure_distribution}}` if `Node`'s host is not this host and `TlsEnabled`
-is false. Host resolution uses `inet:getaddrs/2`; an IP-literal host, and a
-name under the RFC 6761 `invalid` TLD, are decided without any lookup. A
-host that does not resolve at all cannot be proven local, so it falls under
-the policy too.
+is false. Host resolution uses `inet:getaddrs/2`, bounded per address
+family (`resolve/2`, BT-5192); an IP-literal host, and a name under the
+RFC 6761 `invalid` TLD, are decided without any lookup. A host that does not
+resolve at all, or not in time, cannot be proven local, so it falls under the
+policy too.
 """.
 -spec connect_policy(node(), boolean()) -> ok | {error, #beamtalk_error{}}.
 connect_policy(_Node, true) ->
@@ -577,27 +582,21 @@ is logged. Always answers `ok` — a failed sync never fails `connect`.
 """.
 -spec bounded_sync(fun(() -> term()), non_neg_integer()) -> ok.
 bounded_sync(SyncFun, TimeoutMs) ->
-    {Pid, Ref} = spawn_monitor(fun() ->
-        _ = SyncFun(),
-        ok
-    end),
-    receive
-        {'DOWN', Ref, process, Pid, normal} ->
+    case beamtalk_bounded:run(SyncFun, TimeoutMs) of
+        {ok, _} ->
             ok;
-        {'DOWN', Ref, process, Pid, Reason} ->
+        timeout ->
+            ?LOG_WARNING(
+                "Node connect: global:sync() did not finish; answering ok anyway",
+                #{timeout_ms => TimeoutMs, domain => [beamtalk, runtime]}
+            ),
+            ok;
+        Failed ->
             ?LOG_WARNING(
                 "Node connect: global:sync() failed",
-                #{reason => Reason, domain => [beamtalk, runtime]}
+                #{reason => Failed, domain => [beamtalk, runtime]}
             ),
             ok
-    after TimeoutMs ->
-        exit(Pid, kill),
-        erlang:demonitor(Ref, [flush]),
-        ?LOG_WARNING(
-            "Node connect: global:sync() did not finish; answering ok anyway",
-            #{timeout_ms => TimeoutMs, domain => [beamtalk, runtime]}
-        ),
-        ok
     end.
 
 -spec node_down_error(node(), binary()) -> #beamtalk_error{}.
@@ -710,11 +709,39 @@ is_special_use_invalid(Host) ->
     Labels = string:lexemes(string:lowercase(Host), "."),
     Labels =/= [] andalso lists:last(Labels) =:= "invalid".
 
+-doc """
+`Host`'s addresses in `Family`, or `[]` when it has none or the lookup fails.
+
+Bounded per family (BT-5192): `inet:getaddrs/2` has no timeout of its own, and
+an unresponsive resolver stalled `connect` (and every `connect_policy/2`
+caller: `spawnOn:`, `named:on:`, `ping`) for as long as it kept retrying. Each
+family's lookup gets `node_resolve_timeout_ms` (application env, default
+`?HOST_RESOLVE_TIMEOUT_MS`) through `beamtalk_bounded:run/2`, whichever
+resolver is configured. A family that has not answered by then contributes no
+addresses, as a failed lookup always did, so a slow IPv6 lookup does not throw
+away a host's IPv4 answer. A host left with no addresses cannot be proven
+local, so the policy refuses it without TLS.
+""".
 -spec resolve(string(), inet | inet6) -> [inet:ip_address()].
 resolve(Host, Family) ->
-    case inet:getaddrs(Host, Family) of
-        {ok, Addrs} -> Addrs;
-        {error, _} -> []
+    Timeout = application:get_env(
+        beamtalk_runtime, node_resolve_timeout_ms, ?HOST_RESOLVE_TIMEOUT_MS
+    ),
+    case beamtalk_bounded:run(fun() -> inet:getaddrs(Host, Family) end, Timeout) of
+        {ok, {ok, Addrs}} ->
+            Addrs;
+        {ok, {error, _}} ->
+            [];
+        timeout ->
+            ?LOG_WARNING("Node connect: host lookup did not finish in time", #{
+                host => Host, family => Family, timeout_ms => Timeout, domain => [beamtalk, runtime]
+            }),
+            [];
+        Failed ->
+            ?LOG_WARNING("Node connect: host lookup failed", #{
+                host => Host, family => Family, reason => Failed, domain => [beamtalk, runtime]
+            }),
+            []
     end.
 
 -spec is_local_addr(inet:ip_address()) -> boolean().

@@ -667,7 +667,7 @@ impl Parser {
     /// declaration follows. Returns `PendingDeclarationExpect::default()`
     /// (all `None`/empty) when the current token isn't `@expect`.
     ///
-    /// Both a `/// ...` doc comment and any leading `//`/`/* */`
+    /// Both a `/// ...` doc comment and any leading `//`
     /// comments written above a declaration-level `@expect` sit in the
     /// `@expect` token's own leading trivia, not the following
     /// declaration's — `collect_doc_comment()` and

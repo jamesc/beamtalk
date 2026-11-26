@@ -191,8 +191,11 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
         }
         Expression::Error { message, .. } => {
             // Emit a comment indicating the error rather than nothing.
-            // A `//` comment ends at the line break, so keep the message on one
-            // line and break after it (block comments do not exist, BT-5229).
+            // Only reachable for a programmatically built AST: `format_source`
+            // refuses any source with parse errors. A `//` comment ends at the
+            // line break, so keep the message on one line and break after it
+            // (block comments do not exist, BT-5229). The marker belongs in
+            // statement position; mid-expression it is not valid source.
             let one_line = message.as_str().replace(['\r', '\n'], " ");
             docvec!["// error: ", leaf::raw_text(&one_line), line()]
         }

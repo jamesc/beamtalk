@@ -239,6 +239,18 @@ fn doc_comment_document() {
     assert_eq!(unparse_comment(&c).to_pretty_string(), "/// doc text");
 }
 
+#[test]
+fn error_expression_prints_as_a_line_comment() {
+    // BT-5229: block comments no longer exist, so an error node is a `//` line.
+    let e = Expression::Error {
+        message: "bad */ input\nmore".into(),
+        span: span(),
+    };
+    let out = unparse_expression(&e).to_pretty_string();
+    assert!(out.starts_with("// error: bad */ input more"), "{out:?}");
+    assert!(!out.contains("/*"), "{out:?}");
+}
+
 // --- Expression statement with comments ---
 
 #[test]
