@@ -40,6 +40,7 @@ other while keeping both DRY.
     kill_child/2,
     write_stdin/3,
     close/1,
+    submit_write/6,
     await_write/2,
     write_queued/1,
     write_dropped/3,
@@ -191,6 +192,32 @@ kill_child(Port, ChildId) ->
 -spec write_stdin(port(), non_neg_integer(), binary()) -> true.
 write_stdin(Port, ChildId, Data) ->
     beamtalk_exec_port:write_stdin(Port, ChildId, Data).
+
+-doc """
+Send `Line` to the child's stdin and park `From` until the port answers
+(BT-5259).
+
+`port_command` raises `badarg` when the exec port has already died. That must
+not crash the owning gen_server: the caller gets a structured `port_closed`
+error (with the raise reason in its details) and parked writers are failed.
+The result is `{port_dead, Err, State}`: the owner then tears down its readers
+and marks the port closed, exactly as for an unexpected `exit_status`.
+""".
+-spec submit_write(atom(), port(), non_neg_integer(), binary(), term(), map()) ->
+    {noreply, map()} | {port_dead, #beamtalk_error{}, map()}.
+submit_write(Class, Port, ChildId, Line, From, State) ->
+    try write_stdin(Port, ChildId, Line) of
+        true -> {noreply, await_write(From, State)}
+    catch
+        error:Reason ->
+            Err = beamtalk_error:with_details(
+                beamtalk_error:new(port_closed, Class, 'writeLine:'),
+                #{reason => Reason}
+            ),
+            %% The caller finishes the teardown (readers, EOF, port_closed),
+            %% as its exit_status handler does.
+            {port_dead, Err, fail_pending_writes(Class, State)}
+    end.
 
 -doc """
 Park `From`, a `writeLine:` caller, until the exec port answers its write
