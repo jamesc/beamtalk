@@ -493,7 +493,7 @@ on fixture logging alone.
 | **J6** | Live development | REPL in a pty: spawn a `Counter`, send it messages, edit the file, `:sync`; the same actor keeps its state and runs the new code. MCP via the SDK: `evaluate` → `save_method` → `test` → `flush`, and the change is on disk. LSP in workspace mode: diagnostics, and go to definition into a dependency. | Hot reload, flush, LSP workspace mode. |
 | **J7** | LiveView IDE | Install the IDE archive → `bin/server <workspace-id>` → Playwright: page loads → eval round-trips → System Browser shows the class → edit a method → the workspace sees it. Linux variant: the candidate image (§ 10). | Bundle/IDE skew, packaging, the Attach topology. |
 | **J8** | Upgrade path | `install.sh --version <previous>`, verified against that release's published `.sha256` (so it works even when the previous release predates the § 3 payload) → project and release → install the candidate over it → the same project builds, tests and releases → `--upgrade-from` is clean → the old `~/.beamtalk` cache is harmless. | Cache and lockfile compatibility, stale install state. |
-| **J9** | Downstream canaries | For each registry package: its default branch and its latest tag → `beamtalk test --warnings-as-errors`. Runs isolated (§ 7). | BT-5283 / BT-5290. |
+| **J9** | Downstream canaries | For each registry package: its default branch and its latest tag. First, `beamtalk build` and `beamtalk test`, built as a consumer would build a dependency; errors and test failures are **blocking-class**. Then `beamtalk build --warnings-as-errors` and `beamtalk test --warnings-as-errors`, the satellites' own CI commands; a red that appears **only** here is a **new-warning** finding, filed and never blocking. A tag whose index entry declares a `min-beamtalk` newer than the candidate is skipped, with a note. Each tag's resolved commit is recorded in the run. Runs isolated (§ 7). | BT-5283 / BT-5290. |
 | **J10** | Workspaces | `workspace create` → `repl` attaches → a second shell `workspace attach`es and sees the same bindings → `transcript` streams → `stop` → `status` shows stopped → `kill -9` a workspace node → `list` and `status` report it stale, not running → `prune` removes it → no epmd registration is left. | Workspace lifecycle across CLI invocations, stale-state recovery. |
 
 **What J1 tests, and when the plain path runs.** J1 tests the installer, pinned
@@ -704,9 +704,37 @@ them, which breaks the documented install path. Exposure is the smaller cost.
 - any red in a **blocking** contract, journey, adversarial or editor test on a
   target and OTP it declares;
 - any p75 over threshold × multiplier on a gated perf target;
-- a J9 red on a package's latest **tag** (owner decision 1). The exact rules,
-  including how warnings are treated, are pending the owner's answer to review
-  finding 4.
+- a J9 **build error or test failure** on a package's latest **tag** (owner
+  decision 1, amended after review). A new warning, meaning a red only under
+  `--warnings-as-errors`, files a Bug and does not block. Consumers don't build
+  dependencies with `-Werror`, so a user never sees it.
+
+  A toolchain change that legitimately breaks a package has an escape that
+  needs no waiver. The package cuts a release whose index entry declares
+  `min-beamtalk = "<candidate version>"`. That release builds on the candidate,
+  and it becomes the tag J9 tests, so the gate passes. Stable users stay on the
+  older tag through resolution. The owner's waiver (step 5) remains the last
+  resort.
+
+**The `min-beamtalk` index key** (owner decision 1, amended). Registry index
+entries gain an optional per-version key:
+
+```toml
+[[versions]]
+version = "0.3.0"
+git = "https://github.com/jamesc/beamtalk-mint"
+tag = "v0.3.0"
+min-beamtalk = "0.7.0"   # this release needs toolchain ≥ 0.7.0
+```
+
+- It is safe to add: the index format already tolerates unknown keys, so older
+  `beamtalk` binaries ignore it (`docs/beamtalk-packages.md` § Index Format).
+- J9 skips, with a note, any tag that declares a minimum newer than the
+  candidate.
+- `beamtalk publish` writes the key when `beamtalk.toml` declares it.
+- Whether the resolver should *also* refuse such a version on an older
+  toolchain is a separate, follow-up decision. This ADR needs only the J9
+  behaviour.
 
 **What never blocks:**
 
@@ -1019,9 +1047,10 @@ Each is steelmanned above:
 - The `governance.yml` tripwire can be evaded by a determined refactor. The
   owner-gated paths are the actual guarantee.
 - Real-network tests depend on GitHub. `infra` classification limits the damage.
-- Because canaries block promotion, a released package that breaks under a
-  correct toolchain change holds up the release until its maintainer ships or
-  the owner waives. The details are pending review finding 4.
+- Because canaries block on build errors and test failures, a released package
+  that a correct, deliberate toolchain change breaks holds up the release until
+  its maintainer ships a `min-beamtalk`-tagged release or the owner waives. New
+  warnings never block.
 - **The Tauri desktop app is not tested by uat**, so "ships after uat passes"
   means after the toolchain, IDE and `.vsix` pass, not the desktop shell itself.
 - Official client libraries can't see a framing bug every real client
@@ -1044,7 +1073,7 @@ Phases follow the 80/20 point: Phases 0 to 2 cover all four 2026-11-26 incidents
 | Phase | Scope | Size | Why this order |
 |-------|-------|------|----------------|
 | **0. Skeleton, governance, artifacts** | **uat:** Playwright Test project; `env`, `toolchain`, `otp`, `proc` and `artifacts` libraries; the `resolve` job with download-once fan-out and `superseded`; Zod `schemas/`; leak checks; failure bundle; 4-target × OTP workflow; `CLAUDE.md` rules; CODEOWNERS, `targets.toml`, branch protection, Claude App identity, `governance.yml` tripwire; **J1**, **J2**, and Layer 1 for the 7 already-covered commands; delete the Rust harness; accept both event types. **beamtalk:** pin runner labels; `edge.yml` publishes `macos-arm64`; `install.sh --edge` on macOS; `edge.yml` and `nightly.yml` dispatch with the § 3 payload. | M (uat) + S (beamtalk) | Everything builds on it. |
-| **1. Canaries, releases, triage** | **J9**, isolated (`permissions: {}`), in edge-hourly; **J4** on linux and macOS, including the TLS step (the permanent BT-5264 test); `triage.yml` with fingerprints, classes and repo-scoped secrets; retire `cross-repo.yml`. | M | Catches BT-5283 and BT-5264 within the hour. |
+| **1. Canaries, releases, triage** | **J9**, isolated (`permissions: {}`), in edge-hourly, with consumer-build (blocking-class) and `--warnings-as-errors` (file-only) passes and `min-beamtalk` skipping. In beamtalk: the `min-beamtalk` index key in `docs/beamtalk-packages.md`, and `beamtalk publish` writing it; **J4** on linux and macOS, including the TLS step (the permanent BT-5264 test); `triage.yml` with fingerprints, classes and repo-scoped secrets; retire `cross-repo.yml`. | M | Catches BT-5283 and BT-5264 within the hour. |
 | **2. Thin promotion** | **beamtalk:** split build-and-attach from publish in `release.yml`, `release-vscode.yml`, `liveview-release.yml`, `liveview-docker.yml` and `desktop-release.yml`; tags publish a pre-release with every asset attached and the `rc-<sha>` image; `promote.yml` in the `release-promotion` Environment, with re-hashing, run verification and owner review for the first three; the post-promotion J1 smoke. **uat:** the `uat-gate` dispatch back. Blocking set: contracts (7), J1, J2, J4, J9 on tags. | M | The gate becomes real. Everything after this lands incubating. |
 | **3. Remaining contracts, registry, workspaces** | Layer 1 for the remaining 23 leaf commands, plus the missing-JSON feature Bugs; **J3** with offline; **J10**; J1's install edge cases and J2's escript step. All incubating. | M | The newcomer's first-service path. |
 | **4. Adversarial layer** | The six public categories in uat; `beamtalk-uat-security` (private) for distribution security and leakage, with its triage. Incubating; findings filed. | M | Needs Phase 1's release and node handles. |
@@ -1063,6 +1092,7 @@ Phases follow the 80/20 point: Phases 0 to 2 cover all four 2026-11-26 incidents
   - `release-vscode.yml`, `liveview-release.yml`, `liveview-docker.yml`,
     `desktop-release.yml` (build-and-attach / publish split);
   - a new `promote.yml` and the `release-promotion` Environment;
+  - `docs/beamtalk-packages.md` § Index Format and `beamtalk publish` (the optional `min-beamtalk` key);
   - `scripts/install.sh` (`--edge` on macOS) and `scripts/ci/package-release.sh`
     (the `macos-arm64` edge asset);
   - `cross-repo.yml` (removed);
@@ -1091,8 +1121,15 @@ There are no user-facing changes. For maintainers:
 These were raised as open questions in the first draft and settled by the owner.
 They are folded into the sections above:
 
-1. **Canary blocking:** yes. A J9 red on a package's latest tag blocks
-   promotion (§ 10). How warnings are treated is pending: see review finding 4.
+1. **Canary blocking:** yes, *amended after review* (review findings 4 and 17).
+   - A J9 canary blocks promotion only on **build errors and test failures** in
+     a package's latest tag.
+   - **New warnings** are filed as Bugs and do not block.
+   - Registry index entries gain an optional **`min-beamtalk`** key, so a
+     package release can opt out of toolchains it doesn't support. J9 skips
+     such a tag, with a note.
+
+   See § 6 J9 and § 10.
 2. **Pre-release, then promote:** yes. The VS Code, IDE, Docker and desktop
    *publishing* runs from `promote`, so editors and the IDE ship only after uat
    passes (§ 10, Phase 2).
