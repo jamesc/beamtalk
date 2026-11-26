@@ -380,23 +380,10 @@ handle_writeLine(Data, From, State) ->
             try iolist_to_binary(Data) of
                 Bin ->
                     Line = <<Bin/binary, $\n>>,
-                    try
-                        beamtalk_subprocess_port:write_stdin(Port, ChildId, Line),
-                        %% BT-5248: the reply is the port's answer.
-                        {noreply, beamtalk_subprocess_port:await_write(From, State)}
-                    catch
-                        _:WriteReason ->
-                            Err = beamtalk_error:with_details(
-                                beamtalk_error:new(
-                                    port_closed, 'ReactiveSubprocess', 'writeLine:'
-                                ),
-                                #{reason => WriteReason}
-                            ),
-                            %% Parked callers would never be answered once port_closed is set.
-                            {reply, {error, Err}, (fail_pending_writes(State))#{
-                                port_closed => true
-                            }}
-                    end
+                    %% BT-5248/BT-5259: reply is the port's answer; a dead port errors.
+                    beamtalk_subprocess_port:submit_write(
+                        'ReactiveSubprocess', Port, ChildId, Line, From, State
+                    )
             catch
                 error:badarg ->
                     Err = beamtalk_error:new(type_error, 'ReactiveSubprocess', 'writeLine:'),

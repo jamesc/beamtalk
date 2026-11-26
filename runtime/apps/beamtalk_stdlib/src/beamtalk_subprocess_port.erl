@@ -40,6 +40,7 @@ other while keeping both DRY.
     kill_child/2,
     write_stdin/3,
     close/1,
+    submit_write/6,
     await_write/2,
     write_queued/1,
     write_dropped/3,
@@ -191,6 +192,30 @@ kill_child(Port, ChildId) ->
 -spec write_stdin(port(), non_neg_integer(), binary()) -> true.
 write_stdin(Port, ChildId, Data) ->
     beamtalk_exec_port:write_stdin(Port, ChildId, Data).
+
+-doc """
+Send `Line` to the child's stdin and park `From` until the port answers
+(BT-5259).
+
+`port_command` raises `badarg` when the exec port has already died. That must
+not crash the owning gen_server: the caller gets a structured `port_closed`
+error (with the raise reason in its details), parked callers are failed, and
+the state is marked `port_closed`.
+""".
+-spec submit_write(atom(), port(), non_neg_integer(), binary(), term(), map()) ->
+    {noreply, map()} | {reply, {error, #beamtalk_error{}}, map()}.
+submit_write(Class, Port, ChildId, Line, From, State) ->
+    try
+        write_stdin(Port, ChildId, Line),
+        {noreply, await_write(From, State)}
+    catch
+        _:Reason ->
+            Err = beamtalk_error:with_details(
+                beamtalk_error:new(port_closed, Class, 'writeLine:'),
+                #{reason => Reason}
+            ),
+            {reply, {error, Err}, (fail_pending_writes(Class, State))#{port_closed => true}}
+    end.
 
 -doc """
 Park `From`, a `writeLine:` caller, until the exec port answers its write
