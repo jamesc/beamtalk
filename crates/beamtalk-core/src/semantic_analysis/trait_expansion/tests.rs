@@ -1138,7 +1138,7 @@ fn analyse(source: &str) -> Vec<Diagnostic> {
     let (mut diagnostics, origins) = expand_module(&mut module, &HashMap::new());
 
     let (hierarchy_result, hierarchy_diags) = ClassHierarchy::build(&module);
-    let mut hierarchy = hierarchy_result.expect("ClassHierarchy::build is infallible");
+    let mut hierarchy = hierarchy_result;
     diagnostics.extend(hierarchy_diags);
     apply_origins(&mut hierarchy, &origins);
 
@@ -2033,7 +2033,7 @@ fn check_after_hierarchy_validates_against_the_protocol_the_qualifier_names() {
     );
     let (diagnostics, _origins) = expand_module(&mut module, &external);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let registry = ProtocolRegistry::default();
 
     let diagnostics = check_after_hierarchy(&module, &hierarchy, &registry, &external, None);

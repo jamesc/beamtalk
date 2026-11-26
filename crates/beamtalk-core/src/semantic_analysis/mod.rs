@@ -32,7 +32,6 @@ pub mod class_module_registry;
 pub mod collision_checker;
 pub mod consulted;
 pub mod definite_assignment;
-pub mod error;
 pub mod facts;
 pub mod initialize_assigns;
 pub mod lowering;
@@ -102,7 +101,6 @@ pub use definite_assignment::{
     admits_nil_type_annotation, is_nilable_type_annotation, is_nilable_type_name,
     requires_definite_assignment, requires_definite_assignment_for_declared_type,
 };
-pub use error::{SemanticError, SemanticErrorKind};
 pub use facts::{DispatchKind, SemanticFacts, compute_semantic_facts};
 pub use initialize_assigns::{analyze_initialize_assigns, has_dynamic_field_writer};
 pub use lowering::{
@@ -717,10 +715,7 @@ pub fn local_threading_diagnostics(module: &Module, hierarchy: &ClassHierarchy) 
 ///
 /// # Panics
 ///
-/// Never panics in practice: `ClassHierarchy::build_with_options` is
-/// documented infallible and its `Result` is unwrapped internally with an
-/// `.expect()` that exists only to surface a contract violation loudly
-/// rather than silently, should that documented invariant ever break.
+/// Never panics in practice.
 ///
 /// # Examples
 ///
@@ -1069,10 +1064,8 @@ fn build_class_hierarchy(
     current_package: Option<&str>,
 ) {
     // Phase 0: Build Class Hierarchy (ADR 0006 Phase 1a)
-    let (hierarchy_result, hierarchy_diags) =
-        ClassHierarchy::build_with_options(module, stdlib_mode);
-    // build_with_options is infallible; propagate any diagnostics it produced
-    result.class_hierarchy = hierarchy_result.expect("ClassHierarchy::build is infallible");
+    let (hierarchy, hierarchy_diags) = ClassHierarchy::build_with_options(module, stdlib_mode);
+    result.class_hierarchy = hierarchy;
     result.diagnostics.extend(hierarchy_diags);
     // `MethodInfo::origin` can only be stamped once `ClassHierarchy` exists
     // (ADR 0127 §3 — see `trait_expansion`'s module doc for why the pass

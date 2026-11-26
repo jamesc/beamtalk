@@ -189,9 +189,7 @@ fn test_synthesized_keyword_agrees_with_anchor() {
         let combined = files.concat();
         let module = beamtalk_core::test_helpers::test_support::parse_bt(&combined);
         let hierarchy =
-            beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
-                .0
-                .expect("fixture hierarchy should build");
+            beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module).0;
         for meta in &metas {
             let generated = meta.is_value_subclass.then(|| meta.auto_kw.clone());
             let anchor = hierarchy

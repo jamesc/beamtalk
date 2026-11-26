@@ -49,7 +49,7 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (mut module, _) = parse(tokens);
         let (hierarchy_result, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy_result.unwrap();
+        let hierarchy = hierarchy_result;
         apply_supervisor_kind_writeback(&mut module, &hierarchy);
         assert_eq!(module.classes[0].supervisor_kind, None);
     }
@@ -60,7 +60,7 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (mut module, _) = parse(tokens);
         let (hierarchy_result, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy_result.unwrap();
+        let hierarchy = hierarchy_result;
         apply_supervisor_kind_writeback(&mut module, &hierarchy);
         assert_eq!(
             module.classes[0].supervisor_kind,
@@ -74,7 +74,7 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (mut module, _) = parse(tokens);
         let (hierarchy_result, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy_result.unwrap();
+        let hierarchy = hierarchy_result;
         apply_supervisor_kind_writeback(&mut module, &hierarchy);
         assert_eq!(
             module.classes[0].supervisor_kind,
@@ -89,7 +89,7 @@ mod tests {
         let tokens = lex_with_eof(source);
         let (mut module, _) = parse(tokens);
         let (hierarchy_result, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy_result.unwrap();
+        let hierarchy = hierarchy_result;
         apply_supervisor_kind_writeback(&mut module, &hierarchy);
         apply_supervisor_kind_writeback(&mut module, &hierarchy);
         assert_eq!(
@@ -108,7 +108,7 @@ mod tests {
         // Simulate stale state from a previous pass.
         module.classes[0].supervisor_kind = Some(SupervisorKind::Static);
         let (hierarchy_result, _) = ClassHierarchy::build_with_options(&module, true);
-        let hierarchy = hierarchy_result.unwrap();
+        let hierarchy = hierarchy_result;
         apply_supervisor_kind_writeback(&mut module, &hierarchy);
         assert_eq!(module.classes[0].supervisor_kind, None);
     }

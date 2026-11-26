@@ -907,7 +907,7 @@ mod tests {
     fn hierarchy_for(src: &str) -> (crate::ast::Module, ClassHierarchy) {
         let module = crate::test_helpers::test_support::parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
-        (module, hierarchy.unwrap())
+        (module, hierarchy)
     }
 
     /// A known leaf stdlib class (`String`) → no diagnostics.

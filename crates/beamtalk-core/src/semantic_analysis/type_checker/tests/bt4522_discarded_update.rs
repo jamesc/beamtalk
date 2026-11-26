@@ -321,7 +321,7 @@ TestCase subclass: FooTest
     self assert: self n equals: 3
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert_eq!(discarded(&diags).len(), 1, "got: {diags:#?}");
 }
@@ -360,7 +360,7 @@ Object subclass: Probe
     3
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert_eq!(discarded(&diags).len(), 1, "got: {diags:#?}");
 }
@@ -385,7 +385,7 @@ Object subclass: Probe
     3
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     assert!(discarded(&diags).is_empty(), "got: {diags:#?}");
 }

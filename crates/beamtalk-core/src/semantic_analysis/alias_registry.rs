@@ -1349,7 +1349,7 @@ mod tests {
             ..empty_module()
         };
         let (hierarchy, hierarchy_diags) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         assert!(hierarchy_diags.is_empty());
         let protocol_registry = ProtocolRegistry::new();
         let mut registry = AliasRegistry::new();
@@ -1458,7 +1458,7 @@ mod tests {
             ..empty_module()
         };
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let protocol_registry = ProtocolRegistry::new();
         let mut registry = AliasRegistry::new();
         let diags = registry.register_module(&module, &hierarchy, &protocol_registry);
@@ -1949,7 +1949,7 @@ mod tests {
             ..empty_module()
         };
         let (hierarchy, _) = ClassHierarchy::build(&class_module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let protocol_registry = ProtocolRegistry::new();
         let mut registry = AliasRegistry::new();
         registry.register_test_alias(AliasInfo {

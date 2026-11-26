@@ -758,7 +758,7 @@ fn false_or_param_resolves_to_union() {
         ..empty_module()
     };
 
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
 
     // No DNU for isNil — both Integer and False understand it (via Object)
@@ -803,7 +803,7 @@ fn bt3076_union_member_class_of_unregistered_class_still_contributes() {
         ..empty_module()
     };
 
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
 
     let module_expr = Module::new(
         vec![ExpressionStatement::bare(msg_send(

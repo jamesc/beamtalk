@@ -105,7 +105,7 @@ typed Object subclass: HTTPServer\n\
 typed Object subclass: App\n\
   m: server :: HTTPServer -> HTTPServer => server start: 8080 handler: [:req | req respond]\n";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
 
     let ty = block_type_in_method(&module, checker.type_map(), "App", "m:");
@@ -125,7 +125,7 @@ typed Object subclass: HTTPServer\n\
 typed Object subclass: App\n\
   m: server :: HTTPServer -> HTTPServer => server start: 8080 handler: [:req | req respond]\n";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
 
     let ty = block_type_in_method(&module, checker.type_map(), "App", "m:");

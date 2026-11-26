@@ -314,7 +314,7 @@ fn test_is_actor_class_returns_true_for_supervisor_subclass() {
     let module = make_static_supervisor_module();
     let (hierarchy, _) =
         beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module);
-    let hierarchy = hierarchy.unwrap();
+    let hierarchy = hierarchy;
     assert!(
         CoreErlangGenerator::is_actor_class(&module, &hierarchy),
         "Supervisor subclass must be routed through generate_actor_module. Got false."
@@ -326,7 +326,7 @@ fn test_is_actor_class_returns_true_for_dynamic_supervisor_subclass() {
     let module = make_dynamic_supervisor_module();
     let (hierarchy, _) =
         beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module);
-    let hierarchy = hierarchy.unwrap();
+    let hierarchy = hierarchy;
     assert!(
         CoreErlangGenerator::is_actor_class(&module, &hierarchy),
         "DynamicSupervisor subclass must be routed through generate_actor_module. Got false."

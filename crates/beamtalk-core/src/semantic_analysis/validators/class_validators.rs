@@ -1298,7 +1298,7 @@ mod tests {
         let src = "Value subclass: Point\n  state: x = 0\n  setX: v => self.x := v";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_slot_assignment(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1325,7 +1325,7 @@ mod tests {
         let src = "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_slot_assignment(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1342,7 +1342,7 @@ mod tests {
         let src = "Actor subclass: BankAccount\n  state: value = 0\n  withValue: v => v\n  setDirectly: v => self.value := v";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_slot_assignment(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1369,7 +1369,7 @@ mod tests {
             "Actor subclass: BankAccount\n  state: value = 0\n  withValue: v => self.value := v";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_slot_assignment(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1384,7 +1384,7 @@ mod tests {
         let src = "Object subclass: Plain\n  state: x = 0\n  setX: v => self.x := v";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_slot_assignment(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1400,7 +1400,7 @@ mod tests {
         let src = "Value subclass: Point\n  state: x = 0\n  setX: v => [self.x := v] value";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_slot_assignment(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1424,7 +1424,7 @@ mod tests {
             "Expected 1 standalone method definition"
         );
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_slot_assignment(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1443,7 +1443,7 @@ mod tests {
         let src = "Value subclass: Point\n  state: x = 0\n  doStuff => Point foo!";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_cast_on_value_type(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1466,7 +1466,7 @@ mod tests {
         let src = "Actor subclass: Worker\n  doStuff => Worker foo!";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_cast_on_value_type(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1480,7 +1480,7 @@ mod tests {
         let src = "Value subclass: MyVal\n  doSomething -> Nil => nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1502,7 +1502,7 @@ mod tests {
         let src = "Value subclass: MyVal\n  class create -> Nil => nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1517,7 +1517,7 @@ mod tests {
         let src = "Object subclass: MyObj\n  doSomething -> Nil => nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1532,7 +1532,7 @@ mod tests {
         let src = "Actor subclass: MyActor\n  doSomething -> Nil => nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1547,7 +1547,7 @@ mod tests {
         let src = "Value subclass: MyVal\n  each: block :: Block -> Nil => nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1562,7 +1562,7 @@ mod tests {
         let src = "Value subclass: MyVal\n  sideEffect -> Nil => nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1579,7 +1579,7 @@ mod tests {
         let src = "Value subclass: MyVal\n  doSomething -> Nil => self subclassResponsibility";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1594,7 +1594,7 @@ mod tests {
         let src = "Value subclass: MyVal\n  doSomething -> Nil => ^ self subclassResponsibility";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1609,7 +1609,7 @@ mod tests {
         let src = "Value subclass: MyVal\n  doSomething => nil\nMyVal >> doVoid -> Nil => nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_nil_return(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1631,7 +1631,7 @@ mod tests {
         let src = "Value subclass: Point\n  state: x = 0\n  state: y = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1649,7 +1649,7 @@ mod tests {
         let src = "Actor subclass: Counter\n  field: count = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1667,7 +1667,7 @@ mod tests {
         let src = "Object subclass: BadObj\n  state: x = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1687,7 +1687,7 @@ mod tests {
         let src = "Object subclass: BadObj\n  late state: x :: Integer";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1704,7 +1704,7 @@ mod tests {
         let src = "Object subclass: BadObj\n  field: x = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1721,7 +1721,7 @@ mod tests {
         let src = "Value subclass: Point\n  field: x = 0\n  field: y = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1735,7 +1735,7 @@ mod tests {
         let src = "Actor subclass: Counter\n  state: count = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1751,7 +1751,7 @@ mod tests {
         let src = "Value subclass: Shape\n  field: color = \"red\"\n\nShape subclass: Circle\n  state: radius = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1770,7 +1770,7 @@ mod tests {
         let src = "Object subclass: Helper\n  class doStuff => 42";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1785,7 +1785,7 @@ mod tests {
         let src = "Value subclass: TestCase\n  field: name = \"\"\n\nTestCase subclass: MyTest\n  state: counter = nil";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_data_keyword_class_kind(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1806,7 +1806,7 @@ mod tests {
         let src = "Value subclass: Weird\n  field: x = 0\n  field: X = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_slot_case_collision(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1831,7 +1831,7 @@ mod tests {
         let src = "Value subclass: Dup\n  field: x = 0\n  field: x = 1";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_slot_case_collision(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -1852,7 +1852,7 @@ mod tests {
         let src = "Value subclass: Point\n  field: x = 0\n  field: y = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_slot_case_collision(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1870,7 +1870,7 @@ mod tests {
         let src = "Value subclass: Weird\n  field: x = 0\n  field: X = 0\n  withX: v => v";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_slot_case_collision(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -1887,7 +1887,7 @@ mod tests {
         let src = "Actor subclass: Weird\n  state: x = 0\n  state: X = 0";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+        let hierarchy = hierarchy;
         let mut diagnostics = Vec::new();
         check_value_slot_case_collision(&module, &hierarchy, &mut diagnostics);
         assert!(

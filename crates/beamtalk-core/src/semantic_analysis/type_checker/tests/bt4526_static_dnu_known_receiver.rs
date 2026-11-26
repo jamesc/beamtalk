@@ -32,7 +32,7 @@ typed Object subclass: Stream
 
 fn diagnostics(source: &str, open_surface: bool) -> Vec<Diagnostic> {
     let module = parse_source(source);
-    let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut hierarchy = ClassHierarchy::build(&module).0;
     if open_surface {
         hierarchy.mark_module_classes_surface_incomplete(&module);
     }

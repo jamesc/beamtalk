@@ -339,7 +339,7 @@ fn bt_2039_if_true_if_false_known_branch_suppresses_ffi_warning() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let checker = check(&module, &hierarchy);
 
     // The inner `(Erlang foo) bar` call still produces its own "Dynamic in
@@ -587,7 +587,7 @@ typed Object subclass: TypeTest5
     0
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
 
     let checker = check(&module, &hierarchy);
 
@@ -630,7 +630,7 @@ typed Object subclass: Repro
     flag
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
 
     let checker = check(&module, &hierarchy);
 
@@ -666,7 +666,7 @@ typed Object subclass: Repro
     self.flag ifTrue: [1]
 ";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
 
     let checker = check(&module, &hierarchy);
 

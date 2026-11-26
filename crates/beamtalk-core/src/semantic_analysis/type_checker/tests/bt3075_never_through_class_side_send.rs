@@ -38,7 +38,7 @@ Object subclass: Widget\n\
       selector: #boom\n\
       hint: \"no\"\n";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let mismatches = never_mismatch_diags(&diags);
     assert!(
@@ -58,7 +58,7 @@ Object subclass: Boom\n\
 Object subclass: User\n\
   class fail -> Never => Boom raise: \"nope\"\n";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let mismatches = never_mismatch_diags(&diags);
     assert!(
@@ -76,7 +76,7 @@ fn never_class_method_with_value_body_still_warns() {
 Object subclass: Liar\n\
   class nope -> Never => 42\n";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let mismatches = never_mismatch_diags(&diags);
     assert_eq!(
@@ -233,7 +233,7 @@ typed Object subclass: Repro\n\
     (v isKindOf: Boolean) ifFalse: [ 1 ]\n\
     2\n";
     let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
     let diags = run_with_expect(&module, &hierarchy);
     let impossible: Vec<_> = diags
         .iter()

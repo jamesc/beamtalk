@@ -1284,9 +1284,7 @@ mod tests {
         internal_class: &str,
         internal_pkg: &str,
     ) -> ClassHierarchy {
-        let (Ok(mut h), _) = ClassHierarchy::build(module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(module);
         // Add an internal class from another package
         let info = ClassInfo {
             is_internal: true,
@@ -1328,9 +1326,7 @@ mod tests {
         let module = parse_bt(
             "internal Object subclass: ParserState\n  reset => nil\n\nParserState subclass: ExtendedState\n  parse => 42",
         );
-        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(&module);
         h.stamp_package("json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1357,9 +1353,7 @@ mod tests {
     #[test]
     fn e0401_public_class_cross_package_no_error() {
         let module = parse_bt("Object subclass: MyParser\n  parse => 42");
-        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(&module);
         // Add a public class from another package
         let info = ClassInfo {
             package: Some(EcoString::from("json")),
@@ -1527,9 +1521,7 @@ mod tests {
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              Object subclass: Parser\n  tokenize: input :: String -> TokenBuffer => nil",
         );
-        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(&module);
         h.stamp_package("json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1557,9 +1549,7 @@ mod tests {
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              Object subclass: Parser\n  process: buf :: TokenBuffer => nil",
         );
-        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(&module);
         h.stamp_package("json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1587,9 +1577,7 @@ mod tests {
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              Object subclass: Parser\n  state: buf :: TokenBuffer = nil",
         );
-        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(&module);
         h.stamp_package("json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1618,9 +1606,7 @@ mod tests {
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              internal Object subclass: InternalParser\n  tokenize: input :: String -> TokenBuffer => nil",
         );
-        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(&module);
         h.stamp_package("json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1652,9 +1638,7 @@ mod tests {
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              Object subclass: Parser\n  internal tokenize: input :: String -> TokenBuffer => nil",
         );
-        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(&module);
         h.stamp_package("json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1685,9 +1669,7 @@ mod tests {
             "internal Object subclass: TokenBuffer\n  data => nil\n\n\
              Object subclass: Parser\n  tokenize: input :: String -> TokenBuffer => nil",
         );
-        let (Ok(mut h), _) = ClassHierarchy::build(&module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(&module);
         h.stamp_package("json");
         let mut diags = Vec::new();
         check_class_visibility(
@@ -1712,9 +1694,7 @@ mod tests {
     /// counterpart of `build_hierarchy_with_internal_class` for tests that
     /// exercise a module-local `internal type` alongside a public class.
     fn build_hierarchy_and_aliases(module: &Module, pkg: &str) -> (ClassHierarchy, AliasRegistry) {
-        let (Ok(mut h), _) = ClassHierarchy::build(module) else {
-            panic!("build should succeed");
-        };
+        let (mut h, _) = ClassHierarchy::build(module);
         h.stamp_package(pkg);
         let protocol_registry = ProtocolRegistry::new();
         let mut alias_registry = AliasRegistry::new();
@@ -2176,7 +2156,7 @@ mod tests {
             vec![make_method("asString", true)], // internal!
         )]);
         let (h, _) = ClassHierarchy::build(&module);
-        let hierarchy = h.unwrap();
+        let hierarchy = h;
 
         // Create a protocol registry with a Printable protocol requiring `asString`
         let mut registry = ProtocolRegistry::new();
@@ -2241,7 +2221,7 @@ mod tests {
             vec![make_method("asString", false)], // public
         )]);
         let (h, _) = ClassHierarchy::build(&module);
-        let hierarchy = h.unwrap();
+        let hierarchy = h;
 
         let mut registry = ProtocolRegistry::new();
         let proto_module = {
