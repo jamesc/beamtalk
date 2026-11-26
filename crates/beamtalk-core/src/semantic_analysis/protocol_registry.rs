@@ -722,8 +722,19 @@ impl ProtocolRegistry {
             if own.contains(&parent) || self.protocols.contains_key(&parent) {
                 continue;
             }
-            let Some(def) = trait_expansion::resolve_stdlib_protocol(&parent, current_package)
-            else {
+            // Seeded-only protocols come from the full baked table, so
+            // requirements-only ones (`Printable`) are seen too (BT-5338);
+            // `uses:`-parent seeding keeps the provision-bearing resolver.
+            let def = if seeded_only {
+                if stdlib_protocols::is_stdlib_package(current_package) {
+                    None
+                } else {
+                    stdlib_protocols::stdlib_protocol_definition(&parent)
+                }
+            } else {
+                trait_expansion::resolve_stdlib_protocol(&parent, current_package)
+            };
+            let Some(def) = def else {
                 continue;
             };
             let info = ProtocolInfo::from_definition(def);

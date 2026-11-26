@@ -13,12 +13,11 @@
 use super::generators::{
     generate_app_file, generate_app_src_file, generate_builtins_rs, generate_erlang_builtins_hrl,
     generate_sentinel_tags_hrl, generate_supervisor_config_hrl,
-    provision_bearing_protocol_file_names,
 };
 use super::metadata::{
     AliasSource, ClassMeta, alias_source_texts_sorted_by_name, collect_stdlib_alias_sources,
     collect_stdlib_protocol_infos, extract_class_metadata, is_protocol_only_file,
-    mark_value_subclasses,
+    mark_value_subclasses, protocol_declaring_file_names,
 };
 use crate::beam_compiler::{
     BeamCompiler, ClassHierarchyContext, CompileContext, compile_source_with_bindings,
@@ -155,7 +154,7 @@ pub fn build_stdlib(quiet: bool, warnings: crate::commands::WarningFlags) -> Res
     // immediately above — see `collect_stdlib_protocol_infos`'s doc for why.
     let (protocol_infos, protocol_defs, protocol_sources) =
         collect_stdlib_protocol_infos(&source_files);
-    let protocol_file_names = provision_bearing_protocol_file_names(&protocol_sources);
+    let protocol_file_names = protocol_declaring_file_names(&source_files);
     let compile_ctx = CompileContext {
         native_type_registry: native_type_registry.map(std::sync::Arc::new),
         hierarchy: ClassHierarchyContext {

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! The stdlib's provision-bearing protocols (`Comparable`, `Enumerable`, …),
+//! The stdlib's protocols (`Comparable`, `Enumerable`, `Printable`, …),
 //! available to every user compilation (ADR 0127 §10a; BT-3915).
 //!
 //! **DDD Context:** Semantic Analysis
@@ -12,11 +12,16 @@
 //! exactly like the stdlib's classes (`ClassHierarchy::with_builtins`): `beamtalk
 //! build-stdlib` generates `generated_stdlib_protocol_files()` (in
 //! `class_hierarchy/generated_builtins.rs`), which `include_str!`s each stdlib
-//! file declaring a provision-bearing protocol — the stdlib source itself, not
+//! file declaring a protocol — the stdlib source itself, not
 //! a copy — and this module parses those files once. (`include_str!` ties
 //! `beamtalk-core` to this repository's layout; the crate is not published.)
 //!
-//! They are the *last* tier of `uses:` resolution: the current module's own
+//! Only the provision-bearing ones take part in `uses:` resolution; the rest
+//! (`Printable`, `JsonRepresentable`) are seeded into the checker's
+//! `ProtocolRegistry` so bounds and annotations naming them are checked
+//! (BT-5338).
+//!
+//! The provision-bearing ones are the *last* tier of `uses:` resolution: the current module's own
 //! protocols win, then every protocol carried in from elsewhere
 //! (`external_protocols` — another file of the package, a dependency), and
 //! only then the stdlib's. So a package that declares its own `Comparable`
@@ -55,6 +60,11 @@ struct StdlibProtocols {
     map: HashMap<EcoString, ProtocolDefinition>,
     /// Each protocol's source file, by bare name.
     sources: ProtocolSourceMap,
+    /// Every protocol the baked files declare — provision-bearing or not — by
+    /// bare name. Only the type checker's registry seeding reads this
+    /// (BT-5338); `uses:` resolution and shadowing see `map` / `sources`,
+    /// which stay provision-bearing only.
+    all: HashMap<EcoString, ProtocolDefinition>,
 }
 
 fn stdlib_protocols() -> &'static StdlibProtocols {
@@ -70,16 +80,18 @@ fn stdlib_protocols() -> &'static StdlibProtocols {
 /// stamped as declared in [`STDLIB_PACKAGE`].
 fn parse_protocol_files(files: Vec<(&'static str, &'static str)>) -> StdlibProtocols {
     let mut defs = Vec::new();
+    let mut all = HashMap::new();
     let mut sources = ProtocolSourceMap::new();
     for (path, text) in files {
         let (module, _diagnostics) =
             crate::source_analysis::parse(crate::source_analysis::lex_with_eof(text));
-        for mut protocol in module
-            .protocols
-            .into_iter()
-            .filter(crate::semantic_analysis::trait_expansion::is_provision_bearing)
-        {
+        for mut protocol in module.protocols {
             protocol.package = Some(STDLIB_PACKAGE.into());
+            all.entry(protocol.name.name.clone())
+                .or_insert_with(|| protocol.clone());
+            if !crate::semantic_analysis::trait_expansion::is_provision_bearing(&protocol) {
+                continue;
+            }
             sources.insert(
                 protocol.name.name.clone(),
                 ProtocolSource {
@@ -94,6 +106,7 @@ fn parse_protocol_files(files: Vec<(&'static str, &'static str)>) -> StdlibProto
     StdlibProtocols {
         map: first_wins_protocol_map(defs),
         sources,
+        all,
     }
 }
 
@@ -111,14 +124,21 @@ pub fn is_stdlib_protocol_name(name: &str) -> bool {
     stdlib_protocols().sources.contains_key(name)
 }
 
-/// Names of every baked stdlib protocol (bare), in a stable order.
+/// Names of every baked stdlib protocol (bare, provision-bearing or not), in a
+/// stable order.
 pub(crate) fn stdlib_protocol_names() -> &'static [EcoString] {
     static NAMES: OnceLock<Vec<EcoString>> = OnceLock::new();
     NAMES.get_or_init(|| {
-        let mut names: Vec<EcoString> = stdlib_protocols().sources.keys().cloned().collect();
+        let mut names: Vec<EcoString> = stdlib_protocols().all.keys().cloned().collect();
         names.sort();
         names
     })
+}
+
+/// The definition of baked stdlib protocol `name` (bare), provision-bearing or
+/// not, for seeding the type checker's registry (BT-5338).
+pub(crate) fn stdlib_protocol_definition(name: &str) -> Option<&'static ProtocolDefinition> {
+    stdlib_protocols().all.get(name)
 }
 
 /// The source file of stdlib protocol `name`, if it is one.
@@ -213,11 +233,7 @@ mod tests {
             let text = std::fs::read_to_string(&path).expect("read stdlib source");
             let (module, _) =
                 crate::source_analysis::parse(crate::source_analysis::lex_with_eof(&text));
-            if module
-                .protocols
-                .iter()
-                .any(crate::semantic_analysis::trait_expansion::is_provision_bearing)
-            {
+            if !module.protocols.is_empty() {
                 let name = path
                     .file_name()
                     .and_then(|n| n.to_str())

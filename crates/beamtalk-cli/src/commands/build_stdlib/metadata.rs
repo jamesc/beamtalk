@@ -558,6 +558,31 @@ pub(super) fn collect_stdlib_protocol_infos(
     (all, all_defs, all_sources)
 }
 
+/// The file name (no directory) of every stdlib source file that declares a
+/// protocol, provision-bearing or not, sorted and deduplicated — the files
+/// `generate_protocol_files_section` embeds (BT-5338). Requirements-only
+/// protocols (`Printable`, `JsonRepresentable`) are included so the type
+/// checker sees them in user packages. Unreadable files contribute nothing,
+/// as in [`collect_stdlib_protocol_infos`].
+pub(super) fn protocol_declaring_file_names(source_files: &[Utf8PathBuf]) -> Vec<String> {
+    let mut names: Vec<String> = source_files
+        .iter()
+        .filter(|file| {
+            let Ok(source) = fs::read_to_string(file) else {
+                return false;
+            };
+            let (module, _) = beamtalk_core::source_analysis::parse(
+                beamtalk_core::source_analysis::lex_with_eof(&source),
+            );
+            !module.protocols.is_empty()
+        })
+        .filter_map(|file| file.file_name().map(str::to_string))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
 /// Extracts `alias_sources`' declaration texts sorted by alias *name* (not
 /// raw declaration text — `internal type Foo` would otherwise sort under
 /// "i", not alongside plain `type` entries), for
