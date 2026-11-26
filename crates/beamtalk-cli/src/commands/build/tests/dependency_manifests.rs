@@ -114,9 +114,9 @@ fn unknown_key_warning_is_emitted_once_per_dependency_per_build() {
         build(app.as_str(), &default_options(), false).unwrap();
     });
     let log = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+    let count = log.matches("Ignoring unknown key `once_only_key`").count();
     assert_eq!(
-        log.matches("Ignoring unknown key `once_only_key`").count(),
-        1,
-        "warned more than once:\n{log}"
+        count, 1,
+        "expected exactly one unknown-key warning across both builds, got {count}:\n{log}"
     );
 }
