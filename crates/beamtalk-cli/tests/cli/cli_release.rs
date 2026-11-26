@@ -1643,51 +1643,23 @@ fn release_launcher_tls_distribution_opt_in_test() {
     // A loopback client (no opt-in) cannot reach the TLS node, and does not
     // hold it up: the next TLS client gets one try, no retry, so a stall
     // longer than its handshake timeout (`net_setuptime`) fails the test
-    // (BT-5256). The plain client shares
-    // the node's epmd, so it dials the TLS listener with a plain handshake.
-    // Not on macOS against this node: its epmd listens on every interface,
-    // and macOS lets the plain client start a second, loopback-only epmd on
-    // the same port that then answers every loopback lookup without knowing
-    // the node (Linux refuses that bind). macOS runs the probe against a
-    // loopback node below instead.
-    #[cfg(not(target_os = "macos"))]
+    // (BT-5256). The plain client shares the node's epmd, so it dials the TLS
+    // listener with a plain handshake. On every platform, against this node
+    // (epmd on every interface): the client sees that an epmd answers and does
+    // not start a second, loopback-only one beside it, which macOS would let
+    // bind and which would then answer every loopback lookup without knowing
+    // the node (BT-5264; Linux refuses that bind).
     plain_client_probe(&output_dir, name, &node, &cookie, &epmd_port, &env);
 
     stop_and_wait_for_exit_with_env(&mut foreground, &output_dir, name, &node, &cookie, &env);
-
-    // macOS: a short-lived TLS node on loopback, whose epmd holds loopback
-    // itself, so the plain client cannot start a second one beside it.
-    #[cfg(target_os = "macos")]
-    {
-        let loopback_epmd = PrivateEpmd::new();
-        let loopback_epmd_port = loopback_epmd.0.to_string();
-        let node = format!("{node}_lo");
-        let mut good = tls_env(&tls_dir.join("good.conf"));
-        let mut replaced = 0;
-        for (key, value) in &mut good {
-            match *key {
-                "ERL_EPMD_PORT" => *value = loopback_epmd_port.clone().into(),
-                "RELEASE_DIST_INTERFACE" => *value = "127.0.0.1".into(),
-                _ => continue,
-            }
-            replaced += 1;
-        }
-        assert_eq!(
-            replaced, 2,
-            "the loopback node needs its own epmd port and interface"
-        );
-        let env: Vec<(&str, &std::ffi::OsStr)> =
-            good.iter().map(|(k, v)| (*k, v.as_os_str())).collect();
-        let mut foreground =
-            spawn_foreground_and_wait_for_ping_with_env(&output_dir, name, &node, &cookie, &env);
-        plain_client_probe(&output_dir, name, &node, &cookie, &loopback_epmd_port, &env);
-        stop_and_wait_for_exit_with_env(&mut foreground, &output_dir, name, &node, &cookie, &env);
-    }
 }
 
 /// BT-5256: a plain loopback `ping` (no TLS opt-in, sharing the node's epmd)
 /// must not reach the TLS node `node`, and a TLS `ping` right after it must,
 /// on its first try: one non-TLS client must not stall the TLS listener.
+/// BT-5264: that second `ping` also shows the plain client left the node's
+/// epmd in charge of loopback. On macOS, where a second epmd could bind
+/// loopback beside a wildcard one, it would report the node down.
 fn plain_client_probe(
     output_dir: &std::path::Path,
     name: &str,

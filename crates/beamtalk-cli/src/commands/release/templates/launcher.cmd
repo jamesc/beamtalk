@@ -378,6 +378,20 @@ rem `minimal_boot_args` comment: with no `-boot`, erl.exe falls back to
 rem `%ROOT%\bin\start.boot`, which does not exist; `copy_erts` stages a
 rem plain kernel+stdlib `start_clean.boot` next to the bundled ERTS for
 rem exactly this. A host ERTS already has its own default boot file.
+:client_epmd_args
+rem BT-5264: a client verb (stop, ping, rpc, remote_console) must not start an
+rem epmd while one already answers on the port; see launcher.sh's
+rem `client_epmd_args` for why (a second epmd shadows the first on macOS).
+rem Sets EPMD_ARGS to " -start_epmd false" when `epmd -names`, which only asks
+rem and never starts one, reaches an epmd on ERL_EPMD_PORT; otherwise empty
+rem (no epmd.exe beside erl.exe: erl starts one, as before).
+set "EPMD_ARGS="
+for %%I in ("%ERL%") do set "EPMD_EXE=%%~dpIepmd.exe"
+if not exist "!EPMD_EXE!" exit /b 0
+"!EPMD_EXE!" -names >nul 2>&1
+if not errorlevel 1 set "EPMD_ARGS= -start_epmd false"
+exit /b 0
+
 :minimal_boot_args
 set "BOOT_ARGS="
 if /I "%INCLUDE_ERTS%"=="true" if exist "%ROOT%\erts-%ERTS_VSN%\bin\start_clean.boot" (
@@ -448,6 +462,8 @@ if /I "%DIST_MODE%"=="tls" (
 ) else (
     set "DIST_ARGS=-hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}""
 )
+call :client_epmd_args
+set "DIST_ARGS=!DIST_ARGS!!EPMD_ARGS!"
 "%ERL%" -noshell %DIST_ARGS% %BOOT_ARGS% %PA_ARGS% ^
     -eval "__RESTORE_HOME_EVAL__." ^
     -eval "beamtalk_release_launcher:stop_client_main()." -extra "%NODE%"
@@ -477,6 +493,8 @@ if /I "%DIST_MODE%"=="tls" (
 ) else (
     set "DIST_ARGS=-hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}""
 )
+call :client_epmd_args
+set "DIST_ARGS=!DIST_ARGS!!EPMD_ARGS!"
 "%ERL%" -noshell %DIST_ARGS% %BOOT_ARGS% %PA_ARGS% ^
     -eval "__RESTORE_HOME_EVAL__." ^
     -eval "beamtalk_release_launcher:ping_client_main()." -extra "%NODE%"
@@ -508,6 +526,8 @@ if /I "%DIST_MODE%"=="tls" (
 ) else (
     set "DIST_ARGS=-hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}""
 )
+call :client_epmd_args
+set "DIST_ARGS=!DIST_ARGS!!EPMD_ARGS!"
 "%ERL%" -noshell %DIST_ARGS% %BOOT_ARGS% %PA_ARGS% ^
     -eval "__RESTORE_HOME_EVAL__, shell:start_interactive({'%NODE%', {shell, start, []}})."
 set "RC=!errorlevel!"
@@ -565,6 +585,8 @@ if /I "%DIST_MODE%"=="tls" (
 ) else (
     set "DIST_ARGS=-hidden -sname "%SNAME%" -kernel inet_dist_use_interface "{127,0,0,1}""
 )
+call :client_epmd_args
+set "DIST_ARGS=!DIST_ARGS!!EPMD_ARGS!"
 "%ERL%" -noshell %DIST_ARGS% %BOOT_ARGS% %PA_ARGS% ^
     -eval "__RESTORE_HOME_EVAL__." ^
     -eval "beamtalk_release_launcher:rpc_client_main()." ^
