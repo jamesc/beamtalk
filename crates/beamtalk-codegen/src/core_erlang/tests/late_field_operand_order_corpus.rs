@@ -14,7 +14,7 @@
 //! `late` read) x scope
 //! (method root, conditional arm, evaluated block, `collect:` body, `on:do:`
 //! body, `ensure:` body, actor closure). Every cell compiles clean under the
-//! debug verifier (`operand_order_check`'s `RacingOperands`, the ThreadedIr
+//! debug verifier (`operand_order_check`'s `RacingOperands`, the `ThreadedIr`
 //! checks). With `Fault::LateFieldReadsStable` (the pre-fix rule) every list,
 //! map, send and self-send cell holding two `late` reads outside a
 //! cell-reading scope is reported, so the grid fails on the bug.
