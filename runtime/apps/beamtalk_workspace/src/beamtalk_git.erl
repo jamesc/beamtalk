@@ -228,7 +228,7 @@ git_revert_file(Path) when is_binary(Path) ->
         {ok, true} ->
             {error,
                 arg_error(
-                    git_revert_file, <<"path names a directory; revert one file at a time">>
+                    git_revert_file, <<"path is not one tracked file; revert one file at a time">>
                 )};
         {error, _} = Err ->
             Err
@@ -236,17 +236,20 @@ git_revert_file(Path) when is_binary(Path) ->
 git_revert_file(_Path) ->
     {error, arg_error(git_revert_file, <<"path must be a String">>)}.
 
-%% Whether `Path`, resolved from the repository toplevel (where every git
-%% command runs), is a directory on disk. A text check cannot tell: `src`,
-%% `src/.` and `./src` all name one.
+%% Whether `Path` names a directory rather than one tracked file. Git answers,
+%% not the file system: `git ls-files -z -- Path` lists the index entries under
+%% the path, which is exactly `Path` for one tracked file (deleted or not, a
+%% symlink included) and every file for a directory, whatever its spelling
+%% (`src`, `src/.`, `./src`), present or deleted. Nothing is listed for a path
+%% that is not tracked; that is not a file to revert either, so it counts as a
+%% directory here and `git restore` is never run on it.
 -spec names_directory(atom(), binary()) -> {ok, boolean()} | {error, #beamtalk_error{}}.
 names_directory(Selector, Path) ->
-    case project_dir() of
-        {ok, Dir} ->
-            case cached_repo_toplevel(Selector, Dir) of
-                {ok, Toplevel} -> {ok, filelib:is_dir(filename:join(Toplevel, Path))};
-                {error, _} = Err -> Err
-            end;
+    case run_git(Selector, [<<"ls-files">>, <<"-z">>, <<"--">>, Path]) of
+        {ok, Stdout, 0} ->
+            {ok, binary:split(Stdout, <<0>>, [global, trim_all]) =/= [Path]};
+        {ok, Stdout, Code} ->
+            {error, exit_error(Selector, Code, with_stderr(<<"git ls-files failed">>, Stdout))};
         {error, _} = Err ->
             Err
     end.

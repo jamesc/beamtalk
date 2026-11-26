@@ -29,7 +29,8 @@ segment, no NUL byte, not the tree root itself (`.`). It is relative to the
 repository root, the form `git-status` reports (the project directory when it
 is the root). `git-stage` and `git-unstage` accept a directory (the Git panel
 stages an untracked directory by the `dir/` path `git-status` reports);
-`git-revert-file` refuses one, checked on disk by `beamtalk_git`. It is then passed to git as a literal pathspec, so
+`git-revert-file` refuses anything but one tracked file, as `git ls-files` answers it
+(a directory in any spelling, deleted or not). It is then passed to git as a literal pathspec, so
 `:(top)`-style magic or a glob in a name cannot reach outside it. A refused
 path is an `invalid_argument` error and git is not started.
 

@@ -298,8 +298,24 @@ revert_refuses_directories(#{top := Top}) ->
             ),
             ?assertEqual(<<"modified\n">>, read(Top), Path)
         end,
-        [<<"src">>, <<"src/">>, <<"src/.">>, <<"./src">>, <<"src//">>]
-    ).
+        [<<"src">>, <<"src/">>, <<"src/.">>, <<"./src">>, <<"src//">>, <<"missing.bt">>]
+    ),
+    %% A tracked directory that was deleted is still a directory to git: one call
+    %% must not bring back every file under it.
+    ok = file:write_file(filename:join(Top, "src/b.bt"), <<"b\n">>),
+    git(Top, ["add", "-A"]),
+    git(Top, ["commit", "-q", "-m", "second"]),
+    beamtalk_test_fs:rm_rf(filename:join(Top, "src")),
+    ?assertMatch(
+        {error, #beamtalk_error{}}, request(<<"git-revert-file">>, #{<<"path">> => <<"src">>})
+    ),
+    ?assertNot(filelib:is_file(filename:join(Top, "src/b.bt"))),
+    %% ...while one deleted tracked file reverts.
+    ?assertEqual(
+        {value, #{<<"path">> => <<"src/b.bt">>}},
+        request(<<"git-revert-file">>, #{<<"path">> => <<"src/b.bt">>})
+    ),
+    ?assert(filelib:is_file(filename:join(Top, "src/b.bt"))).
 
 stage_accepts_an_untracked_directory(#{top := Top}) ->
     ok = filelib:ensure_dir(filename:join(Top, "newdir/x")),
