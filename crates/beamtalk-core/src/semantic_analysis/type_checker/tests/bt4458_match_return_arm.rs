@@ -337,3 +337,22 @@ fn all_branches_return_tail_is_reported_once() {
         .count();
     assert_eq!(n, 1, "expected exactly one warning: {diags:?}");
 }
+
+// BT-5283 review: in an untyped class the union tail check is a no-op, so an
+// early `^` whose type matches a union-tail member must still be checked.
+#[test]
+fn untyped_class_early_return_matching_union_tail_member_is_checked() {
+    let diags = type_messages(
+        r#"Object subclass: ZzUntyped
+  class foo: c :: Boolean -> Integer =>
+    c ifTrue: [^"early"]
+    c ifTrue: [1] ifFalse: ["x"]
+"#,
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|m| m.contains("declares return type Integer") && m.contains("String")),
+        "the early `^\"early\"` must be reported: {diags:?}"
+    );
+}
