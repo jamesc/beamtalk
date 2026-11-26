@@ -61,7 +61,7 @@ use super::super::threaded_ir::{
     self, BindOp, FrameId, RebindFrameKind, StateReadSite, ThreadedStmt, ThreadedValue,
     ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
-use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
+use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use super::analysis::ThreadedFamilies;
 use super::family_slots::{self, FamilyVersionStep};
 use beamtalk_cerl_doc::Document;
@@ -593,6 +593,25 @@ impl CoreErlangGenerator {
         (seed_doc, seeded_state)
     }
 
+    /// BT-5281: the base `State` a construct that threads no outer local of
+    /// its own (a non-producer `match:` whose arms thread `State`) starts its
+    /// arms from in `frame`: the frame's `State` where it continues one, else
+    /// a private scratch seeded as a conditional's is there
+    /// ([`ScratchStart::Fresh`]: the captured `State` or the cell in a plain
+    /// closure body, an empty map in a direct-params or tuple-acc loop or fold
+    /// body, which binds no `StateAcc`). Returns the seed's `let` (empty when
+    /// none is needed) and the base variable.
+    pub(in crate::core_erlang) fn construct_base_state(
+        &mut self,
+        frame: FrameId,
+    ) -> (Document<'static>, String) {
+        if self.conditional_has_private_scratch(frame) {
+            self.seed_scratch_locals(&[], ScratchStart::Fresh, "")
+        } else {
+            (Document::Nil, self.current_state_var())
+        }
+    }
+
     /// BT-4206: [`Self::seed_scratch_locals`] for a local-threading producer
     /// whose operands may splice a prelude into its frame (`match:`, a
     /// lookup), seeding from the frame's current `State` and recording, in
@@ -1006,23 +1025,25 @@ impl CoreErlangGenerator {
         Ok(ThreadedValue { prelude, value })
     }
 
-    /// [`Self::conditional_tuple_to_threaded_value`] for a construct that
-    /// threads no outer local of its own (`match:`, an ADR 0128 opaque fold):
-    /// actor instance methods only, so its scratch map is always the `State`
-    /// family.
+    /// [`Self::conditional_tuple_to_threaded_value`] for a `match:` that
+    /// threads no outer local of its own but whose arms thread the actor's
+    /// `State` (`match_needs_state_threading`).
+    ///
+    /// BT-5281: in a frame whose scratch map is private
+    /// ([`Self::conditional_has_private_scratch`]: a plain closure body or a
+    /// direct-params/tuple-acc loop or fold body of an actor method) there is
+    /// no `State` family to continue, so the tuple's element 2 is adopted by
+    /// nothing ([`Self::conditional_families`] is empty there), exactly as for
+    /// a conditional producer in that frame. Field writes in such a frame do
+    /// not ride that element: a closure writes through the actor-state cell
+    /// (ADR 0137), and a loop that writes a field threads `State` and is not
+    /// direct-params.
     pub(super) fn control_flow_tuple_to_threaded_value(
         &mut self,
         tuple_doc: Document<'static>,
         frame: FrameId,
         span: Span,
     ) -> Result<ThreadedValue> {
-        if self.conditional_has_private_scratch(frame) {
-            return Err(CodeGenError::Internal(
-                "a match: or opaque-callable fold producer was reached in a frame with a \
-                 private scratch map (no State family to continue; ADR 0131 §3)"
-                    .to_string(),
-            ));
-        }
         self.conditional_tuple_to_threaded_value(
             tuple_doc,
             frame,

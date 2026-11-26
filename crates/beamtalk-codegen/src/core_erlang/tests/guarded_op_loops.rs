@@ -1361,9 +1361,10 @@ fn field_write_corpus_is_verifier_clean() {
 /// from its own bracket decision, so the §4b rule ("no loop that brackets
 /// admits a field write in its body") holds even if mode selection regresses.
 /// With mode selection's field-write exclusion off, every shape it lowers
-/// stateless reports `FieldWriteInBracketedLoop` — a write directly in the body
-/// and one in a nested loop alike — and every other shape stays clean because
-/// an independent guard keeps it on the `StateAcc` path.
+/// stateless reports the lost write — `FieldWriteOnPrivateScratch` where the
+/// write is lowered on the loop's private scratch map (BT-5281), else
+/// `FieldWriteInBracketedLoop` from the checkout — and every other shape stays
+/// clean because an independent guard keeps it on the `StateAcc` path.
 #[test]
 fn checkout_reports_a_field_write_in_a_bracketing_loop() {
     let mut reported = 0;
@@ -1374,9 +1375,20 @@ fn checkout_reports_a_field_write_in_a_bracketing_loop() {
         } else {
             let report =
                 report.unwrap_or_else(|| panic!("{name}: faulted compile should report:\n{src}"));
+            // BT-5281: a write lowered in the stateless loop's own frame (or an
+            // arm or loop nested in it that holds no whole `State` either) is
+            // reported first, where it is lowered, as
+            // `FieldWriteOnPrivateScratch`. A write in a nested frame that does
+            // hold a whole `State` (`separatedBy:`'s `StateAcc` body) is left to
+            // the bracketing checkout.
+            let expected = if name.ends_with("/nested_separated_by") {
+                "FieldWriteInBracketedLoop"
+            } else {
+                "FieldWriteOnPrivateScratch"
+            };
             assert!(
-                report.contains("FieldWriteInBracketedLoop"),
-                "{name}: expected the field-write finding, got:\n{report}\n{src}"
+                report.contains(expected),
+                "{name}: expected {expected}, got:\n{report}\n{src}"
             );
             reported += 1;
         }

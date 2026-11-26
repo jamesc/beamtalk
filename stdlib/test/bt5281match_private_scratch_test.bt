@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5281: see stdlib/test/fixtures/Bt5281MatchPrivateScratchActor.bt.
+
+TestCase subclass: Bt5281MatchPrivateScratchTest
+
+  testGuardsReturnEarly =>
+    a := Bt5281MatchPrivateScratchActor spawn
+    self assert: (a reload: nil) equals: nil
+    self assert: (a reload: #[]) equals: nil
+    self assert: a total equals: 0
+
+  testMatchInLoopAfterGuardsWritesField =>
+    a := Bt5281MatchPrivateScratchActor spawn
+    items := #[(Result ok: 1), (Result error: #bad), (Result ok: 0), (Result ok: 4)]
+    self assert: (a reload: items) equals: 50
+    self assert: a total equals: 50
+
+  testMatchAfterGuardsWritesField =>
+    a := Bt5281MatchPrivateScratchActor spawn
+    self assert: (a classify: nil) equals: #none
+    self assert: (a classify: #[]) equals: #empty
+    self assert: (a classify: #[(Result ok: 3)]) equals: 6
+    self assert: (a classify: #[(Result ok: -3)]) equals: 6
+    self assert: (a classify: #[(Result error: #bad)]) equals: 6
+
+  testMatchInNonBooleanFallbackClosureWritesField =>
+    a := Bt5281MatchPrivateScratchActor spawn
+    self assert: (a nested: NonBooleanCondCalling new with: 4) equals: #[#ifTrueIfFalse, 4]
+    self assert: a total equals: 4
+    self assert: (a nested: NonBooleanCondCalling new with: -1) equals: #[#ifTrueIfFalse, 4]
+    self assert: (a nested: NonBooleanCondCalling new with: nil) equals: nil
