@@ -59,10 +59,13 @@ on:
 concurrency:
   # Serialize edge publishes: a newer merge waits for the in-flight publish
   # instead of cancelling it; only the newest pending run is kept (older pending
-  # runs are replaced). A ~15-20 min run (both legs, then publish) must be able to finish during a burst of
-  # merges, otherwise each run is cancelled by the next one and nothing publishes.
-  # The release still catches up to the latest main within one extra build.
-  group: edge
+  # runs are replaced). A ~15-20 min run (both legs, then publish) must be able
+  # to finish during a burst of merges, otherwise each run is cancelled by the
+  # next one and nothing publishes. The release still catches up to the latest
+  # main within one extra build. main keeps the group `edge`; a branch run
+  # (workflow_dispatch, never publishes) gets its own group, so it can neither
+  # delay main's publish nor replace a pending one.
+  group: ${{ github.ref == 'refs/heads/main' && 'edge' || format('edge-{0}', github.ref) }}
   cancel-in-progress: false
 
 # Read-only by default: only the `edge` job writes the release.
