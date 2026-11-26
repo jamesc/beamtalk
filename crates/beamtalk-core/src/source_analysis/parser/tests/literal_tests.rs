@@ -1591,3 +1591,16 @@ fn parse_typed_map_destructure_values() {
     assert!(matches!(pairs[0].value, Pattern::Type { .. }));
     assert!(matches!(pairs[1].value, Pattern::Variable(_)));
 }
+
+#[test]
+fn parse_typed_map_value_reports_generic_args_like_tuple_elements() {
+    // Map values share the tuple/array `x :: T` parsing, so they get the
+    // same targeted diagnostic (BT-5284).
+    let diagnostics = parse_err("#{#k => v :: List(Integer)} := m");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("generic type arguments")),
+        "{diagnostics:?}"
+    );
+}
