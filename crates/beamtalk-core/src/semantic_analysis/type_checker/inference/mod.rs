@@ -417,7 +417,9 @@ impl TypeChecker {
         self.stash_return_position_block_pushdown(method);
         self.block_written_locals =
             super::binary_string_compare::block_written_locals(&method.body);
+        self.collected_returns.clear();
         let body_type = self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
+        let collected_returns = std::mem::take(&mut self.collected_returns);
         // BT-4235: on the value-type body path a trailing `self.x := v` answers
         // the updated `self` (BT-833), with or without statement-level
         // parentheses (BT-4092), not `v`. A body that already diverged keeps
@@ -431,7 +433,8 @@ impl TypeChecker {
             body_type
         };
         let body_type = {
-            let returned = self.tail_match_return_types(&method.body);
+            let mut returned = self.tail_match_return_types(&method.body);
+            returned.extend(collected_returns);
             if returned.is_empty() {
                 body_type
             } else {
@@ -817,7 +820,10 @@ impl TypeChecker {
             ),
             // Returns propagate the value type
             Expression::Return { value, .. } => {
-                self.infer_expr(value, hierarchy, env, in_abstract_method)
+                let ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
+                // BT-5283: every `^` answers the enclosing method.
+                self.collected_returns.push(ty.clone());
+                ty
             }
             // Cascades: all messages dispatch to the UNDERLYING receiver of
             // the first send, not to its return value — see

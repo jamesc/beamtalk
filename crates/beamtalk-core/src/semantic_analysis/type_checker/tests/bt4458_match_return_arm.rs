@@ -157,3 +157,52 @@ fn all_return_match_tail_with_untyped_values_does_not_make_method_never() {
         "`self kind: 1` returns, so `x` must stay `String | Nil`: {diags:?}"
     );
 }
+
+// BT-5283: every `^` path is checked against the declared return type, not
+// just a `^` arm of a tail `match:`.
+
+#[test]
+fn early_return_checked_against_declared_return_type() {
+    let diags = type_messages(
+        r"typed Object subclass: ZzEarly
+  class early: n :: Integer -> Tuple =>
+    n < 1 ifTrue: [^#more]
+    {#ok, n}
+",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|m| m.contains("declares return type Tuple") && m.contains("#more")),
+        "`^#more` in a `-> Tuple` method must warn: {diags:?}"
+    );
+}
+
+#[test]
+fn early_return_inside_nested_block_checked() {
+    let diags = type_messages(
+        r"typed Object subclass: ZzEarly
+  class pick: n :: Integer -> Tuple =>
+    #(1, 2) do: [:x | x > n ifTrue: [^#more]]
+    {#ok, n}
+",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|m| m.contains("declares return type Tuple") && m.contains("#more")),
+        "`^` inside a block (non-local return) must warn: {diags:?}"
+    );
+}
+
+#[test]
+fn early_return_of_declared_type_is_clean() {
+    let diags = type_messages(
+        r"typed Object subclass: ZzEarly
+  class early: n :: Integer -> Tuple =>
+    n < 1 ifTrue: [^{#none, 0}]
+    {#ok, n}
+",
+    );
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+}
