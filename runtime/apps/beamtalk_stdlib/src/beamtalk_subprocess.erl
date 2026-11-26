@@ -34,7 +34,8 @@ this module only exports `start_link/1` and gen_server callbacks.
   port_closed   => boolean(),
   child_exited  => boolean(),
   stdin_dropped => binary(),    % only once the exec port dropped a write
-  stdin_waiters => queue:queue(From)  % writeLine: callers awaiting the port's answer
+  stdin_waiters => queue:queue(From),   % writeLine: callers awaiting stdin_queued
+  stdin_unwritten => queue:queue(From)  % queued, awaiting stdin_written/failed
 }
 ```
 
@@ -246,8 +247,20 @@ handle_info({Port, {data, Packet}}, #{port := Port} = State) ->
             S3 = maybe_reply_eof(stderr, S2),
             {noreply, S3};
         {stdin_queued, _ChildId} ->
-            %% BT-5248: the oldest writeLine: was accepted.
-            {noreply, beamtalk_subprocess_port:write_queued(State)};
+            %% BT-5248: the oldest writeLine: was accepted; it waits on for
+            %% the writer thread's report (BT-5269).
+            {noreply, beamtalk_subprocess_port:write_queued('Subprocess', State)};
+        {stdin_written, _ChildId} ->
+            %% BT-5269: the oldest queued line is in the child's stdin pipe.
+            {noreply, beamtalk_subprocess_port:write_written(State)};
+        {stdin_failed, _ChildId, Reason} ->
+            %% BT-5269: the child exited or closed its stdin before taking the
+            %% oldest queued line: it and every line queued behind it raise,
+            %% and so does every later writeLine:.
+            ?LOG_WARNING("Subprocess stdin write failed", #{
+                reason => Reason, domain => [beamtalk, stdlib]
+            }),
+            {noreply, beamtalk_subprocess_port:write_failed('Subprocess', Reason, State)};
         {error, _ChildId, write_stdin, Reason} ->
             %% A line was not delivered (the child is not reading its input,
             %% or closed it): that writeLine: raises, and so does every later

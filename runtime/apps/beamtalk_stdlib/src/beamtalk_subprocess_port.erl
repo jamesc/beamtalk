@@ -24,6 +24,9 @@ other while keeping both DRY.
 * `spawn_child/4,5` — spawn a subprocess through the port
 * `kill_child/2` — send kill command to a subprocess
 * `write_stdin/3` — write data to subprocess stdin
+* `submit_write/6`, `await_write/2` — park a `writeLine:` caller
+* `write_queued/2`, `write_written/1`, `write_failed/3`, `write_dropped/3`,
+  `fail_pending_writes/2` — answer parked callers from the port's events
 * `close/1` — close the exec port
 """.
 
@@ -42,7 +45,9 @@ other while keeping both DRY.
     close/1,
     submit_write/6,
     await_write/2,
-    write_queued/1,
+    write_queued/2,
+    write_written/1,
+    write_failed/3,
     write_dropped/3,
     stdin_dropped_error/2,
     fail_pending_writes/2
@@ -220,27 +225,70 @@ submit_write(Class, Port, ChildId, Line, From, State) ->
     end.
 
 -doc """
-Park `From`, a `writeLine:` caller, until the exec port answers its write
-(BT-5248).
+Park `From`, a `writeLine:` caller, until the exec port says whether its line
+reached the child's stdin pipe (BT-5248, BT-5269).
 
-The port answers every `write_stdin` once, in order: `stdin_queued` when it
-was accepted, `error` when it was dropped. The caller's reply is that answer,
-so the write that loses data raises instead of returning `nil`.
+A write is answered in two steps, each in order. The command thread answers
+every `write_stdin` once: `stdin_queued` when it was accepted (the caller
+moves to `stdin_unwritten`), `error` when it was dropped (the caller raises).
+The writer thread then answers each queued write once: `stdin_written` when
+the line is in the pipe (the caller gets `nil`), or `stdin_failed` when the
+child exited or closed its stdin first (that caller and every one queued
+behind it raise). So no caller is told `nil` for a line that was then lost
+before reaching the pipe.
 """.
 -spec await_write(term(), map()) -> map().
 await_write(From, State) ->
     State#{stdin_waiters => queue:in(From, stdin_waiters(State))}.
 
--doc "The oldest parked write was accepted: its caller gets `nil`.".
--spec write_queued(map()) -> map().
-write_queued(State) ->
+-doc """
+The oldest parked write was queued by the exec port: its caller waits on for
+the writer thread's report. If the writer thread has already failed, the line
+will never be written, so the caller raises now.
+""".
+-spec write_queued(atom(), map()) -> map().
+write_queued(Class, State) ->
     case queue:out(stdin_waiters(State)) of
         {{value, From}, Rest} ->
-            gen_server:reply(From, nil),
-            State#{stdin_waiters => Rest};
+            S1 = State#{stdin_waiters => Rest},
+            case S1 of
+                #{stdin_dropped := Reason} ->
+                    %% Not sent by beamtalk-exec (no write is queued after a
+                    %% refusal or `stdin_failed`); guards a protocol violation.
+                    gen_server:reply(From, {error, line_not_written_error(Class, Reason)}),
+                    S1;
+                _ ->
+                    S1#{stdin_unwritten => queue:in(From, stdin_unwritten(S1))}
+            end;
         {empty, _} ->
             State
     end.
+
+-doc "The oldest queued write is in the child's stdin pipe: its caller gets `nil`.".
+-spec write_written(map()) -> map().
+write_written(State) ->
+    case queue:out(stdin_unwritten(State)) of
+        {{value, From}, Rest} ->
+            gen_server:reply(From, nil),
+            State#{stdin_unwritten => Rest};
+        {empty, _} ->
+            State
+    end.
+
+-doc """
+The writer thread could not write the oldest queued line (the child exited or
+closed its stdin, BT-5269): it and every line queued behind it are lost, so
+each of their callers gets the `runtime_error` a dropped line gets. Every
+later `writeLine:` raises too.
+""".
+-spec write_failed(atom(), binary(), map()) -> map().
+write_failed(Class, Reason, State) ->
+    Err = line_not_written_error(Class, Reason),
+    lists:foreach(
+        fun(From) -> gen_server:reply(From, {error, Err}) end,
+        queue:to_list(stdin_unwritten(State))
+    ),
+    mark_stdin_dropped(Reason, State#{stdin_unwritten => queue:new()}).
 
 -doc """
 The `runtime_error` a `writeLine:` raises once the exec port has dropped a
@@ -259,21 +307,28 @@ the line was not written. Every later `writeLine:` raises too.
 """.
 -spec write_dropped(atom(), binary(), map()) -> map().
 write_dropped(Class, Reason, State) ->
-    Err = beamtalk_error:with_message(
-        stdin_dropped_error(Class, Reason),
-        <<"writeLine: failed: the line was not written">>
-    ),
     S1 =
         case queue:out(stdin_waiters(State)) of
             {{value, From}, Rest} ->
-                gen_server:reply(From, {error, Err}),
+                gen_server:reply(From, {error, line_not_written_error(Class, Reason)}),
                 State#{stdin_waiters => Rest};
             {empty, _} ->
                 State
         end,
-    case maps:is_key(stdin_dropped, S1) of
-        true -> S1;
-        false -> S1#{stdin_dropped => Reason}
+    mark_stdin_dropped(Reason, S1).
+
+%% The error a writeLine: whose own line was lost raises.
+line_not_written_error(Class, Reason) ->
+    beamtalk_error:with_message(
+        stdin_dropped_error(Class, Reason),
+        <<"writeLine: failed: the line was not written">>
+    ).
+
+%% Sticky: the first loss's reason is kept for every later writeLine:.
+mark_stdin_dropped(Reason, State) ->
+    case maps:is_key(stdin_dropped, State) of
+        true -> State;
+        false -> State#{stdin_dropped => Reason}
     end.
 
 -doc """
@@ -287,13 +342,17 @@ fail_pending_writes(Class, State) ->
         fun(From) ->
             gen_server:reply(From, {error, beamtalk_error:new(port_closed, Class, 'writeLine:')})
         end,
-        queue:to_list(stdin_waiters(State))
+        queue:to_list(stdin_waiters(State)) ++ queue:to_list(stdin_unwritten(State))
     ),
-    State#{stdin_waiters => queue:new()}.
+    State#{stdin_waiters => queue:new(), stdin_unwritten => queue:new()}.
 
 -spec stdin_waiters(map()) -> queue:queue(term()).
 stdin_waiters(State) ->
     maps:get(stdin_waiters, State, queue:new()).
+
+-spec stdin_unwritten(map()) -> queue:queue(term()).
+stdin_unwritten(State) ->
+    maps:get(stdin_unwritten, State, queue:new()).
 
 -doc "Close the exec port (terminates all managed subprocesses).".
 -spec close(port()) -> true.
