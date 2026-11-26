@@ -1,0 +1,53 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5289: a `match:` whose scrutinee is a send (it runs in a `SyncedCall`
+// window, or is a self-send that advances `State`) and whose arm writes a
+// field, as a statement of a conditional arm and of a loop body. Used by
+// stdlib/test/bt5289match_sent_scrutinee_test.bt.
+
+Actor subclass: Bt5289MatchSentScrutineeActor
+  state: total = 0
+  state: bumps = 0
+
+  total => self.total
+
+  bumps => self.bumps
+
+  // The issue's repro: the `match:` is the false arm's statement.
+  classify: items =>
+    items isNil ifTrue: [
+      nil
+    ] ifFalse: [
+      items first match: [_ -> items first > 0 ifTrue: [
+        self.total := items first
+      ]]
+    ]
+    self.total
+
+  // The same after two guard-style returns (BT-4415 nests the rest of the
+  // method in a conditional arm).
+  guarded: items =>
+    items isNil ifTrue: [^#none]
+    items isEmpty ifTrue: [^#empty]
+    items first match: [_ -> items first > 0 ifTrue: [
+      self.total := self.total + items first
+    ]]
+    self.total
+
+  bump =>
+    self.bumps := self.bumps + 1
+    self.bumps
+
+  // A self-send scrutinee that writes a field, in a loop body: each pass
+  // sees the field the previous pass's scrutinee and arm wrote.
+  loop: n =>
+    1
+      to: n
+      do: [:i |
+        self bump match: [
+          k :: Integer -> self.total := self.total + k;
+          _ -> nil
+        ]
+      ]
+    {self.bumps, self.total}

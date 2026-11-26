@@ -29,8 +29,7 @@ Actor subclass: Bt5281MatchPrivateScratchActor
   classify: items =>
     items isNil ifTrue: [^#none]
     items isEmpty ifTrue: [^#empty]
-    head := items first
-    head match: [
+    items first match: [
       Result ok: v -> v > 0
         ifTrue: [
           doubled := v * 2

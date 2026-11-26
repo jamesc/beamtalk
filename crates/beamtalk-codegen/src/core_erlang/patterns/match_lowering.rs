@@ -670,7 +670,7 @@ impl CoreErlangGenerator {
         // builder would compile the receiver, carrier and all, in place.
         if self.control_flow_has_mutations(body)
             && !self.evaluated_block_is_producer(body)
-            && !self.is_conditional_with_sequenced_receiver(body)
+            && !self.is_construct_with_sequenced_operand(body)
         {
             return self.expression_doc(body);
         }

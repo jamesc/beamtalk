@@ -776,7 +776,7 @@ impl CoreErlangGenerator {
         arm_is_frame: bool,
     ) -> bool {
         ((arm_is_frame || self.is_repl_mode()) && self.local_producer_locals(expr).is_some())
-            || self.is_conditional_with_sequenced_receiver(expr)
+            || self.is_construct_with_sequenced_operand(expr)
             // BT-3982: an actor evaluated block that threads `State` is a
             // producer in every arm.
             || self
