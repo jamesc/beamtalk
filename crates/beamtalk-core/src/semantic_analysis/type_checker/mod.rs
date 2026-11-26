@@ -1064,6 +1064,12 @@ impl TypeEnv {
         self.result_error_variants.contains(key)
     }
 
+    /// BT-5290: whether any variable is known to be a `Result`'s error
+    /// variant here.
+    fn has_result_error_variants(&self) -> bool {
+        !self.result_error_variants.is_empty()
+    }
+
     /// BT-5290: forget that `key` is known to be a `Result`'s error variant.
     fn clear_result_error_variant(&mut self, key: &EnvKey) {
         self.result_error_variants.remove(key);

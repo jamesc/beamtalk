@@ -421,3 +421,74 @@ fn unguarded_declared_never_success_result_keeps_its_display() {
         "the message must name the value's real type: {diags:?}"
     );
 }
+
+/// A loop body that rebinds the local *after* its `^x`: a later iteration
+/// returns a value an earlier one rebound, so the narrowing cannot hold in
+/// the loop body (Claude review on #5869).
+#[test]
+fn loop_rebinding_after_return_drops_narrowing() {
+    let diags = type_messages(
+        r"typed Object subclass: ZzMint
+  readLine: ms :: Integer -> Result(Binary, Object) => Result ok: <<>>
+  readHead: ms :: Integer -> Result(Tuple, Object) =>
+    line := self readLine: ms
+    line isError ifTrue: [
+      #(1, 2) do: [:i |
+        i =:= 2 ifTrue: [^line]
+        line := self readLine: ms
+      ]
+    ]
+    Result ok: {#head}
+",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|m| m.contains("declares return type Result(Tuple, Object)")),
+        "a later iteration may return a rebound ok `line`: {diags:?}"
+    );
+}
+
+/// The narrowed arm itself runs once: a write after its `^x` does not undo
+/// the guard.
+#[test]
+fn write_after_return_in_guard_arm_keeps_narrowing() {
+    let diags = type_messages(
+        r"typed Object subclass: ZzMint
+  readLine: ms :: Integer -> Result(Binary, Object) => Result ok: <<>>
+  readHead: ms :: Integer -> Result(Tuple, Object) =>
+    line := self readLine: ms
+    line isError ifTrue: [
+      ms > 0 ifTrue: [^line]
+      line := self readLine: ms
+    ]
+    Result ok: {#head}
+",
+    );
+    assert!(
+        return_mismatches(&diags).is_empty(),
+        "`^line` runs before the write in a one-shot arm: {diags:?}"
+    );
+}
+
+/// Pinned: the narrowing does not reach the rest of the method after a
+/// diverging `isOk` guard (post-guard narrowing skips Result tests), so a
+/// later `^x` is checked with the full `Result(T, E)` type.
+#[test]
+fn narrowing_does_not_reach_rest_of_method_after_guard() {
+    let diags = type_messages(
+        r"typed Object subclass: ZzMint
+  readLine: ms :: Integer -> Result(Binary, Object) => Result ok: <<>>
+  readHead: ms :: Integer -> Result(Tuple, Object) =>
+    line := self readLine: ms
+    line isOk ifTrue: [^Result ok: {#head, line value}]
+    ^line
+",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|m| m.contains("declares return type Result(Tuple, Object)")),
+        "post-guard `^line` is not narrowed: {diags:?}"
+    );
+}

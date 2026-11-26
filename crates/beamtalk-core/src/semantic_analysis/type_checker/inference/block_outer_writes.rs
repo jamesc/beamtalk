@@ -99,6 +99,32 @@ impl TypeChecker {
         }
     }
 
+    /// The environment a block literal's body is inferred in: a child of
+    /// `env` that, for BT-5290, forgets the `Result` error-variant fact of
+    /// every outer local the block may write. A block can run more than once
+    /// (a `do:` body), so a `^x` before the write in its text can still see
+    /// a value an earlier run rebound — the fact cannot hold anywhere in it.
+    /// The block's own narrowings are pushed after this, so the one-shot arm
+    /// of `x isError ifTrue: [^x. x := …]` keeps its fact.
+    pub(super) fn block_child_env(block: &crate::ast::Block, env: &TypeEnv) -> TypeEnv {
+        let mut block_env = env.child();
+        if block_env.has_result_error_variants() {
+            let writes =
+                crate::semantic_analysis::block_facts::outer_local_writes(block, &|name| {
+                    env.get_local(name).is_some()
+                });
+            for write in writes {
+                if matches!(
+                    write.kind,
+                    crate::semantic_analysis::block_facts::WriteKind::Local
+                ) {
+                    block_env.clear_result_error_variant(&EnvKey::local(write.name));
+                }
+            }
+        }
+        block_env
+    }
+
     /// Join each deferred block write into `env`: the local's current type
     /// joined with every type the send's arms left it with.
     pub(in crate::semantic_analysis::type_checker) fn apply_deferred_block_widenings(

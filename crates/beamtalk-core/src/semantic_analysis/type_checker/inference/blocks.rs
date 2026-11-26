@@ -725,7 +725,7 @@ impl TypeChecker {
         in_abstract_method: bool,
     ) -> InferredType {
         if let Expression::Block(block) = arg {
-            let mut block_env = env.child();
+            let mut block_env = Self::block_child_env(block, env);
             // Narrowing uses the unified refinement API; the layers
             // are block-scoped because the child env is dropped on return.
             for (var_key, narrowed_type) in narrowings {
@@ -1444,7 +1444,7 @@ impl TypeChecker {
         // BT-4102: explicit `:: T` annotations win over the pushed-down type,
         // which wins over `Dynamic(UnannotatedParam)`.
         let resolved = self.resolve_block_param_types(block, param_types, hierarchy);
-        let mut block_env = env.child();
+        let mut block_env = Self::block_child_env(block, env);
         for (var_key, narrowed_type) in narrowings {
             block_env.push_refinement(RefinementLayer::block_scope(
                 (*var_key).clone(),
