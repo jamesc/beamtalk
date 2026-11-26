@@ -46,6 +46,13 @@ until the new release is complete the previous one is restored; once the
 journal says `committed`, the new release is kept and the leftover old copy
 removed.
 
+Each run holds an exclusive lock on `<output>.beamtalk-lock` for its whole
+duration, taken before that recovery, so two projects (or checkouts) sharing one
+`--output` cannot interleave. Like the project build lock, a second run waits
+(printing a notice) rather than failing; the OS frees the lock if the holder
+dies. The lock file stays beside the output (safe to delete or git-ignore), and
+`BEAMTALK_NO_BUILD_LOCK=1` turns it off along with the other beamtalk file locks.
+
 `Beamtalk releaseInfo` is the parity-neutral reflective send that names the
 release, its version and the toolchain OTP release. `rpc`/`eval` resolve `Beamtalk`, `Workspace` and `Transcript` as ordinary
 class names (class registry), so `rpc "Beamtalk releaseInfo"` is a plain

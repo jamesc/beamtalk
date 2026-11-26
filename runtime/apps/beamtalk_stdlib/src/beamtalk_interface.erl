@@ -188,20 +188,18 @@ not removed, and still answers its name. The walk then
 sends to it, `class_send_with_recovery` restarts it, and a genuine error from
 it is re-raised rather than swallowed.
 
-A remote class (pg spans a cluster) cannot be checked locally, so it falls
-back to `class_name_safe/1`'s call and answers `nil` only if that call exits.
+A class object whose pid is on another node answers `nil` without a message
+(BT-5192). The walk enumerates this node's classes only (`allClasses` reads the
+node-local members of `beamtalk_classes`), and a class object that crosses a
+node is resolved by name on the receiving node (ADR 0126 §5), so a remote class
+pid never belongs to it; calling into a peer's class process would block the
+walk for the call timeout while that peer is silently partitioned.
 """.
 -spec liveClassName(term()) -> atom() | nil.
 liveClassName(#beamtalk_object{pid = Pid}) when is_pid(Pid), node(Pid) =:= node() ->
     case beamtalk_class_registry:class_name_for_pid(Pid) of
         {ok, Name} -> Name;
         not_found -> nil
-    end;
-liveClassName(#beamtalk_object{pid = Pid}) when is_pid(Pid) ->
-    try
-        beamtalk_object_class_read:class_name_safe(Pid)
-    catch
-        exit:_ -> nil
     end;
 liveClassName(_) ->
     nil.

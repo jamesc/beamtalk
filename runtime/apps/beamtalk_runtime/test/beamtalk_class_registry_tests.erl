@@ -457,9 +457,9 @@ whereis_class_registered_test() ->
 
 all_classes_test() ->
     beamtalk_class_registry:ensure_pg_started(),
-    %% all_classes returns whatever is in the pg group
+    %% all_classes returns this node's members of the pg group (BT-5192)
     Result = beamtalk_class_registry:all_classes(),
-    ?assertEqual(lists:sort(pg:get_members(beamtalk_classes)), lists:sort(Result)).
+    ?assertEqual(lists:sort(pg:get_local_members(beamtalk_classes)), lists:sort(Result)).
 
 %%% ============================================================================
 %%% live_class_entries tests

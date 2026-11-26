@@ -156,6 +156,57 @@ writeLine_raises_for_the_line_the_port_drops_test_() ->
         gen_server:stop(Pid)
     end}.
 
+%%% BT-5259: a write to an exec port that has already died must answer a
+%%% structured error and leave the gen_server running (it used to crash on
+%%% the badarg raised by port_command).
+writeLine_to_dead_port_returns_error_and_keeps_server_up_test() ->
+    {CatExe, CatArgs} = cat_cmd(),
+    {ok, Pid} = beamtalk_subprocess:start(#{executable => CatExe, args => CatArgs}),
+    #{port := Port} = sys:get_state(Pid),
+    true = port_close(Port),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = port_closed, selector = 'writeLine:'}},
+        gen_server:call(Pid, {'writeLine:', [<<"x">>]})
+    ),
+    ?assert(is_process_alive(Pid)),
+    %% Later writes keep answering the same error; close stays safe.
+    ?assertMatch(
+        {error, #beamtalk_error{kind = port_closed}},
+        gen_server:call(Pid, {'writeLine:', [<<"y">>]})
+    ),
+    ?assertEqual(nil, gen_server:call(Pid, {close, []})),
+    gen_server:stop(Pid).
+
+%% BT-5259: a reader parked on the dead port is answered (EOF), not left to hang.
+writeLine_to_dead_port_releases_parked_reader_test() ->
+    {CatExe, CatArgs} = cat_cmd(),
+    {ok, Pid} = beamtalk_subprocess:start(#{executable => CatExe, args => CatArgs}),
+    Self = self(),
+    Reader = spawn(fun() -> Self ! {read, gen_server:call(Pid, {readLine, []}, 5000)} end),
+    ok = beamtalk_test_wait:idle(Reader),
+    ok = beamtalk_test_wait:sync(Pid),
+    #{port := Port} = sys:get_state(Pid),
+    true = port_close(Port),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = port_closed}},
+        gen_server:call(Pid, {'writeLine:', [<<"x">>]})
+    ),
+    ?awaitMessage({read, ReadResult}),
+    ?assertEqual(nil, ReadResult),
+    gen_server:stop(Pid).
+
+%% BT-5259: a non-iodata argument is a type_error reply, not a crash.
+writeLine_non_iodata_returns_type_error_test() ->
+    {CatExe, CatArgs} = cat_cmd(),
+    {ok, Pid} = beamtalk_subprocess:start(#{executable => CatExe, args => CatArgs}),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = type_error}},
+        gen_server:call(Pid, {'writeLine:', [42]})
+    ),
+    ?assert(is_process_alive(Pid)),
+    gen_server:call(Pid, {close, []}),
+    gen_server:stop(Pid).
+
 %% Write Chunk until writeLine: answers an error; returns how many writes
 %% were accepted (answered nil) before it.
 write_until_error(_Pid, _Chunk, Accepted) when Accepted > 100 ->
