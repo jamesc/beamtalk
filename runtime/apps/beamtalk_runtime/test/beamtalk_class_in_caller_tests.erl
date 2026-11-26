@@ -24,7 +24,6 @@ process. An error has the same value on both paths.
 -define(METHODS, #{
     testSelf => #{arity => 0},
     testClassSelf => #{arity => 0},
-    testHasCount => #{arity => 0},
     testRaise => #{arity => 0},
     testSignal => #{arity => 0},
     testDnu => #{arity => 0},
@@ -159,23 +158,6 @@ in_caller_test_() ->
                     beamtalk_class_derived_cache:fetch(
                         {class_method_owner, Pid, 'hasField:'}, fun() -> {nocache, miss} end
                     )
-                )
-            end)
-        end},
-        {"with no class-variable home a class's state is unreachable", fun() ->
-            %% ADR 0153 Phase 3a: no per-chain class-variable fact lets a
-            %% home-less read answer the empty map any more (BT-5160 deletes
-            %% the access module).
-            with_class('Bt5158NoHome', none, fun(Pid) ->
-                ClassSelf = #beamtalk_object{
-                    class = tag('Bt5158NoHome'), class_mod = ?HELPER, pid = Pid
-                },
-                ?assertBtError(class_state_unreachable, beamtalk_class_vars:has(ClassSelf, count)),
-                ?assertBtError(
-                    class_state_unreachable, beamtalk_class_vars:clear(ClassSelf, count)
-                ),
-                ?assertBtError(
-                    class_state_unreachable, beamtalk_class_vars:put(ClassSelf, count, 1)
                 )
             end)
         end},

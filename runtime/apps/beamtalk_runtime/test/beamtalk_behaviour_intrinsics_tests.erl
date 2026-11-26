@@ -1404,31 +1404,6 @@ meta_fast_path_reflection_test_() ->
                 purge_meta_module(MetaMod)
             end
         end),
-        %% BT-5154 (ADR 0153): the compiler no longer emits `class_fields`;
-        %% a meta map without the key reads as no class-variable kinds.
-        ?_test(begin
-            MetaMod = load_meta_module(bt_meta_fixture_no_class_fields, #{
-                superclass => nil,
-                fields => [alpha],
-                method_info => #{},
-                class_method_info => #{}
-            }),
-            ClassName = 'BTMetaFixtureNoClassFields',
-            ClassInfo = #{
-                name => ClassName,
-                module => MetaMod,
-                superclass => none,
-                instance_methods => #{},
-                class_methods => #{}
-            },
-            {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
-            try
-                ?assertEqual(#{}, beamtalk_class_metadata:class_var_kinds_or_unknown(ClassName))
-            after
-                beamtalk_test_proc:stop(Pid),
-                purge_meta_module(MetaMod)
-            end
-        end),
         %% classIncludesSelector/2 on a metaclass-tagged object backed by a meta module
         %% uses the class_method_info fast path (maps:is_key over class_method_info).
         ?_test(begin
@@ -1630,9 +1605,9 @@ meta_fast_path_reflection_test_() ->
 %% Compile and load a module exporting __beamtalk_meta/0 returning MetaMap.
 %% Returns the module atom.
 load_meta_module(ModAtom, MetaMap0) ->
-    %% A module exporting `__beamtalk_meta/0` is inside the ADR 0130 class_var_abi
+    %% A module exporting `__beamtalk_meta/0` is inside the ADR 0130 module_abi
     %% load gate, so the fixture declares the current value like a compiled class.
-    MetaMap = MetaMap0#{class_var_abi => beamtalk_class_var_abi:abi()},
+    MetaMap = MetaMap0#{module_abi => beamtalk_module_abi:abi()},
     beamtalk_test_module:meta_module(ModAtom, MetaMap).
 
 purge_meta_module(ModAtom) ->

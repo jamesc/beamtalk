@@ -27,20 +27,20 @@ use beamtalk_core::ast::{
 };
 use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, DeclaredType};
 
-/// The calling convention a compiled module declares as `class_var_abi` in
-/// `__beamtalk_meta/0` (ADR 0130 §3). `1` was "class methods are
-/// `class_<sel>(ClassSelf, Args...)`"; `2` adds the actor-state cell protocol
-/// (ADR 0137); `3` (ADR 0142, BT-4301) retires the `nil` `ClassSelf`. The
-/// runtime's load gate (`beamtalk_class_var_abi:check_class_info_abi/2`,
-/// enforced at class registration, hot reload and the release preflight)
-/// compares it with `?BT_CLASS_VAR_ABI` in
-/// `runtime/apps/beamtalk_runtime/include/beamtalk_class_vars_keys.hrl`;
-/// `class_var_abi_matches_the_runtime_header` keeps the two equal until ADR
-/// 0153 Phase 3 moves the gate.
+/// The runtime ABI a compiled module declares as `module_abi` in
+/// `__beamtalk_meta/0`. The runtime's load gate
+/// (`beamtalk_module_abi:check_class_info_abi/2`, enforced at class
+/// registration, hot reload and the release preflight) refuses a module whose
+/// value is not exactly `?BT_MODULE_ABI` in
+/// `runtime/apps/beamtalk_runtime/include/beamtalk_module_abi.hrl`;
+/// `module_abi_matches_the_runtime_header` keeps the two equal.
 ///
-/// ADR 0153: compiled code no longer calls `beamtalk_class_vars`, which every
-/// runtime of this ABI still exports, so the value is unchanged.
-pub(super) const CLASS_VAR_ABI: i64 = 3;
+/// `1`-`3` were the class-variable calling conventions of ADR 0130, 0137 and
+/// 0142, declared under an older key. ADR 0153 deleted the runtime modules
+/// those conventions call, so the number moved to `4` under a new key and a
+/// module built by an older compiler (no `module_abi`) is refused with a clear
+/// message instead of failing with `undef`.
+pub(super) const MODULE_ABI: i64 = 4;
 
 /// ADR 0098 Phase 3: producing-toolchain identity baked into a module's
 /// `__beamtalk_meta/0` map so a *loaded* module is self-describing — consumers
@@ -446,10 +446,10 @@ impl CoreErlangGenerator {
             method_info_doc,
             ",\n      'class_method_info' => ",
             class_method_info_doc,
-            // ADR 0130 §3: the class-variable calling convention this module
-            // was compiled for (the runtime's load gate reads it).
-            ",\n      'class_var_abi' => ",
-            leaf::int_lit(CLASS_VAR_ABI),
+            // The runtime ABI this module was compiled for (the runtime's load
+            // gate reads it).
+            ",\n      'module_abi' => ",
+            leaf::int_lit(MODULE_ABI),
             // ADR 0103: sendability handle scope (omitted when undeclared).
             handle_scope_doc,
             // ADR 0123 §1/§2: declared shape version + migration table

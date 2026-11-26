@@ -1058,9 +1058,11 @@ test-cache-keys:
 # test_merge_queue (BT-5247): ci.yml and claude-review-queue.yml report the required
 # checks on the merge queue's `merge_group` commit, and every other PR workflow is
 # listed as one that cannot be required.
+# test_dependabot_auto (BT-5254): dependabot-auto.yml runs no PR code with its write token
+# and only approves and auto-merges patch/minor dependabot PRs.
 test-ci-ok:
     @python3 scripts/ci/ci_ok.py check
-    @cd scripts/ci && python3 -m unittest -q test_ci_ok test_ci_code_filter test_merge_queue
+    @cd scripts/ci && python3 -m unittest -q test_ci_ok test_ci_code_filter test_merge_queue test_dependabot_auto
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
@@ -1998,7 +2000,7 @@ test-hermetic-home:
 # `stdlib/bootstrap-test/*.btscript` (exercised by `test-stdlib`) is
 # bootstrap-primitive-only — arithmetic, booleans, equality, strings — and
 # contains no Actor code, so it never reaches the actor-state-threading
-# invariants (gen_server routing, class-var shadow-writes, self-send
+# invariants (gen_server routing, self-send
 # sequencing) this verifier spends most of its checks on. Those are
 # exercised by `stdlib/test/*.bt` (via `test-bunit`): specifically
 # `actor_self_send_position_matrix_test.bt`, `value_type_mutation_matrix_test.bt`,

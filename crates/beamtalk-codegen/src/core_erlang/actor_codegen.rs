@@ -373,12 +373,12 @@ impl CoreErlangGenerator {
             docs.push(Document::Str("\n"));
             docs.push(self.generate_meta_function(module, needs_spec_synthesis));
             // Generate register_class/0 for class system registration
-            docs.push(self.generate_register_class(module, needs_spec_synthesis)?);
+            docs.push(self.generate_register_class(module, needs_spec_synthesis));
         } else if has_protocols {
             // Protocol-only modules need register_class/0 for protocol
             // registration even though there are no classes.
             docs.push(Document::Str("\n"));
-            docs.push(self.generate_register_class(module, false)?);
+            docs.push(self.generate_register_class(module, false));
         }
 
         if has_protocol_source && let Some(source) = self.source_text.as_deref() {

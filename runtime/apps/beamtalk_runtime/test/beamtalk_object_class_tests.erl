@@ -13,7 +13,7 @@ Tests class-side method dispatch, metaclass lookup, and class object behaviour.
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
--export([class_lcSelf/1, class_lcKey/1]).
+-export([class_lcSelf/1]).
 
 %%====================================================================
 %% Setup/Teardown
@@ -1430,17 +1430,15 @@ test_local_call_non_object() ->
     ).
 
 %%====================================================================
-%% local_call/3 runs in the caller with no class-variable region (ADR 0153)
+%% local_call/3 runs in the caller (ADR 0153)
 %%====================================================================
 
 %% Class methods the local_call/3 tests reach (`class_mod = ?MODULE`).
 class_lcSelf(ClassSelf) -> ClassSelf.
-class_lcKey(#beamtalk_object{class = Tag}) -> erlang:get(beamtalk_class_vars:key_for_tag(Tag)).
 
 local_call_group() ->
     {foreach, fun setup/0, fun teardown/1, [
-        {"passes the receiver as ClassSelf, not nil", fun test_local_call_passes_receiver/0},
-        {"installs no class-variable key or snapshot marker", fun test_local_call_installs_no_key/0}
+        {"passes the receiver as ClassSelf, not nil", fun test_local_call_passes_receiver/0}
     ]}.
 
 lc_class(Name) ->
@@ -1450,7 +1448,7 @@ lc_class(Name) ->
         superclass => none,
         %% BT-4300: local_call/3 resolves through the published class-method
         %% selectors (the class-method chain), not any export of the module.
-        class_methods => #{lcSelf => #{arity => 0}, lcKey => #{arity => 0}}
+        class_methods => #{lcSelf => #{arity => 0}}
     },
     {ok, Pid} = beamtalk_object_class:start_link(Name, ClassInfo),
     #beamtalk_object{
@@ -1462,10 +1460,6 @@ lc_class(Name) ->
 test_local_call_passes_receiver() ->
     Obj = lc_class('BT3708LcSelf'),
     ?assertEqual(Obj, beamtalk_object_class:local_call(Obj, lcSelf, [])).
-
-test_local_call_installs_no_key() ->
-    Obj = lc_class('BT3708LcKey'),
-    ?assertEqual(undefined, beamtalk_object_class:local_call(Obj, lcKey, [])).
 
 %%====================================================================
 %% put_class_method/4 arity gate (ADR 0130 §3, BT-3708)

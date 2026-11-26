@@ -4,9 +4,8 @@
 //! ADR 0124 §3/B3: the guarded `maps:find` read for a `late` slot, in both
 //! `generate_field_access` branches (instance `State`/`Self` map,
 //! class-method class-variable read) — `expressions.rs`. Companion to BT-3548's
-//! `test_late_state_omitted_from_init_state_literal` /
-//! `test_late_classstate_omitted_from_classstate_map` in
-//! `class_registration.rs`, which cover the *representation* (key absence);
+//! `test_late_state_omitted_from_init_state_literal` in
+//! `class_registration.rs`, which covers the *representation* (key absence);
 //! this covers the *read*.
 
 use super::*;

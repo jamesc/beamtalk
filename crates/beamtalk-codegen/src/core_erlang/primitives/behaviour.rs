@@ -440,12 +440,12 @@ mod tests {
                 ("test_unknown_tower_selector", "unknownMethod", &[]),
                 // ADR 0153 (BT-5160): the class-variable name intrinsics are gone.
                 (
-                    "test_class_class_var_names_removed",
+                    "test_removed_class_name_intrinsic",
                     "classClassVarNames",
                     &[],
                 ),
                 (
-                    "test_class_all_class_var_names_removed",
+                    "test_removed_all_class_name_intrinsic",
                     "classAllClassVarNames",
                     &[],
                 ),

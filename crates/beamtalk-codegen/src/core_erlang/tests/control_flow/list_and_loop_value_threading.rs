@@ -240,9 +240,8 @@ fn test_value_type_field_write_in_last_position_conditional_is_threaded() {
 
 #[test]
 fn test_value_type_field_write_in_conditional_nested_in_loop_is_compile_error() {
-    // The half this fixes — byte-for-byte the class-var fragment above,
-    // with `classState:`/`class ` swapped for the `TestCase` value-type
-    // exemption.
+    // The half this fixes — byte-for-byte the fragment above, with the
+    // class swapped for the `TestCase` value-type exemption.
     //
     // The write is not a TOP-LEVEL statement of the loop body, so
     // `loop_body_threads_value_self` (and hence

@@ -1067,6 +1067,23 @@ that never starts stays pending, and the queue stalls.
 reason for each. Adding a workflow that runs on `pull_request` fails that test
 until the workflow either gets a `merge_group` trigger or is added to that list.
 
+**Dependabot PRs (BT-5254).** `dependabot-auto.yml` approves a dependabot PR and
+enables squash auto-merge when every updated dependency is a patch or minor bump
+(read by `dependabot/fetch-metadata`); the merge queue then takes it once `ci-ok`
+is green. Majors, and anything without a semver type, are left for the weekly
+fold-in session. `Claude BeamTalk Review` needs no stand-in: `claude-review.yml`
+skips dependabot, and GitHub counts a skipped job as a passing required check.
+The workflow runs on `pull_request_target`, so it never checks out or runs PR
+code, and it runs only when both the PR author and the event's actor are
+`dependabot[bot]`. Because `main` no longer requires up-to-date branches, there is
+no branch-updater job. Two repo settings are needed: Settings → Actions → General →
+"Allow GitHub Actions to create and approve pull requests", and Settings →
+General → "Allow auto-merge". `ci-ok` is the only gate on a bump, so a 0.x minor
+or a GitHub Actions bump merges once CI is green. To check it, wait for
+the next Monday dependabot PR (or comment `@dependabot recreate` on one): a
+patch/minor PR gets an approval from `github-actions[bot]` and auto-merge enabled;
+a major PR gets neither. `scripts/ci/test_dependabot_auto.py` pins the rest.
+
 **Batch size.** 2–4 PRs per queue run (*Maximum pull requests to build*), with
 *Minimum pull requests to merge* at 1. A larger batch saves runner time but a
 failure costs every PR in it a re-run. A queue run is the full suite, as long as

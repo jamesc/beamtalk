@@ -4,7 +4,7 @@
 // BT-3766, rewritten by BT-5150 (ADR 0153): a class-side `on:do:` in a loop
 // whose protected block always raises. The class used to declare a class
 // variable, which kept it in class-process mode and made every catch arm run
-// the class-variable restore. With `classState:` gone it is a stateless class
+// the class-variable restore. With class variables gone it is a stateless class
 // method that runs in the caller, so this row's number changes from the
 // BT-5145 baseline. `SsbOnDoRaiseObject` is the instance-side control.
 

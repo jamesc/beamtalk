@@ -1721,7 +1721,7 @@ pub(in crate::core_erlang) struct OnDoCatchVars {
     pub built_stack_var: String,
     pub ex_obj_var: String,
     pub match_var: String,
-    pub ex_class_var: String,
+    pub ex_class_term: String,
     /// The pattern variable of the exhaustive fallback clause that closes the
     /// class filter's `case` ([`CatchStep::FilterMiss`]).
     pub filter_fallback_var: String,

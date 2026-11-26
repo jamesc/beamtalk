@@ -237,7 +237,7 @@ impl Parser {
 
     /// Checks whether the current position starts a new class/protocol/
     /// type-alias/method/standalone-method declaration, or a `state:`/
-    /// `field:`/`classState:`/`uses:` keyword — the set of tokens that
+    /// `field:`/`uses:` keyword — the set of tokens that
     /// always end a method body no matter how the body was left (a trailing
     /// period, a cast `!`, or error recovery). Factored out of
     /// `parse_method_body` because the same check is needed at three
