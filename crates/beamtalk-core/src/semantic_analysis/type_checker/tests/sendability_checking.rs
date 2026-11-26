@@ -21,7 +21,6 @@ fn hierarchy_with(class: &str, superclass: &str) -> ClassHierarchy {
         methods: vec![MethodInfo {
             selector: "consume:".into(),
             arity: 1,
-            kind: MethodKind::Primary,
             defined_in: class.into(),
             is_sealed: false,
             is_internal: false,

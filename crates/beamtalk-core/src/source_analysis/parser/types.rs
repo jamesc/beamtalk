@@ -630,7 +630,7 @@ impl Parser {
             // - `TypeAnnotation::type_name()` (the unparser) already
             //   re-derives parens where precedence demands them — the
             //   `Difference`/`Intersection` arms parenthesise a nested
-            //   `Union`/`FalseOr`/opposite-operator operand — so a group that
+            //   `Union`/opposite-operator operand — so a group that
             //   changed the parse (e.g. `(A & B) \ C`) round-trips, while a
             //   redundant group (e.g. `(Integer)`) collapses away, which is
             //   fine since it doesn't change the AST shape.

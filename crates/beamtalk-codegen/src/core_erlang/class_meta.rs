@@ -22,7 +22,7 @@ use super::value_accessors::{AutoSlotMethods, compute_auto_slot_methods};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::{
-    ClassDefinition, ClassKind, MethodDefinition, MethodKind, Module, SlotKind, StateDeclaration,
+    ClassDefinition, ClassKind, MethodDefinition, Module, SlotKind, StateDeclaration,
     TypeParamDecl, declared_shape_migrations,
 };
 use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, DeclaredType};
@@ -768,7 +768,7 @@ impl CoreErlangGenerator {
         let Some(initialize) = class
             .methods
             .iter()
-            .find(|m| m.kind == MethodKind::Primary && m.selector.name() == "initialize")
+            .find(|m| m.selector.name() == "initialize")
         else {
             return Self::meta_atom_list(&[]);
         };
@@ -822,17 +822,16 @@ impl CoreErlangGenerator {
         let mut entries: Vec<MethodInfoEntry> = class
             .methods
             .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
             .map(|m| Self::meta_method_entry(m, class, type_params))
             .collect();
         // Standalone methods are excluded from __beamtalk_meta/0 (folded into the class, BT-4721)
         // but included in BuilderState.meta so init/1 can register their return types.
         if include_standalone {
-            for standalone in module.method_definitions.iter().filter(|m| {
-                m.class_name.name == class.name.name
-                    && !m.is_class_method
-                    && m.method.kind == MethodKind::Primary
-            }) {
+            for standalone in module
+                .method_definitions
+                .iter()
+                .filter(|m| m.class_name.name == class.name.name && !m.is_class_method)
+            {
                 entries.push(Self::meta_method_entry(
                     &standalone.method,
                     class,
@@ -892,17 +891,16 @@ impl CoreErlangGenerator {
         let mut entries: Vec<MethodInfoEntry> = class
             .class_methods
             .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
             .map(|m| Self::meta_method_entry(m, class, type_params))
             .collect();
         // Standalone methods are excluded from __beamtalk_meta/0 (folded into the class, BT-4721)
         // but included in BuilderState.meta so init/1 can register their return types.
         if include_standalone {
-            for standalone in module.method_definitions.iter().filter(|m| {
-                m.class_name.name == class.name.name
-                    && m.is_class_method
-                    && m.method.kind == MethodKind::Primary
-            }) {
+            for standalone in module
+                .method_definitions
+                .iter()
+                .filter(|m| m.class_name.name == class.name.name && m.is_class_method)
+            {
                 entries.push(Self::meta_method_entry(
                     &standalone.method,
                     class,
@@ -1036,7 +1034,7 @@ impl CoreErlangGenerator {
     ///
     /// `Union` and `Singleton` convert structurally
     /// (`MetaTypeRepr::Union` / `MetaTypeRepr::Singleton`), rather than
-    /// degrading to a flat atom of the rendered string. `FalseOr`, `Difference`, `Intersection`,
+    /// degrading to a flat atom of the rendered string. `Difference`, `Intersection`,
     /// `SelfType`, `SelfClass`, and `ClassOf` are rare in method signatures
     /// and still fall back to a flat `Atom` of the rendered string (old
     /// readers of a new artifact degrade gracefully; the format is internal
@@ -1092,7 +1090,7 @@ impl CoreErlangGenerator {
             // A map shape (ADR 0147) is a flat `Dictionary` in metadata —
             // see `DeclaredType::erase_shapes`.
             DeclaredType::Shape { .. } => MetaTypeRepr::Atom("Dictionary".to_string()),
-            // FalseOr, Difference, Intersection, SelfType, SelfClass, ClassOf
+            // Difference, Intersection, SelfType, SelfClass, ClassOf
             // → fall back to flat atom string (see doc above).
             _ => MetaTypeRepr::Atom(dt.erase_shapes().to_string()),
         }

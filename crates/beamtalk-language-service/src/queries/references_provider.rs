@@ -310,9 +310,6 @@ fn collect_type_annotation_refs(
                 collect_type_annotation_refs(ty, name, file_path, results);
             }
         }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            collect_type_annotation_refs(inner, name, file_path, results);
-        }
         TypeAnnotation::Difference { base, excluded, .. } => {
             collect_type_annotation_refs(base, name, file_path, results);
             collect_type_annotation_refs(excluded, name, file_path, results);

@@ -939,14 +939,6 @@ mod tests {
     }
 
     #[test]
-    fn type_annotation_false_or() {
-        let inner = TypeAnnotation::simple("Integer", Span::new(0, 7));
-        let ty = TypeAnnotation::false_or(inner, Span::new(0, 15));
-        assert!(matches!(ty, TypeAnnotation::FalseOr { .. }));
-        assert_eq!(ty.span(), Span::new(0, 15));
-    }
-
-    #[test]
     fn type_annotation_span() {
         // Test that span() works for all variants
         let simple = TypeAnnotation::simple("Int", Span::new(0, 3));
@@ -964,12 +956,6 @@ mod tests {
             Span::new(0, 6),
         );
         assert_eq!(generic.span(), Span::new(0, 6));
-
-        let false_or = TypeAnnotation::false_or(
-            TypeAnnotation::simple("X", Span::new(0, 1)),
-            Span::new(0, 9),
-        );
-        assert_eq!(false_or.span(), Span::new(0, 9));
     }
 
     #[test]
@@ -995,25 +981,6 @@ mod tests {
             Span::new(0, 19),
         );
         assert_eq!(generic.type_name(), "Collection(Integer)");
-
-        let false_or = TypeAnnotation::false_or(
-            TypeAnnotation::simple("Integer", Span::new(0, 7)),
-            Span::new(0, 15),
-        );
-        assert_eq!(false_or.type_name(), "Integer | False");
-
-        // FalseOr with union inner type should parenthesize
-        let false_or_union = TypeAnnotation::false_or(
-            TypeAnnotation::union(
-                vec![
-                    TypeAnnotation::simple("Integer", Span::new(0, 7)),
-                    TypeAnnotation::simple("String", Span::new(10, 16)),
-                ],
-                Span::new(0, 16),
-            ),
-            Span::new(0, 24),
-        );
-        assert_eq!(false_or_union.type_name(), "(Integer | String) | False");
     }
 
     #[test]

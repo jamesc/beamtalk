@@ -12,9 +12,7 @@
 //! negative has an unshadowed positive control so it cannot pass vacuously.
 
 use super::super::{CodegenOptions, CoreErlangGenerator, DirectCallClassInfo, generate_module};
-use beamtalk_core::ast::{
-    Expression, Identifier, KeywordPart, Literal, MessageSelector, MethodKind,
-};
+use beamtalk_core::ast::{Expression, Identifier, KeywordPart, Literal, MessageSelector};
 use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 use beamtalk_core::source_analysis::Span;
 
@@ -27,7 +25,6 @@ fn sealed_parser(package: Option<&str>) -> ClassInfo {
         class_methods: vec![MethodInfo {
             selector: "parse:".into(),
             arity: 1,
-            kind: MethodKind::Primary,
             defined_in: "Parser".into(),
             is_sealed: true,
             is_internal: false,

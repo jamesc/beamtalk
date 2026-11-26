@@ -3,8 +3,7 @@
 
 //! Method definition AST nodes for Beamtalk.
 //!
-//! This module contains [`MethodDefinition`], [`ParameterDefinition`],
-//! and [`MethodKind`].
+//! This module contains [`MethodDefinition`] and [`ParameterDefinition`].
 
 use crate::span::Span;
 use ecow::EcoString;
@@ -112,7 +111,7 @@ impl ConstantValue {
 
 /// Modifier flags for a method definition.
 ///
-/// All flags default to `false` and kind defaults to `Primary`,
+/// All flags default to `false`,
 /// so callers can use struct update syntax:
 /// ```ignore
 /// MethodModifiers { is_sealed: true, ..Default::default() }
@@ -125,20 +124,6 @@ pub struct MethodModifiers {
     pub is_internal: bool,
     /// Whether this is a class-side method (the `class ` modifier).
     pub is_class_method: bool,
-    /// The kind of method.
-    pub kind: MethodKind,
-}
-
-/// The kind of method.
-///
-/// Currently only Primary methods exist. Additional kinds (e.g., AOP-style
-/// before/after/around) may be added in the future if needed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum MethodKind {
-    /// A normal/primary method.
-    #[default]
-    Primary,
 }
 
 /// A method parameter definition with optional type annotation.
@@ -204,8 +189,6 @@ pub struct MethodDefinition {
     /// methods (ADR 0082). Whole-file unparse adds the prefix from its
     /// own context, so it ignores this flag.
     pub is_class_method: bool,
-    /// The kind of method.
-    pub kind: MethodKind,
     /// Optional `@expect` directive attached to this method declaration.
     ///
     /// When present, diagnostics matching any of these categories that fire
@@ -422,7 +405,6 @@ impl MethodDefinition {
             is_sealed: false,
             is_internal: false,
             is_class_method: false,
-            kind: MethodKind::Primary,
             expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
@@ -449,7 +431,6 @@ impl MethodDefinition {
             is_sealed: false,
             is_internal: false,
             is_class_method: false,
-            kind: MethodKind::Primary,
             expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
@@ -477,7 +458,6 @@ impl MethodDefinition {
             is_sealed: modifiers.is_sealed,
             is_internal: modifiers.is_internal,
             is_class_method: modifiers.is_class_method,
-            kind: modifiers.kind,
             expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
@@ -585,11 +565,10 @@ pub struct DuplicateMethod<'a> {
 /// as a diagnostic and codegen refuses the first one as a backstop.
 #[must_use]
 pub fn duplicate_methods(methods: &[MethodDefinition]) -> Vec<DuplicateMethod<'_>> {
-    let mut seen: std::collections::HashMap<(EcoString, MethodKind), Span> =
-        std::collections::HashMap::new();
+    let mut seen: std::collections::HashMap<EcoString, Span> = std::collections::HashMap::new();
     let mut dups = Vec::new();
     for method in methods {
-        match seen.entry((method.selector.name(), method.kind)) {
+        match seen.entry(method.selector.name()) {
             std::collections::hash_map::Entry::Occupied(first) => dups.push(DuplicateMethod {
                 method,
                 first_span: *first.get(),

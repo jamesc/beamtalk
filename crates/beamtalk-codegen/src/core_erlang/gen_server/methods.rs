@@ -19,7 +19,6 @@ use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::{Document, INDENT, join, leaf, nest};
 use beamtalk_core::ast::{
     Block, CascadeMessage, ClassDefinition, Expression, MessageSelector, MethodDefinition,
-    MethodKind,
 };
 use beamtalk_core::source_analysis::Span;
 use ecow::EcoString;
@@ -102,10 +101,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let mut docs = Vec::new();
         for method in &class.methods {
-            // Only generate dispatch for primary methods for now
-            if method.kind == MethodKind::Primary {
-                docs.push(self.generate_method_dispatch(method, indent_level)?);
-            }
+            docs.push(self.generate_method_dispatch(method, indent_level)?);
         }
         Ok(Document::Vec(docs))
     }

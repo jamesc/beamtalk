@@ -1301,9 +1301,6 @@ pub(crate) fn for_each_type_annotation_class_ref<'a>(
                 for_each_type_annotation_class_ref(ty, f);
             }
         }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            for_each_type_annotation_class_ref(inner, f);
-        }
         TypeAnnotation::Difference { base, excluded, .. } => {
             for_each_type_annotation_class_ref(base, f);
             for_each_type_annotation_class_ref(excluded, f);

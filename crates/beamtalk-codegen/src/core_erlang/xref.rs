@@ -171,7 +171,7 @@ impl CoreErlangGenerator {
     /// ADR 0087 Phase 2: Builds the `method_xref` list document baked
     /// into `register_class/0`'s `ClassInfo` (via `BuilderState.methodXref`).
     ///
-    /// One entry per primary method (instance- and class-side). Each entry
+    /// One entry per method (instance- and class-side). Each entry
     /// records the method's defining line, the selectors it sends (with
     /// receiver kind), and the classes it references — the per-method rows
     /// `beamtalk_xref:register_class/2` fans out into the senders / references /

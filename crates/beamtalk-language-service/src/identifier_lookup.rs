@@ -485,9 +485,6 @@ impl SimpleLanguageService {
                     .iter()
                     .find_map(|ty| Self::find_identifier_in_type_annotation(ty, offset_val))
             }
-            TypeAnnotation::FalseOr { inner, .. } => {
-                Self::find_identifier_in_type_annotation(inner, offset_val)
-            }
             TypeAnnotation::Difference { base, excluded, .. } => {
                 Self::find_identifier_in_type_annotation(base, offset_val)
                     .or_else(|| Self::find_identifier_in_type_annotation(excluded, offset_val))

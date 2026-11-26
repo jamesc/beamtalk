@@ -10,7 +10,7 @@
 //! (`generate_primitive_has_method`/`generate_minimal_has_method`) implement
 //! the same reflection surface — "does this class understand `Selector`,
 //! locally or via an ancestor?" — and had drifted: the actor version only
-//! checked its own primary methods, silently omitting superclass delegation
+//! checked its own methods, silently omitting superclass delegation
 //! and the catch-all-DNU short-circuit that the value-type version already
 //! had. That made `respondsTo:` answer differently for an actor than for a
 //! value type given the identical situation (an inherited method, or a class

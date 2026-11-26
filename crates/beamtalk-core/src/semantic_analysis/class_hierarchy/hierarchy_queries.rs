@@ -7,7 +7,7 @@
 //! questions about class relationships (is-actor, is-value, is-typed, etc.)
 //! and aggregate inherited state/class-variable information.
 
-use crate::ast::{ClassDefinition, ClassKind, MethodKind, Module, SlotKind};
+use crate::ast::{ClassDefinition, ClassKind, Module, SlotKind};
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use ecow::EcoString;
 use std::collections::{BTreeSet, HashSet};
@@ -849,9 +849,7 @@ impl ClassHierarchy {
             methods: &'m [crate::ast::MethodDefinition],
             selector: &str,
         ) -> Option<&'m crate::ast::MethodDefinition> {
-            methods
-                .iter()
-                .find(|m| m.kind == MethodKind::Primary && m.selector.name() == selector)
+            methods.iter().find(|m| m.selector.name() == selector)
         }
         let keyword = match selector {
             "new" => false,

@@ -240,7 +240,6 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     let class_name = module.classes[target_idx].name.name.to_string();
 
     // 3. Merge the method into the target class (replace-or-add) via the shared path.
-    let patched_kind = method.kind;
     {
         let class = &mut module.classes[target_idx];
         let methods = if is_class_method {
@@ -302,9 +301,7 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
             } else {
                 &c.methods
             };
-            methods
-                .iter()
-                .find(|m| m.selector.name() == selector && m.kind == patched_kind)
+            methods.iter().find(|m| m.selector.name() == selector)
         });
     let patched_method_span = patched_method.map(|m| m.span);
     // ADR 0105 Phase 1: declared signature of the patched method, read

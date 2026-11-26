@@ -302,7 +302,6 @@ fn method_meta(selector: &str) -> MethodMeta {
     MethodMeta {
         arity: selector.matches(':').count(),
         selector: selector.to_string(),
-        kind: MethodKindMeta::Primary,
         is_sealed: false,
         is_internal: false,
         spawns_block: false,

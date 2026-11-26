@@ -83,7 +83,6 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     is_class_method: false,
-                    kind: Primary,
                     expect: None,
                     comments: CommentAttachment {
                         leading: [
@@ -212,7 +211,6 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     is_class_method: false,
-                    kind: Primary,
                     expect: None,
                     comments: CommentAttachment {
                         leading: [
@@ -444,7 +442,6 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     is_class_method: false,
-                    kind: Primary,
                     expect: None,
                     comments: CommentAttachment {
                         leading: [
@@ -540,7 +537,6 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     is_class_method: false,
-                    kind: Primary,
                     expect: None,
                     comments: CommentAttachment {
                         leading: [
@@ -651,7 +647,6 @@ Module {
                     is_sealed: false,
                     is_internal: false,
                     is_class_method: false,
-                    kind: Primary,
                     expect: None,
                     comments: CommentAttachment {
                         leading: [

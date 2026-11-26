@@ -63,7 +63,8 @@ const CACHE_FILENAME: &str = ".beamtalk-pass1-cache.json";
 /// `false` there), so v7 entries would hide it from cross-file callers
 /// (BT-4640).
 /// v9: entries no longer carry per-file extension definitions (ADR 0152).
-const CACHE_VERSION: u32 = 9;
+/// v10: `MethodInfo` dropped its single-variant `kind` field (BT-5220).
+const CACHE_VERSION: u32 = 10;
 
 /// On-disk representation of the Pass 1 metadata cache.
 ///

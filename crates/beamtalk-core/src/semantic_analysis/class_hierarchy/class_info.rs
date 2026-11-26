@@ -7,7 +7,7 @@
 //! that describe classes and methods in the static hierarchy.
 
 use crate::ast::{
-    ClassDefinition, ClassKind, ConstantValue, Expression, MethodDefinition, MethodKind, SlotKind,
+    ClassDefinition, ClassKind, ConstantValue, Expression, MethodDefinition, SlotKind,
 };
 use ecow::EcoString;
 use std::collections::{BTreeSet, HashMap};
@@ -25,8 +25,6 @@ pub struct MethodInfo {
     pub selector: EcoString,
     /// Number of arguments.
     pub arity: usize,
-    /// Method kind.
-    pub kind: MethodKind,
     /// Class that defines this method.
     pub defined_in: EcoString,
     /// Whether this method is sealed (cannot be overridden).
@@ -113,7 +111,6 @@ impl MethodInfo {
         Self {
             selector: m.selector.name(),
             arity: m.selector.arity(),
-            kind: m.kind,
             defined_in: class.name.name.clone(),
             is_sealed: class.is_method_sealed(m),
             is_internal: m.is_internal,
@@ -153,7 +150,6 @@ impl MethodInfo {
         Self {
             selector: selector.into(),
             arity: param_types.len(),
-            kind: MethodKind::Primary,
             defined_in: defined_in.into(),
             is_sealed: false,
             is_internal: false,
@@ -649,7 +645,7 @@ impl ClassInfo {
             initialize_assigns: class
                 .methods
                 .iter()
-                .find(|m| m.kind == MethodKind::Primary && m.selector.name() == "initialize")
+                .find(|m| m.selector.name() == "initialize")
                 .map(|m| crate::semantic_analysis::analyze_initialize_assigns(&m.body))
                 .unwrap_or_default(),
             has_dynamic_field_writer: crate::semantic_analysis::has_dynamic_field_writer(

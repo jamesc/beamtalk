@@ -354,7 +354,6 @@ fn test_generate_method_list_emits_return_type() {
     let methods = vec![MethodMeta {
         selector: "add:".to_string(),
         arity: 1,
-        kind: MethodKindMeta::Primary,
         is_sealed: false,
         is_internal: false,
         spawns_block: false,
@@ -382,7 +381,6 @@ fn test_generate_method_list_emits_none_return_type() {
     let methods = vec![MethodMeta {
         selector: "increment".to_string(),
         arity: 0,
-        kind: MethodKindMeta::Primary,
         is_sealed: false,
         is_internal: false,
         spawns_block: false,
@@ -410,7 +408,6 @@ fn test_generate_method_list_emits_spawns_block_true() {
     let methods = vec![MethodMeta {
         selector: "after:do:".to_string(),
         arity: 2,
-        kind: MethodKindMeta::Primary,
         is_sealed: false,
         is_internal: false,
         spawns_block: true,
@@ -437,7 +434,6 @@ fn test_generate_method_list_emits_is_internal_true() {
     let methods = vec![MethodMeta {
         selector: "xrefImplementorsOf:".to_string(),
         arity: 1,
-        kind: MethodKindMeta::Primary,
         is_sealed: false,
         is_internal: true,
         spawns_block: false,
@@ -586,12 +582,6 @@ fn test_declared_type_to_rust_expr_covers_every_variant() {
         r#"DeclaredType::generic("List", vec![DeclaredType::simple("Integer")])"#
     );
     assert_eq!(
-        declared_type_to_rust_expr(&DeclaredType::FalseOr(Box::new(DeclaredType::simple(
-            "Integer"
-        )))),
-        r#"DeclaredType::FalseOr(Box::new(DeclaredType::simple("Integer")))"#
-    );
-    assert_eq!(
         declared_type_to_rust_expr(&DeclaredType::Difference {
             base: Box::new(DeclaredType::simple("Object")),
             excluded: Box::new(DeclaredType::simple("Nil")),
@@ -626,7 +616,6 @@ fn test_generate_method_list_escapes_doc_special_characters() {
     let methods = vec![MethodMeta {
         selector: "help".to_string(),
         arity: 0,
-        kind: MethodKindMeta::Primary,
         is_sealed: false,
         is_internal: false,
         spawns_block: false,

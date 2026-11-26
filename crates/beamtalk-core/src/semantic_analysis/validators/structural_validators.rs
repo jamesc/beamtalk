@@ -299,15 +299,6 @@ fn check_annotation_for_unresolved_alias(
                 );
             }
         }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            check_annotation_for_unresolved_alias(
-                inner,
-                hierarchy,
-                protocol_registry,
-                alias_registry,
-                diagnostics,
-            );
-        }
         TypeAnnotation::Difference { base, excluded, .. } => {
             check_annotation_for_unresolved_alias(
                 base,

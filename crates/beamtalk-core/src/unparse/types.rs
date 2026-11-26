@@ -30,14 +30,6 @@ pub(super) fn unparse_type_annotation(ty: &TypeAnnotation) -> Document<'static> 
             let joined = join_docs(param_docs, ", ");
             docvec![leaf::ident(&base.name), "(", joined, ")"]
         }
-        TypeAnnotation::FalseOr { inner, .. } => {
-            // A union/`FalseOr` inner needs grouping to match `type_name`.
-            let needs_parens = matches!(
-                inner.as_ref(),
-                TypeAnnotation::Union { .. } | TypeAnnotation::FalseOr { .. }
-            );
-            docvec![unparse_grouped_type(inner, needs_parens), " | False"]
-        }
         TypeAnnotation::Difference { base, excluded, .. } => {
             // Re-derive grouping parens where re-parsing would
             // otherwise change the AST. The predicate is shared with

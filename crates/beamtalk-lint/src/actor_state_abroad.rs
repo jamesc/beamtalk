@@ -92,7 +92,7 @@ use std::collections::HashSet;
 use crate::{LintContext, LintPass, async_cast_hint};
 use beamtalk_core::ast::{
     Block, ClassDefinition, ClassKind, DeclaredKeyword, Expression, ExpressionStatement,
-    MessageSelector, MethodKind, Module, ParameterDefinition, TypeAnnotation, WellKnownSelector,
+    MessageSelector, Module, ParameterDefinition, TypeAnnotation, WellKnownSelector,
 };
 use beamtalk_core::ast_walker::{SendRef, SendSite, walk_expression, walk_sends};
 use beamtalk_core::semantic_analysis::ClassHierarchy;
@@ -128,18 +128,14 @@ fn check_module(module: &Module, hierarchy: &ClassHierarchy, diagnostics: &mut V
             actor_fields: actor_typed_fields(module, hierarchy, class_name),
             hierarchy,
         };
-        for method in class
-            .methods
-            .iter()
-            .filter(|m| m.kind == MethodKind::Primary)
-        {
+        for method in &class.methods {
             check_method_body(&method.body, &method.parameters, &ctx, diagnostics);
         }
     }
     // Standalone `Counter >> tick => ...` definitions are instance methods
     // of `Counter` too.
     for standalone in &module.method_definitions {
-        if standalone.is_class_method || standalone.method.kind != MethodKind::Primary {
+        if standalone.is_class_method {
             continue;
         }
         let class_name = standalone.class_name.name.as_str();

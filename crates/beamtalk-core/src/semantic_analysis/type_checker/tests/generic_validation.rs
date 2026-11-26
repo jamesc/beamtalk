@@ -265,7 +265,6 @@ fn bt2022_generic_type_param_in_declared_args_not_warned() {
             ],
             span: span(),
         }),
-        kind: MethodKind::Primary,
         is_sealed: false,
         is_internal: false,
         is_class_method: false,

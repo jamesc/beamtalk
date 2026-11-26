@@ -139,8 +139,6 @@ pub(super) struct MethodMeta {
     pub(super) selector: String,
     /// Number of arguments the method accepts.
     pub(super) arity: usize,
-    /// Method dispatch kind.
-    pub(super) kind: MethodKindMeta,
     /// Whether this method is sealed (cannot be overridden).
     pub(super) is_sealed: bool,
     /// Whether this method is internal (package-scoped visibility, ADR 0071).
@@ -164,28 +162,6 @@ pub(super) struct MethodMeta {
     pub(super) answers_receiver: bool,
 }
 
-/// Simplified method kind for code generation.
-pub(super) enum MethodKindMeta {
-    /// Standard method dispatch.
-    Primary,
-}
-
-impl MethodKindMeta {
-    /// Convert from the AST method kind representation.
-    fn from_ast(kind: beamtalk_core::ast::MethodKind) -> Self {
-        match kind {
-            beamtalk_core::ast::MethodKind::Primary => Self::Primary,
-        }
-    }
-
-    /// Return the Rust expression string for this kind (used in codegen output).
-    pub(super) fn to_rust_expr(&self) -> &'static str {
-        match self {
-            Self::Primary => "MethodKind::Primary",
-        }
-    }
-}
-
 /// Convert an AST method definition to `MethodMeta`; `class_side` selects the
 /// side's constant rule ([`MethodInfo::recorded_constant`]).
 fn method_def_to_meta(
@@ -196,7 +172,6 @@ fn method_def_to_meta(
     MethodMeta {
         selector: m.selector.name().to_string(),
         arity: m.selector.arity(),
-        kind: MethodKindMeta::from_ast(m.kind),
         is_sealed: class.is_method_sealed(m),
         is_internal: m.is_internal,
         spawns_block: false,
@@ -252,7 +227,6 @@ pub(super) fn synthesize_value_auto_methods(
             methods.push(MethodMeta {
                 selector: slot_name.to_string(),
                 arity: 0,
-                kind: MethodKindMeta::Primary,
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
@@ -277,7 +251,6 @@ pub(super) fn synthesize_value_auto_methods(
             methods.push(MethodMeta {
                 selector: with_sel,
                 arity: 1,
-                kind: MethodKindMeta::Primary,
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
@@ -321,7 +294,6 @@ pub(super) fn synthesize_value_auto_methods(
     class_methods.push(MethodMeta {
         selector: kw_sel.clone(),
         arity,
-        kind: MethodKindMeta::Primary,
         is_sealed: false,
         is_internal: false,
         spawns_block: false,
@@ -749,9 +721,7 @@ pub(super) fn extract_class_metadata(
     let initialize_assigns = class
         .methods
         .iter()
-        .find(|m| {
-            m.kind == beamtalk_core::ast::MethodKind::Primary && m.selector.name() == "initialize"
-        })
+        .find(|m| m.selector.name() == "initialize")
         .map(|m| {
             beamtalk_core::semantic_analysis::analyze_initialize_assigns(&m.body)
                 .into_iter()

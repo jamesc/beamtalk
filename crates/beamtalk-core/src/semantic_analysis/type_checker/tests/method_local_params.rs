@@ -22,7 +22,6 @@ fn add_processor_class(hierarchy: &mut ClassHierarchy) {
             MethodInfo {
                 selector: eco_string("processResult:"),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("Processor"),
                 is_sealed: false,
                 is_internal: false,
@@ -39,7 +38,6 @@ fn add_processor_class(hierarchy: &mut ClassHierarchy) {
             MethodInfo {
                 selector: eco_string("processArray:"),
                 arity: 1,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("Processor"),
                 is_sealed: false,
                 is_internal: false,

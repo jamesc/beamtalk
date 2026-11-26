@@ -35,7 +35,6 @@ fn add_counter_actor(hierarchy: &mut ClassHierarchy) {
             MethodInfo {
                 selector: eco_string("increment"),
                 arity: 0,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("Counter"),
                 is_sealed: false,
                 is_internal: false,
@@ -53,7 +52,6 @@ fn add_counter_actor(hierarchy: &mut ClassHierarchy) {
             MethodInfo {
                 selector: eco_string("getValue"),
                 arity: 0,
-                kind: MethodKind::Primary,
                 defined_in: eco_string("Counter"),
                 is_sealed: false,
                 is_internal: false,
