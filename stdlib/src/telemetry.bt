@@ -27,10 +27,9 @@
 /// and detaching the last such handler turns them off again; so do
 /// `Tracing enable` / `Tracing disable`. Their `#pid` is always a pid. A
 /// send to a node-qualified registered ref (one from `named:on:`) on another
-/// node usually addresses the name there directly, with no pid: such a send
-/// emits none of these events, but still counts in `Tracing`'s per-class
-/// stats, under class `unknown` (BT-5271). A send that resolves the name to a
-/// pid first (a lifecycle selector, say) emits them as usual.
+/// node addresses the name there directly, in one round trip, only while
+/// these events are off; while they are on it resolves the name to the
+/// actor's pid first, so it is observed like any other send (BT-5271).
 /// Erlang or Elixir code attaching with
 /// `telemetry:attach/4` sets the `beamtalk_runtime` app env
 /// `dispatch_telemetry` to `true` or calls

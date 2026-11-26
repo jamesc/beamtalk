@@ -318,7 +318,9 @@ are answered by the ref alone. `isAlive` and the selectors answered from the
 pid in the caller (`kill`, `pid`, `monitor`, `onExit:`, `stop`, `stopWith:`,
 `isRemote`, …) still resolve the name on `Node` first, as does a sync send
 made inside a call chain that already holds a pid on `Node`, so the
-call-stack deadlock check still sees its target.
+call-stack deadlock check still sees its target, and any send while actor
+dispatch events are on (ADR 0069; `Tracing enable` turns them on), so it is
+observed with the actor's pid like any other send.
 
 ### 4. Cluster-unique names (opt-in `global`)
 

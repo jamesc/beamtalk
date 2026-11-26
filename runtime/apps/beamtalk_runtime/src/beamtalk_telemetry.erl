@@ -343,10 +343,13 @@ metadata map built at all. With them on it also emits
 is enabled, sets the causal span id (and the trace id, for a root span) in
 the process dictionary and records a trace event.
 
-A send to a node-qualified registered ref addresses `{Name, Node}` directly
-and has no pid (BT-5271). It records the aggregate only and emits no events,
-so the events' `pid` is always a pid: a handler that treats it as one cannot
-raise on it (and `telemetry` permanently detaches a handler that raises).
+A send to a node-qualified registered ref that addresses `{Name, Node}`
+directly has no pid (BT-5271). Such a send is only made while dispatch
+events are off (`beamtalk_actor_send:direct_registered_send/3` resolves the
+pid while they are on), so it records the aggregate only. If the events are
+turned on mid-send it still emits none: the events' `pid` is always a pid, so
+a handler that treats it as one cannot raise on it (and `telemetry`
+permanently detaches a handler that raises).
 """.
 -spec dispatch_span(
     pid() | {atom(), node()}, atom(), atom(), sync | async | cast, fun(() -> {term(), atom()})

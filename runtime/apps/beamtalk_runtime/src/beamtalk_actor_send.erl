@@ -1109,7 +1109,12 @@ needs the pid:
   path's `type_error`;
 - a send made inside a sync call chain that already holds a pid on `Node`
   resolves, so the Layer 2 call-stack check (`check_call_stack/2`) still sees
-  the target and raises `deadlock_detected` instead of waiting out the call.
+  the target and raises `deadlock_detected` instead of waiting out the call;
+- while dispatch events are on (`beamtalk_telemetry:dispatch_events_enabled/0`,
+  which `Tracing enable` also turns on) the send resolves, so it is observed
+  like any other send: its events carry the actor's pid, and trace capture
+  gets its span and trace event. Only the default (events off) pays one
+  round trip.
 """.
 -spec direct_registered_send(proxy_ref(), atom(), default | {timeout, term()}) ->
     {true, atom(), node(), default | timeout()} | false.
@@ -1118,7 +1123,10 @@ direct_registered_send({registered, Name, Node}, Selector, SendTimeout) when
 ->
     case call_timeout(SendTimeout) of
         {ok, CallTimeout} ->
-            case needs_resolved_pid(Selector) orelse call_stack_has_node(Node) of
+            case
+                needs_resolved_pid(Selector) orelse call_stack_has_node(Node) orelse
+                    beamtalk_telemetry:dispatch_events_enabled()
+            of
                 false -> {true, Name, Node, CallTimeout};
                 true -> false
             end;
@@ -1175,12 +1183,13 @@ As for a cast to a remote pid, distribution may buffer a cast sent while the
 connection is still being set up and deliver it if the node comes back.
 Returns `false` for any other ref, or for a selector a cast answers from the
 resolved pid (`continueWith:`, `continueWith:withArguments:`), which keeps the
-resolving path. The dispatch span is given `{Name, Node}`, as in
+resolving path, as does any cast while dispatch events are on (see
+`direct_registered_send/3`). The dispatch span is given `{Name, Node}`, as in
 `sync_call_registered/5`.
 """.
 -spec cast_send_registered(proxy_ref(), atom(), list()) -> ok | false.
 cast_send_registered({registered, Name, Node}, Selector, Args) when Node =/= node() ->
-    case cast_needs_resolved_pid(Selector) of
+    case cast_needs_resolved_pid(Selector) orelse beamtalk_telemetry:dispatch_events_enabled() of
         true ->
             false;
         false ->

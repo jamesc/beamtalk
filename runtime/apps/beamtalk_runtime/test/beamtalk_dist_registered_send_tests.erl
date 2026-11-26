@@ -16,7 +16,8 @@ peer (`whereis_counter/2`), read only after `erlang:trace_delivered/1`, so
 the count is exact without any sleep.
 
 1. A plain sync send (`sync_send/3,4`) and a cast make no `whereis` on the
-   peer.
+   peer, unless dispatch events are on (then the pid is resolved, so the
+   send is observed with it).
 2. Errors are unchanged: `no_such_process` for a name not registered on a
    live node, `node_down` across a partition.
 3. Lifecycle selectors on the ref keep their answers (they still resolve the
@@ -56,6 +57,9 @@ registered_send_test_() ->
                 end},
                 {"a cast to a remote named ref makes no whereis round trip", fun() ->
                     cast_makes_no_whereis(PeerNode)
+                end},
+                {"with dispatch events on, a remote named send resolves the pid", fun() ->
+                    dispatch_events_on_resolves_the_pid(PeerNode)
                 end},
                 {"a remote name not registered on a live node is no_such_process", fun() ->
                     unregistered_name_is_no_such_process(PeerNode)
@@ -196,6 +200,27 @@ cast_makes_no_whereis(PeerNode) ->
         %% sender, one receiver), so it sees the cast's effect.
         ?assertEqual(9, beamtalk_actor:sync_send(Pid, getValue, []))
     after
+        stop_remote(PeerNode, Pid)
+    end.
+
+%% While dispatch events are on (as under `Tracing enable`), a send resolves
+%% the pid first, so its events and trace capture see the actor's pid.
+dispatch_events_on_resolves_the_pid(PeerNode) ->
+    {Name, Pid} = start_named_counter(PeerNode, 4),
+    Ref = {registered, Name, PeerNode},
+    ok = beamtalk_telemetry:enable_dispatch_events(),
+    try
+        {Result, Whereis} = with_whereis_count(PeerNode, Name, fun() ->
+            beamtalk_actor:sync_send(Ref, getValue, [])
+        end),
+        ?assertEqual(4, Result),
+        ?assertEqual(1, Whereis),
+        {ok, CastWhereis} = with_whereis_count(PeerNode, Name, fun() ->
+            beamtalk_actor:cast_send(Ref, 'setValue:', [4])
+        end),
+        ?assertEqual(1, CastWhereis)
+    after
+        ok = beamtalk_telemetry:disable_dispatch_events(),
         stop_remote(PeerNode, Pid)
     end.
 
