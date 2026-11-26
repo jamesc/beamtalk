@@ -24,79 +24,95 @@ TestCase subclass: NestedTypePatternTest
     self assert: (self bindPort: {#tcp, 1, 2}) equals: 0
 
   testTupleTwoTypeTestsLeftToRight =>
-    f := [:v | v match: [
-      {a :: Integer, b :: String} -> 1;
-      {a :: String, b :: Integer} -> 2;
-      _ -> 3
-    ]]
+    f := [:v |
+      v match: [
+        {a :: Integer, b :: String} -> 1;
+        {a :: String, b :: Integer} -> 2;
+        _ -> 3
+      ]
+    ]
     self assert: (f value: {1, "x"}) equals: 1
     self assert: (f value: {"x", 1}) equals: 2
     self assert: (f value: {1, 1}) equals: 3
 
   testTypeTestRunsBeforeGuard =>
-    f := [:v | v match: [
-      {#n, n :: Integer} when: [n > 5] -> #big;
-      {#n, n :: Integer} -> #small;
-      _ -> #other
-    ]]
+    f := [:v |
+      v match: [
+        {#n, n :: Integer} when: [n > 5] -> #big;
+        {#n, n :: Integer} -> #small;
+        _ -> #other
+      ]
+    ]
     self assert: (f value: {#n, 9}) equals: #big
     self assert: (f value: {#n, 2}) equals: #small
     self assert: (f value: {#n, "9"}) equals: #other
 
   testGuardOnlyRunsAfterTypeTest =>
     // `n > 5` would raise on a String; the type test must filter it first.
-    f := [:v | v match: [
-      {#n, n :: Integer} when: [n > 5] -> #big;
-      _ -> #other
-    ]]
+    f := [:v |
+      v match: [
+        {#n, n :: Integer} when: [n > 5] -> #big;
+        _ -> #other
+      ]
+    ]
     self assert: (f value: {#n, "abc"}) equals: #other
 
   testWildcardTypeTopLevel =>
-    f := [:v | v match: [
-      _ :: String -> #string;
-      _ :: Integer -> #integer;
-      _ -> #other
-    ]]
+    f := [:v |
+      v match: [
+        _ :: String -> #string;
+        _ :: Integer -> #integer;
+        _ -> #other
+      ]
+    ]
     self assert: (f value: "x") equals: #string
     self assert: (f value: 3) equals: #integer
     self assert: (f value: 3.5) equals: #other
 
   testWildcardTypeInTuple =>
-    f := [:v | v match: [
-      {_ :: Integer, _ :: Integer} -> #ints;
-      {_ :: Integer, _} -> #first;
-      _ -> #other
-    ]]
+    f := [:v |
+      v match: [
+        {_ :: Integer, _ :: Integer} -> #ints;
+        {_ :: Integer, _} -> #first;
+        _ -> #other
+      ]
+    ]
     self assert: (f value: {1, 2}) equals: #ints
     self assert: (f value: {1, "b"}) equals: #first
     self assert: (f value: {"a", 1}) equals: #other
 
   testArrayElementTypePattern =>
-    f := [:v | v match: [
-      #[h :: Integer, t] -> h + t;
-      #[_ :: String, t] -> t;
-      _ -> -1
-    ]]
+    f := [:v |
+      v match: [
+        #[h :: Integer, t] -> h + t;
+        #[_ :: String, t] -> t;
+        _ -> -1
+      ]
+    ]
     self assert: (f value: #[3, 4]) equals: 7
     self assert: (f value: #["a", 4]) equals: 4
     self assert: (f value: #[1.5, 4]) equals: -1
 
   testConstructorTypePattern =>
-    f := [:r | r match: [
-      Result ok: n :: Integer -> n;
-      Result ok: _ -> -1;
-      Result error: _ -> -2
-    ]]
+    f := [:r |
+      r match: [
+        Result ok: n :: Integer -> n;
+        Result ok: _ -> -1;
+        Result error: _ -> -2
+      ]
+    ]
     self assert: (f value: (Result ok: 5)) equals: 5
     self assert: (f value: (Result ok: "five")) equals: -1
     self assert: (f value: (Result error: 5)) equals: -2
 
   testConstructorWildcardTypePattern =>
-    f := [:r | r match: [
-      Result error: _ :: String -> #text;
-      Result error: _ -> #other;
-      Result ok: _ -> #ok
-    ]]
+    f := [:r |
+      r match: [
+        Result error: _ :: String -> #text;
+        Result error: _ -> #other;
+        Result ok: _ -> #ok
+      ]
+    ]
     self assert: (f value: (Result error: "bad")) equals: #text
     self assert: (f value: (Result error: 3)) equals: #other
 
@@ -110,19 +126,23 @@ TestCase subclass: NestedTypePatternTest
       equals: 42
 
   testMapValueTypePattern =>
-    f := [:m | m match: [
-      #{#id => i :: Integer} -> i;
-      _ -> -1
-    ]]
+    f := [:m |
+      m match: [
+        #{#id => i :: Integer} -> i;
+        _ -> -1
+      ]
+    ]
     self assert: (f value: #{#id => 3}) equals: 3
     self assert: (f value: #{#id => "3"}) equals: -1
 
   testNestedTypeFallsThroughToLaterNestedTypeArm =>
-    f := [:v | v match: [
-      {#a, x :: String} -> 1;
-      {#a, x :: Integer} -> 2;
-      _ -> 3
-    ]]
+    f := [:v |
+      v match: [
+        {#a, x :: String} -> 1;
+        {#a, x :: Integer} -> 2;
+        _ -> 3
+      ]
+    ]
     self assert: (f value: {#a, "s"}) equals: 1
     self assert: (f value: {#a, 4}) equals: 2
     self assert: (f value: {#b, 4}) equals: 3
