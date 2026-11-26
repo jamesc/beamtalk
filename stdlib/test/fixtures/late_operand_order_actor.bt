@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5339: the fixture for stdlib/test/late_field_operand_order_test.bt. A
+// `late` field read raises `uninitialized_state_error` while its slot is
+// unassigned, so two of them in one operand list must evaluate in source
+// order: with both unassigned the error names `first`. Before BT-5339 the
+// list literal, the actor-send and the self-send argument lists were built in
+// place and erlc evaluated `self.second` first (beamtalk-watcher's
+// `Watcher>>configureRegistry`).
+
+typed Actor subclass: LateOperandOrderActor
+  late state: first :: Integer
+  late state: second :: Integer
+  state: count :: Integer = 0
+
+  setFirst: a :: Integer second: b :: Integer -> Nil =>
+    self.first := a
+    self.second := b
+    nil
+
+  pair: a :: Object with: b :: Object -> List => #(a, b)
+
+  listOfBoth -> List => #(self.first, self.second)
+
+  sendOfBoth: peer :: EvalOrderActor -> Object =>
+    peer pair: self.first with: self.second
+
+  selfSendOfBoth -> List => self pair: self.first with: self.second
+
+  mapOfBoth -> Dictionary => #{#a => self.first, #b => self.second}
+
+  tupleOfBoth -> Tuple => {self.first, self.second}
+
+  sumOfBoth -> Integer => self.first + self.second
+
+  armListOfBoth: flag :: Boolean -> Object =>
+    flag ifTrue: [#(self.first, self.second)] ifFalse: [nil]
+
+  divThenLate -> List => self pair: self.count / 0 with: self.first

@@ -1318,13 +1318,14 @@ impl CoreErlangGenerator {
     ) -> Result<(Vec<ThreadedStmt>, PrecompiledScope)> {
         let mut prelude: Vec<ThreadedStmt> = Vec::new();
         let mut scope = PrecompiledScope::new();
-        // BT-4722: a block literal whose capture reads live state races with a
-        // sibling that runs code (`last_racing_operand`), so the hoisting point
-        // extends to it; the sibling is bound to a temp ahead of the capture.
+        // BT-4722 / BT-5339: a block literal whose capture reads live state, or
+        // a `late` field read that may raise, races with a sibling that runs
+        // code (`last_racing_operand`), so the hoisting point extends to it;
+        // the sibling is bound to a temp ahead of it.
         let Some(k) = children
             .iter()
             .rposition(|child| self.subexpr_needs_prelude(child))
-            .max(self.last_racing_block_capture(children))
+            .max(self.last_racing_in_place_child(children))
         else {
             return Ok((prelude, scope));
         };

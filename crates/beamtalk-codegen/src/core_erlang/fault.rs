@@ -357,6 +357,11 @@ mod registry {
         /// `State` `Bind` is closed into that lowering's argument list
         /// (`StateEffectEscapesExpression`).
         SuperArgsNotPresequenced,
+        /// BT-5339: a `late` field read counts as a stable operand, as before
+        /// BT-5339, so `#(self.a, self.b)` over two `late` fields stays in
+        /// place and erlc evaluates `self.b` first: unassigned, it raises for
+        /// `b` instead of `a` (`operand_order_check`'s `RacingOperands`).
+        LateFieldReadsStable,
         /// BT-4591: `thread_subexprs` leaves operands in place even when two or
         /// more may run code — the in-place list builder BT-4296 removed — so a
         /// list cell or map literal evaluates its later operand first

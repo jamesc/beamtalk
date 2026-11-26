@@ -408,6 +408,8 @@ mod hybrid_field_rebind_corpus;
 mod hybrid_loop_nlr_corpus;
 mod inline_block_local_in_loop_corpus;
 mod keyed_fold_corpus;
+mod late_field_operand_order;
+mod late_field_operand_order_corpus;
 mod late_reconcile_conformance;
 mod local_assignment_producer;
 mod local_producer_agreement;

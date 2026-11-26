@@ -1,0 +1,63 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5339: operands that read `late` fields evaluate in source order. With
+// both `late` fields unassigned, the first operand raises, so the
+// `uninitialized_state_error` hint names `first`. Before the fix the list
+// literal, actor-send and self-send cases named `second` (erlc evaluated the
+// list cell's tail first).
+//
+// Fixture: stdlib/test/fixtures/late_operand_order_actor.bt
+
+TestCase subclass: LateFieldOperandOrderTest
+
+  hintOf: aBlock => aBlock on: Exception do: [:e | e hint]
+
+  testListLiteralRaisesForTheFirstOperand =>
+    a := LateOperandOrderActor spawn
+    self assert: ((self hintOf: [a listOfBoth]) includesSubstring: "'first'")
+
+  testActorSendArgumentsRaiseForTheFirstOperand =>
+    a := LateOperandOrderActor spawn
+    self
+      assert: ((self hintOf: [
+        a sendOfBoth: EvalOrderActor spawn
+      ]) includesSubstring: "'first'")
+
+  testSelfSendArgumentsRaiseForTheFirstOperand =>
+    a := LateOperandOrderActor spawn
+    self assert: ((self hintOf: [
+      a selfSendOfBoth
+    ]) includesSubstring: "'first'")
+
+  testMapLiteralRaisesForTheFirstOperand =>
+    a := LateOperandOrderActor spawn
+    self assert: ((self hintOf: [a mapOfBoth]) includesSubstring: "'first'")
+
+  testTupleLiteralRaisesForTheFirstOperand =>
+    a := LateOperandOrderActor spawn
+    self assert: ((self hintOf: [a tupleOfBoth]) includesSubstring: "'first'")
+
+  testBinaryOperandsRaiseForTheFirstOperand =>
+    a := LateOperandOrderActor spawn
+    self assert: ((self hintOf: [a sumOfBoth]) includesSubstring: "'first'")
+
+  testConditionalArmListRaisesForTheFirstOperand =>
+    a := LateOperandOrderActor spawn
+    self assert: ((self hintOf: [
+      a armListOfBoth: true
+    ]) includesSubstring: "'first'")
+
+  // `self.count / 0` raises bad arithmetic (a type_error) before `self.first`
+  // is read; out of order it raised uninitialized_state_error.
+  testADivisionBeforeALateReadRaisesFirst =>
+    a := LateOperandOrderActor spawn
+    self should: [a divThenLate] raise: #type_error
+
+  testAssignedFieldsAnswerTheirValuesInOrder =>
+    a := LateOperandOrderActor spawn
+    a setFirst: 1 second: 2
+    self assert: a listOfBoth equals: #(1, 2)
+    self assert: (a sendOfBoth: EvalOrderActor spawn) equals: #[1, 2]
+    self assert: a selfSendOfBoth equals: #(1, 2)
+    self assert: a sumOfBoth equals: 3

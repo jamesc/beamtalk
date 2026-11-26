@@ -29,7 +29,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::{Block, Expression};
+use beamtalk_core::ast::{Block, Expression, Identifier};
 use beamtalk_core::source_analysis::Span;
 
 /// One entry of [`CoreErlangGenerator::precompiled_subexprs`] — see that
@@ -524,6 +524,11 @@ impl CoreErlangGenerator {
     /// operand prelude). Inside an actor closure (ADR 0137 §3) a field read is
     /// a live cell lookup that a sibling `blk value` writing the field through
     /// the cell changes, so there it races like any send.
+    ///
+    /// BT-5339: a read of a `late` field is not stable: it raises
+    /// `uninitialized_state_error` while the slot is unassigned, so it races
+    /// like a send. `#(self.a, self.b)` with both unassigned must raise for
+    /// `a`, the first operand, but in place erlc evaluated `self.b` first.
     pub(super) fn last_racing_operand(&self, exprs: &[&Expression]) -> Option<usize> {
         // BT-4591 fault: the in-place list builder BT-4296 removed.
         if fault!(OperandsInPlace) {
@@ -547,7 +552,9 @@ impl CoreErlangGenerator {
                 continue;
             }
             match inner {
-                Expression::FieldAccess { .. } if stable_field_reads => {}
+                Expression::FieldAccess {
+                    receiver, field, ..
+                } if stable_field_reads && !self.field_read_may_raise(receiver, field) => {}
                 _ => runs.push(i),
             }
         }
@@ -557,18 +564,39 @@ impl CoreErlangGenerator {
         runs.last().into_iter().chain(live.last()).max().copied()
     }
 
-    /// BT-4722: the hoisting point [`Self::sequence_children`] extends to when
-    /// a child is a block literal whose capture reads live state and a sibling
-    /// child runs code and so races with it: the last racing operand
-    /// ([`Self::last_racing_operand`]), or `None` when no such block exists.
-    /// Without it `sequence_children` hoists only to the last child that needs
-    /// a prelude.
-    pub(super) fn last_racing_block_capture(&self, children: &[&Expression]) -> Option<usize> {
+    /// BT-5339: whether evaluating the field read `receiver.field` may raise:
+    /// a read of a `late` field of `self` ([`Self::is_late_state_field`])
+    /// raises `uninitialized_state_error` while the slot is unassigned
+    /// (ADR 0124 §3). Any other field read answers a value.
+    fn field_read_may_raise(&self, receiver: &Expression, field: &Identifier) -> bool {
+        if fault!(LateFieldReadsStable) {
+            return false;
+        }
+        receiver.is_self() && self.is_late_state_field(&self.class_name(), field.name.as_str())
+    }
+
+    /// The hoisting point [`Self::sequence_children`] extends to when a child
+    /// needs no prelude yet races with a sibling that runs code: the last
+    /// racing operand ([`Self::last_racing_operand`]), or `None` when no such
+    /// child exists. Without it `sequence_children` hoists only to the last
+    /// child that needs a prelude, and a parent that compiles its operands in
+    /// place (a self-send's argument list, `capture_argument_list_doc`) lets
+    /// erlc evaluate them last-first. Two kinds of child:
+    ///
+    /// * BT-4722: a block literal whose capture reads live state.
+    /// * BT-5339: a `late` field read, which raises while its slot is
+    ///   unassigned ([`Self::field_read_may_raise`]):
+    ///   `self pair: self.a with: self.b` must raise for `a`.
+    pub(super) fn last_racing_in_place_child(&self, children: &[&Expression]) -> Option<usize> {
         let racing = self.last_racing_operand(children)?;
         children
             .iter()
-            .any(|c| {
-                matches!(c.unwrap_parens(), Expression::Block(b) if self.block_capture_reads_live_state(b))
+            .any(|c| match c.unwrap_parens() {
+                Expression::Block(b) => self.block_capture_reads_live_state(b),
+                Expression::FieldAccess {
+                    receiver, field, ..
+                } => self.field_read_may_raise(receiver, field),
+                _ => false,
             })
             .then_some(racing)
     }
