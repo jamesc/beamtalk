@@ -763,34 +763,7 @@ impl Parser {
             return;
         }
         if seg_type == BinarySegmentType::Float {
-            if let Some((n, span)) = size_lit {
-                // `erlc` validates size × unit (`<<X:4/unit:8-float>>` is a
-                // clean 32-bit float; `<<X:16/unit:8-float>>` warns).
-                let effective = n.saturating_mul(unit_multiplier(unit));
-                if effective != 16 && effective != 32 && effective != 64 {
-                    self.diagnostics.push(Diagnostic::warning(
-                        format!(
-                            "bad float bit size: float segments must be 16, 32, or 64 bits, got {effective}"
-                        ),
-                        span,
-                    ));
-                }
-            }
-            // A bignum beyond `f64` (about 309 digits) has no float to
-            // stand for it: a pattern arm never matches, a construction
-            // fails at run time.
-            if let Some((Literal::BigInteger(digits), value_span)) = literal
-                && !digits.parse::<f64>().is_ok_and(f64::is_finite)
-            {
-                self.diagnostics.push(Diagnostic::warning(
-                    format!(
-                        "{} because '{}' is too large to be a float",
-                        direction.cannot_succeed(),
-                        abbreviate_digits(digits)
-                    ),
-                    value_span,
-                ));
-            }
+            self.check_binary_float_shape(size_lit, unit, literal, direction);
             return;
         }
         let Some((lit, value_span)) = literal else {
@@ -838,6 +811,45 @@ impl Parser {
                 format!(
                     "{} because '{f}' is not of the expected type '{expected}'",
                     direction.cannot_succeed()
+                ),
+                value_span,
+            ));
+        }
+    }
+
+    /// The checks on a `float` segment: its bit size (size × unit) and a
+    /// bignum value beyond `f64`.
+    fn check_binary_float_shape(
+        &mut self,
+        size_lit: Option<(i64, Span)>,
+        unit: Option<usize>,
+        literal: Option<(&Literal, Span)>,
+        direction: BinaryDirection,
+    ) {
+        if let Some((n, span)) = size_lit {
+            // `erlc` validates size × unit (`<<X:4/unit:8-float>>` is a
+            // clean 32-bit float; `<<X:16/unit:8-float>>` warns).
+            let effective = n.saturating_mul(unit_multiplier(unit));
+            if effective != 16 && effective != 32 && effective != 64 {
+                self.diagnostics.push(Diagnostic::warning(
+                    format!(
+                        "bad float bit size: float segments must be 16, 32, or 64 bits, got {effective}"
+                    ),
+                    span,
+                ));
+            }
+        }
+        // A bignum beyond `f64` (about 309 digits) has no float to
+        // stand for it: a pattern arm never matches, a construction
+        // fails at run time.
+        if let Some((Literal::BigInteger(digits), value_span)) = literal
+            && !digits.parse::<f64>().is_ok_and(f64::is_finite)
+        {
+            self.diagnostics.push(Diagnostic::warning(
+                format!(
+                    "{} because '{}' is too large to be a float",
+                    direction.cannot_succeed(),
+                    abbreviate_digits(digits)
                 ),
                 value_span,
             ));
