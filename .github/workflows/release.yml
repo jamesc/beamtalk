@@ -643,14 +643,20 @@ jobs:
       publish: true
       tag: ${{ needs.prepare.outputs.tag }}
 
-  # After the uat dispatch, and only when every platform bundle is attached.
+  # After the uat dispatch, and only when everything is attached: every platform
+  # bundle and every lane, so a release never goes latest with missing assets
+  # (a failed lane is fixed by re-running failed jobs, which re-runs this). It
+  # does not wait on the interim publishes: a Marketplace or ghcr problem must
+  # not keep the toolchain from installers.
   interim-make-latest:
-    needs: [prepare, linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, notify-uat]
+    needs: [prepare, linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64, vscode-extension, liveview-ide, ide-image, desktop-app, notify-uat]
     if: >-
       ${{ !cancelled() && github.event_name == 'push' && vars.RELEASE_PUBLISH_MODE != 'promote'
       && needs.prepare.result == 'success'
       && needs.linux-x86_64.result == 'success' && needs.macos-x86_64.result == 'success'
-      && needs.macos-arm64.result == 'success' && needs.windows-x86_64.result == 'success' }}
+      && needs.macos-arm64.result == 'success' && needs.windows-x86_64.result == 'success'
+      && needs.vscode-extension.result == 'success' && needs.liveview-ide.result == 'success'
+      && needs.ide-image.result == 'success' && needs.desktop-app.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
