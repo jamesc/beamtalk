@@ -679,9 +679,9 @@ impl ProtocolRegistry {
             .filter_map(|p| p.extending.as_ref().map(|e| e.name.clone()))
             .chain(self.protocols.values().filter_map(|p| p.extending.clone()))
             .chain(stdlib_names.into_iter().filter(|n| {
-                !hierarchy
+                hierarchy
                     .get_class(n)
-                    .is_some_and(|ci| ci.superclass.as_deref() != Some("Protocol"))
+                    .is_none_or(|ci| ci.superclass.as_deref() == Some("Protocol"))
             }))
             .collect();
         while let Some(parent) = pending.pop() {
