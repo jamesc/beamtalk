@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Fix: a writing `inject:into:` on a finite `Stream` runs again (BT-5263, BT-5190 follow-up).** `inject:into:` consumes the stream to answer one value, so the in-place fold answers what the pure send does. The lazy and short-circuiting selectors (`collect:`, `select:`, `reject:`, `detect:`, `detect:ifNone:`, `anySatisfy:`, `allSatisfy:`) still raise `stateful_block_dispatch` on a `Stream`; `do:` was never refused.
+- **Fix: a writing `inject:into:` on a finite `Stream` runs again (BT-5263, BT-5190 follow-up).** `inject:into:` consumes the stream to answer one value, so the in-place fold answers what the pure send does on a finite stream. Limit: the stream is drained before the block runs, so an early `^` exit, or an infinite stream, behaves differently from the pure send. The lazy and short-circuiting selectors (`collect:`, `select:`, `reject:`, `detect:`, `detect:ifNone:`, `anySatisfy:`, `allSatisfy:`) still raise `stateful_block_dispatch` on a `Stream`; `do:` was never refused.
 
 - **Breaking: a `String` or `Symbol` is no longer ordered against another kind (BT-5213, ADR 0116 addendum).** `<`, `<=`, `>` and `>=` with a `String` or `Symbol` on the left and a value of any other kind on the right used to fall back to Erlang term order (`"a" < 5` and `#a < 5` were `false`). They now raise a `type_error` (`TypeError`), for example "'<' cannot order a String against Integer — the argument must be a String". There is no reflected hook, unlike the number side. `Symbol` against `String` raises too, both ways (`#a < "a"`, `"a" < #a`). The rule holds on the inlined path and on dynamic sends (`perform:`).
   - Unchanged: `"a" < "b"`, `#a < #b`; `==`, `=:=`, `/=`, `=/=`; default `sort` of a mixed list and `Dictionary`/`Set` order.

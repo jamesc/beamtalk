@@ -7,7 +7,9 @@
 // `do:` for a `Collection`. A `Stream` defines those messages natively (lazy,
 // short-circuiting), so the fold would force it (never ending on an infinite
 // stream) and answer a List. It raises `stateful_block_dispatch` instead,
-// and does so before touching the stream.
+// and does so before touching the stream. Exception (BT-5263): the eager
+// `inject:into:` folds a finite stream in place (it drains the stream before
+// the block runs, so an early `^` or an infinite stream is not supported).
 
 TestCase subclass: WritingFoldStreamReceiverTest
 
@@ -87,9 +89,6 @@ TestCase subclass: WritingFoldStreamReceiverTest
   testInjectOnFiniteStreamFolds =>
     self assert: (self writingInject: (Stream on: #(1, 2, 3))) equals: 6
     self assert: (self writingInjectCount: (Stream on: #(1, 2, 3))) equals: 3
-    self assert: ((Stream on: #(1, 2, 3)) inject: 0 into: [:acc :e |
-      acc + e
-    ]) equals: 6
 
   // `do:` on a Stream is eager too and was never guarded.
   testDoOnFiniteStreamFolds =>
