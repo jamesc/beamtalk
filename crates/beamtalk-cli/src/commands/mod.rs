@@ -83,6 +83,7 @@ impl WarningFlags {
     }
 }
 
+pub mod agents;
 pub mod app_file;
 pub mod attach;
 pub mod beam_environment;

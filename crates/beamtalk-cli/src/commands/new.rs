@@ -363,16 +363,25 @@ fn write_ci_workflow(path: &Utf8Path, name: &str) -> Result<()> {
     .wrap_err("Failed to create CI workflow")
 }
 
+/// The `AGENTS.md` that `beamtalk new` writes for a project called `name`.
+pub(crate) fn render_agents_md(name: &str) -> String {
+    include_str!("../../templates/agents.md").replace("{{project_name}}", name)
+}
+
+/// The `.github/copilot-instructions.md` that `beamtalk new` writes.
+pub(crate) fn render_copilot_instructions(name: &str) -> String {
+    include_str!("../../templates/copilot-instructions.md").replace("{{project_name}}", name)
+}
+
 fn write_agents_md(path: &Utf8Path, name: &str) -> Result<()> {
-    let content = include_str!("../../templates/agents.md").replace("{{project_name}}", name);
+    let content = render_agents_md(name);
     fs::write(path.join("AGENTS.md"), content)
         .into_diagnostic()
         .wrap_err("Failed to create AGENTS.md")
 }
 
 fn write_copilot_instructions(path: &Utf8Path, name: &str) -> Result<()> {
-    let content =
-        include_str!("../../templates/copilot-instructions.md").replace("{{project_name}}", name);
+    let content = render_copilot_instructions(name);
     fs::write(
         path.join(".github").join("copilot-instructions.md"),
         content,

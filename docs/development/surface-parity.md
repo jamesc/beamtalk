@@ -375,6 +375,7 @@ These CLI subcommands are build/tooling commands that operate offline (no worksp
 | `test-script` | -- | -- | `surface-specific: btscript expression tests (CI)` |
 | `test-docs` | -- | -- | `surface-specific: doctest runner (CI)` |
 | `doctor` | -- | -- | `surface-specific: environment health check` |
+| `agents refresh` / `agents check` | -- | -- | `surface-specific: regenerate or verify the templated region of AGENTS.md and copilot-instructions.md (BT-5228)` |
 | `warm-otp-cache` | -- | -- | `surface-specific: background OTP type-spec cache warming` (BT-2471). Hidden CLI command with no project/`beamtalk.toml` of its own — the `SessionStart` hook (`.claude/hooks/worktree-init.sh`) backgrounds it in remote sessions so the shared, OTP-version-keyed cache (ADR 0075/BT-2470) is warm before the first interactive `beamtalk build`. No REPL/MCP/LSP analogue; it exists purely as a session-setup tooling hook, not a user-facing operation. |
 | `deps add` | -- | -- | `surface-specific: package management`. With none of `--path`/`--git` given, `NAME` resolves through the package registry (`deps::registry`, BT-2978) — pinned to `--version` if given, else the latest published release (BT-2979) — then flows through the same git-dependency machinery a `--git` dependency uses. |
 | `deps list` | -- | -- | `surface-specific: package management`. A registry dependency's row shows its resolved git URL/tag/commit provenance alongside the requested version, matching a `--git` dependency's row (BT-2979). |

@@ -379,6 +379,12 @@ enum Command {
         dev: bool,
     },
 
+    /// Refresh or check the generated part of AGENTS.md and copilot-instructions.md
+    Agents {
+        #[command(subcommand)]
+        action: commands::agents::AgentsCommand,
+    },
+
     /// Manage package dependencies (add, list, update)
     Deps {
         #[command(subcommand)]
@@ -759,6 +765,7 @@ fn dispatch_command(command: Command) -> Result<()> {
         Command::Publish { dry_run } => commands::publish::run(dry_run),
         Command::Registry { action } => commands::registry::cli::run(action),
         Command::Doctor { dev } => commands::doctor::run(dev),
+        Command::Agents { action } => commands::agents::run(&action),
         Command::Doc {
             path,
             output,
