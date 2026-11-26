@@ -5,9 +5,9 @@
 //!
 //! **DDD Context:** Language Service — Tooling Surface Parity
 //!
-//! `beamtalk-mcp`'s typed tools (`save_class`, `precheck_method`, `flush`,
+//! `beamtalk-mcp`'s typed tools (`precheck_method`, `flush`,
 //! `remove_method`) and `beamtalk-lsp`'s `workspace/executeCommand` handlers
-//! (`CMD_SAVE_CLASS`, `CMD_PRECHECK_METHOD`, `CMD_FLUSH*`, `CMD_REMOVE_METHOD`)
+//! (`CMD_PRECHECK_METHOD`, `CMD_FLUSH*`, `CMD_REMOVE_METHOD`)
 //! each compile client-supplied parameters into a Beamtalk expression string
 //! submitted through the workspace's existing `evaluate` REPL op (ADR 0082
 //! "Rationale: why no new REPL ops").
@@ -44,16 +44,6 @@
 //! these arguments before calling in here — any new caller must do the same.
 
 use crate::unparse::escape_string_literal;
-
-/// Build the Beamtalk expression for the `save_class` MCP tool / LSP
-/// `beamtalk.saveClass` command — new-class creation path (ADR 0082 Phase 3).
-pub fn save_class_expr(source: &str, path: &str) -> String {
-    format!(
-        "Workspace newClass: \"{}\" at: \"{}\"",
-        escape_string_literal(source),
-        escape_string_literal(path),
-    )
-}
 
 /// Build the Beamtalk expression for the `precheck_method` MCP tool / LSP
 /// `beamtalk.precheckMethod` command — the pre-save advisory precheck (ADR
@@ -244,29 +234,6 @@ mod tests {
         assert_eq!(
             precheck_method_expr("Dict", "at:put:", "..."),
             "Dict precheckCompile: #at:put: source: \"...\"",
-        );
-    }
-
-    #[test]
-    fn save_class_expr_compiles_new_class_creation() {
-        // `save_class` / `beamtalk.saveClass` → `Workspace newClass: source
-        // at: path`.
-        assert_eq!(
-            save_class_expr("Object subclass: Greeter", "src/greeter.bt"),
-            "Workspace newClass: \"Object subclass: Greeter\" at: \"src/greeter.bt\"",
-        );
-    }
-
-    #[test]
-    fn save_class_expr_escapes_source_quotes_and_braces() {
-        // A class source containing string-interpolation literals must come
-        // through as a String value, not as embedded Beamtalk source.
-        // Newlines pass through verbatim — Beamtalk strings are multi-line.
-        let source = "Object subclass: Greeter\n  greet => \"hi {name}\"";
-        let got = save_class_expr(source, "src/greeter.bt");
-        assert_eq!(
-            got,
-            "Workspace newClass: \"Object subclass: Greeter\n  greet => \"\"hi \\{name}\"\"\" at: \"src/greeter.bt\"",
         );
     }
 

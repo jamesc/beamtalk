@@ -6,15 +6,14 @@
 //! corresponding beamtalk-core tool expression.
 
 use beamtalk_core::tool_expr::{
-    FlushFilter, flush_expr, precheck_method_expr, remove_method_expr,
-    remove_method_if_absent_expr, save_class_expr,
+    FlushFilter, flush_expr, precheck_method_expr, remove_method_expr, remove_method_if_absent_expr,
 };
+use beamtalk_repl_protocol::RequestBuilder;
 
 /// ADR 0082 Phase 3: LSP `workspace/executeCommand` identifiers
 /// surfaced to clients. Each command compiles to a Beamtalk expression
-/// submitted via the workspace's existing `evaluate` REPL op — no new
-/// workspace-side dispatch is added (per ADR 0082 "Rationale: why no new REPL
-/// ops"). Keep the names stable; editors bind to them by string match.
+/// submitted via the workspace's existing `evaluate` REPL op, except
+/// `beamtalk.saveClass`, which sends the `save-class` op (BT-5276). Keep the names stable; editors bind to them by string match.
 pub(crate) const CMD_FLUSH: &str = "beamtalk.flush";
 pub(crate) const CMD_FLUSH_CLASS: &str = "beamtalk.flush.class";
 pub(crate) const CMD_FLUSH_FILE: &str = "beamtalk.flush.file";
@@ -48,6 +47,57 @@ pub(crate) const BEAMTALK_LSP_COMMANDS: &[&str] = &[
     CMD_RECHECK_IMAGE,
     CMD_REMOVE_METHOD,
 ];
+
+/// What an `executeCommand` invocation sends to the workspace: a Beamtalk
+/// expression for the `eval` op, or a dedicated structured operation whose
+/// parameters travel as values rather than as text spliced into source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CommandCall {
+    /// Evaluate this Beamtalk expression.
+    Eval(String),
+    /// The `save-class` op (BT-5203, wired to the LSP by BT-5276): `beamtalk.saveClass`.
+    SaveClass { source: String, path: String },
+}
+
+impl CommandCall {
+    /// The REPL protocol request this call sends.
+    pub(crate) fn request(&self) -> serde_json::Value {
+        match self {
+            Self::Eval(expr) => RequestBuilder::eval(expr),
+            Self::SaveClass { source, path } => RequestBuilder::save_class(source, path),
+        }
+    }
+
+    /// The op name, for error messages.
+    pub(crate) fn op(&self) -> &'static str {
+        match self {
+            Self::Eval(_) => "eval",
+            Self::SaveClass { .. } => "save-class",
+        }
+    }
+}
+
+/// Map a `workspace/executeCommand` invocation to the call it sends:
+/// `beamtalk.saveClass` becomes the `save-class` op, every other command the
+/// expression from [`build_command_expression`].
+pub(crate) fn build_command_call(
+    command: &str,
+    arguments: &[serde_json::Value],
+) -> std::result::Result<CommandCall, String> {
+    if command == CMD_SAVE_CLASS {
+        let source = expect_string_arg(arguments, 0, "source")?;
+        let path = expect_string_arg(arguments, 1, "path")?;
+        if source.is_empty() {
+            return Err(format!("{CMD_SAVE_CLASS}: 'source' must not be empty"));
+        }
+        if path.is_empty() {
+            return Err(format!("{CMD_SAVE_CLASS}: 'path' must not be empty"));
+        }
+        return Ok(CommandCall::SaveClass { source, path });
+    }
+    build_command_expression(command, arguments).map(CommandCall::Eval)
+}
+
 /// ADR 0082 Phase 3: map a `workspace/executeCommand` invocation
 /// to the Beamtalk expression that compiles to the same effect on the live
 /// workspace. Delegates the actual expression construction to
@@ -102,17 +152,6 @@ pub(crate) fn build_command_expression(
                 ));
             }
             Ok(flush_expr(FlushFilter::Kind(bare)))
-        }
-        CMD_SAVE_CLASS => {
-            let source = expect_string_arg(arguments, 0, "source")?;
-            let path = expect_string_arg(arguments, 1, "path")?;
-            if source.is_empty() {
-                return Err(format!("{CMD_SAVE_CLASS}: 'source' must not be empty"));
-            }
-            if path.is_empty() {
-                return Err(format!("{CMD_SAVE_CLASS}: 'path' must not be empty"));
-            }
-            Ok(save_class_expr(&source, &path))
         }
         CMD_PRECHECK_METHOD => {
             let class = expect_string_arg(arguments, 0, "class")?;

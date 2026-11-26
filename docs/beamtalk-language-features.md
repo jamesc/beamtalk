@@ -1372,6 +1372,8 @@ Object subclass: Validator
 
 `^` at the top level of a method body is an early return (the method exits immediately). `^` inside a block argument causes the *method* to exit with that value.
 
+The type checker checks every `^` — a top-level early return, one inside a block, one in a match arm — against the method's declared return type (BT-5283). That includes a `^` in a block the method returns or stores: `^` always answers the home method, so `-> Block` with `[:x | ^x]` where `x` is an `Integer` warns that the body returns `Integer`.
+
 Guard clauses like `Validator>>validate:` above compile to plain branches, with no non-local-return frame. A method whose only block `^`s are early returns from inlined conditionals at its top level (`ifTrue:`, `ifFalse:`, `ifNil:`, `ifNotNil:` and their two-branch forms) compiles them as if written `x isNil ifTrue: ["missing"] ifFalse: [...]`. A receiver that turns out not to be a Boolean is still sent `ifTrue:` with a block that returns from the method. For an `ifTrue:`/`ifFalse:` guard whose receiver might not be a Boolean, this holds when the block is just `^` and a literal, a variable or a field of `self`. Other guard blocks compile this way only when the receiver is a Boolean by construction: `true`, `false`, an `==`/`=:=`/`/=`/`=/=` comparison, or a `<`/`>`/`<=`/`>=` comparison whose left operand is a number, string or character literal or a parameter typed `:: Integer`, `Float`, `Number`, `Character` or `String` that the method never rebinds (codegen compiles that comparison to the bare Erlang comparison, which never sends). Any other block `^`, including one inside a real closure (`do:`, `detect:`, a stored block), needs the non-local-return throw/catch, and the method then compiles every `^` that way.
 
 ### Abstract and Stub Methods
@@ -5306,6 +5308,15 @@ temp match: [-1 -> "minus one"; 0 -> "zero"; _ -> "other"]
 ]
 // => 42
 
+// The sub-pattern after `ok:` / `error:` may be a variable, `_`, a literal,
+// or a nested tuple `{a, b}` / map `#{#k => v}` pattern (BT-5277). Array
+// (`#[...]`) and binary sub-patterns are not supported there.
+(Result ok: {3, 4}) match: [
+  Result ok: {a, b} -> a + b;
+  Result error: _   -> 0
+]
+// => 7
+
 // Binary patterns (BT-663; BT-4096, BT-4097, BT-4143)
 (Binary fromBytes: #(3, 104, 105, 33, 99)) match: [
   <<n:8, payload:n/binary, rest/binary>> -> payload toBytes;
@@ -5569,6 +5580,15 @@ x matchExhaustive: [#ok -> 1; _ -> 0]
 //    concrete leaf classes
 ```
 
+**`Result` is a closed pair (BT-5278).** A `Result(T, E)` scrutinee is accepted when the arms are `Result ok:` / `Result error:` constructor patterns: `ok:` and `error:` are the two variants, exactly as for plain `match:`. A missing variant is the usual compile error (`Non-exhaustive match: on sealed type \`Result\``), an arm after both variants are covered is flagged as unreachable, and a variant matched only by a refutable nested pattern (`Result ok: {a, b}`) is an error because the checker cannot prove it total — add `Result ok: v` or a `_` arm:
+
+```beamtalk
+r matchExhaustive: [
+  Result ok: v    -> v;
+  Result error: _ -> 0
+]
+```
+
 Plain `match:`'s advisory warning behaviour is unchanged by `matchExhaustive:` — the two checks are independent, and only the keyword you write selects between them.
 
 **Guard expressions** support: `>`, `<`, `>=`, `<=`, `=:=`, `=/=`, `/=`, `+`, `-`, `*`, `/`
@@ -5754,7 +5774,7 @@ external-edit conflict detection.
 | `aClass >> sel => body` (parser sugar) | durable | yes | humans at the REPL |
 | `aClass compile: #sel source: "body"` | durable | yes | MCP `save_method`, browser "Save", REPL editor |
 | `aClass tryCompile: #sel source: "body"` | ephemeral (auto-prunes) | yes | MCP `try_method`, agent spikes |
-| `Workspace newClass: source at: path` | durable, `kind: #'new-class'` | yes | MCP `save_class`, browser "New File" |
+| `Workspace newClass: source at: path` | durable, `kind: #'new-class'` | yes | MCP `save_class` and LSP `beamtalk.saveClass` (via the `save-class` op), browser "New File" |
 
 `>>` and `compile:source:` are equivalent in effect — both install the new
 method and append a durable ChangeEntry. The keyword form takes the body as a

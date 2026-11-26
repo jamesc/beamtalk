@@ -33,7 +33,7 @@ defmodule BtAttach.Facade do
   # The authorized op vocabulary and its capability class (ADR 0091 Decision 3/4).
   # `eval`/`load_source`/`save`/`flush`/`reload` inject or run code (execute);
   # the read ops trigger no user code; `kill`/`rotate_cookie` are admin.
-  # `info`, `rotate_cookie` and `subscribe_actors` are declared
+  # `rotate_cookie` and `subscribe_actors` are declared
   # here (the ADR 0091 RBAC vocabulary) but have no `invoke/3` clause yet: they
   # are kept as reserved vocabulary and answer `{:error, {:unsupported_op, op}}`
   # once authorized. `kill`, `actors` and `sessions` dispatch the wire
@@ -187,7 +187,7 @@ defmodule BtAttach.Facade do
     # code, so it is `:read`, safe for the Observer role.
     subscribe_classes: :read,
     # ADR 0105 Phase 1 (BT-2779): reload-induced findings. `reload_findings`
-    # reads the current live snapshot (`beamtalk_workspace_findings_store:all/0`)
+    # reads the current live snapshot (the `reload-findings` operation)
     # — pure reflection, no user code — so it is `:read`, safe for the
     # Observer role, scoped exactly like `changes`. `subscribe_reload_check`
     # registers the LiveView pid on the `reload_check` push stream so a
@@ -244,8 +244,6 @@ defmodule BtAttach.Facade do
   # ceiling. Each entry is implemented by dispatch, or removed from `@ops`, by the
   # issue named beside it; `rotate_cookie` is decided in BT-5206.
   @reserved_ops [
-    # BT-5204: answers version, node, workspace id and settings through `info`.
-    :info,
     # BT-5205: the actor-list push stream; implemented by dispatch or removed.
     :subscribe_actors,
     # BT-5206 decides explicitly: implemented, or removed from the vocabulary.
@@ -605,7 +603,17 @@ defmodule BtAttach.Facade do
   # catalogue + System Browser "Tests" group are populated (no args).
   defp invoke(:load_tests, _params, _ctx), do: client().load_tests()
 
-  defp invoke(:flush, _params, _ctx), do: client().flush()
+  # BT-5204: `flush` dispatches the `flush` operation. The optional scope
+  # (`:class`, `:file` or `:kind`) and `:confirm_destructive` ride through as the
+  # operation's own params; an absent key is not sent. The confirmation rule is
+  # the operation's: only a boolean `true` applies the destructive tier.
+  defp invoke(:flush, params, _ctx),
+    do:
+      client().flush(Keyword.new(Map.take(params, [:class, :file, :kind, :confirm_destructive])))
+
+  # BT-5204: the workspace's version, node, workspace id and settings, through
+  # the `info` operation.
+  defp invoke(:info, _params, _ctx), do: client().info()
 
   # BT-2590: the workspace `autoflush` boolean. Returns the flag directly (never a
   # `{:ok, _}` tuple — the client defaults a degraded read to `false`), so the

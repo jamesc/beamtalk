@@ -392,6 +392,10 @@ impl TypeChecker {
             && Self::arms_use_nil_or_type_pattern(arms)
         {
             Self::nil_or_type_match_residual(scrutinee_ty, arms, hierarchy)
+        } else if Self::is_result_constructor_match(scrutinee_ty, arms) {
+            // BT-5278: `Result(T, E)` is a closed pair (`ok:` / `error:`).
+            self.check_result_asserted(arms, match_span);
+            return;
         } else {
             let ty_display = scrutinee_ty.display_for_diagnostic().unwrap_or_default();
             self.diagnostics.push(
@@ -433,6 +437,108 @@ impl TypeChecker {
             .with_hint(
                 "Add an arm for the remaining case(s), or a `_ ->` wildcard \
                  to handle them."
+                    .to_string(),
+            )
+            .with_category(DiagnosticCategory::Type),
+        );
+    }
+
+    /// BT-5278: scrutinee is a `Result` and every arm is a `Result`
+    /// constructor pattern, a wildcard, or a variable binding.
+    fn is_result_constructor_match(scrutinee_ty: &InferredType, arms: &[MatchArm]) -> bool {
+        matches!(scrutinee_ty, InferredType::Known { class_name, .. }
+            if class_name.as_str() == WellKnownClass::Result.as_str())
+            && arms
+                .iter()
+                .any(|a| matches!(a.pattern, Pattern::Constructor { .. }))
+            && arms.iter().all(|a| match &a.pattern {
+                Pattern::Constructor { class, .. } => {
+                    class.name.as_str() == WellKnownClass::Result.as_str()
+                }
+                Pattern::Wildcard(_) | Pattern::Variable(_) => true,
+                _ => false,
+            })
+    }
+
+    /// BT-5278: `matchExhaustive:` over a closed `Result` pair.
+    ///
+    /// Walks the arms in order tracking which of `ok:` / `error:` are covered
+    /// by an *unguarded, irrefutable* arm (variable or `_` sub-pattern), or
+    /// whether an unguarded catch-all already covers everything. An arm seen
+    /// after full coverage is flagged unreachable. If a variant is still
+    /// uncovered, an `Error` is reported when it has refutable unguarded arms
+    /// (`Result ok: {a, b}` cannot be proven total). A variant with no
+    /// unguarded arm at all is left to the pattern-based
+    /// `check_match_exhaustiveness` validator, which already reports it, so
+    /// the user does not see the same error twice.
+    fn check_result_asserted(&mut self, arms: &[MatchArm], match_span: Span) {
+        let all = crate::semantic_analysis::validators::sealed_type_all_constructors("Result")
+            .unwrap_or(&[]);
+        let mut covered: Vec<&str> = Vec::new();
+        let mut full = false;
+        for arm in arms {
+            if full {
+                self.diagnostics.push(
+                    Diagnostic::warning(
+                        "unreachable arm: `ok:` and `error:` already cover every `Result`",
+                        arm.pattern.span(),
+                    )
+                    .with_category(DiagnosticCategory::Type),
+                );
+                continue;
+            }
+            if arm.guard.is_some() {
+                continue;
+            }
+            match &arm.pattern {
+                Pattern::Wildcard(_) | Pattern::Variable(_) => full = true,
+                Pattern::Constructor { keywords, .. }
+                    if keywords.len() == 1
+                        && matches!(keywords[0].1, Pattern::Variable(_) | Pattern::Wildcard(_)) =>
+                {
+                    let sel = keywords[0].0.name.as_str();
+                    if !covered.contains(&sel) {
+                        covered.push(sel);
+                    }
+                    full = all.iter().all(|s| covered.contains(s));
+                }
+                _ => {}
+            }
+        }
+        if full {
+            return;
+        }
+        let refutable_only: Vec<&str> = all
+            .iter()
+            .copied()
+            .filter(|s| !covered.contains(s))
+            .filter(|s| {
+                arms.iter().any(|a| {
+                    a.guard.is_none()
+                        && matches!(&a.pattern, Pattern::Constructor { keywords, .. }
+                            if keywords.len() == 1 && keywords[0].0.name.as_str() == *s)
+                })
+            })
+            .collect();
+        if refutable_only.is_empty() {
+            return;
+        }
+        self.diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "non-exhaustive matchExhaustive: `Result` {} {} only matched by a nested \
+                     pattern that may not match every value",
+                    if refutable_only.len() == 1 {
+                        "variant"
+                    } else {
+                        "variants"
+                    },
+                    refutable_only.join(", ")
+                ),
+                match_span,
+            )
+            .with_hint(
+                "Add an arm that binds the whole value (`Result ok: v`) or a `_ ->` wildcard."
                     .to_string(),
             )
             .with_category(DiagnosticCategory::Type),

@@ -320,41 +320,33 @@ defmodule BtAttachWeb.Live.Dock.GitChanges do
 
   # "Delete file" / "Apply rename" (ADR 0113 Phase 4 BT-3210, extended by ADR
   # 0114 Phase 5 BT-3277) — the scoped Tier-2 flush for one `remove-class`/
-  # `rename-class`/`rename-method` row, submitted as `Workspace flush:
-  # #Class confirmDestructive: true` through the generic `evaluate` op (no
-  # dedicated workspace-side op, matching `remove_class`/`remove_method` and
-  # mirroring the REPL's `:flush-destructive #Class` / MCP `flush`'s scoped
-  # `confirm_destructive: true` form). All three kinds join the same Tier 2
+  # `rename-class`/`rename-method` row: the `flush` operation with `class` and
+  # `confirm_destructive: true` (BT-5204), the same operation and confirmation
+  # rule as the MCP `flush` tool's scoped `confirm_destructive: true` form and
+  # the REPL's `:flush-destructive #Class`. All three kinds join the same Tier 2
   # (ADR 0114 "Flush" reuses ADR 0113's tier verbatim), so one handler drives
   # all three rows; only the confirmation prompt and the resulting status
   # message differ by `kind`.
   #
-  # Scoped by *Symbol* (`#Class`), not the bare class name: a `remove-class`
-  # row's class name is already unbound by the time this fires
-  # (`removeFromSystem` ran first) — a bare identifier would fail to
-  # *evaluate* before the `flush:` send ever runs. `beamtalk_workspace_flush`'s
-  # filter normalisation matches a Symbol against the ChangeLog entry's
-  # recorded `class` field by name, needing no live class to resolve, so the
-  # same Symbol form works uniformly for a `rename-class`/`rename-method` row
-  # too (both still-bound, but simpler to share one code path than
-  # special-case which kind can take a bare identifier).
+  # Scoped by class *name*, not a live class: a `remove-class` row's class is
+  # already unbound by the time this fires (`removeFromSystem` ran first), and
+  # `beamtalk_workspace_flush`'s filter matches the name against the ChangeLog
+  # entry's recorded `class` field, so the same scope works uniformly for a
+  # `rename-class`/`rename-method` row too.
   #
-  # `class` rides a `phx-value-*` attribute, so — unlike `remove_class`'s
-  # `class` (read from server-tracked active-tab state) — it is
-  # client-controlled input reaching a raw, textually-interpolated Beamtalk
-  # expression: validated against `ClassModals.valid_class_name?/1`, the
-  # same bare-PascalCase-identifier shape the New Class modal enforces, so a
-  # crafted event cannot inject arbitrary source into the `evaluate` call.
+  # `class` rides a `phx-value-*` attribute, so it is client-controlled input:
+  # validated against `ClassModals.valid_class_name?/1`, the same bare-PascalCase-
+  # identifier shape the New Class modal enforces. It travels as an operation
+  # param, never spliced into source text, so this is defence in depth.
   @doc false
   def flush_destructive(socket, class, kind) do
     if ClassModals.valid_class_name?(class) do
-      expr = "Workspace flush: ##{class} confirmDestructive: true"
       pid = socket.assigns[:session_pid]
 
       if not is_pid(pid) do
         WorkspaceLive.status_error(socket, "not attached to workspace")
       else
-        flush_destructive_eval(socket, class, kind, expr, pid)
+        flush_destructive_dispatch(socket, class, kind, pid)
       end
     else
       WorkspaceLive.status_error(socket, "Invalid class name.")
@@ -371,14 +363,15 @@ defmodule BtAttachWeb.Live.Dock.GitChanges do
 
   defp rename_flush_message(_kind, class), do: "Flushed the pending removal for #{class}"
 
-  defp flush_destructive_eval(socket, class, kind, expr, pid) do
-    BtAttachWeb.Live.Dock.eval_async(
+  defp flush_destructive_dispatch(socket, class, kind, pid) do
+    BtAttachWeb.Live.Dock.dispatch_async(
       socket,
       pid,
-      expr,
+      :flush,
+      %{class: class, confirm_destructive: true},
       fn socket, result ->
         case result do
-          {:ok, _term, _output, _warnings} ->
+          {:ok, _summary} ->
             socket
             |> assign(
               save_result: nil,
@@ -392,11 +385,8 @@ defmodule BtAttachWeb.Live.Dock.GitChanges do
             # "Save All to Disk" flush.
             |> WorkspaceLive.maybe_refresh_git()
 
-          {:error, _, _, _} = err ->
-            WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
-
-          {:error, _} = err ->
-            WorkspaceLive.status_error(socket, FacadeError.render_eval_error(err))
+          {:error, reason} ->
+            WorkspaceLive.status_error(socket, FacadeError.render(reason))
         end
       end,
       &flush_destructive_failed(&1, class, &2),

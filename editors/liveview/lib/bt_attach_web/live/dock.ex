@@ -635,6 +635,27 @@ defmodule BtAttachWeb.Live.Dock do
   end
 
   @doc """
+  Like `eval_async/6`, but runs the facade op `op` with `params` instead of an
+  evaluation (BT-5204). The operation takes its turn in the same queue (one at a
+  time, in submit order, behind a running eval), shares the Stop control, the
+  `DOWN` reset and the `:key` pending marker, and is rejected through `reject`
+  by the same paths. `fold` receives the raw `Facade.dispatch(op, params, ctx)`
+  result. `pid` is the session the operation waits behind; the op itself does not
+  use it.
+  """
+  def dispatch_async(socket, pid, op, params, fold, reject, opts \\ [])
+      when is_atom(op) and is_map(params) and is_function(fold, 2) and is_function(reject, 2) do
+    key = Keyword.get(opts, :key)
+
+    if key != nil and eval_pending?(socket, key) do
+      socket
+    else
+      job = %{kind: :fold, fold: fold, reject: reject, key: key, op: {op, params}}
+      start_eval(socket, job, pid, "")
+    end
+  end
+
+  @doc """
   Whether an `eval_async/6` operation submitted under `key` is still queued or
   running (BT-5189). Takes a socket or its assigns, so templates can gate a
   submit control with it.
@@ -760,7 +781,7 @@ defmodule BtAttachWeb.Live.Dock do
     ctx = RequestContext.build(socket)
 
     task = fn ->
-      result = Facade.dispatch(:eval, %{session_pid: pid, code: code}, ctx)
+      result = dispatch_job(job, pid, code, ctx)
 
       if eval_timed_out?(result), do: Facade.dispatch(:interrupt, %{session_pid: pid}, ctx)
       {job, result}
@@ -776,6 +797,12 @@ defmodule BtAttachWeb.Live.Dock do
       socket
     end
   end
+
+  # What a queued job runs: its own facade op (`dispatch_async/7`), else an eval.
+  defp dispatch_job(%{op: {op, params}}, _pid, _code, ctx), do: Facade.dispatch(op, params, ctx)
+
+  defp dispatch_job(_job, pid, code, ctx),
+    do: Facade.dispatch(:eval, %{session_pid: pid, code: code}, ctx)
 
   defp eval_timed_out?({:error, {:unreachable, :timeout}, _output, _warnings}), do: true
   defp eval_timed_out?(_result), do: false

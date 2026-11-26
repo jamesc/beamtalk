@@ -631,8 +631,9 @@ impl Parser {
     /// Example: `Result ok: v`, `Result error: _`, `Result ok: 42`
     ///
     /// The class identifier must start with an uppercase letter. Each `keyword: binding`
-    /// pair names one constructor argument. The binding is a simple variable, wildcard,
-    /// or literal — not an arbitrary expression.
+    /// pair names one constructor argument. The binding is a variable, wildcard,
+    /// literal, or a nested tuple / map pattern — not an
+    /// arbitrary expression.
     fn parse_constructor_pattern(&mut self) -> Pattern {
         let class_token = self.advance(); // consume uppercase class identifier
         let start = class_token.span();
@@ -654,6 +655,14 @@ impl Parser {
             let kw_span = self.current_token().span();
             self.advance(); // consume keyword
             let binding = self.parse_constructor_binding();
+            if let Some(bad) = Self::unsupported_nested_pattern(&binding) {
+                self.diagnostics.push(Diagnostic::error(
+                    "array and binary patterns cannot be nested inside a constructor pattern \
+                     (bind the value and destructure it in the arm body instead)"
+                        .to_string(),
+                    bad,
+                ));
+            }
             end_span = binding.span();
             keywords.push((Identifier::new(kw_name, kw_span), binding));
         }
@@ -675,10 +684,26 @@ impl Parser {
         }
     }
 
+    /// Span of the first array/binary sub-pattern nested anywhere inside a
+    /// constructor binding (codegen cannot lower these inside a composite
+    /// native pattern), or `None`.
+    fn unsupported_nested_pattern(pattern: &Pattern) -> Option<Span> {
+        match pattern {
+            Pattern::Array { span, .. } | Pattern::Binary { span, .. } => Some(*span),
+            Pattern::Tuple { elements, .. } => {
+                elements.iter().find_map(Self::unsupported_nested_pattern)
+            }
+            Pattern::Map { pairs, .. } => pairs
+                .iter()
+                .find_map(|p| Self::unsupported_nested_pattern(&p.value)),
+            _ => None,
+        }
+    }
+
     /// Parses the binding position of a constructor pattern argument.
     ///
     /// Accepts: wildcard `_`, variable identifier, `nil` (the `Pattern::Nil`
-    /// literal), or a literal (integer, float, string, symbol, or
+    /// literal), a nested tuple `{...}` or map `#{...}` pattern (BT-5277), or a literal (integer, float, string, symbol, or
     /// negative number like `-1`). Bare `true`/`false` are rejected with a
     /// diagnostic rather than parsed as a variable binding — see
     /// the dedicated match arm below for why. A trailing `:: ClassName` on
@@ -790,17 +815,27 @@ impl Parser {
                     Pattern::Variable(Identifier::new(name, span))
                 }
             }
+            // Nested destructuring patterns (BT-5277): `Result ok: {a, b}`,
+            // `Result ok: #{#k => v}`. These are self-delimiting, so they
+            // cannot swallow the next constructor keyword or the arm's `->`.
+            // Array (`#[...]`) and binary (`<<...>>`) sub-patterns are not
+            // accepted: codegen cannot lower them inside a composite native
+            // pattern (see `generate_pattern`), so reject them here.
+            //
+            // Literals and nested tuple/map patterns:
             TokenKind::Integer(_)
             | TokenKind::Float(_)
             | TokenKind::String(_)
             | TokenKind::Character(_)
-            | TokenKind::Symbol(_) => self.parse_pattern(),
+            | TokenKind::Symbol(_)
+            | TokenKind::LeftBrace
+            | TokenKind::MapOpen => self.parse_pattern(),
             // Negative numeric literals: `-1`, `-3.14`
             TokenKind::BinarySelector(op) if op.as_str() == "-" => self.parse_pattern(),
             _ => {
                 let span = self.current_token().span();
                 self.diagnostics.push(Diagnostic::error(
-                    "Expected variable, '_', or literal after constructor keyword".to_string(),
+                    "Expected variable, '_', literal, or '{...}' or '#{...}' pattern after constructor keyword".to_string(),
                     span,
                 ));
                 Pattern::Wildcard(span)

@@ -2021,9 +2021,24 @@ impl CoreErlangGenerator {
     /// no site mints a field `Put` without it. A write inside an actor closure
     /// goes through the cell view (`cell_field_write_doc`), is never part of
     /// the loop's frame and records nothing.
-    pub(in crate::core_erlang) fn note_field_write(&self, field: &str, at: Span) {
+    ///
+    /// BT-5281: a write outside cell mode in a frame whose `StateAcc` is a
+    /// private scratch map is reported
+    /// ([`VerifyError::FieldWriteOnPrivateScratch`]): nothing adopts that
+    /// map as the next `State`, so the write would be lost.
+    pub(in crate::core_erlang) fn note_field_write(&mut self, field: &str, at: Span) {
         if self.in_cell_closure() {
             return;
+        }
+        if self.in_private_scratch {
+            self.report_threaded_ir_verify_errors(
+                &[VerifyError::FieldWriteOnPrivateScratch {
+                    field: field.to_string(),
+                    at,
+                }],
+                "field write on a private scratch map",
+                at,
+            );
         }
         self.note_threaded_state_use(StaleStateUseKind::FieldWrite, field, at);
     }
