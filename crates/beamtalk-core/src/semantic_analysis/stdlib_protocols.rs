@@ -111,6 +111,16 @@ pub fn is_stdlib_protocol_name(name: &str) -> bool {
     stdlib_protocols().sources.contains_key(name)
 }
 
+/// Names of every baked stdlib protocol (bare), in a stable order.
+pub(crate) fn stdlib_protocol_names() -> &'static [EcoString] {
+    static NAMES: OnceLock<Vec<EcoString>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        let mut names: Vec<EcoString> = stdlib_protocols().sources.keys().cloned().collect();
+        names.sort();
+        names
+    })
+}
+
 /// The source file of stdlib protocol `name`, if it is one.
 #[must_use]
 pub fn stdlib_protocol_source(name: &str) -> Option<&'static ProtocolSource> {
