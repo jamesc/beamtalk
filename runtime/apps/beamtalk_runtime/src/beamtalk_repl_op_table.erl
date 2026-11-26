@@ -186,6 +186,24 @@ ops() ->
             always,
             <<"Version, node, workspace id and the settings a client needs.">>
         ),
+        %% Git working tree (BT-5205): shared by LiveView's Git panel and wire
+        %% clients. Every `path` is checked by `beamtalk_repl_paths` first; reads
+        %% are bounded. The mutating ops change the index, working tree or
+        %% history, so they are `workspace` (refused in a release).
+        e(<<"git-status">>, beamtalk_repl_ops_git, [], [], always),
+        e(<<"git-diff">>, beamtalk_repl_ops_git, [<<"path">>], [], always),
+        e(<<"git-log">>, beamtalk_repl_ops_git, [], [<<"count">>], always),
+        e(<<"git-stage">>, beamtalk_repl_ops_git, [<<"path">>], [], workspace),
+        e(<<"git-unstage">>, beamtalk_repl_ops_git, [<<"path">>], [], workspace),
+        e(
+            <<"git-commit">>,
+            beamtalk_repl_ops_git,
+            [<<"message">>],
+            [],
+            workspace,
+            <<"Commit the staged index through system `git`, so hooks and signing apply.">>
+        ),
+        e(<<"git-revert-file">>, beamtalk_repl_ops_git, [<<"path">>], [], workspace),
         %% --- Sessions ---
         e(<<"sessions">>, beamtalk_repl_ops_session, [], [], always),
         e(<<"close">>, beamtalk_repl_ops_session, [], [], always),
@@ -208,6 +226,18 @@ ops() ->
                 "for an actor pid."
             >>
         ),
+        %% Process navigation (BT-5205): a pid is the node-local text or, over
+        %% distribution, the live pid. `children` keeps live handles for the
+        %% Inspector and encodes them as stable ids on the wire.
+        e(
+            <<"children">>,
+            beamtalk_repl_ops_process,
+            [<<"supervisor">>],
+            [],
+            always,
+            <<"List a supervisor's children as drillable rows.">>
+        ),
+        e(<<"process-info">>, beamtalk_repl_ops_process, [<<"pid">>], [], always),
         %% --- Reflection ---
         e(<<"describe">>, beamtalk_repl_ops_dev, [], [], always),
         e(<<"methods">>, beamtalk_repl_ops_dev, [<<"class">>], [], always),

@@ -274,17 +274,12 @@ defmodule BtAttach.Workspace do
   `{:error, :not_inspectable}` for a term that is not a pid-backed object.
   """
   def kill_actor({:beamtalk_object, _class, _module, pid} = _term) when is_pid(pid) do
-    case rpc(:erlang, :pid_to_list, [pid]) do
-      pid_chars when is_list(pid_chars) ->
-        case dispatch_simple("kill", %{"actor" => to_string(pid_chars)}) do
-          {:status, :ok} -> :ok
-          {:error, reason} -> {:error, reason}
-          {:badrpc, reason} -> {:error, {:unreachable, reason}}
-          other -> {:error, {:unexpected_reply, other}}
-        end
-
-      {:badrpc, reason} ->
-        {:error, {:unreachable, reason}}
+    # The op takes the live pid itself: no client-side `pid_to_list`.
+    case dispatch_simple("kill", %{"actor" => pid}) do
+      {:status, :ok} -> :ok
+      {:error, reason} -> {:error, reason}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
     end
   end
 
@@ -294,29 +289,15 @@ defmodule BtAttach.Workspace do
   List the running actors through the `actors` operation (BT-5199): one map per
   actor (`pid`, `class`, `module`, `spawned_at`, and `system` for a
   runtime-started one), plus `pid_text`, the pid as the workspace node prints
-  it (`<0.123.0>`, the form every other surface shows; formatted there in one
-  round-trip). Answers `{:ok, actors}` or `{:error, reason}`.
+  it (`<0.123.0>`, the form every other surface shows; the operation supplies
+  it). Answers `{:ok, actors}` or `{:error, reason}`.
   """
   def actors do
     case dispatch_simple("actors", %{}) do
-      {:actors, actors} when is_list(actors) -> {:ok, with_pid_text(actors)}
+      {:actors, actors} when is_list(actors) -> {:ok, actors}
       {:error, reason} -> {:error, reason}
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
       other -> {:error, {:unexpected_reply, other}}
-    end
-  end
-
-  # Add each actor's workspace-local pid text. A failed formatting call leaves
-  # the rows without it; the caller falls back to the pid term.
-  defp with_pid_text([]), do: []
-
-  defp with_pid_text(actors) do
-    case rpc(:lists, :map, [&:erlang.pid_to_list/1, Enum.map(actors, & &1.pid)]) do
-      texts when is_list(texts) and length(texts) == length(actors) ->
-        Enum.zip_with(actors, texts, &Map.put(&1, :pid_text, to_string(&2)))
-
-      _ ->
-        actors
     end
   end
 
@@ -1416,6 +1397,26 @@ defmodule BtAttach.Workspace do
   end
 
   @doc """
+  Subscribe the given `pid` (the LiveView process) to the workspace's actor
+  lifecycle push stream through the BT-2399 subscription facade (BT-5205).
+
+  Like the other streams this uses the facade's explicit-pid form. The `actors`
+  stream rides the SystemAnnouncer bus and pushes the native
+  `{:beamtalk_announcement, sub_ref, :ActorSpawned | :ActorStopped, handler,
+  event}` message when an actor starts or stops: a *refresh trigger*, after which
+  the subscriber re-reads `actors/0`. The bus prunes the subscription on dist
+  disconnect.
+  """
+  def subscribe_actors(pid) when is_pid(pid) do
+    rpc(:beamtalk_repl_subscriptions, :subscribe, [:actors, pid])
+  end
+
+  @doc "Unsubscribe `pid` from the actor lifecycle push stream via the facade."
+  def unsubscribe_actors(pid) when is_pid(pid) do
+    rpc(:beamtalk_repl_subscriptions, :unsubscribe, [:actors, pid])
+  end
+
+  @doc """
   Subscribe the given `pid` (the LiveView process) to the workspace's
   class-lifecycle push stream through the BT-2399 subscription facade (BT-2598).
 
@@ -1512,19 +1513,13 @@ defmodule BtAttach.Workspace do
   change stream: the Inspector pane re-issues it on each `{:object_changed, ...}`
   push (or a refresh timer) to keep the process-health line live.
 
-  Like `inspect_value/1`, the pid is formatted **on the workspace node** (where it
-  is local) so the textual `<0.X.Y>` form round-trips through the op's
-  `list_to_pid/1`. Returns `{:ok, stats_map}` (binary-keyed metrics) or
-  `{:error, reason}`; `{:error, :not_inspectable}` for a non-pid-backed term.
+  Like `inspect_value/1`, the op takes the live pid itself and formats it on the
+  workspace node, where it is local. Returns `{:ok, stats_map}` (binary-keyed
+  metrics) or `{:error, reason}`; `{:error, :not_inspectable}` for a
+  non-pid-backed term.
   """
   def pid_stats({:beamtalk_object, _class, _module, pid} = _term) when is_pid(pid) do
-    case rpc(:erlang, :pid_to_list, [pid]) do
-      pid_chars when is_list(pid_chars) ->
-        dispatch_pid_stats_result(dispatch_pid_stats(to_string(pid_chars)))
-
-      {:badrpc, reason} ->
-        {:error, {:unreachable, reason}}
-    end
+    dispatch_pid_stats_result(dispatch_pid_stats(pid))
   end
 
   def pid_stats(_term), do: {:error, :not_inspectable}
@@ -1686,23 +1681,12 @@ defmodule BtAttach.Workspace do
 
   # Inspect a live actor handle through the read-surface `inspect` op (ADR 0085).
   #
-  # The `inspect` op identifies the actor by the *textual* pid form, the same
-  # contract the browser uses (`beamtalk_ws_handler` formats with pid_to_list,
-  # the op resolves with list_to_pid). Both sides must run on the SAME node:
-  # `pid_to_list/1` of a node-LOCAL pid yields the canonical `<0.X.Y>` text
-  # that `list_to_pid/1` round-trips on that node. Stringifying a *remote*
-  # workspace pid here on the Phoenix node would instead emit `<N.X.Y>` (N =
-  # the workspace's index in *our* dist table), and the workspace's
-  # `list_to_pid/1` would then `badarg` (or worse, resolve a different pid).
-  # So format the pid ON the workspace node, where it is local, via RPC.
+  # The op takes the live pid itself (BT-5205) and works out the node-local
+  # `<0.X.Y>` text on the workspace node. Formatting a *remote* pid here on the
+  # Phoenix node would emit `<N.X.Y>` (N = the workspace's index in *our* dist
+  # table), which the workspace's `list_to_pid/1` cannot resolve.
   defp inspect_object(pid) when is_pid(pid) do
-    case rpc(:erlang, :pid_to_list, [pid]) do
-      pid_chars when is_list(pid_chars) ->
-        dispatch_inspect_result(dispatch_inspect(to_string(pid_chars)))
-
-      {:badrpc, reason} ->
-        {:error, {:unreachable, reason}}
-    end
+    dispatch_inspect_result(dispatch_inspect(pid))
   end
 
   # A supervisor's meaningful inspection content is its CHILDREN / supervision
@@ -1744,14 +1728,12 @@ defmodule BtAttach.Workspace do
   # BT-2633 degraded supervisors before children content existed) rather than an
   # error — the term IS a live handle, there is just nothing more to show yet.
   defp inspect_process_info(pid) when is_pid(pid) do
-    keys = [:status, :message_queue_len, :memory, :reductions]
+    case dispatch_simple("process-info", %{"pid" => pid}) do
+      {:value, %{"alive" => true} = info} ->
+        {:ok, Map.take(info, ~w(status message_queue_len memory reductions))}
 
-    case rpc(:erlang, :process_info, [pid, keys]) do
-      info when is_list(info) ->
-        {:ok, Map.new(info, fn {k, v} -> {to_string(k), v} end)}
-
-      # `undefined` (dead pid) or `{:badrpc, _}` (unreachable workspace): degrade
-      # to an empty field set, never a crash.
+      # A dead pid (`alive: false`), a refusal or an unreachable workspace
+      # degrades to an empty field set, never a crash.
       _ ->
         {:ok, %{}}
     end
@@ -1763,11 +1745,9 @@ defmodule BtAttach.Workspace do
 
   `sup_pid` is the live remote supervisor pid (extracted from a
   `{:beamtalk_supervisor, class, module, pid}` handle held in the LiveView).
-  Like `inspect_value/1`, the pid is formatted **on the workspace node** (where it
-  is local) so the textual `<0.X.Y>` form round-trips through the runtime helper's
-  `list_to_pid/1`, then `beamtalk_process_navigation:child_handles/1` classifies
-  each direct child and mints a **live child handle** for it — the reference the
-  Inspector drills into. Static and `DynamicSupervisor` children come back through
+  Dispatched as the `children` operation (BT-5205), which takes the live pid and
+  classifies each direct child and mints a **live child handle** for it — the
+  reference the Inspector drills into. Static and `DynamicSupervisor` children come back through
   the same `which_children` path, so they render uniformly.
 
   Each row is the runtime's binary-keyed child map (`label`, `className`, `kind`,
@@ -1782,17 +1762,11 @@ defmodule BtAttach.Workspace do
   """
   @spec supervisor_children(pid()) :: {:ok, [map()]} | {:error, term()}
   def supervisor_children(sup_pid) when is_pid(sup_pid) do
-    case rpc(:erlang, :pid_to_list, [sup_pid]) do
-      pid_chars when is_list(pid_chars) ->
-        case rpc(:beamtalk_process_navigation, :child_handles, [to_string(pid_chars)]) do
-          {:ok, rows} when is_list(rows) -> {:ok, rows}
-          {:error, reason} -> {:error, reason}
-          {:badrpc, reason} -> {:error, {:unreachable, reason}}
-          other -> {:error, {:unexpected_reply, other}}
-        end
-
-      {:badrpc, reason} ->
-        {:error, {:unreachable, reason}}
+    case dispatch_simple("children", %{"supervisor" => sup_pid}) do
+      {:value, %{"children" => rows}} when is_list(rows) -> {:ok, rows}
+      {:error, reason} -> {:error, reason}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
     end
   end
 
@@ -2249,77 +2223,130 @@ defmodule BtAttach.Workspace do
   @doc """
   Working-tree git status for the workspace project root (ADR 0082, BT-2586).
 
-  The cockpit's post-flush, human-facing VCS surface. Delegates to the
-  workspace-node `beamtalk_git` module (a shell-out to system `git` parsed into
-  typed Erlang maps), so it runs where the `.bt` working tree lives. Returns
+  The cockpit's post-flush, human-facing VCS surface. Dispatches the `git-status`
+  operation (BT-5205; a shell-out to system `git` parsed into typed maps), so it
+  runs where the `.bt` working tree lives. Returns
   `{:ok, status_map}` where `status_map` has `:branch`, `:upstream`, `:ahead`,
   `:behind` and `:files` (each `%{path:, index:, worktree:}`), or `{:error,
   reason}` when the workspace is unreachable, the project is not a git repo, or
   `git` is absent.
   """
   def git_status do
-    case rpc(:beamtalk_git, :git_status, [], @rpc_long_timeout) do
-      {:ok, status} when is_map(status) -> {:ok, status}
-      {:error, reason} -> {:error, structure_error(reason)}
-      {:badrpc, reason} -> {:error, {:unreachable, reason}}
-      other -> {:error, {:unexpected_reply, other}}
+    case dispatch_browse("git-status", %{}) do
+      {:value, %{"files" => files} = status} when is_list(files) ->
+        {:ok,
+         %{
+           branch: null_to_nil(Map.get(status, "branch")),
+           upstream: null_to_nil(Map.get(status, "upstream")),
+           ahead: Map.get(status, "ahead", 0),
+           behind: Map.get(status, "behind", 0),
+           truncated: Map.get(status, "truncated", false),
+           files: Enum.map(files, &git_file_from_wire/1)
+         }}
+
+      other ->
+        git_result_error(other)
     end
   end
 
+  # The status words `beamtalk_git:classify_xy/1` produces, mapped by name so
+  # remote text never makes an atom. A word this node does not know stays text.
+  @git_states Map.new(
+                ~w(unmodified modified added deleted renamed copied type_changed untracked
+                   ignored unmerged updated_unmerged),
+                &{&1, String.to_atom(&1)}
+              )
+
+  defp git_file_from_wire(file) when is_map(file) do
+    %{
+      path: Map.get(file, "path"),
+      index: git_state(Map.get(file, "index")),
+      worktree: git_state(Map.get(file, "worktree"))
+    }
+  end
+
+  defp git_state(word), do: Map.get(@git_states, word, word)
+
+  # A refusal or failure from a git operation (`dispatch_browse/2` has already
+  # turned a badrpc into `{:error, {:unreachable, _}}`), or a reply of the wrong
+  # shape.
+  defp git_result_error({:error, reason}), do: {:error, reason}
+  defp git_result_error(other), do: {:error, {:unexpected_reply, other}}
+
   @doc """
   Unified diff for a single path: working-tree-vs-HEAD and staged-vs-HEAD.
+
+  `path` must be relative to the project root with no `..` segment; the
+  operation refuses anything else (`{:error, %BeamtalkError{kind:
+  :invalid_argument}}`-shaped term). Output is capped at 1 MiB per side.
 
   Returns `{:ok, %{worktree: binary, staged: binary}}` (diff text passed through
   verbatim), or `{:error, reason}`.
   """
   def git_diff(path) when is_binary(path) do
-    case rpc(:beamtalk_git, :git_diff, [path], @rpc_long_timeout) do
-      {:ok, diff} when is_map(diff) -> {:ok, diff}
-      {:error, reason} -> {:error, structure_error(reason)}
-      {:badrpc, reason} -> {:error, {:unreachable, reason}}
-      other -> {:error, {:unexpected_reply, other}}
+    case dispatch_browse("git-diff", %{"path" => path}) do
+      {:value, %{"worktree" => worktree, "staged" => staged}}
+      when is_binary(worktree) and is_binary(staged) ->
+        {:ok, %{worktree: worktree, staged: staged}}
+
+      other ->
+        git_result_error(other)
     end
   end
 
   @doc """
   The most recent `count` commits as `{:ok, [%{sha:, short_sha:, subject:,
-  author:, ts:}]}`, or `{:error, reason}`.
+  author:, ts:}]}`, or `{:error, reason}`. The workspace caps `count` at 500.
   """
   def git_log(count) when is_integer(count) and count > 0 do
-    case rpc(:beamtalk_git, :git_log, [count], @rpc_long_timeout) do
-      {:ok, commits} when is_list(commits) -> {:ok, commits}
-      {:error, reason} -> {:error, structure_error(reason)}
-      {:badrpc, reason} -> {:error, {:unreachable, reason}}
-      other -> {:error, {:unexpected_reply, other}}
+    case dispatch_browse("git-log", %{"count" => count}) do
+      {:value, %{"commits" => commits}} when is_list(commits) ->
+        {:ok, Enum.map(commits, &git_commit_from_wire/1)}
+
+      other ->
+        git_result_error(other)
     end
   end
 
+  @commit_keys %{
+    "sha" => :sha,
+    "short_sha" => :short_sha,
+    "subject" => :subject,
+    "author" => :author,
+    "ts" => :ts
+  }
+
+  defp git_commit_from_wire(commit) when is_map(commit) do
+    for {key, value} <- commit, atom = Map.get(@commit_keys, key), into: %{}, do: {atom, value}
+  end
+
   @doc "Stage a single path (`git add`). Returns `{:ok, nil}` or `{:error, reason}`."
-  def git_stage(path) when is_binary(path), do: git_mutate(:git_stage, [path])
+  def git_stage(path) when is_binary(path), do: git_mutate("git-stage", %{"path" => path})
 
   @doc "Unstage a single path (`git restore --staged`). Returns `{:ok, nil}` or `{:error, reason}`."
-  def git_unstage(path) when is_binary(path), do: git_mutate(:git_unstage, [path])
+  def git_unstage(path) when is_binary(path), do: git_mutate("git-unstage", %{"path" => path})
 
   @doc """
   Commit the staged index with `message` (`git commit -m`). Invokes system `git`
-  so hooks/signing/config apply. Returns `{:ok, nil}` or `{:error, reason}`.
+  so hooks/signing/config apply. The message travels as one structured param,
+  never through a shell. Returns `{:ok, nil}` or `{:error, reason}`.
   """
-  def git_commit(message) when is_binary(message), do: git_mutate(:git_commit, [message])
+  def git_commit(message) when is_binary(message),
+    do: git_mutate("git-commit", %{"message" => message})
 
   @doc """
-  Discard a working-tree change for a single path (`git checkout --`) — the
+  Discard a working-tree change for a single path (`git restore --`) — the
   human counterpart to the agent ChangeLog `revert:`. Returns `{:ok, nil}` or
   `{:error, reason}`.
   """
-  def git_revert_file(path) when is_binary(path), do: git_mutate(:git_revert_file, [path])
+  def git_revert_file(path) when is_binary(path),
+    do: git_mutate("git-revert-file", %{"path" => path})
 
-  # Shared transport for the mutating git ops, all of which return {ok, nil}.
-  defp git_mutate(fun, args) do
-    case rpc(:beamtalk_git, fun, args, @rpc_long_timeout) do
-      {:ok, _} -> {:ok, nil}
-      {:error, reason} -> {:error, structure_error(reason)}
-      {:badrpc, reason} -> {:error, {:unreachable, reason}}
-      other -> {:error, {:unexpected_reply, other}}
+  # Shared transport for the mutating git ops, all of which answer `{:ok, nil}`.
+  defp git_mutate(op, params) do
+    case dispatch_browse(op, params) do
+      {:value, _} -> {:ok, nil}
+      other -> git_result_error(other)
     end
   end
 
@@ -2426,20 +2453,6 @@ defmodule BtAttach.Workspace do
   defp present_side(nil), do: nil
   defp present_side(side), do: to_string(side)
 
-  # Turn a runtime `{error, Reason}` into a structured `#beamtalk_error{}` term so
-  # the LiveView renders an actionable message. The structured half of
-  # `beamtalk_repl_ops:render(:error, reason)` is the workspace's own wrapper
-  # (`ensure_structured_error/1`) — already structured reasons pass through
-  # unchanged, raw reasons get wrapped — so we never flatten an error to an
-  # opaque string. The raw-reason path goes away as the direct calls that
-  # produce them migrate to the operation layer (BT-5202..BT-5205).
-  defp structure_error(reason) do
-    case rpc(:beamtalk_repl_ops, :render, [:error, reason]) do
-      {structured, msg} when is_binary(msg) and structured != :badrpc -> structured
-      _ -> reason
-    end
-  end
-
   defp dispatch_inspect_result(result) do
     case result do
       {:inspect, fields} when is_map(fields) -> {:ok, fields}
@@ -2453,9 +2466,9 @@ defmodule BtAttach.Workspace do
   # Dispatch `inspect` through the op layer. `request/3` returns the `{:inspect, _}` term
   # directly — JSON encoding (`encode/2`) is never invoked, so the fields stay
   # live terms with their messageable pids intact.
-  defp dispatch_inspect(pid_str) do
+  defp dispatch_inspect(pid) when is_pid(pid) do
     # inspect ignores SessionPid; pass self() purely to satisfy request/3.
-    request_op("inspect", %{"actor" => pid_str}, self(), @rpc_timeout)
+    request_op("inspect", %{"actor" => pid}, self(), @rpc_timeout)
   end
 
   defp dispatch_pid_stats_result(result) do
@@ -2472,9 +2485,9 @@ defmodule BtAttach.Workspace do
   # Build the `pid-stats` request as a flat map (`actor` top-level, mirroring
   # `dispatch_inspect/1`), and send it with one `request/3` call, which dispatches through
   # the term-returning op layer so the metrics map stays a live term.
-  defp dispatch_pid_stats(pid_str) do
+  defp dispatch_pid_stats(pid) when is_pid(pid) do
     # pid-stats ignores SessionPid; pass self() to satisfy request/3.
-    request_op("pid-stats", %{"actor" => pid_str}, self(), @rpc_timeout)
+    request_op("pid-stats", %{"actor" => pid}, self(), @rpc_timeout)
   end
 
   # ── internals ─────────────────────────────────────────────────────────────
@@ -2705,8 +2718,18 @@ defmodule BtAttach.Workspace do
     rpc(:beamtalk_repl_ops, :request, [op, wire_params(params), session_pid], timeout)
   end
 
-  defp wire_params(params),
-    do: params |> :json.encode() |> :erlang.iolist_to_binary() |> :json.decode()
+  # A live pid is the one value JSON cannot carry and a distribution client can
+  # send (BT-5205): the pid ops (`kill`, `inspect`, `pid-stats`, `children`,
+  # `process-info`) take it as is, so this node never formats a remote pid. A
+  # top-level pid param skips the round-trip and is restored under its string key.
+  defp wire_params(params) do
+    {pids, plain} = Enum.split_with(params, fn {_key, value} -> is_pid(value) end)
+
+    decoded =
+      plain |> Map.new() |> :json.encode() |> :erlang.iolist_to_binary() |> :json.decode()
+
+    Map.merge(decoded, Map.new(pids, fn {key, pid} -> {to_string(key), pid} end))
+  end
 
   defp rpc(mod, fun, args, timeout \\ @rpc_timeout) do
     erpc(mod, fun, args, timeout, true)

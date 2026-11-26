@@ -972,6 +972,10 @@ the client to the `protocol_msg()` record. It is gone.
 
 `flush` takes at most one of `class`, `file` or `kind` (two is `invalid_argument`) and `confirm_destructive`; the destructive tier is applied only for a boolean `true`, and any other value is `invalid_argument`. `save-class`'s `{value, Map}` also carries `warnings` (a list of texts) when the class went live but its ChangeLog entry could not be recorded, so `flush` will not write the file.
 
+**Git ops (BT-5205).** `git-status`, `git-diff`, `git-log`, `git-stage`, `git-unstage`, `git-commit` and `git-revert-file` run system `git` in the project's repository (never through a shell; pathspecs are literal). A `path` must be relative to the project root, with no `..` segment, no NUL byte, and not empty; anything else is `invalid_argument` and git is not started. `git-status` answers `{branch, upstream, ahead, behind, files: [{path, index, worktree}], truncated}` (at most 5000 files); `git-diff` `{path, worktree, staged, truncated}` (at most 1 MiB per side, valid UTF-8); `git-log` takes an optional positive `count` (default 20, capped at 500) and answers `{commits: [{sha, short_sha, subject, author, ts}], limit}`; `git-stage`, `git-unstage` and `git-revert-file` answer `{path}`; `git-commit` takes `message` (a String, at most 64 KiB) and answers `{committed: true}`.
+
+**Process navigation (BT-5205).** `children` takes `supervisor` and answers `{children: [Row], truncated}` (at most 500 rows); a row is `{label, className, kind, pid, registeredName, childCount, isSupervisor, handle}`, where `handle` is `null` for a foreign or restarting child and otherwise `{kind: "supervisor" | "actor", class, pid}` on the wire (a client attached over Erlang distribution receives the live `{beamtalk_supervisor | beamtalk_object, Class, Module, Pid}` term instead). `process-info` takes `pid` and answers `{pid, alive, status, message_queue_len, memory, reductions}`; a dead pid is `{pid, alive: false}`. A pid param (`supervisor`, `pid`, and `actor` for `inspect`, `kill`, `pid-stats`) is the node-local text `<0.123.0>` or, over distribution, the live pid.
+
 Every op returns one of these tagged terms. The tag and the arity are the
 contract; the table gives the shape per operation family.
 
@@ -979,10 +983,12 @@ contract; the table gives the shape per operation family.
 |--------|------------|--------------|
 | Evaluation | `eval` | `{ok, Value, Output, Warnings}` · `{trace, Steps, Output, Warnings}` · `{script_exit, Code, Output, Warnings}` |
 | Evaluation (other) | `unload`, tracing read ops | `{ok, Value, Output, Warnings}` |
-| Actors | `actors`, `inspect`, `kill`, `interrupt`, `pid-stats` | `{actors, [ActorMeta]}` · `{inspect, FieldMap \| binary()}` · `{status, ok}` · `{value, StatsMap}` |
+| Actors | `actors`, `inspect`, `kill`, `interrupt`, `pid-stats` | `{actors, [ActorMeta]}` (over distribution each also has `pid_text`; the wire does not) · `{inspect, FieldMap \| binary()}` · `{status, ok}` · `{value, StatsMap}` |
 | Sessions | `sessions`, `close`, `health`, `shutdown` | `{sessions, [SessionMeta]}` (`#{id, pid}`; the wire carries `id`) · `{status, ok}` · `{health, WorkspaceId, Nonce}` |
 | Loading | `load-source`, `load-project`, `save-section`, `save-native-source`, `save-method`, `save-class`, `revert-method`, `reload-file` | `{loaded, Classes, Warnings}` · `{load_project, Classes, Errors, Summary, Warnings}` · `{value, Map}` |
 | Workspace state | `flush`, `changes`, `info` | `{value, Map}`: a `FlushResult` summary · `#{entries}` · `#{version, node, workspace_id, settings}`, wire-shaped (binary keys, `null` for absent) |
+| Git | `git-status`, `git-diff`, `git-log`, `git-stage`, `git-unstage`, `git-commit`, `git-revert-file` | `{value, Map}`, wire-shaped: a status, a diff pair, a commit list, or the path / `committed` echoed back |
+| Process navigation | `children`, `process-info` | `{value, #{children, truncated}}` (rows keep a live `handle` over distribution) · `{value, #{pid, alive, ...}}` |
 | Developer reads | `complete`, `erlang-complete`, `hover`, `erlang-help`, `diagnostics`, `describe`, `methods`, `inherited-methods`, `list-classes`, `show-codegen`, `test`, `test-all`, `list-tests`, `load-tests` | `{completions, [binary()]}` · `{docs, binary()}` · `{diagnostics, [map()]}` · `{describe, Ops, Versions}` · `{methods, Methods, StateVars}` · `{inherited_methods, Methods}` · `{class_list, [ClassInfo]}` · `{codegen, CoreErlang, Warnings}` · `{test_results, map()}` · `{value, JsonValue}` |
 | Browse and navigation | `browse-*`, `nav-query`, `nav-symbols`, `reload-findings`, `export-traces` | `{value, JsonValue}` |
 

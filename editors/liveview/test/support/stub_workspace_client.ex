@@ -200,6 +200,8 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   def unsubscribe_transcript(_pid), do: :ok
   def subscribe_bindings(_pid), do: :ok
   def unsubscribe_bindings(_pid), do: :ok
+  def subscribe_actors(_pid), do: :ok
+  def unsubscribe_actors(_pid), do: :ok
   # BT-2598: the class-lifecycle push stream. Records the subscribe so a test can
   # assert it is wired at mount; returns :ok (the real facade's success reply).
   def subscribe_classes(_pid), do: record({:subscribe_classes}) && :ok

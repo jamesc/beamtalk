@@ -158,13 +158,11 @@ revert_side(_Other) ->
         )}.
 
 %% `reload-file` takes the project-relative `.bt` path a git operation just
-%% restored: no absolute path, no `..` segment, `.bt` only.
+%% restored: the shared path policy (`beamtalk_repl_paths`), `.bt` only.
 -spec project_relative_bt_path(binary()) -> ok | {error, #beamtalk_error{}}.
 project_relative_bt_path(Path) ->
-    Segments = binary:split(Path, [<<"/">>, <<"\\">>], [global]),
     case
-        filename:pathtype(binary_to_list(Path)) =:= relative andalso
-            not lists:member(<<"..">>, Segments) andalso
+        beamtalk_repl_paths:check_relative(Path) =:= ok andalso
             filename:extension(Path) =:= <<".bt">>
     of
         true ->

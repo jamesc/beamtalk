@@ -82,6 +82,11 @@ never crashed.
 -define(FS, 16#1f).
 -define(RS, 16#1e).
 
+%% Every pathspec is a literal path: a name that looks like `:(top)` magic or a
+%% glob is a file name, so a path the op layer vetted cannot name anything else
+%% (BT-5205).
+-define(LITERAL_PATHSPECS, <<"--literal-pathspecs">>).
+
 %% Upper bound on how long a single git invocation may run before we give up
 %% and return a structured timeout error rather than blocking the caller.
 -define(GIT_TIMEOUT_MS, 30000).
@@ -334,7 +339,9 @@ run_git_in(Selector, Args, Dir) ->
     try beamtalk_exec_port:open() of
         Port ->
             try
-                beamtalk_exec_port:spawn_child(Port, ChildId, <<"git">>, Args, #{dir => Dir}),
+                beamtalk_exec_port:spawn_child(
+                    Port, ChildId, <<"git">>, [?LITERAL_PATHSPECS | Args], #{dir => Dir}
+                ),
                 collect(Selector, Port, ChildId)
             after
                 try
