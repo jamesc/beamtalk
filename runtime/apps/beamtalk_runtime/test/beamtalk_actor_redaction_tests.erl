@@ -25,6 +25,7 @@ capture crash reports.
 -export(['__beamtalk_secrets'/0]).
 
 -define(R, <<"[redacted]">>).
+-define(SECRETS_OVERRIDE, bt5334_secrets_override).
 
 %% Secret markers for the compiled-actor tests. Deliberately long and
 %% non-numeric: the `~p` dumps they are searched in also hold pids and refs,
@@ -39,7 +40,24 @@ capture crash reports.
 %%% ----------------------------------------------------------------------
 
 '__beamtalk_secrets'() ->
-    beamtalk_actor_redaction:merge_secrets({[token], []}, [], ['login:']).
+    case get(?SECRETS_OVERRIDE) of
+        undefined -> beamtalk_actor_redaction:merge_secrets({[token], []}, [], ['login:']);
+        {raise, Reason} -> error(Reason);
+        Secrets -> Secrets
+    end.
+
+%% BT-5334: the crash filter calls `Module:'__beamtalk_secrets'()` in the
+%% calling process, so a test can make this module declare other secrets (or
+%% raise) by setting this process-dictionary key, with no `meck` and no code
+%% loading. (`meck:new`/`unload` compile, load and purge through the code
+%% server, which under load blew EUnit's 5s per-test timeout.)
+with_secrets_override(Override, Fun) ->
+    put(?SECRETS_OVERRIDE, Override),
+    try
+        Fun()
+    after
+        erase(?SECRETS_OVERRIDE)
+    end.
 
 format_status(Status) ->
     beamtalk_actor_redaction:format_status(?MODULE, Status).
@@ -303,17 +321,13 @@ crash_filter_ignores_other_events_test() ->
     ?assertEqual(ignore, beamtalk_actor_redaction:crash_report_filter(Event, [])).
 
 crash_filter_fails_closed_test() ->
-    ok = meck:new(bt4666_broken_actor, [non_strict]),
-    try
-        ok = meck:expect(bt4666_broken_actor, '__beamtalk_secrets', fun() -> error(boom) end),
-        Event = crash_event({bt4666_broken_actor, init, ['Argument__1']}, [m], [{k, v}]),
+    with_secrets_override({raise, boom}, fun() ->
+        Event = crash_event({?MODULE, init, ['Argument__1']}, [m], [{k, v}]),
         Info = crash_info(beamtalk_actor_redaction:crash_report_filter(Event, [])),
         ?assertEqual(?R, proplists:get_value(messages, Info)),
         ?assertEqual(?R, proplists:get_value(dictionary, Info)),
         ?assertMatch({error, boom, _}, proplists:get_value(error_info, Info))
-    after
-        meck:unload(bt4666_broken_actor)
-    end.
+    end).
 
 compiled_actor_proc_lib_report_redacts_queued_send_test() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
@@ -387,21 +401,17 @@ crash_filter_redacts_installed_state_cell_test() ->
 crash_filter_secret_state_only_actor_test() ->
     %% An actor declaring only secretState still has its cell redacted;
     %% its queued messages pass unchanged.
-    ok = meck:new(bt4666_state_only_actor, [non_strict]),
-    try
-        ok = meck:expect(bt4666_state_only_actor, '__beamtalk_secrets', fun() -> {[pin], []} end),
+    with_secrets_override({[pin], []}, fun() ->
         Cell = {'$bt_actor_state', {self(), #{pin => 1234}}},
         Msg = {'$gen_call', {self(), tag}, {'login:', [pw], #{}}},
-        Event = crash_event({bt4666_state_only_actor, init, ['Argument__1']}, [Msg], [Cell]),
+        Event = crash_event({?MODULE, init, ['Argument__1']}, [Msg], [Cell]),
         Info = crash_info(beamtalk_actor_redaction:crash_report_filter(Event, [])),
         ?assertEqual([Msg], proplists:get_value(messages, Info)),
         ?assertEqual(
             [{'$bt_actor_state', {self(), #{pin => ?R}}}],
             proplists:get_value(dictionary, Info)
         )
-    after
-        meck:unload(bt4666_state_only_actor)
-    end.
+    end).
 
 crash_filter_redacts_excused_carried_states_test() ->
     %% The test-build commit check's excused list holds carried state maps.
