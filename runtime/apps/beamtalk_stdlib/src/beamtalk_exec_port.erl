@@ -35,6 +35,8 @@ Events (binary → BEAM) — ETF tuples on the port:
   {stderr, ChildId, Data}
   {exit,   ChildId, ExitCode}
   {stdin_queued, ChildId}
+  {stdin_written, ChildId}
+  {stdin_failed, ChildId, Reason}
   {error,  ChildId, Command, Reason}
 ```
 
@@ -48,6 +50,13 @@ later output is dropped. A failed `spawn` is answered with
 well-formed `write_stdin` (one naming a `child_id`) gets exactly one answer,
 `stdin_queued` or `error`, in command order, so the caller can tell which
 write was dropped.
+
+Each queued write is then reported once more, in queue order and after its
+`stdin_queued`: `stdin_written` when it is in the child's stdin pipe, or
+`stdin_failed` when the child exited or closed its stdin first. One
+`stdin_failed` covers that write and every write queued behind it, and later
+writes get an `error`. Neither is sent after `exit`. "Written" means the
+bytes reached the pipe, not that the child read them.
 
 `error` reports that `Command` (`spawn`, `write_stdin`, …) for `ChildId`
 failed: malformed `args` or

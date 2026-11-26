@@ -335,9 +335,13 @@ writeLine_after_close_returns_error_test() ->
 %%% writeLine: raises for the line the exec port drops (BT-5248)
 %%% ============================================================================
 
-%% The exec port queues at most 8 MiB for a child that never reads: eight 1 MiB
-%% lines are accepted, the ninth is dropped. That call raises (it used to
-%% return nil, and only the next one raised), and so does every later one.
+%% The exec port queues at most 8 MiB for a child; past that it drops the
+%% write and says so. The writeLine: whose line is dropped raises (BT-5248:
+%% it used to return nil, and only the next one raised), and so does every
+%% later one. A writeLine: answers only once its line is in the pipe
+%% (BT-5269), which a child that never reads leaves full, so ten callers
+%% write at once: eight 1 MiB lines fill the queue, the other two raise. The
+%% eight are never written, so none of them is told nil: close answers them.
 writeLine_raises_for_the_line_the_port_drops_test_() ->
     {timeout, 60, fun() ->
         {Notify, Collector} = make_collector(),
@@ -349,26 +353,86 @@ writeLine_raises_for_the_line_the_port_drops_test_() ->
         }),
         %% 1 MiB less the newline writeLine: appends: each line is exactly 1 MiB.
         Chunk = binary:copy(<<"x">>, (1 bsl 20) - 1),
-        {Accepted, Err} = write_until_error(Pid, Chunk, 0),
-        ?assertEqual(8, Accepted),
-        ?assertMatch(#beamtalk_error{kind = runtime_error, selector = 'writeLine:'}, Err),
-        ?assertEqual(
-            {beamtalk_string, <<"writeLine: failed: the line was not written">>},
-            Err#beamtalk_error.message
+        start_writers(Pid, Chunk, 10),
+        Refused = [await_write_reply() || _ <- [1, 2]],
+        lists:foreach(
+            fun(R) ->
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = runtime_error, selector = 'writeLine:'}}, R
+                )
+            end,
+            Refused
         ),
+        ?assert(
+            lists:any(
+                fun({error, E}) ->
+                    E#beamtalk_error.message =:=
+                        {beamtalk_string, <<"writeLine: failed: the line was not written">>}
+                end,
+                Refused
+            )
+        ),
+        %% Sticky: the next write raises too.
         ?assertMatch({error, #beamtalk_error{}}, gen_server:call(Pid, {'writeLine:', [<<"x">>]})),
         ?assertEqual(nil, gen_server:call(Pid, {close, []})),
+        Queued = [await_write_reply() || _ <- lists:seq(1, 8)],
+        ?assertEqual(
+            lists:duplicate(8, port_closed),
+            [K || {error, #beamtalk_error{kind = K}} <- Queued]
+        ),
         Collector ! stop,
         gen_server:stop(Pid)
     end}.
 
-write_until_error(_Pid, _Chunk, Accepted) when Accepted > 100 ->
-    error(writes_never_refused);
-write_until_error(Pid, Chunk, Accepted) ->
-    case gen_server:call(Pid, {'writeLine:', [Chunk]}, 10000) of
-        nil -> write_until_error(Pid, Chunk, Accepted + 1);
-        {error, Err} -> {Accepted, Err}
+%% Start N callers that each write Chunk once and send this process the reply.
+start_writers(Pid, Chunk, N) ->
+    Self = self(),
+    [
+        spawn(fun() ->
+            Self ! {write_reply, gen_server:call(Pid, {'writeLine:', [Chunk]}, 30000)}
+        end)
+     || _ <- lists:seq(1, N)
+    ].
+
+await_write_reply() ->
+    receive
+        {write_reply, Reply} -> Reply
+    after 20000 -> error(no_write_reply)
     end.
+
+%%% BT-5269: a writeLine: whose child closed its stdin before taking the line
+%%% raises (it used to return nil: the line was queued, then lost silently).
+writeLine_raises_when_the_child_closed_stdin_test_() ->
+    case os:type() of
+        %% Unix only: no stock Windows command closes its stdin and stays up.
+        %% The exec-level test covers the writer thread on every platform.
+        {unix, _} -> [fun writeLine_raises_when_the_child_closed_stdin/0];
+        _ -> []
+    end.
+
+writeLine_raises_when_the_child_closed_stdin() ->
+    {Notify, Collector} = make_collector(),
+    {ok, Pid} = beamtalk_reactive_subprocess:start(#{
+        executable => <<"/bin/sh">>,
+        args => [<<"-c">>, <<"exec 0<&-; echo closed; exec sleep 60">>],
+        notify => Notify
+    }),
+    %% The child prints once its stdin is closed.
+    wait_for_line(Collector, {beamtalk_string, <<"closed">>}),
+    {error, Err} = gen_server:call(Pid, {'writeLine:', [<<"lost">>]}),
+    ?assertMatch(#beamtalk_error{kind = runtime_error, selector = 'writeLine:'}, Err),
+    ?assertEqual(
+        {beamtalk_string, <<"writeLine: failed: the line was not written">>},
+        Err#beamtalk_error.message
+    ),
+    %% Sticky: every later write raises too.
+    ?assertMatch(
+        {error, #beamtalk_error{kind = runtime_error}},
+        gen_server:call(Pid, {'writeLine:', [<<"later">>]})
+    ),
+    ?assertEqual(nil, gen_server:call(Pid, {close, []})),
+    Collector ! stop,
+    gen_server:stop(Pid).
 
 %% A writeLine: whose write_stdin raises (the exec port is gone) marks the port
 %% closed; callers already parked for an answer must be failed then, or nothing
