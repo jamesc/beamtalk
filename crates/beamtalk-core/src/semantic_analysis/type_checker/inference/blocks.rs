@@ -739,6 +739,10 @@ impl TypeChecker {
             block_env
         };
         let widenings = self.loop_head_widenings(block, env, &build, hierarchy, in_abstract_method);
+        if !self.speculating && !block.parameters.is_empty() {
+            self.resolved_block_params
+                .insert(block.span, param_types.to_vec());
+        }
         build(&widenings)
     }
 

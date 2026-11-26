@@ -697,6 +697,10 @@ pub struct TypeChecker {
     /// `do:separatedBy:`), those other blocks: their writes reach its loop
     /// head too.
     pub(super) loop_siblings: HashMap<Span, Vec<crate::ast::Block>>,
+    /// BT-5298: the parameter types each block literal's body was last
+    /// inferred with, so a later sibling's loop head can infer it again with
+    /// the same parameters.
+    pub(super) resolved_block_params: HashMap<Span, Vec<InferredType>>,
     /// BT-5298: true during a speculative pass of a block body, whose side
     /// effects are rolled back afterwards.
     pub(super) speculating: bool,
@@ -734,6 +738,7 @@ impl TypeChecker {
             deferred_block_widenings: Vec::new(),
             run_once_blocks: std::collections::HashSet::new(),
             loop_siblings: HashMap::new(),
+            resolved_block_params: HashMap::new(),
             speculating: false,
             block_param_pushdown: HashMap::new(),
             unresolved_selector_sends: std::collections::HashSet::new(),
@@ -768,6 +773,7 @@ impl TypeChecker {
             deferred_block_widenings: Vec::new(),
             run_once_blocks: std::collections::HashSet::new(),
             loop_siblings: HashMap::new(),
+            resolved_block_params: HashMap::new(),
             speculating: false,
             block_param_pushdown: HashMap::new(),
             unresolved_selector_sends: std::collections::HashSet::new(),

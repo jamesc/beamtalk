@@ -64,7 +64,9 @@ impl TypeChecker {
                     .chain(messages.iter().flat_map(|m| &m.arguments)),
                 env,
             );
-            self.mark_run_once_blocks(Some(inner.as_ref()), inner_sel, inner_args);
+            // BT-5298: the cascade target is not marked run-once even for
+            // `value`: every message of the cascade runs it again
+            // (`[...] value; value`), so it gets the loop-head join.
             let inner_ty = self.infer_send_receiver(inner, hierarchy, env, in_abstract_method);
             let send_ty = self.infer_message_send_with_receiver_ty(
                 inner,

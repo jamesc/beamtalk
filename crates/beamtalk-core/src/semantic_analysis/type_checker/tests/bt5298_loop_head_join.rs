@@ -218,17 +218,106 @@ fn while_true_condition_sees_body_writes() {
 #[test]
 fn separator_block_sees_body_writes() {
     let diags = type_messages(
-        r#"Object subclass: Probe
+        r"Object subclass: Probe
   class t: items :: List(String) -> Result(Integer, String) =>
     last := nil
     items do: [:each | last := each] separatedBy: [
       last notNil ifTrue: [^Result error: last]
     ]
     Result ok: 1
-"#,
+",
     );
     assert!(
         return_mismatches(&diags).is_empty(),
         "the body's write must reach the separator: {diags:?}"
+    );
+}
+
+/// A write through a block stored inside the loop body (not a send
+/// argument) reaches the loop head too: the speculative pass starts a fresh
+/// send frame, as the real body does.
+#[test]
+fn stored_block_write_in_loop_body_reaches_loop_head() {
+    let diags = type_messages(
+        r"Object subclass: Probe
+  class u: items :: List(String) -> Result(Integer, String) =>
+    x := nil
+    items do: [:each |
+      x notNil ifTrue: [^Result error: x]
+      b := [x := each]
+      b value
+    ]
+    Result ok: 1
+",
+    );
+    assert!(
+        return_mismatches(&diags).is_empty(),
+        "the stored block's write must reach the loop head: {diags:?}"
+    );
+}
+
+/// A chain longer than the speculative passes can follow never leaves a
+/// local narrower than a later run sees: it enters the block as `Dynamic`.
+#[test]
+fn unconverged_loop_head_falls_back_to_dynamic() {
+    let diags = type_messages(
+        r"Object subclass: Probe
+  class v: items :: List(String) -> Result(Integer, String) =>
+    p := nil
+    a := nil
+    b := nil
+    c := nil
+    items do: [:each |
+      p notNil ifTrue: [^Result error: p]
+      p := a
+      a := b
+      b := c
+      c := each
+    ]
+    Result ok: 1
+",
+    );
+    assert!(
+        return_mismatches(&diags).is_empty(),
+        "`p` holds a String from the fifth run on: {diags:?}"
+    );
+}
+
+/// A sibling is inferred with the parameter types its own pass resolved, so
+/// the separator's writes leave `last` as `String | Nil`, not `Dynamic`: a
+/// selector neither member understands is still reported after the send.
+#[test]
+fn sibling_with_parameters_keeps_a_precise_join() {
+    let diags = type_messages(
+        r#"Object subclass: Probe
+  class w: items :: List(String) -> Integer =>
+    last := nil
+    items do: [:each | last := each] separatedBy: [last := "sep"]
+    last zzNoSuchSelector
+    0
+"#,
+    );
+    assert!(
+        diags.iter().any(|m| m.contains("zzNoSuchSelector")),
+        "`last` must stay `String | Nil` after the send: {diags:?}"
+    );
+}
+
+/// Every message of a cascade on a block literal runs it again, so the
+/// target block gets the loop-head join even when the first message is
+/// `value`.
+#[test]
+fn cascaded_value_block_gets_the_loop_head_join() {
+    let diags = type_messages(
+        r#"Object subclass: Probe
+  class x -> Result(Integer, String) =>
+    x := nil
+    [x notNil ifTrue: [^Result error: x]. x := "s"] value; value
+    Result ok: 1
+"#,
+    );
+    assert!(
+        return_mismatches(&diags).is_empty(),
+        "the second `value` sees the first run's write: {diags:?}"
     );
 }

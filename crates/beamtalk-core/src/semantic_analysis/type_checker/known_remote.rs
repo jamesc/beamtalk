@@ -51,6 +51,26 @@ impl KnownRemote {
     fn new(node_hint: Option<EcoString>) -> Self {
         Self { node_hint }
     }
+
+    /// The known-remote fact of a local after a join of its `binding` with
+    /// the values some `arms` leave it with (a block write, BT-4636; a loop
+    /// head, BT-5298): it survives only when the binding and every arm are
+    /// known-remote, otherwise a stale fact would describe a value the local
+    /// may no longer hold. `node_hint` is kept only when all of them agree on
+    /// it; otherwise the fact stays with no hint and the diagnostic says
+    /// "there".
+    pub(super) fn join<'a>(
+        binding: Option<KnownRemote>,
+        arms: impl IntoIterator<Item = Option<&'a KnownRemote>>,
+    ) -> Option<KnownRemote> {
+        let mut node_hint = binding?.node_hint;
+        for arm in arms {
+            if arm?.node_hint != node_hint {
+                node_hint = None;
+            }
+        }
+        Some(Self { node_hint })
+    }
 }
 
 /// The direct remote spawn/lookup selectors (ADR 0126 §3's decision table):
