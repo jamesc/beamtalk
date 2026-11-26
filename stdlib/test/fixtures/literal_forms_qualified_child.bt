@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-5218: a subclass of a class whose own superclass is package-qualified.
+LiteralFormsQualifiedBase subclass: LiteralFormsQualifiedChild
+
+  answer => super answer + 1
