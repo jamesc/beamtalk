@@ -79,17 +79,9 @@ handle_term(<<"save-class">>, Params, _Msg, _SessionPid) ->
             %% A failed ChangeLog append for the new class is queued as a warning
             %% (BT-5084), not raised: collect it and return it, so the caller
             %% learns `flush` will not write the file.
-            ok = beamtalk_refactor_support:begin_changelog_warnings(),
-            Result =
-                try
-                    beamtalk_repl_loader_newclass:new_class(Source, Path)
-                catch
-                    Class:Reason0:Stack ->
-                        %% A raise must not leave the process marked as collecting.
-                        _ = beamtalk_refactor_support:end_changelog_warnings(),
-                        erlang:raise(Class, Reason0, Stack)
-                end,
-            Warnings = beamtalk_refactor_support:end_changelog_warnings(),
+            {Result, Warnings} = beamtalk_refactor_support:collect_changelog_warnings(fun() ->
+                beamtalk_repl_loader_newclass:new_class(Source, Path)
+            end),
             case Result of
                 {ok, _ClassObjects} ->
                     Value = #{<<"path">> => Path},

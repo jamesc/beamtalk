@@ -35,6 +35,8 @@ edit_ops_test_() ->
         {"reload-file reloads a file's classes", fun reload_file_reloads/0},
         {"save-class returns no warnings key when the ChangeLog append is clean",
             fun save_class_clean_has_no_warnings/0},
+        {"collect_changelog_warnings returns the queue and cleans up after a raise",
+            fun collect_changelog_warnings_returns_queued_and_cleans_up/0},
         {"revert-method rejects an unrecognised side", fun revert_bad_side/0},
         {"reload-file refuses absolute, escaping and non-.bt paths", fun reload_file_bad_paths/0},
         {"reload-file of a missing file is a structured error", fun reload_file_missing/0}
@@ -265,14 +267,34 @@ reload_file_bad_paths() ->
     ].
 
 save_class_clean_has_no_warnings() ->
-    %% The failure path (`{warning, _}` from the ChangeLog append) is queued by
-    %% `note_changelog_result/1`; here we pin that the op collects around the call
-    %% and leaves the process unmarked afterwards.
-    _ = request(<<"save-class">>, #{
-        <<"source">> => <<"Value subclass: EditOpsWarn">>,
-        <<"path">> => <<"../outside/EditOpsWarn.bt">>
+    %% A clean create replies with the path alone: no `warnings` key.
+    {ok, #{project_path := Project}} = beamtalk_workspace_meta:get_metadata(),
+    Path = filename:join(Project, <<"EditOpsWarn.bt">>),
+    ?assertEqual(
+        {value, #{<<"path">> => Path}},
+        request(<<"save-class">>, #{
+            <<"source">> => <<"Value subclass: EditOpsWarn">>,
+            <<"path">> => Path
+        })
+    ),
+    %% A refused create leaves the process unmarked as collecting.
+    {error, _} = request(<<"save-class">>, #{
+        <<"source">> => <<"Value subclass: EditOpsWarn2">>,
+        <<"path">> => <<"../outside/EditOpsWarn2.bt">>
     }),
-    ?assertEqual(undefined, erlang:get('$beamtalk_changelog_eval')),
-    ok = beamtalk_refactor_support:begin_changelog_warnings(),
-    ok = beamtalk_refactor_support:note_changelog_result({warning, <<"w">>}),
-    ?assertEqual([<<"w">>], beamtalk_refactor_support:end_changelog_warnings()).
+    ?assertEqual(undefined, erlang:get('$beamtalk_changelog_eval')).
+
+collect_changelog_warnings_returns_queued_and_cleans_up() ->
+    ?assertEqual(
+        {done, [<<"w1">>, <<"w2">>]},
+        beamtalk_refactor_support:collect_changelog_warnings(fun() ->
+            ok = beamtalk_refactor_support:note_changelog_result({warning, <<"w1">>}),
+            ok = beamtalk_refactor_support:note_changelog_result({warning, <<"w2">>}),
+            done
+        end)
+    ),
+    ?assertError(
+        boom,
+        beamtalk_refactor_support:collect_changelog_warnings(fun() -> erlang:error(boom) end)
+    ),
+    ?assertEqual(undefined, erlang:get('$beamtalk_changelog_eval')).

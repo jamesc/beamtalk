@@ -1854,15 +1854,23 @@ defmodule BtAttach.Workspace do
   Returns:
 
     * success → `{:ok, path}` — the path the new class is bound to (the created
-      class objects are not surfaced; the path is the actionable identity)
+      class objects are not surfaced; the path is the actionable identity); or
+      `{:ok, path, warnings}` when the class is live but its ChangeLog entry could
+      not be recorded, so `flush` will not write the file
     * error   → `{:error, reason_term}` — a structured `#beamtalk_error{}` for a
       bad path / name clash / compile failure, or `{:unreachable, _}` if the
       workspace is gone
   """
   def new_class(source, path) when is_binary(source) and is_binary(path) do
     case dispatch_browse("save-class", %{"source" => source, "path" => path}) do
-      {:value, %{"path" => path_bin}} -> {:ok, to_string(path_bin)}
-      other -> edit_error(other)
+      {:value, %{"path" => path_bin, "warnings" => [_ | _] = warnings}} ->
+        {:ok, to_string(path_bin), Enum.map(warnings, &to_string/1)}
+
+      {:value, %{"path" => path_bin}} ->
+        {:ok, to_string(path_bin)}
+
+      other ->
+        edit_error(other)
     end
   end
 

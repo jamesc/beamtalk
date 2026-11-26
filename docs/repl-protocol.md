@@ -967,6 +967,8 @@ the client to the `protocol_msg()` record. It is gone.
 
 ### Result shapes
 
+`save-class`'s `{value, Map}` also carries `warnings` (a list of texts) when the class went live but its ChangeLog entry could not be recorded, so `flush` will not write the file.
+
 Every op returns one of these tagged terms. The tag and the arity are the
 contract; the table gives the shape per operation family.
 

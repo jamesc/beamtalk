@@ -44,6 +44,7 @@ verbatim.
     note_changelog_result/1,
     take_changelog_warnings/0,
     begin_changelog_warnings/0,
+    collect_changelog_warnings/1,
     end_changelog_warnings/0,
     %% Shared by the class-rename and method-rename pipelines (BT-4703).
     raise_if_colliding/2,
@@ -313,6 +314,23 @@ begin_changelog_warnings() ->
     _ = erlang:erase(?CHANGELOG_WARNINGS_KEY),
     _ = erlang:put(?CHANGELOG_EVAL_KEY, true),
     ok.
+
+%% Run `Fun`, collecting the ChangeLog warnings it queues. Returns its result and
+%% the warnings, oldest first. A raise from `Fun` ends collection first, so the
+%% process is never left marked as collecting.
+-spec collect_changelog_warnings(fun(() -> Result)) -> {Result, [binary()]} when
+    Result :: term().
+collect_changelog_warnings(Fun) ->
+    ok = begin_changelog_warnings(),
+    Result =
+        try
+            Fun()
+        catch
+            Class:Reason:Stack ->
+                _ = end_changelog_warnings(),
+                erlang:raise(Class, Reason, Stack)
+        end,
+    {Result, end_changelog_warnings()}.
 
 %% Stop collecting and return what was queued, oldest first.
 -spec end_changelog_warnings() -> [binary()].

@@ -885,6 +885,18 @@ defmodule BtAttach.WorkspaceRpcTest do
                {:ok, "src/greeter.bt"}
     end
 
+    test "new_class/2 returns the ChangeLog warnings the operation reports" do
+      mock_rpc(
+        decode_ok(
+          {:beamtalk_repl_ops, :request},
+          {:value, %{"path" => "src/g.bt", "warnings" => ["ChangeLog append failed"]}}
+        )
+      )
+
+      assert Workspace.new_class("Object subclass: G", "src/g.bt") ==
+               {:ok, "src/g.bt", ["ChangeLog append failed"]}
+    end
+
     test "new_class/2 returns the operation's structured error as is" do
       err = {:beamtalk_error, :name_clash}
       mock_rpc(decode_ok({:beamtalk_repl_ops, :request}, {:error, err}))
