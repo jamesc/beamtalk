@@ -57,7 +57,9 @@ pub(crate) use environment::{
     BuildEnvironment, DependencyContext, package_identity, resolve_and_validate_dependencies,
     setup_build_environment,
 };
-pub(crate) use native::{Rebar3Result, collect_rebar3_ebin_paths, compile_native_sources};
+pub(crate) use native::{
+    Rebar3Result, collect_rebar3_ebin_paths, compile_native_sources, compile_own_native_for_check,
+};
 pub(crate) use outputs::{
     PackageBuildOutputs, build_alias_metadata, build_class_metadata, generate_package_corpus,
     generate_package_outputs,
@@ -209,8 +211,7 @@ pub(crate) struct Pass2Inputs {
 /// Resolve the Pass 2 inputs: the project-known Erlang modules (BT-4022) and
 /// the ADR 0075 type registry with its stub diagnostics. Call it after native
 /// compilation so freshly compiled native modules and dependency ebins are
-/// visible; `check` calls it without compiling anything and reads only
-/// already-built artifacts.
+/// visible; `check` compiles the native sources first too (BT-5342).
 pub(crate) fn pass2_inputs(
     env: &BuildEnvironment,
     dep_ctx: &DependencyContext,

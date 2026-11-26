@@ -123,6 +123,35 @@ pub(crate) fn compile_native_sources(
     Ok(native_result)
 }
 
+/// BT-5342: the native step `beamtalk check` runs so the package's own
+/// `native/*.erl` `-spec`s are visible to Pass 2 on a clean tree.
+///
+/// Deliberately narrower than [`compile_native_sources`]: it only writes under
+/// `_build` (the class header and the `erlc` output) and never runs rebar3 /
+/// touches the network or rewrites `beamtalk.lock`. It is also non-fatal: a
+/// native compile failure is reported as a warning and `check` still analyses
+/// every `.bt` file against whatever artifacts exist, so one run keeps
+/// reporting the whole error surface.
+pub(crate) fn compile_own_native_for_check(
+    env: &BuildEnvironment,
+    dep_ctx: &DependencyContext,
+    class_module_index: &HashMap<String, String>,
+) {
+    let result = (|| -> Result<()> {
+        if env.pkg_manifest().is_some() {
+            generate_class_header(&env.layout.native_include_dir(), class_module_index)?;
+        }
+        compile_native_erlang_with_deps(&env.project_root, &dep_ctx.resolved_deps)?;
+        Ok(())
+    })();
+    if let Err(e) = result {
+        eprintln!(
+            "warning: could not compile native Erlang sources for check ({e:#}); \
+             FFI types from this package's native/ modules may be inferred as Dynamic"
+        );
+    }
+}
+
 // ── Class module header generation ──────────────────────────────────────────
 
 /// Generate a `beamtalk_classes.hrl` header file with Erlang preprocessor

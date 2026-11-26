@@ -44,6 +44,22 @@ if [ "${out}" != "${expected}" ]; then
     echo "expected: ${expected}" >&2
     exit 1
 fi
+# IDE_IMAGE (BT-5313) adds `ide_image`; a malformed one is refused.
+img="ghcr.io/jamesc/beamtalk-ide@sha256:${H1}"
+out="$(PATH="${tmp}/bin:${PATH}" GITHUB_REPOSITORY=o/r OTP_SUPPORT_TOML="${tmp}/otp.toml" IDE_IMAGE="${img}" \
+    "${here}/uat-dispatch-payload.sh" release 0.6.0 v0.6.0 deadbeef)"
+[ "$(jq -r .ide_image <<<"${out}")" = "${img}" ] \
+    || { echo "FAIL: ide_image missing: ${out}" >&2; exit 1; }
+[ "$(jq -r '.assets | length' <<<"${out}")" = 2 ] \
+    || { echo "FAIL: assets changed with IDE_IMAGE: ${out}" >&2; exit 1; }
+for bad in "ghcr.io/jamesc/beamtalk-ide:rc-deadbeef" "ghcr.io/jamesc/other@sha256:${H1}" \
+           "ghcr.io/jamesc/beamtalk-ide@sha256:abc"; do
+    if PATH="${tmp}/bin:${PATH}" GITHUB_REPOSITORY=o/r OTP_SUPPORT_TOML="${tmp}/otp.toml" IDE_IMAGE="${bad}" \
+        "${here}/uat-dispatch-payload.sh" release 0.6.0 v0.6.0 deadbeef >/dev/null 2>&1; then
+        echo "FAIL: malformed IDE_IMAGE '${bad}' accepted" >&2
+        exit 1
+    fi
+done
 # --otp prints just the window; a toml without it is an error.
 [ "$(OTP_SUPPORT_TOML="${tmp}/otp.toml" "${here}/uat-dispatch-payload.sh" --otp)" = '{"min-major":28,"max-major":29}' ] \
     || { echo "FAIL: --otp output" >&2; exit 1; }
