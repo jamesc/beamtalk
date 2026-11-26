@@ -6,6 +6,8 @@
 # Used by release.yml to avoid duplicating version logic across jobs.
 #
 # Usage: scripts/ci/determine-version.sh <event_name> [release_tag] [input_tag]
+#   release_tag  the tag the event names: `github.ref_name` for a tag `push`
+#                (BT-5313), or `github.event.release.tag_name` for `release`
 # Outputs (to $GITHUB_OUTPUT if set, else stdout):
 #   tag=v0.1.0
 #   version=0.1.0
@@ -16,7 +18,7 @@ EVENT_NAME="${1:?Usage: determine-version.sh <event_name> [release_tag] [input_t
 RELEASE_TAG="${2:-}"
 INPUT_TAG="${3:-}"
 
-if [ "${EVENT_NAME}" = "release" ] && [ -n "${RELEASE_TAG}" ]; then
+if { [ "${EVENT_NAME}" = "push" ] || [ "${EVENT_NAME}" = "release" ]; } && [ -n "${RELEASE_TAG}" ]; then
     TAG="${RELEASE_TAG}"
 elif [ -n "${INPUT_TAG}" ]; then
     TAG="${INPUT_TAG}"

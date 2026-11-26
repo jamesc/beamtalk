@@ -285,9 +285,9 @@ beamtalk check path/to/file.bt  # Check a single file
 
 **What it runs:** Pass 1 indexing plus the full semantic-analysis pipeline over every source file. It checks all files instead of stopping at the first failure.
 
-**What it skips:** No `.core` or `.beam` files are written, native Erlang sources are not compiled, the post-codegen verifier does not run, and no OTP packaging (`.app` file, corpus) is produced.
+**What it skips:** No `.core` or `.beam` files are written for Beamtalk sources (the package's own `native/*.erl` is compiled, see below), the post-codegen verifier does not run, and no OTP packaging (`.app` file, corpus) is produced.
 
-**FFI caveat:** FFI and native-module checks see only already-built artifacts (from a prior `beamtalk build`). A passing `beamtalk check` does not guarantee `beamtalk build` succeeds.
+**FFI note:** `check` compiles the package's own `native/*.erl` first (as `build` does), so its `-spec`s type FFI calls the same on a clean tree as after a build. A passing `beamtalk check` still does not guarantee `beamtalk build` succeeds.
 
 **Warning flags:** `--warnings-as-errors` also fails on `Warning`/`Hint` diagnostics (same exclusions as `build`); `--no-warnings` suppresses warning output. The two are mutually exclusive (BT-5045).
 

@@ -57,7 +57,11 @@ run workflow_dispatch "" ""
 check "describe fallback picks v0.5.0, not edge/nightly" \
   '[ "$RC" -eq 0 ] && grep -qx "tag=v0.5.0" <<<"$OUT" && grep -qx "version=0.5.0" <<<"$OUT"'
 
-# Explicit tags: release event and dispatch input.
+# Explicit tags: tag push (BT-5313), release event and dispatch input.
+run push v0.7.0 ""
+check "tag push v0.7.0" '[ "$RC" -eq 0 ] && grep -qx "tag=v0.7.0" <<<"$OUT" && grep -qx "version=0.7.0" <<<"$OUT"'
+run push v0.7.0 v9.9.9
+check "tag push wins over an input tag" '[ "$RC" -eq 0 ] && grep -qx "version=0.7.0" <<<"$OUT"'
 run release v0.6.1 ""
 check "release event tag v0.6.1" '[ "$RC" -eq 0 ] && grep -qx "version=0.6.1" <<<"$OUT"'
 run workflow_dispatch "" v1.0.0-rc.1
@@ -66,6 +70,8 @@ check "input tag v1.0.0-rc.1" '[ "$RC" -eq 0 ] && grep -qx "version=1.0.0-rc.1" 
 for bad in edge nightly dev latest v1 v1.2 'v1.2.3;x'; do
   run release "$bad" ""
   check "release tag '$bad' is rejected" '[ "$RC" -ne 0 ]'
+  run push "$bad" ""
+  check "pushed tag '$bad' is rejected" '[ "$RC" -ne 0 ]'
   run workflow_dispatch "" "$bad"
   check "input tag '$bad' is rejected" '[ "$RC" -ne 0 ]'
 done
