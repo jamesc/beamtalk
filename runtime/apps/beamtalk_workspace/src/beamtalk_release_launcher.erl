@@ -390,12 +390,19 @@ file order. Every other flag, including `-name`, `-sname`, `-detached`, `-s`,
 `-run` and `-eval`, is ignored: the check VM never loads the file, so none of
 them can run, start distribution or silence its output there. Reads erl's
 arg-file syntax: whitespace-separated words, `#` comments to the end of the
-line, and single or double quoted words; `-extra` ends the flags.
+line, and single or double quoted words; `-extra` ends the flags. A `+`
+emulator flag ends the words of the flag before it.
 """.
 -spec vm_args_dist_flags(string() | binary()) ->
     #{ssl_dist_opt := [string()], ssl_dist_optfile := [string()], proto_dist := [string()]}.
 vm_args_dist_flags(Text) ->
-    Words = vm_args_words(unicode:characters_to_list(Text), [], []),
+    Chars =
+        case unicode:characters_to_list(Text) of
+            List when is_list(List) -> List;
+            %% Not UTF-8 (a Latin-1 comment): erl reads the file bytewise.
+            _ -> binary_to_list(iolist_to_binary(Text))
+        end,
+    Words = vm_args_words(Chars, [], []),
     Empty = #{ssl_dist_opt => [], ssl_dist_optfile => [], proto_dist => []},
     vm_args_collect(Words, none, Empty).
 
@@ -409,7 +416,8 @@ vm_args_collect(["-ssl_dist_optfile" | T], _, Acc) ->
     vm_args_collect(T, ssl_dist_optfile, Acc);
 vm_args_collect(["-proto_dist" | T], _, Acc) ->
     vm_args_collect(T, proto_dist, Acc);
-vm_args_collect([[$- | _] | T], _, Acc) ->
+vm_args_collect([[Lead | _] | T], _, Acc) when Lead =:= $-; Lead =:= $+ ->
+    %% A `-flag` or a `+emulator` flag (`+K true`) ends the previous flag's words.
     vm_args_collect(T, none, Acc);
 vm_args_collect([_ | T], none, Acc) ->
     vm_args_collect(T, none, Acc);

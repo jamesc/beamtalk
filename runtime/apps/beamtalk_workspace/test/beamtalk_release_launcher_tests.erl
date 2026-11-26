@@ -204,8 +204,6 @@ tls_preflight_test_() ->
             ]
         end}.
 
-%% An epmd that already runs on loopback only would hide the node from other
-%% hosts; one that listens on the interface (or none at all) is fine.
 %% BT-5260: only the distribution flags are read from a `vm.args` overlay.
 vm_args_dist_flags_test_() ->
     Flags = fun(Text) -> beamtalk_release_launcher:vm_args_dist_flags(Text) end,
@@ -223,6 +221,13 @@ vm_args_dist_flags_test_() ->
             },
             Flags("-sname stray\n-ssl_dist_opt server_verify verify_none\n")
         ),
+        %% `+` emulator flags and a non-UTF-8 comment do not leak into the words.
+        ?_assertEqual(
+            #{ssl_dist_opt => ["a"], ssl_dist_optfile => ["f"], proto_dist => ["inet_tls"]},
+            Flags(
+                <<"# caf\xE9\n-ssl_dist_opt a\n+K true\n-ssl_dist_optfile f +P 9\n-proto_dist inet_tls\n+sbwt none\n">>
+            )
+        ),
         ?_assertEqual(
             #{
                 ssl_dist_opt => ["a", "b", "c d"],
@@ -237,6 +242,8 @@ vm_args_dist_flags_test_() ->
         )
     ].
 
+%% An epmd that already runs on loopback only would hide the node from other
+%% hosts; one that listens on the interface (or none at all) is fine.
 tls_preflight_epmd_test_() ->
     {setup, fun() -> beamtalk_test_fs:tmp_dir("bt5233_epmd") end, fun beamtalk_test_fs:rm_rf/1, fun(
             Dir
