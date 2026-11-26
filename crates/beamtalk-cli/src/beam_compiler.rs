@@ -162,7 +162,7 @@ impl BeamCompiler {
         // Find runtime and build -pa paths (canonicalize for absolute paths,
         // since the BEAM node runs from temp_dir).
         let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout().map_err(|e| {
-            runtime_missing_error("the Beamtalk runtime directory", &format!("{e}"))
+            runtime_missing_error("the Beamtalk runtime directory", &format!("Details: {e}"))
         })?;
 
         let runtime_dir = beamtalk_core::paths::canonicalize(&runtime_dir)
@@ -312,10 +312,10 @@ impl BeamCompiler {
 
 /// Build the one actionable error for a missing Port runtime: what is
 /// missing, where it was looked for, and how to install or build it.
-fn runtime_missing_error(what: &str, looked_in: &str) -> miette::Report {
+fn runtime_missing_error(what: &str, detail: &str) -> miette::Report {
     miette::miette!(
         "Cannot compile Beamtalk: {what} is missing.\n\
-         Looked in: {looked_in}\n\
+         {detail}\n\
          To fix it:\n\
          - installed copy: reinstall Beamtalk (the runtime lives in <prefix>/lib/beamtalk/lib/beamtalk_compiler/ebin)\n\
          - source checkout: run `just build` (or `cd runtime && rebar3 compile`)\n\
@@ -326,7 +326,7 @@ fn runtime_missing_error(what: &str, looked_in: &str) -> miette::Report {
 /// Check that `compiler_ebin` holds the compiled compiler app and its
 /// `beamtalk_build_worker` module; returns the directory on success.
 fn require_build_worker(compiler_ebin: &std::path::Path) -> Result<&std::path::Path> {
-    let looked_in = compiler_ebin.display().to_string();
+    let looked_in = format!("Looked in: {}", compiler_ebin.display());
     if !beamtalk_cli::repl_startup::has_beam_files(compiler_ebin) {
         return Err(runtime_missing_error(
             "the compiled beamtalk_compiler app",

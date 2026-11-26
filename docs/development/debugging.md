@@ -390,9 +390,11 @@ readable everywhere it can surface:
   `sys_messages:format_messages/4` OTP itself uses internally.
 
 If you see a bare `internal error` or a build failure with no readable cause,
-run `beamtalk_compile_diagnostics:format_errors/1` on the raw `compile:forms`
-error term (the legacy `escript` backend that used to offer a second opinion
-was removed in BT-5198; `BEAMTALK_COMPILER` is no longer read).
+call `beamtalk_build_worker`'s compile path on the `.core` file from an
+`erl -pa runtime/_build/default/lib/beamtalk_compiler/ebin` shell, or run
+`escript scripts/compile-pipeline-corpus-lint.escript <core_dir>`, to see the
+raw `compile:forms` error term (the legacy `escript` backend that used to offer
+a second opinion was removed in BT-5198; `BEAMTALK_COMPILER` is no longer read).
 
 ### ThreadedIr verifier (ADR 0111, BT-3129-BT-3165, BT-3164, BT-3166-BT-3170, BT-3447)
 

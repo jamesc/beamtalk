@@ -31,11 +31,9 @@ render as `"<file>: unbound variable 'State' in foo/1"' for the same
 input).
 
 Used by both `beamtalk_build_worker' and `beamtalk_compiler_server' (the
-in-memory Port backend, ADR 0022 Phase 3) so the two never drift. (The
-former standalone `compile.escript' backend, which carried its own copy of
-this logic, was removed in BT-5198.) Note that `report_errors'/`report_warnings' (the more
-obvious option) turned out to be actively wrong here, not just an
-unshared duplicate of this formatting: they print through the compiling
+in-memory Port backend, ADR 0022 Phase 3) so the two never drift. The more
+obvious `report_errors'/`report_warnings' options are actively wrong here:
+they print through the compiling
 process's default group leader, which lands on stdout, not stderr — the
 Rust CLI's stdout parser only recognises the `beamtalk-compile-*'
 protocol markers and silently drops every other line, so the message was
