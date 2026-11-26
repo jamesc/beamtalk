@@ -503,11 +503,6 @@ pub(super) fn collect_stdlib_alias_sources(
 /// parse error is already reported through the normal per-file diagnostics
 /// path when that file is compiled on its own.
 ///
-/// The fourth element is the file name of every stdlib source that declares
-/// any protocol, provision-bearing or not, sorted and deduplicated — the files
-/// `generate_protocol_files_section` embeds (BT-5338), so requirements-only
-/// protocols (`Printable`, `JsonRepresentable`) reach the type checker.
-///
 /// Also returns the full AST of every *provision-bearing* protocol found
 /// (ADR 0127 §10a; BT-3591) — the trait-flattening counterpart to the
 /// `ProtocolInfo` metadata above, handed to every stdlib file's
@@ -522,7 +517,12 @@ pub(super) fn collect_stdlib_alias_sources(
 /// The third element is each such protocol's source file (path + text —
 /// ADR 0127 §3, "Source locations"; BT-3625), so codegen can map a
 /// flattened provision's spans to lines of the *protocol's* file.
-#[allow(clippy::type_complexity)] // 3-tuple mirrors this module's other multi-output extractors
+///
+/// The fourth element is the file name of every stdlib source that declares
+/// any protocol, provision-bearing or not, sorted and deduplicated — the files
+/// `generate_protocol_files_section` embeds (BT-5338), so requirements-only
+/// protocols (`Printable`, `JsonRepresentable`) reach the type checker.
+#[allow(clippy::type_complexity)] // 4-tuple mirrors this module's other multi-output extractors
 pub(super) fn collect_stdlib_protocol_infos(
     source_files: &[Utf8PathBuf],
 ) -> (

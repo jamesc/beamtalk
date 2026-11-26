@@ -300,18 +300,12 @@ impl TypeChecker {
                     }
                 }
             }
-            InferredType::Dynamic(_) => {
-                if protocol_registry.has_protocol(base_protocol) {
-                    self.diagnostics.push(
-                        Diagnostic::warning(
-                            format!("Cannot verify {base_protocol} conformance for Dynamic value"),
-                            span,
-                        )
-                        .with_category(DiagnosticCategory::Type)
-                        .with_hint("Add a type annotation to enable protocol conformance checking"),
-                    );
-                }
-            }
+            // Gradual typing (BT-5338): a `Dynamic` argument is accepted by a
+            // protocol-typed parameter, as it is by a class-typed one. Unions
+            // containing `Dynamic` are skipped the same way (see
+            // `check_union_argument_conformance`); strictness for untyped
+            // values belongs to the "Dynamic in typed class" lint.
+            InferredType::Dynamic(_) => {}
             InferredType::Union { members, .. } => {
                 self.check_union_argument_conformance(
                     arg_type,

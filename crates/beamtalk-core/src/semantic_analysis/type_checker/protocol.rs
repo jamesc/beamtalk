@@ -143,7 +143,7 @@ impl TypeChecker {
                                 self.check_protocol_argument_conformance(
                                     &arg_type,
                                     part,
-                                    send.span,
+                                    arg.span(),
                                     hierarchy,
                                     protocol_registry,
                                 );
@@ -153,7 +153,7 @@ impl TypeChecker {
                         self.check_protocol_argument_conformance(
                             &arg_type,
                             &expected_ty,
-                            send.span,
+                            arg.span(),
                             hierarchy,
                             protocol_registry,
                         );
