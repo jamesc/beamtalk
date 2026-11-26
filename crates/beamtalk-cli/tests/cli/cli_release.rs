@@ -1393,6 +1393,29 @@ fn release_launcher_tls_distribution_opt_in_test() {
         stderr.contains("{verify, verify_peer} to the server list"),
         "vm.args override: {stderr}"
     );
+    // BT-5260: the check reads only the distribution flags from `vm.args`, so
+    // an overlay with `-sname` (would start distribution in the check VM) and
+    // `-detached` (would silence its output) still reports the option file's
+    // real problem, not a confusing "printed no settings".
+    std::fs::write(
+        &vm_args,
+        format!("{original_vm_args}\n-sname bt5260_stray\n-detached\n-eval \"halt(7).\"\n"),
+    )
+    .expect("write vm.args");
+    let out = launcher_command(&output_dir, name)
+        .arg("foreground")
+        .envs(tls_env(&tls_dir.join("no_client_verify.conf")))
+        .env("RELEASE_NODE", &node)
+        .env("RELEASE_COOKIE", &cookie)
+        .output()
+        .expect("spawn bin/<name> foreground");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "stray vm.args flags: {stderr}");
+    assert!(
+        stderr.contains("{verify, verify_peer} to the client list")
+            && !stderr.contains("printed no settings"),
+        "stray vm.args flags: {stderr}"
+    );
     std::fs::write(&vm_args, original_vm_args).expect("restore vm.args");
 
     // The client verbs refuse the same way.

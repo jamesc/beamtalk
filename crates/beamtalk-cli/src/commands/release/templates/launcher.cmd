@@ -280,8 +280,11 @@ exit /b 0
 
 rem RELEASE_DISTRIBUTION=tls (BT-5233): run beamtalk_release_launcher's
 rem tls_preflight_main in a VM with no distribution, as launcher.sh's
-rem `select_distribution` does (with vm.args, so it sees every -ssl_dist_opt
-rem the node will). It refuses (exit 2, each problem and its fix
+rem `select_distribution` does: it is not given vm.args to load, only its path
+rem as -beamtalk_vm_args, and reads just the -ssl_dist_opt, -ssl_dist_optfile
+rem and -proto_dist flags in Erlang (vm_args_dist_flags/1), so a user
+rem [release] vm-args overlay cannot run -eval, start distribution or silence
+rem the check there. It refuses (exit 2, each problem and its fix
 rem on stderr) unless RELEASE_HOST and RELEASE_DIST_INTERFACE are valid and
 rem the RELEASE_SSL_DIST_OPTFILE file makes both sides verify their peer;
 rem otherwise it prints one tls-KEY=VALUE line per setting. The output goes
@@ -311,7 +314,7 @@ if not defined TLS_PROBE_DIR (
     exit /b 1
 )
 set "TLS_PROBE=!TLS_PROBE_DIR!\preflight.txt"
-"%ERL%" -noshell %BOOT_ARGS% %PA_ARGS% -args_file "%CONFIG_DIR%\vm.args" -beamtalk_launcher_verb %VERB% -eval "beamtalk_release_launcher:tls_preflight_main()." >"!TLS_PROBE!"
+"%ERL%" -noshell %BOOT_ARGS% %PA_ARGS% -beamtalk_vm_args "%CONFIG_DIR%\vm.args" -beamtalk_launcher_verb %VERB% -eval "beamtalk_release_launcher:tls_preflight_main()." >"!TLS_PROBE!"
 set "TLS_RC=!errorlevel!"
 set "TLS_PROTO="
 set "TLS_INTERFACE="

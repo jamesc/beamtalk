@@ -290,8 +290,12 @@ node_sname() {
 }
 
 # RELEASE_DISTRIBUTION=tls (BT-5233): run `tls_preflight_main/0` in a VM with
-# no distribution, but with `vm.args` (and so every `-ssl_dist_opt` the node
-# will see) as the node has it. It refuses (exit 2, each problem and its fix on stderr)
+# no distribution that is not given `vm.args` to load (a user `[release]
+# vm-args` overlay could then run `-eval`, start distribution with `-sname` or
+# silence the check with `-detached`). It gets the path as `-beamtalk_vm_args`
+# and reads only the `-ssl_dist_opt`, `-ssl_dist_optfile` and `-proto_dist`
+# flags in Erlang (`vm_args_dist_flags/1`), so every one the node will see
+# still counts and nothing else in the file does. It refuses (exit 2, each problem and its fix on stderr)
 # unless RELEASE_HOST and RELEASE_DIST_INTERFACE are set and valid and the
 # RELEASE_SSL_DIST_OPTFILE file sets `{verify, verify_peer}` on both sides and
 # `{fail_if_no_peer_cert, true}` on the server side; otherwise it prints the
@@ -310,7 +314,7 @@ select_distribution() {
     fi
     [ "$DIST_MODE" = "tls" ] || return 0
     eval "set -- -noshell $(minimal_boot_args) $(lib_pa_args) \
-        -args_file \"\$CONFIG_DIR/vm.args\" \
+        -beamtalk_vm_args \"\$CONFIG_DIR/vm.args\" \
         -beamtalk_launcher_verb \"\$VERB\" \
         -eval \"beamtalk_release_launcher:tls_preflight_main().\""
     preflight=$("$ERL" "$@") || exit $?

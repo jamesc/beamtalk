@@ -51,6 +51,7 @@ WebSocket `run-entry` op and these launcher verbs — never a second one.
     stop_client_main/0,
     tls_preflight_main/0,
     tls_preflight/2,
+    vm_args_dist_flags/1,
     epmd_address/1
 ]).
 
@@ -324,19 +325,35 @@ stop_client_main() ->
 
 -doc """
 The `RELEASE_DISTRIBUTION=tls` check `bin/<name>` runs (in a VM with no
-distribution, but the release's `vm.args` and the `ERL_*FLAGS` variables, so
-it sees every `-ssl_dist_opt` flag the node will) before it starts any
-distributed node (ADR 0126 amendment D2, BT-5233). On success it prints one
+distribution, given the release's `vm.args` path as `-beamtalk_vm_args` and
+reading only its distribution flags with `vm_args_dist_flags/1`, plus the
+`ERL_*FLAGS` variables, so it sees every `-ssl_dist_opt` flag the node will)
+before it starts any distributed node (ADR 0126 amendment D2, BT-5233). On success it prints one
 `tls-<key>=<value>` line per value the launcher needs and halts with 0;
 otherwise it prints each problem with its fix to stderr and halts with 2, so
 the launcher refuses to start. See `tls_preflight/2` for what it checks.
 """.
 -spec tls_preflight_main() -> no_return().
 tls_preflight_main() ->
+    case vm_args_flags() of
+        {ok, VmArgs} ->
+            tls_preflight_main(VmArgs);
+        {error, Problem} ->
+            io:format(
+                standard_error,
+                "error: RELEASE_DISTRIBUTION=tls is set, but this node cannot start with it:~n"
+                "  - ~ts~n",
+                [Problem]
+            ),
+            erlang:halt(2)
+    end.
+
+tls_preflight_main(VmArgs) ->
+    Words = fun(Flag) -> init_words(Flag) ++ maps:get(Flag, VmArgs) end,
     Args = #{
-        dist_opt_words => init_words(ssl_dist_opt),
-        extra_optfiles => init_words(ssl_dist_optfile),
-        extra_proto_dists => init_words(proto_dist),
+        dist_opt_words => Words(ssl_dist_opt),
+        extra_optfiles => Words(ssl_dist_optfile),
+        extra_proto_dists => Words(proto_dist),
         epmd_listening => fun epmd_listening/2
     },
     case tls_preflight(fun os:getenv/1, Args) of
@@ -365,11 +382,80 @@ tls_preflight_main() ->
     end.
 
 -doc """
+The distribution flags in a `vm.args` file's text, and nothing else: the words
+after each `-ssl_dist_opt`, `-ssl_dist_optfile` and `-proto_dist` (up to the
+next word that starts with `-`, as `init:get_argument/1` would give them), in
+file order. Every other flag, including `-name`, `-sname`, `-detached`, `-s`,
+`-run` and `-eval`, is ignored: the check VM never loads the file, so none of
+them can run, start distribution or silence its output there. Reads erl's
+arg-file syntax: whitespace-separated words, `#` comments to the end of the
+line, and single or double quoted words; `-extra` ends the flags.
+""".
+-spec vm_args_dist_flags(string() | binary()) ->
+    #{ssl_dist_opt := [string()], ssl_dist_optfile := [string()], proto_dist := [string()]}.
+vm_args_dist_flags(Text) ->
+    Words = vm_args_words(unicode:characters_to_list(Text), [], []),
+    Empty = #{ssl_dist_opt => [], ssl_dist_optfile => [], proto_dist => []},
+    vm_args_collect(Words, none, Empty).
+
+vm_args_collect([], _Current, Acc) ->
+    Acc;
+vm_args_collect(["-extra" | _], _Current, Acc) ->
+    Acc;
+vm_args_collect(["-ssl_dist_opt" | T], _, Acc) ->
+    vm_args_collect(T, ssl_dist_opt, Acc);
+vm_args_collect(["-ssl_dist_optfile" | T], _, Acc) ->
+    vm_args_collect(T, ssl_dist_optfile, Acc);
+vm_args_collect(["-proto_dist" | T], _, Acc) ->
+    vm_args_collect(T, proto_dist, Acc);
+vm_args_collect([[$- | _] | T], _, Acc) ->
+    vm_args_collect(T, none, Acc);
+vm_args_collect([_ | T], none, Acc) ->
+    vm_args_collect(T, none, Acc);
+vm_args_collect([Word | T], Flag, Acc) ->
+    vm_args_collect(T, Flag, Acc#{Flag := maps:get(Flag, Acc) ++ [Word]}).
+
+%% Split into words: whitespace separates, `#` starts a comment at the start
+%% of a word, and a quoted word may hold whitespace.
+vm_args_words([], [], Acc) ->
+    lists:reverse(Acc);
+vm_args_words([], Cur, Acc) ->
+    lists:reverse([lists:reverse(Cur) | Acc]);
+vm_args_words([C | T], Cur, Acc) when C =:= $\s; C =:= $\t; C =:= $\n; C =:= $\r ->
+    vm_args_words(T, [], vm_args_flush(Cur, Acc));
+vm_args_words([$# | T], [], Acc) ->
+    vm_args_words(lists:dropwhile(fun(C) -> C =/= $\n end, T), [], Acc);
+vm_args_words([Q | T], Cur, Acc) when Q =:= $"; Q =:= $' ->
+    {Quoted, Rest} = lists:splitwith(fun(C) -> C =/= Q end, T),
+    vm_args_words(lists:nthtail(min(1, length(Rest)), Rest), lists:reverse(Quoted) ++ Cur, Acc);
+vm_args_words([C | T], Cur, Acc) ->
+    vm_args_words(T, [C | Cur], Acc).
+
+vm_args_flush([], Acc) -> Acc;
+vm_args_flush(Cur, Acc) -> [lists:reverse(Cur) | Acc].
+
+%% The file `-beamtalk_vm_args` names (the launcher passes the release's
+%% `vm.args`), or no flags when it is not given.
+vm_args_flags() ->
+    case init:get_argument(beamtalk_vm_args) of
+        {ok, [[Path | _] | _]} ->
+            case file:read_file(Path) of
+                {ok, Text} ->
+                    {ok, vm_args_dist_flags(Text)};
+                {error, Reason} ->
+                    {error,
+                        io_lib:format("cannot read '~ts': ~ts", [Path, file:format_error(Reason)])}
+            end;
+        _ ->
+            {ok, vm_args_dist_flags("")}
+    end.
+
+-doc """
 Check a `RELEASE_DISTRIBUTION=tls` opt-in, reading the environment with
 `GetEnv` (`os:getenv/1`'s contract):
 
-* `RELEASE_HOST` names this host as the other nodes reach it (a DNS name its
-  certificate names, or an IP address); it becomes the host part of `-name`.
+* `RELEASE_HOST` names this host as the other nodes reach it (fully qualified,
+  with at least one '.', and a name its certificate names, or an IP address); it becomes the host part of `-name`.
 * `RELEASE_DIST_INTERFACE` is one IP address of this host to listen on, parsed
   by the shared rule (`beamtalk_dist_address:parse/1`; a `%zone` is refused,
   since the listener cannot carry one). There is no default, so the node
@@ -561,9 +647,9 @@ tls_host(Host) ->
                 false ->
                     {error,
                         io_lib:format(
-                            "RELEASE_HOST '~ts' is not a host name or IP address "
-                            "(a fully qualified name with at least one '.', or an IP address; "
-                            "letters, digits, '-' and '.' only)",
+                            "RELEASE_HOST '~ts' is not a fully qualified host name "
+                            "(with at least one '.') or an IP address "
+                            "(letters, digits, '-' and '.' only in a name)",
                             [Host]
                         )}
             end

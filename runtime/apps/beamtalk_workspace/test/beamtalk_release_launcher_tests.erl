@@ -206,6 +206,37 @@ tls_preflight_test_() ->
 
 %% An epmd that already runs on loopback only would hide the node from other
 %% hosts; one that listens on the interface (or none at all) is fine.
+%% BT-5260: only the distribution flags are read from a `vm.args` overlay.
+vm_args_dist_flags_test_() ->
+    Flags = fun(Text) -> beamtalk_release_launcher:vm_args_dist_flags(Text) end,
+    [
+        ?_assertEqual(
+            #{ssl_dist_opt => [], ssl_dist_optfile => [], proto_dist => []},
+            Flags("-mode interactive\n-sname stray\n-detached\n-s init stop\n-eval \"x().\"\n")
+        ),
+        %% A stray -sname does not hide a later weaker -ssl_dist_opt.
+        ?_assertEqual(
+            #{
+                ssl_dist_opt => ["server_verify", "verify_none"],
+                ssl_dist_optfile => [],
+                proto_dist => []
+            },
+            Flags("-sname stray\n-ssl_dist_opt server_verify verify_none\n")
+        ),
+        ?_assertEqual(
+            #{
+                ssl_dist_opt => ["a", "b", "c d"],
+                ssl_dist_optfile => ["/p q/o.conf"],
+                proto_dist => ["inet_tls"]
+            },
+            Flags(
+                "# -ssl_dist_opt commented\n-ssl_dist_opt a b\n-detached\n"
+                "-ssl_dist_opt 'c d' -ssl_dist_optfile \"/p q/o.conf\"\n"
+                "-proto_dist inet_tls\n-extra -proto_dist other\n"
+            )
+        )
+    ].
+
 tls_preflight_epmd_test_() ->
     {setup, fun() -> beamtalk_test_fs:tmp_dir("bt5233_epmd") end, fun beamtalk_test_fs:rm_rf/1, fun(
             Dir
