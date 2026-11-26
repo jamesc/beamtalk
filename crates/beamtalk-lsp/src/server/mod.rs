@@ -59,6 +59,9 @@ mod publish;
 mod range_format;
 mod reload;
 
+pub(crate) use commands::CommandCall;
+pub(in crate::server) use commands::build_command_call;
+#[cfg(test)]
 pub(in crate::server) use commands::build_command_expression;
 pub(in crate::server) use config::PreloadConfig;
 pub(in crate::server) use convert::{
@@ -832,8 +835,8 @@ impl LanguageServer for Backend {
         params: ExecuteCommandParams,
     ) -> Result<Option<serde_json::Value>> {
         guard_request("execute_command", async move {
-            let expr = match build_command_expression(&params.command, &params.arguments) {
-                Ok(expr) => expr,
+            let call = match build_command_call(&params.command, &params.arguments) {
+                Ok(call) => call,
                 Err(msg) => {
                     self.client
                         .log_message(
@@ -861,7 +864,7 @@ impl LanguageServer for Backend {
                 }
             };
 
-            match runtime.evaluate(&expr).await {
+            match runtime.send_call(&call).await {
                 Ok(response) => {
                     if response.is_error() {
                         let msg = response
@@ -884,6 +887,19 @@ impl LanguageServer for Backend {
                             })
                         });
                         return Ok(Some(value));
+                    }
+                    // A ChangeLog entry that could not be recorded means `flush`
+                    // will not write the file; log each warning, as MCP and
+                    // LiveView surface theirs. The value keeps `warnings` too.
+                    if let CommandCall::SaveClass { .. } = call {
+                        for warning in save_class_warnings(response.value.as_ref()) {
+                            self.client
+                                .log_message(
+                                    MessageType::WARNING,
+                                    format!("executeCommand {}: {warning}", params.command),
+                                )
+                                .await;
+                        }
                     }
                     let pretty = response.value_string();
                     let value = response.value.unwrap_or(serde_json::Value::Null);
@@ -908,6 +924,15 @@ impl LanguageServer for Backend {
         })
         .await
     }
+}
+
+/// The `warnings` texts of a `save-class` reply value.
+fn save_class_warnings(value: Option<&serde_json::Value>) -> Vec<&str> {
+    value
+        .and_then(|v| v.get("warnings"))
+        .and_then(serde_json::Value::as_array)
+        .map(|ws| ws.iter().filter_map(serde_json::Value::as_str).collect())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
