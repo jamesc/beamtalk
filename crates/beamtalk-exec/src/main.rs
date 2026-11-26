@@ -41,11 +41,10 @@
 //!   [`DRAIN_MAX`] + [`DRAIN_GRACE`] after the child exits); one still
 //!   unreported then (its pipe is full and held open by a process that does
 //!   not read it) gets none: `exit` ends it.
-//! - `{exit, ChildId, ExitCode}` — the last event for a child, except for the
-//!   answer (`stdin_queued`/`error`) to a `write_stdin` sent after it while
-//!   the entry is still registered (Unix, a grandchild left in the group).
-//!   A failed `spawn` gets `{exit, ChildId, -1}` (unless the id belongs to a
-//!   live child).
+//! - `{exit, ChildId, ExitCode}` — the last event the child itself produces;
+//!   a command for the id sent after it is still answered (`stdin_queued` or
+//!   `error`). A failed `spawn` gets `{exit, ChildId, -1}` (unless the id
+//!   belongs to a live child).
 //! - `{error, ChildId, Command, Reason}` — the `Command` (`spawn`,
 //!   `write_stdin`, …) naming `ChildId` failed: malformed `args`/`env`,
 //!   unknown child, full stdin queue, …. `Reason` is a binary.

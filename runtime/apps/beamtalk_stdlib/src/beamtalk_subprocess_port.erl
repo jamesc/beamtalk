@@ -253,6 +253,8 @@ write_queued(Class, State) ->
             S1 = State#{stdin_waiters => Rest},
             case S1 of
                 #{stdin_dropped := Reason} ->
+                    %% Not sent by beamtalk-exec (no write is queued after a
+                    %% refusal or `stdin_failed`); guards a protocol violation.
                     gen_server:reply(From, {error, line_not_written_error(Class, Reason)}),
                     S1;
                 _ ->
