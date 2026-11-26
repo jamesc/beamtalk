@@ -18,7 +18,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::{Identifier, MatchArm};
+use beamtalk_core::ast::{Identifier, MatchArm, Pattern};
 
 /// The head of the `String` representation, the `{'beamtalk_string', Bytes}`
 /// tuple ([`Guard::StringTag`], BT-4173): shared by the `case` renderer
@@ -91,6 +91,173 @@ fn true_doc() -> Document<'static> {
 
 fn false_doc() -> Document<'static> {
     Document::Str("'false'")
+}
+
+/// Whether a *nested* sub-pattern (inside a tuple, list, map value or
+/// constructor keyword) is a type pattern (BT-5294). A top-level type arm is
+/// not counted: it has its own path (`generate_type_pattern`).
+pub(super) fn pattern_has_nested_type(pattern: &Pattern) -> bool {
+    fn any_type(pattern: &Pattern) -> bool {
+        match pattern {
+            Pattern::Type { .. } => true,
+            _ => pattern_has_nested_type(pattern),
+        }
+    }
+    match pattern {
+        Pattern::Tuple { elements, .. } => elements.iter().any(any_type),
+        Pattern::List { elements, tail, .. } => {
+            elements.iter().any(any_type) || tail.as_deref().is_some_and(any_type)
+        }
+        Pattern::Map { pairs, .. } => pairs.iter().any(|pair| any_type(&pair.value)),
+        Pattern::Constructor { keywords, .. } => {
+            keywords.iter().any(|(_, binding)| any_type(binding))
+        }
+        Pattern::Array { .. }
+        | Pattern::Binary { .. }
+        | Pattern::Type { .. }
+        | Pattern::Wildcard(_)
+        | Pattern::Literal(..)
+        | Pattern::Nil(_)
+        | Pattern::Variable(_) => false,
+    }
+}
+
+impl CoreErlangGenerator {
+    /// BT-5294: replaces every type sub-pattern nested inside a composite
+    /// pattern with a plain variable (the binding itself, or a fresh one for
+    /// `_ :: T`), collecting `(core variable, class)` pairs in source order.
+    /// The class test cannot be a native sub-pattern, so the arm matches the
+    /// shape first and tests each hoisted value afterwards
+    /// ([`Self::generate_nested_type_arm`]).
+    pub(super) fn hoist_nested_types(
+        &mut self,
+        pattern: &mut Pattern,
+        hoisted: &mut Vec<(String, Identifier)>,
+    ) {
+        match pattern {
+            Pattern::Tuple { elements, .. } => {
+                for elem in elements {
+                    self.hoist_type_subpattern(elem, hoisted);
+                }
+            }
+            Pattern::List { elements, tail, .. } => {
+                for elem in elements {
+                    self.hoist_type_subpattern(elem, hoisted);
+                }
+                if let Some(tail) = tail {
+                    self.hoist_type_subpattern(tail, hoisted);
+                }
+            }
+            Pattern::Map { pairs, .. } => {
+                for pair in pairs {
+                    self.hoist_type_subpattern(&mut pair.value, hoisted);
+                }
+            }
+            Pattern::Constructor { keywords, .. } => {
+                for (_, binding) in keywords {
+                    self.hoist_type_subpattern(binding, hoisted);
+                }
+            }
+            Pattern::Array { .. }
+            | Pattern::Binary { .. }
+            | Pattern::Type { .. }
+            | Pattern::Wildcard(_)
+            | Pattern::Literal(..)
+            | Pattern::Nil(_)
+            | Pattern::Variable(_) => {}
+        }
+    }
+
+    fn hoist_type_subpattern(
+        &mut self,
+        sub: &mut Pattern,
+        hoisted: &mut Vec<(String, Identifier)>,
+    ) {
+        if let Pattern::Type {
+            binding,
+            class,
+            span,
+        } = sub
+        {
+            let (class, span) = (class.clone(), *span);
+            let var = if binding.name == "_" {
+                let tmp = self.fresh_temp_var("TypeNested");
+                *sub = Pattern::Variable(Identifier::new(tmp.as_str(), span));
+                tmp
+            } else {
+                let var = Self::to_core_erlang_var(&binding.name);
+                *sub = Pattern::Variable(binding.clone());
+                var
+            };
+            hoisted.push((var, class));
+        } else {
+            self.hoist_nested_types(sub, hoisted);
+        }
+    }
+
+    /// Compiles a match arm whose composite pattern nests type sub-patterns
+    /// (BT-5294), e.g. `{#ok, n :: Integer} -> ...`.
+    ///
+    /// The outer pattern (with each `x :: T` hoisted to a plain variable)
+    /// matches natively; then each hoisted value is class-tested in source
+    /// order, exactly like a top-level type arm; the arm guard runs last,
+    /// with every variable bound. Any miss falls through to the later arms.
+    pub(super) fn generate_nested_type_arm(
+        &mut self,
+        match_var: &str,
+        arm: &MatchArm,
+        outer: &Pattern,
+        hoisted: &[(String, Identifier)],
+        rest_arms: &[MatchArm],
+        threading: Option<&MatchThreading<'_>>,
+    ) -> Result<Document<'static>> {
+        self.push_scope();
+        Self::collect_pattern_variables(outer, |name, core_var| {
+            self.bind_var(name, core_var);
+        });
+        let guard_doc = match &arm.guard {
+            Some(guard) => Some(self.generate_guard_expression(guard)?),
+            None => None,
+        };
+        let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
+        self.pop_scope();
+
+        let shared = self.generate_shared_rest(match_var, rest_arms, threading)?;
+        let rest_doc = shared.apply();
+
+        let outer_doc = self.generate_pattern(outer)?;
+
+        let mut inner = match guard_doc {
+            Some(guard_doc) => docvec![
+                "case 'true' of <'true'> when ",
+                guard_doc,
+                " -> ",
+                body_doc,
+                " <'true'> when 'true' -> ",
+                rest_doc.clone(),
+                " end"
+            ],
+            None => body_doc,
+        };
+        for (var, class) in hoisted.iter().rev() {
+            inner = self.dispatch_type_pattern_strategy(var, &class.name, inner, &rest_doc);
+        }
+
+        let fallthrough = self.fresh_temp_var("NoMatch");
+        Ok(shared.bind_around(docvec![
+            "case ",
+            leaf::var(match_var.to_string()),
+            " of <",
+            outer_doc,
+            "> when 'true' -> ",
+            inner,
+            " <",
+            leaf::var(fallthrough),
+            "> when 'true' -> ",
+            rest_doc,
+            " end"
+        ]))
+    }
 }
 
 impl CoreErlangGenerator {
@@ -244,7 +411,7 @@ impl CoreErlangGenerator {
     /// [`Self::render_type_test`]. The fallback below (actor/supervisor/
     /// generic tagged-class) stays a hand-written default: it needs a
     /// hierarchy lookup a static table keyed by name alone cannot express.
-    fn dispatch_type_pattern_strategy(
+    pub(super) fn dispatch_type_pattern_strategy(
         &mut self,
         match_var: &str,
         class_name: &str,

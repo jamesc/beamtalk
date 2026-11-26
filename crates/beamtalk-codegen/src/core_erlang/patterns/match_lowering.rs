@@ -22,6 +22,7 @@ use super::super::control_flow::ArmFrame;
 use super::super::threaded_ir::{ThreadedValue, VersionPrefix};
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use super::binary_patterns::{binary_needs_segmented, nested_split_span, pattern_has_binary};
+use super::type_tests::pattern_has_nested_type;
 use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -222,9 +223,10 @@ impl CoreErlangGenerator {
         // one `case`: both arm kinds flow through `generate_match_chain`,
         // which dispatches each arm (in source order) to its own strategy
         // and recurses for the rest.
-        let has_type_arm = arms
-            .iter()
-            .any(|arm| matches!(arm.pattern, Pattern::Type { .. }));
+        let has_type_arm = arms.iter().any(|arm| {
+            matches!(arm.pattern, Pattern::Type { .. })
+                || (pattern_has_nested_type(&arm.pattern) && !pattern_has_binary(&arm.pattern))
+        });
         // BT-4173: a top-level binary arm unwraps a `String` scrutinee to
         // its bytes before the native binary match (see
         // `binary_match_scrutinee`) — a per-arm scrutinee rewrite the
@@ -815,6 +817,15 @@ impl CoreErlangGenerator {
             // BT-4223: a binary nested inside a composite pattern can't
             // unwrap a `String` element in native pattern position, so it
             // is hoisted out to a fresh variable and matched afterwards.
+            // BT-5294: a type test nested in a composite pattern is hoisted
+            // the same way and tested after the outer pattern matches.
+            if pattern_has_nested_type(&arm.pattern) && !pattern_has_binary(&arm.pattern) {
+                let mut outer = arm.pattern.clone();
+                let mut hoisted = Vec::new();
+                self.hoist_nested_types(&mut outer, &mut hoisted);
+                return self
+                    .generate_nested_type_arm(match_var, arm, &outer, &hoisted, rest, threading);
+            }
             let mut outer = arm.pattern.clone();
             let mut hoisted = Vec::new();
             self.hoist_nested_binaries(&mut outer, &mut hoisted);
@@ -917,17 +928,15 @@ impl CoreErlangGenerator {
             // (ADR 0107 Phase A) — `nil` has one canonical runtime
             // representation, no new mechanism needed.
             Pattern::Nil(_) => Ok(Document::Str("'nil'")),
-            // `Pattern::Type` only has codegen as a top-level match arm
-            // pattern (`generate_type_pattern`, dispatched from
-            // `generate_match_chain`) — its per-class runtime test needs to
-            // wrap the *whole* arm (body, guard, rest-arm fallthrough), which
-            // isn't expressible as a plain native sub-pattern nested inside a
-            // `Tuple`/`List`/`Map`/`Constructor`. Mirrors `Pattern::Array`'s
-            // identical restriction just below.
+            // BT-5294: a type sub-pattern is hoisted out of its composite
+            // pattern and class-tested after the shape matches
+            // (`generate_nested_type_arm`), so only one that is left in
+            // place — an arm that also nests a binary pattern — reaches
+            // here.
             Pattern::Type { span, .. } => Err(CodeGenError::UnsupportedFeature {
                 feature: "Type pattern (`binding :: ClassName`) nested inside a composite \
-                          pattern (tuple/list/map/constructor) is not supported — only \
-                          top-level match arm patterns are supported (ADR 0107 Phase A)"
+                          pattern that also nests a binary pattern is not supported — split \
+                          the match in two"
                     .to_string(),
                 span: Some(*span),
             }),
@@ -1181,17 +1190,14 @@ impl CoreErlangGenerator {
                     Self::collect_pattern_variables_inner(binding, bind);
                 }
             }
-            // `Pattern::Type`'s `binding` is bound directly by
-            // `generate_type_pattern` when it's the arm's
-            // top-level pattern — this helper is only reached for *nested*
-            // sub-patterns (inside `Tuple`/`List`/`Map`/`Constructor`), and
-            // `generate_pattern` already rejects a nested `Pattern::Type`
-            // before this would matter (same restriction as
-            // `Pattern::Array`).
-            Pattern::Wildcard(_)
-            | Pattern::Literal(_, _)
-            | Pattern::Nil(_)
-            | Pattern::Type { .. } => {}
+            // A type pattern binds its name (not the discard `_`, BT-5294).
+            Pattern::Type { binding, .. } => {
+                if binding.name != "_" {
+                    let core_var = Self::to_core_erlang_var(&binding.name);
+                    bind(&binding.name, &core_var);
+                }
+            }
+            Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Nil(_) => {}
         }
     }
 }
