@@ -35,7 +35,10 @@ Keys are caller-chosen terms; namespace them with a leading tag
 (`{inherits_from, Class, Ancestor}`, `{tagged_class_dispatch, Class}`,
 `{instance_method_info, Class, Selector}`, `{class_object, Class}`,
 `{defining_method, Class, Selector}`, `{is_kind_of, Class, Behaviour}`,
-`{class_method_owner, ClassPid, Selector}`,
+`{ClassPid, Selector}` (the in-caller class-method owner memo: the one key
+whose first element is a pid rather than a tag, so it collides with no tagged
+key; every class send held in a variable builds and copies it, and a tag
+would cost two heap words per send, BT-5267),
 `{inherited_target, Class, Selector}`, `{declared_fields, Class}`,
 `{chain_has_user_new1, Class}`, `{chain_has_user_new0, Class}`,
 `module_to_class_map` (a bare atom: the whole module -> class-name map),
@@ -67,10 +70,11 @@ answers, whose cached pid is re-validated on every hit; `defining_method`
 is the send-path hierarchy resolution behind `beamtalk_dispatch:lookup/5`;
 `is_kind_of` is `Object>>isKindOf:`'s decided answer for an instance of
 `Class` (`beamtalk_behaviour_intrinsics:objectIsKindOf/2`, BT-4221), whose
-cached pids are re-validated on every hit; `class_method_owner` is the
-class-side twin of `defining_method`, the defining class and module a dynamic
-class-side send runs in the caller (`beamtalk_class_dispatch:class_send/3`,
-ADR 0142 §2), or its `decline` (cached too, flushed by the next class write).
+cached pids are re-validated on every hit; the `{ClassPid, Selector}` owner
+memo is the class-side twin of `defining_method`, the defining class and
+module a dynamic class-side send runs in the caller
+(`beamtalk_class_dispatch:class_send/3`, ADR 0142 §2), or its `decline`
+(cached too, flushed by the next class write).
 The `instance_method_info` key caches
 misses too (a selector no class in the chain defines, e.g. a DNU
 or `respondsTo:` probe), so the table holds up to one row per class and

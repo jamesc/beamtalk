@@ -240,6 +240,7 @@ actual transitions write (set when unset, erase when set); both are rare
     is_set/2,
     is_shadowed/1,
     direct_call_ok/2,
+    body_route/2,
     shadow_free/2,
     invalidate/1,
     erase_all_static_call_keys/0,
@@ -542,15 +543,59 @@ is_shadowed(ClassName) ->
 True exactly when the class is ready and nothing shadows its compiled class
 methods (no `runtime_fun`). The guard of every static class-side direct call
 (ADR 0142 §2; ADR 0153 removed its class-variable input). One
-`persistent_term` read of the derived flag keyed by `ClassTag`; a miss falls
-to `install_direct_flag/2`, which derives the value from the raw flags and
-installs it when the class is not shadowed.
+`persistent_term` read of the derived flag keyed by `ClassTag`; a miss
+derives the value from the raw flags and installs it when the class is ready
+and not shadowed (`body_route/2`, which owns the rule).
 """.
 -spec direct_call_ok(atom(), atom()) -> boolean().
 direct_call_ok(ClassTag, ClassName) ->
+    body_route(ClassTag, ClassName) =:= compiled.
+
+-doc """
+BT-5267: which body an in-caller class send runs for a method `ClassName`
+(metaclass tag `ClassTag`) defines: `compiled` exactly when `direct_call_ok/2`
+holds (the derived flag, one `persistent_term` read on a hit, installed on a
+miss as `direct_call_ok/2` installs it), `lookup` when the runtime is ready but
+a runtime fun may shadow the compiled export (ask
+`beamtalk_class_dispatch:class_method_body/2`'s fun store), `not_ready`
+before `mark_ready/0`.
+
+The same rule as `direct_call_ok/2`, answered so the caller never re-reads a
+raw flag: a miss derives readiness and the `runtime_fun` flag once and says
+which of them failed. `compiled` is safe for the fun store too: the raw flag
+is raised, and this derived flag erased, before a fun becomes visible
+(`set/2`), so while the flag is present `class_method_body/2` would answer
+`compiled`. An install the bounded lock declines answers `lookup`, which is
+always correct.
+""".
+-spec body_route(atom(), atom()) -> compiled | lookup | not_ready.
+body_route(ClassTag, ClassName) ->
     case persistent_term:get(ClassTag, false) of
-        true -> true;
-        _ -> install_direct_flag(ClassTag, ClassName) =:= true
+        true ->
+            compiled;
+        _ ->
+            %% Lock-free pre-check of the raw flags: a shadowed or not-yet-ready
+            %% class must not take a lock per send.
+            case is_ready() of
+                false ->
+                    not_ready;
+                true ->
+                    case is_shadowed(ClassName) of
+                        true ->
+                            lookup;
+                        false ->
+                            case
+                                with_install_lock(
+                                    ClassTag,
+                                    fun() -> install_direct_flag_locked(ClassTag, ClassName) end,
+                                    false
+                                )
+                            of
+                                true -> compiled;
+                                false -> lookup
+                            end
+                    end
+            end
     end.
 
 -doc """
@@ -582,19 +627,6 @@ direct_flag_value(ClassTag) ->
 -spec derive(atom()) -> derived() | false.
 derive(ClassName) ->
     is_ready() andalso not is_shadowed(ClassName).
-
--spec install_direct_flag(atom(), atom()) -> derived() | false.
-install_direct_flag(ClassTag, ClassName) ->
-    %% Cheap pre-check without the lock: a shadowed or not-yet-ready class must
-    %% not take a lock per send.
-    case derive(ClassName) of
-        false ->
-            false;
-        _ ->
-            with_install_lock(
-                ClassTag, fun() -> install_direct_flag_locked(ClassTag, ClassName) end, false
-            )
-    end.
 
 %% The derived value under the tag lock: the installed one, or re-derived from
 %% the raw flags and installed. Must run inside `with_tag_lock(ClassTag, _)`.
@@ -744,7 +776,7 @@ install_static_call_locked(Tag, Key, Ref) ->
 %% `ClassSelf` that path builds (`class_send_plain/3`): this class's tag, its
 %% own module and its pid. Under the tag lock it takes no lock itself: the
 %% caller installed the derived flag first, so `direct_call_ok/2` answers from
-%% it.
+%% it, and `in_caller_owner/2` reads readiness only (BT-5267).
 -spec static_call_ref(static_call_key(), atom(), atom(), arity()) ->
     #beamtalk_object{} | false.
 static_call_ref({Module, new, Tag}, ClassName, new, 0) ->
@@ -831,7 +863,7 @@ key_body_holds(_DirectCallKey, _ClassName, _Module, _Selector) ->
     true.
 
 %% Whether the in-caller path runs the defining class's compiled function for
-%% `Selector` (`beamtalk_class_dispatch:run_in_caller/7`): only while
+%% `Selector` (`beamtalk_class_dispatch:in_caller_or/6`): only while
 %% `beamtalk_class_dispatch:class_method_body/2`, the choice
 %% `apply_class_method_body/7` makes, picks the compiled function over an ADR
 %% 0084 runtime fun. One rule for a method the class defines and an inherited

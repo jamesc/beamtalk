@@ -34,7 +34,7 @@ Rows 3f-3j and c4 no longer exist (ADR 0152 and ADR 0153 removed what they measu
 | 8a | `on: Error do:` without a raise | 65.3 | 64.6 | **5.0** | **3.0** | 0 | 0 |
 | 8b | `on: Error do:` with a raise | 2546 | 2462 | 99.2 | 95.2 | 167 | 167 |
 
-Per run (base / main), 3a-3c ns: run 1 21.8, 21.1, 23.7 / 29.6, 20.0, 33.5; run 2 22.3, 21.7, 22.4 / 26.1, 21.4, 49.4; run 3 22.6, 25.8, 28.8 / 26.5, 28.7, 33.5. The 3a-3c reductions are identical (3.0), but **the time is inconclusive, not shown to be unchanged**: 3c is slower on main in all three runs here (median +41%) while the separate dispatch harness shows c3 faster on main (25.6 → 21.2 ns), and 3a is slower in two of three runs. Nothing in the code path changed for these rows (same one read, same guarded call), so noise or code layout is the likely cause, but it was not isolated; a rerun with more rounds on a quiet host would settle it.
+Per run (base / main), 3a-3c ns: run 1 21.8, 21.1, 23.7 / 29.6, 20.0, 33.5; run 2 22.3, 21.7, 22.4 / 26.1, 21.4, 49.4; run 3 22.6, 25.8, 28.8 / 26.5, 28.7, 33.5. The 3a-3c reductions are identical (3.0), but **the time is inconclusive, not shown to be unchanged**: 3c is slower on main in all three runs here (median +41%) while the separate dispatch harness shows c3 faster on main (25.6 → 21.2 ns), and 3a is slower in all three runs. Nothing in the code path changed for these rows (same one read, same guarded call), so noise or code layout is the likely cause, but it was not isolated; a rerun with more rounds on a quiet host would settle it.
 
 ## 2. dispatch-overhead (net ns/op, median of 3 runs)
 
@@ -83,4 +83,4 @@ The dynamic path (`in_caller_owner/3`, BT-5161) now re-derives the answer from t
 
 ## Conclusion
 
-The guard read can go in principle (BT-5164 conclusion (a): "the read can go, with a design that honours reload, `removeSelector:`, runtime-fun shadowing and a dead class process"): it is 75-85% of a class send, nothing cheaper than `persistent_term` exists to replace it, and no part of ADR 0152 or ADR 0153 removed it. Whether it can go *safely* needs two owner decisions (a runtime fun shadowing a compiled selector; a `ClassSelf` that carries a pid). That is BT-5268, a spike labelled `needs-spec`. The 3d/3e regression is BT-5267.
+The guard read can go in principle (BT-5164 conclusion (a): "the read can go, with a design that honours reload, `removeSelector:`, runtime-fun shadowing and a dead class process"): it is 75-90% of a class send, nothing cheaper than `persistent_term` exists to replace it, and no part of ADR 0152 or ADR 0153 removed it. Whether it can go *safely* needs two owner decisions (a runtime fun shadowing a compiled selector; a `ClassSelf` that carries a pid). That is BT-5268, a spike labelled `needs-spec`. The 3d/3e regression is BT-5267.
