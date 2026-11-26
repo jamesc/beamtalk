@@ -136,7 +136,8 @@ handle_term(<<"interrupt">>, _Params, Msg, SessionPid) ->
         ok = beamtalk_repl_shell:interrupt(TargetPid),
         {status, ok}
     catch
-        exit:{noproc, _} ->
+        exit:{Reason, _} when Reason =:= noproc; Reason =:= normal; Reason =:= shutdown ->
+            %% Gone before, or while, the call was in flight: nothing to interrupt.
             {status, ok};
         exit:{timeout, _} ->
             %% The shell did not answer in 5 s: it is alive but wedged. Say so
