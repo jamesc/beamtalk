@@ -1108,7 +1108,7 @@ This is receiver-dispatch's mirror image, not a new arithmetic mechanism: no `ge
 - `<=` - Less than or equal: `3 <= 3` → `true`
 - `>=` - Greater than or equal: `5 >= 3` → `true`
 
-Comparisons are messages sent to the **receiver**, which decides. `Integer`, `Float`, `Character`, `String` and `Symbol` define them (numbers numerically, characters by codepoint, strings and symbols by codepoint, lexicographically); a value type can define its own (`aMoney < bMoney` reaches `Money>><`). A receiver whose class defines no ordering raises `does_not_understand` — including the non-object primitives `nil`, `true`/`false`, lists and tuples:
+Comparisons are messages sent to the **receiver**, which decides. `Integer`, `Float`, `Character`, `String` and `Symbol` define them (numbers numerically, characters by codepoint, strings and symbols by codepoint, lexicographically); a value type can define its own (`aMoney < bMoney` reaches `Money>><`). A receiver whose class defines no ordering raises `does_not_understand` — including the non-object primitives `nil`, `true`/`false`, lists and tuples, and a raw `Binary` (a `String` is not a `Binary` instance at run time, BT-5261):
 
 ```beamtalk
 #apple < #banana   // => true
@@ -1116,7 +1116,7 @@ x := nil
 x < 5              // => ERROR: UndefinedObject does not understand '<'
 ```
 
-This holds however the receiver is typed: an untyped local or parameter, an `:: Integer | Nil` field that holds `nil`, or an `:: Integer` parameter or field that was handed a wrong value. A declared type is not enforced at run time (a `Dynamic` argument, an FFI result or a cast can violate it), and the BEAM's `<` is a total order that never raises, so trusting a declaration would answer `nil > 10` with `true`. Only a receiver whose kind the compiler *proves* (a literal, `self` in `Integer`/`Float`/`Character`/`String`) compiles to the bare comparison instruction. Every other receiver is checked at run time with one inline type test: a `:: Integer`-style parameter or field is tested for its declared kind, anything else for a number, character or string. A receiver that fails the test is sent the operator as a message, so it raises `does_not_understand` (or reaches its own overload). There is no "total order over every value" to fall back on.
+This holds however the receiver is typed: an untyped local or parameter, an `:: Integer | Nil` field that holds `nil`, or an `:: Integer` parameter or field that was handed a wrong value. A declared type is not enforced at run time (a `Dynamic` argument, an FFI result or a cast can violate it), and the BEAM's `<` is a total order that never raises, so trusting a declaration would answer `nil > 10` with `true`. Only a receiver whose kind the compiler *proves* (a literal, `self` in `Integer`/`Float`/`Character`/`String`) compiles to the bare comparison instruction. Every other receiver is checked at run time with one inline type test: a `:: Integer`-style or `:: String` parameter or field is tested for its declared kind, anything else for a number or character. A receiver that fails the test is sent the operator as a message, so it raises `does_not_understand` (or reaches its own overload). There is no "total order over every value" to fall back on.
 
 `==`, `=:=`, `/=` and `=/=` are unaffected: Erlang equality never term-orders, so a wrong-kind value answers `false` (`true` for the inequalities), not a wrong ordering.
 

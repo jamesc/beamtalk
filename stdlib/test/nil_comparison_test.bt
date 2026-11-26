@@ -105,3 +105,12 @@ TestCase subclass: NilComparisonTest
   testWrongKindArgumentRaises =>
     self should: [self lt: 5 with: nil] raise: #does_not_understand
     self should: [self lt: #a with: 5] raise: #type_error
+
+  /// BT-5261: a raw `Binary` defines no ordering. Through an untyped
+  /// receiver (the inlined guard) and through `perform:` it raises
+  /// `does_not_understand` alike, instead of term-ordering inline.
+  testRawBinaryReceiverRaises =>
+    bin := Binary fromBytes: #(104, 105)
+    self should: [self lt: bin with: 5] raise: #does_not_understand
+    self should: [self ge: bin with: bin] raise: #does_not_understand
+    self should: [bin perform: #< withArguments: #(5)] raise: #does_not_understand

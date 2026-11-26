@@ -369,7 +369,9 @@ impl Rewriter {
             // answer is a broken declaration only when the right operand is
             // proven numeric or declared with a number kind; an untyped or
             // `String`-declared one makes it ordinary code. A declared
-            // `String`-only receiver never tests its right operand.
+            // `String`-only receiver answers a Boolean or raises a
+            // frame-free `type_error` for a wrong-kind right operand
+            // (BT-5213, BT-5261): only a broken declaration dispatches.
             let number_receiver = match declared(receiver) {
                 Some(kinds) if !kinds.has_number_kind() => return true,
                 Some(_) => true,
