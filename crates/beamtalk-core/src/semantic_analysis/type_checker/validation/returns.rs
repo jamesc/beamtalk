@@ -253,7 +253,7 @@ impl TypeChecker {
                             site.span(method),
                         )
                         .with_category(DiagnosticCategory::Type)
-                        .with_hint(site.hint(&expected_display, &actual_display.to_string())),
+                        .with_hint(site.hint(&expected_display, &actual_display)),
                     );
                 }
             }
