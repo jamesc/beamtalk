@@ -54,21 +54,17 @@ first, then walks the class hierarchy via ETS until the method is found in an
 ancestor's module.
 The compiled convention is `class_<sel>(ClassSelf, Args...)` returning the bare
 result (ADR 0130 §3), so the arity is `1 + length(ExtraArgs)`. The call runs in
-`beamtalk_class_vars:with_snapshot/2`: class-variable reads see the ETS mirror
-(or the live map if this process is already inside the class's invocation) and
-writes raise `class_state_read_only`.
+the calling process: a class has no state of its own (ADR 0153).
 """.
 -spec call_class_method_direct(atom(), module(), atom(), tuple(), [term()]) -> term().
 call_class_method_direct(ClassName, Module, FunName, ClassSelf, ExtraArgs) ->
-    beamtalk_class_vars:with_snapshot(ClassSelf, fun() ->
-        Arity = 1 + length(ExtraArgs),
-        case erlang:function_exported(Module, FunName, Arity) of
-            true ->
-                erlang:apply(Module, FunName, [ClassSelf | ExtraArgs]);
-            false ->
-                call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ExtraArgs, 0)
-        end
-    end).
+    Arity = 1 + length(ExtraArgs),
+    case erlang:function_exported(Module, FunName, Arity) of
+        true ->
+            erlang:apply(Module, FunName, [ClassSelf | ExtraArgs]);
+        false ->
+            call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ExtraArgs, 0)
+    end.
 
 -spec call_inherited_class_method_direct(
     atom(), atom(), tuple(), [term()], non_neg_integer()

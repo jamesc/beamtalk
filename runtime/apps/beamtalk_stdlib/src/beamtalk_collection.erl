@@ -559,7 +559,9 @@ guard_writing_fold(Recv, Selector) ->
 %% default `species` answers a List on both paths and is allowed.
 %% BT-5190: this is an allowlist, not a denylist: a receiver the fold can stand
 %% in for is a `Collection` or gets `Selector` from a stdlib trait provision (a
-%% fold over `do:`); any other object, a `Stream`, is refused.
+%% fold over `do:`) or the eager `inject:into:` (BT-5263); any other object, a
+%% `Stream`, is refused. The check covers map-backed objects only: the clause
+%% below passes every other receiver (a List, a tuple) unchecked.
 -spec guard_species_rebuild(term(), atom(), atom()) -> ok.
 guard_species_rebuild(#{?BT_CLASS_TAG_KEY := Tag}, _Class, _Selector) when
     Tag =:= 'Array'; Tag =:= 'Set'

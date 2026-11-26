@@ -25,7 +25,7 @@ Tests cover:
 - root registry — nil, roundtrip, overwrite, clear_root
 - static_init/3, dynamic_init/3 — instance-side configuration, start args,
   calling_self hint, validator errors (ADR 0135 §2)
-- start_child_via_class_method/4: valid return, invalid return, read-only snapshot reads, write raises class_state_read_only
+- start_child_via_class_method/4: valid return, invalid return, no class-variable key installed, write raises class_state_unreachable
   unwrap, process dictionary cleanup, child linking, supervisor restart,
   supervisor tuple return
 - start_child_via_class_method/4 supervisor restart through the REAL compiled
@@ -68,8 +68,7 @@ Tests cover:
     class_returnInvalid/1,
     class_returnSupervisor/1,
     class_writeVar/1,
-    class_readVar/1,
-    class_readThenActor/1,
+    class_keyProbeThenActor/1,
     start_link_fake_child/0,
     start_link_fake_child/1,
     start_link_fake_child/2
@@ -1346,9 +1345,9 @@ static_init_two_argument_form_rejects_pre_adr_0135_module_test() ->
     #beamtalk_error{hint = Hint} = Reason,
     ?assertNotEqual(nomatch, binary:match(element(2, Hint), <<"recompile">>)).
 
-static_init_config_class_var_write_raises_read_only_test() ->
-    %% ADR 0130 §5: configuration still runs in a read-only snapshot region of
-    %% the supervisor's class; a class-variable write fails the start.
+static_init_config_class_var_write_raises_unreachable_test() ->
+    %% ADR 0153 Phase 3e: configuration runs in the caller with no class-variable
+    %% key (no snapshot region); a class-variable write fails the start.
     Config = bt3963_static_config(#{
         childSpecs => fun(_Self) ->
             ClassSelf =
@@ -1358,7 +1357,7 @@ static_init_config_class_var_write_raises_read_only_test() ->
         end
     }),
     with_bt3963_class('BT3963Sup', Config, fun() ->
-        ?assertMatch(#beamtalk_error{kind = class_state_read_only}, start_failing(nil))
+        ?assertMatch(#beamtalk_error{kind = class_state_unreachable}, start_failing(nil))
     end).
 
 %% A fake class object for a supervisor child class.
@@ -1545,17 +1544,14 @@ last_fake_child_args() ->
 class_returnInvalid(_ClassSelf) ->
     <<"not an actor tuple">>.
 
-%% ADR 0130 §5: class-variable access from a runtime-owned snapshot region.
-%% Writes raise class_state_read_only; reads see the ETS mirror.
+%% ADR 0153 Phase 3e: a runtime-owned class-method call runs in the caller with
+%% no class-variable key, so a write has nowhere to go.
 class_writeVar(ClassSelf) ->
     beamtalk_class_vars:put(ClassSelf, n, 1).
 
-class_readVar(ClassSelf) ->
-    beamtalk_class_vars:get(ClassSelf, n).
-
-%% Reads a class variable (must see the mirror value), then returns an actor.
-class_readThenActor(ClassSelf) ->
-    7 = beamtalk_class_vars:get(ClassSelf, n),
+%% Asserts no class-variable key is installed in the caller, then returns an actor.
+class_keyProbeThenActor(#beamtalk_object{class = Tag}) ->
+    undefined = get(beamtalk_class_vars:key_for_tag(Tag)),
     {ok, Pid} = start_link_fake_child(),
     {beamtalk_object, 'FakeChild', ?MODULE, Pid}.
 
@@ -1669,51 +1665,36 @@ start_child_via_class_method_invalid_return_test() ->
         cleanup_fake_class('BT1875Invalid', FakeClassPid)
     end.
 
-%% ADR 0130 §5: the withClassMethod: factory runs in a read-only snapshot
-%% region. Reads see the ETS mirror; a write raises class_state_read_only
-%% instead of being silently discarded.
-start_child_via_class_method_reads_mirror_test() ->
+%% ADR 0153 Phase 3e: the withClassMethod: factory runs in the caller with no
+%% class-variable key installed (there is no read-only snapshot region), and a
+%% class variable write from it raises `class_state_unreachable`.
+start_child_via_class_method_installs_no_class_var_key_test() ->
     FakeClassPid = setup_fake_class('BT3708Read'),
-    beamtalk_class_registry:record_class_state_snapshot(FakeClassPid, #{n => 7}),
     try
-        ClassSelf = #beamtalk_object{
-            class = beamtalk_class_registry:class_object_tag('BT3708Read'),
-            class_mod = ?MODULE,
-            pid = FakeClassPid
-        },
-        ?assertEqual(
-            7,
-            beamtalk_class_vars:with_snapshot(ClassSelf, fun() -> class_readVar(ClassSelf) end)
-        ),
-        %% The factory reads `n` through the mirror and then returns an actor.
         ?assertMatch(
             {ok, Pid} when is_pid(Pid),
             beamtalk_supervisor:start_child_via_class_method(
-                'BT3708Read', ?MODULE, class_readThenActor, []
+                'BT3708Read', ?MODULE, class_keyProbeThenActor, []
             )
         ),
         ?assertEqual(undefined, get(beamtalk_class_vars:key('BT3708Read')))
     after
-        beamtalk_class_registry:forget_class_state_snapshot(FakeClassPid),
         cleanup_fake_class('BT3708Read', FakeClassPid)
     end.
 
 start_child_via_class_method_write_raises_test() ->
     FakeClassPid = setup_fake_class('BT3708Write'),
-    beamtalk_class_registry:record_class_state_snapshot(FakeClassPid, #{n => 7}),
     try
         ?assertMatch(
-            #beamtalk_error{kind = class_state_read_only},
+            #beamtalk_error{kind = class_state_unreachable},
             raised_beamtalk_error(fun() ->
                 beamtalk_supervisor:start_child_via_class_method(
                     'BT3708Write', ?MODULE, class_writeVar, []
                 )
             end)
         ),
-        %% The snapshot is erased even though the method raised.
         ?assertEqual(undefined, get(beamtalk_class_vars:key('BT3708Write')))
     after
-        beamtalk_class_registry:forget_class_state_snapshot(FakeClassPid),
         cleanup_fake_class('BT3708Write', FakeClassPid)
     end.
 

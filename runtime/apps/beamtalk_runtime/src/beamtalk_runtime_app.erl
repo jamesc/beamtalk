@@ -50,12 +50,6 @@ start(_StartType, _StartArgs) ->
     %% the application master so it survives class process crashes.
     beamtalk_class_registry:ensure_loaded_classes_table(),
 
-    %% Create the classVars snapshot table at app startup (BT-3787; removed
-    %% with `with_snapshot/2` by BT-5162) rather
-    %% than in the first class gen_server's init/1, so a class-process crash
-    %% never hands it off.
-    beamtalk_class_registry:ensure_class_state_table(),
-
     %% Create collision warnings ETS table at app startup.
     beamtalk_class_registry:ensure_class_warnings_table(),
 

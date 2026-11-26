@@ -19,8 +19,6 @@ kind's message and hint have one source. The class gen_server's
     raise_uninitialized/2,
     raise_nil_receiver/0,
     raise_unreachable/3,
-    raise_no_snapshot/2,
-    raise_read_only/2,
     undeclared_error/2
 ]).
 
@@ -72,9 +70,9 @@ variable cannot be read or written from this process.
 """.
 -spec raise_unreachable(atom(), atom() | undefined, read | write) -> no_return().
 raise_unreachable(Class, undefined, _Mode) ->
-    %% Name-less variant (`capture/2`, mirror reads without a variable name): a
+    %% Name-less variant (`capture/2`, no variable name): a
     %% class-level condition, so the block-oriented hint of the named variant
-    %% does not fit supervisor-init or `local_call/3` callers.
+    %% does not fit supervisor-init callers.
     Error0 = beamtalk_error:new(class_state_unreachable, Class),
     Error1 = beamtalk_error:with_message(
         Error0,
@@ -116,51 +114,6 @@ raise_unreachable(Class, Name, Mode) ->
         )
     ),
     Error0 = beamtalk_error:new(class_state_unreachable, Class),
-    Error1 = beamtalk_error:with_message(Error0, Message),
-    Error2 = beamtalk_error:with_details(Error1, #{class_variable => Name}),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error2, Hint)).
-
--doc "`class_state_unreachable`: the class process is registered but has recorded no snapshot row yet.".
--spec raise_no_snapshot(atom(), atom() | undefined) -> no_return().
-raise_no_snapshot(Class, Name) ->
-    Error0 = beamtalk_error:new(class_state_unreachable, Class),
-    Error1 = beamtalk_error:with_message(
-        Error0,
-        beamtalk_error:chars_to_binary(
-            io_lib:format("~ts's class state cannot be reached: no snapshot recorded yet", [Class])
-        )
-    ),
-    Error2 =
-        case Name of
-            undefined -> Error1;
-            _ -> beamtalk_error:with_details(Error1, #{class_variable => Name})
-        end,
-    beamtalk_error:raise(
-        beamtalk_error:with_hint(
-            Error2,
-            <<
-                "The class process was just (re)started and has not recorded its class "
-                "variables yet; retry shortly."
-            >>
-        )
-    ).
-
--doc "`class_state_read_only`: a write under `with_snapshot/2`'s read-only marker.".
--spec raise_read_only(atom(), atom()) -> no_return().
-raise_read_only(Class, Name) ->
-    Message = beamtalk_error:chars_to_binary(
-        io_lib:format("~ts's class variable ~ts is read-only here", [Class, Name])
-    ),
-    Hint = beamtalk_error:chars_to_binary(
-        io_lib:format(
-            "This code runs against a read-only snapshot of ~ts's class variables "
-            "(a supervisor definition or a class `initialize:` hook). "
-            "Assign the variable from one of ~ts's own class methods, sent as a normal "
-            "class-side message.",
-            [Class, Class]
-        )
-    ),
-    Error0 = beamtalk_error:new(class_state_read_only, Class),
     Error1 = beamtalk_error:with_message(Error0, Message),
     Error2 = beamtalk_error:with_details(Error1, #{class_variable => Name}),
     beamtalk_error:raise(beamtalk_error:with_hint(Error2, Hint)).

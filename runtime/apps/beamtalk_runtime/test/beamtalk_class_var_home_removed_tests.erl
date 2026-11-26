@@ -15,8 +15,7 @@ class variables or installs a class-variable home around a class method.
   `classClassVarNames` / `classAllClassVarNames` intrinsics.
 - A class method run in the class process sees no home: neither the
   receiver's class-variable key nor a live home key is set.
-- `ClassBuilder register` ignores a `classState` key: the class process's
-  classVars snapshot row stays empty.
+- `ClassBuilder register` ignores a `classState` key.
 - `is_field_reflection_selector/1` names exactly the four instance-field
   reflection selectors that a class object refuses (ADR 0153 decision 7).
 """.
@@ -86,10 +85,6 @@ class_method_runs_without_home_test_() ->
             ?assertEqual(
                 {ok, {undefined, undefined}},
                 gen_server:call(Pid, {class_method_call, testObserveHome, []})
-            ),
-            %% The snapshot row is the empty map, not the ClassInfo value.
-            ?assertEqual(
-                {ok, #{}}, beamtalk_class_registry:class_state_snapshot_lookup(Pid)
             )
         after
             beamtalk_test_class:stop(Name)
@@ -108,9 +103,8 @@ class_builder_ignores_class_state_test_() ->
         },
         {ok, Pid} = beamtalk_class_builder:register(Builder),
         try
-            ?assertEqual(
-                {ok, #{}}, beamtalk_class_registry:class_state_snapshot_lookup(Pid)
-            )
+            %% A stale `classState` BuilderState entry is ignored.
+            ?assert(is_pid(Pid))
         after
             beamtalk_test_class:stop(Name)
         end
