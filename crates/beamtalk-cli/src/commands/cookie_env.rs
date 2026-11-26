@@ -715,7 +715,7 @@ mod tests {
         let mut child = cmd.spawn().expect("spawn erl");
         let checked = std::panic::catch_unwind(|| {
             // Readiness: the node is up and parked in its first `-eval`.
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_mins(2);
             while !ready.exists() {
                 assert!(
                     std::time::Instant::now() < deadline,
