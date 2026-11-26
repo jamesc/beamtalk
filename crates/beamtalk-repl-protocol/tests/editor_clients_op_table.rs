@@ -289,7 +289,7 @@ fn elixir_added_keys(window: &str) -> BTreeSet<String> {
 }
 
 /// Requests built in `workspace.ex`: `dispatch_browse("op", …)` /
-/// `dispatch_simple("op", …)` calls, `%{"op" => "name", …}` request literals,
+/// `dispatch_simple("op", …)` / `request_op("op", …)` (BT-5201) calls, `%{"op" => "name", …}` request literals,
 /// and the `{op, params} = case … {"name", %{…}}` tuple form in `run_tests`.
 fn scan_liveview(text: &str) -> Vec<Sent> {
     let bytes = text.as_bytes();
@@ -302,7 +302,7 @@ fn scan_liveview(text: &str) -> Vec<Sent> {
         &text[start..at]
     };
 
-    for call in ["dispatch_browse(\"", "dispatch_simple(\""] {
+    for call in ["dispatch_browse(\"", "dispatch_simple(\"", "request_op(\""] {
         let mut from = 0;
         while let Some(rel) = text[from..].find(call) {
             let at = from + rel;

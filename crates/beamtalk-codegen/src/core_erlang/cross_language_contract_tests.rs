@@ -185,7 +185,7 @@ fn every_liveview_rpc_target_is_exported() {
     for (module, function, arity) in [
         ("beamtalk_process_navigation", "child_handles", 1),
         ("beamtalk_repl_eval", "compile_method", 6),
-        ("beamtalk_repl_ops", "dispatch", 4),
+        ("beamtalk_repl_ops", "request", 3),
         ("beamtalk_git", "git_stage", 1),
     ] {
         assert!(

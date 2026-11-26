@@ -1216,12 +1216,8 @@ defmodule BtAttach.Workspace do
   # (BT-1045); `cursor` (the byte length of the line prefix) makes the op take
   # its context-aware path (BT-783) rather than bare-prefix completion.
   defp dispatch_complete(session_pid, code) do
-    request_op(
-      "complete",
-      %{"code" => code, "cursor" => byte_size(code)},
-      session_pid,
-      @rpc_interactive_timeout
-    )
+    params = %{"code" => code, "cursor" => byte_size(code)}
+    request_op("complete", params, session_pid, @rpc_interactive_timeout)
   end
 
   # Build the `hover` request as a flat map (`code` top-level, mirroring
@@ -1235,24 +1231,24 @@ defmodule BtAttach.Workspace do
   # whereas hover always resolves the hovered token against its line context, so
   # the distinction does not apply here.
   defp dispatch_hover(session_pid, code, context) do
-    params = %{
-      "code" => code,
-      "before" => Map.get(context, :before, ""),
-      "suffix" => Map.get(context, :suffix, "")
-    }
-
-    # BT-4463: the edited method's class, only when a method editor sent one.
     params =
-      case context do
-        %{class: class, side: side} when is_binary(class) and is_binary(side) ->
-          Map.merge(params, %{"class" => class, "side" => side})
-
-        _ ->
-          params
-      end
+      Map.merge(
+        %{
+          "code" => code,
+          "before" => Map.get(context, :before, ""),
+          "suffix" => Map.get(context, :suffix, "")
+        },
+        hover_scope(context)
+      )
 
     request_op("hover", params, session_pid, @rpc_interactive_timeout)
   end
+
+  # BT-4463: the edited method's class, only when a method editor sent one.
+  defp hover_scope(%{class: class, side: side}) when is_binary(class) and is_binary(side),
+    do: %{"class" => class, "side" => side}
+
+  defp hover_scope(_context), do: %{}
 
   # Build the `diagnostics` request as a flat map (`code` + `mode` top-level),
   # and send it with one `request/3` call, which dispatches through the term-returning op
