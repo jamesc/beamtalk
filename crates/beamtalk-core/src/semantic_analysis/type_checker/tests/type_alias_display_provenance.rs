@@ -249,7 +249,6 @@ Object subclass: Widget
 ";
     let module = parse_ok(source);
     let (hierarchy, hierarchy_diags) = crate::semantic_analysis::ClassHierarchy::build(&module);
-    let hierarchy = hierarchy.expect("hierarchy should build");
     assert!(
         hierarchy_diags.is_empty(),
         "unexpected: {hierarchy_diags:?}"

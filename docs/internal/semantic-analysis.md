@@ -62,10 +62,6 @@ Semantic analysis validates the AST after parsing, checking for errors that can'
   - Validates primitive constraints on classes
   - **10 tests**
 
-- **Error types**: `crates/beamtalk-core/src/semantic_analysis/error.rs`
-  - `SemanticError` and `SemanticErrorKind`
-  - Error types: undefined variables, unused variables, mutated captures, escaping blocks
-
 - **Type checker**: `crates/beamtalk-core/src/semantic_analysis/type_checker.rs`
   - Stub for future gradual typing (Phase 3)
 
@@ -137,8 +133,7 @@ crates/beamtalk-core/src/semantic_analysis/
 │   └── builtins.rs        # ✅ Built-in classes and protocols
 ├── primitive_validator.rs # ✅ Primitive constraint validation
 ├── method_validators.rs   # ✅ Selector-specific argument validation
-├── type_checker.rs        # ⏳ Stub for future gradual typing (Phase 3)
-└── error.rs               # ✅ Semantic error types
+└── type_checker.rs        # ⏳ Stub for future gradual typing (Phase 3)
 ```
 
 ## Key Types

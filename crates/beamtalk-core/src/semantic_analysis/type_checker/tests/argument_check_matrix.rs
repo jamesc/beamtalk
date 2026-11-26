@@ -124,7 +124,7 @@ fn assert_compatible(diags: &[Diagnostic], cell: &str) {
 
 fn unary_hierarchy() -> ClassHierarchy {
     let module = parse_source("typed Value subclass: Thing\n  probe -> String => \"x\"\n");
-    ClassHierarchy::build(&module).0.unwrap()
+    ClassHierarchy::build(&module).0
 }
 
 fn assert_unary_cell(cell: &str, arg_ty: InferredType) {

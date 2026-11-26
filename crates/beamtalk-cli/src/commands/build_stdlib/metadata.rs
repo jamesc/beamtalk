@@ -818,9 +818,8 @@ pub(super) fn extract_class_metadata(
                 &module, true,
             );
         hierarchy
-            .ok()
-            .and_then(|h| h.get_class(&class_name).map(|c| c.in_caller_new1))
-            .unwrap_or(false)
+            .get_class(&class_name)
+            .is_some_and(|c| c.in_caller_new1)
     };
 
     Ok(ClassMeta {

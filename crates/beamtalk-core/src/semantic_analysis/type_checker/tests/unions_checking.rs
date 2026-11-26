@@ -339,7 +339,7 @@ fn union_field_assign_all_compatible_no_warning() {
     );
     let class = counter_class_with_typed_state(vec![method], state);
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
@@ -370,7 +370,7 @@ fn union_field_assign_none_compatible_warns() {
     let method = make_method("setCount", vec![field_assign("count", int_lit(1))]);
     let class = counter_class_with_typed_state(vec![method], state);
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();
@@ -407,7 +407,7 @@ fn union_field_assign_mixed_compatible_hints() {
     let method = make_method("setCount", vec![field_assign("count", int_lit(1))]);
     let class = counter_class_with_typed_state(vec![method], state);
     let module = make_module_with_classes(vec![], vec![class]);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let hierarchy = ClassHierarchy::build(&module).0;
 
     let mut checker = TypeChecker::new();
     let mut env = TypeEnv::new();

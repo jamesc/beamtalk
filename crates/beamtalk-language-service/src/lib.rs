@@ -910,7 +910,7 @@ impl SimpleLanguageService {
     /// Returns whether this was a dependency file whose `internal` aliases
     /// changed, i.e. whether its package siblings are now stale — a caller
     /// passing `reindex_siblings = false` must deal with that itself.
-    fn index_file(&mut self, file: Utf8PathBuf, content: String, reindex_siblings: bool) -> bool {
+    fn index_file(&mut self, file: &Utf8PathBuf, content: String, reindex_siblings: bool) -> bool {
         use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
         let tokens = lex_with_eof(&content);
@@ -933,119 +933,99 @@ impl SimpleLanguageService {
         // Trait provenance (ADR 0127, BT-3655): flatten `uses:` and stamp
         // `MethodInfo::origin` here, at the source that builds `MethodInfo`
         // for the LSP path, so hover needn't re-derive it.
-        let (class_hierarchy_result, hierarchy_diags) =
+        let (mut class_hierarchy, _hierarchy_diags) =
             crate::project_index::build_hierarchy_with_trait_origins(
                 &module,
-                Some(self.project_index.alias_package_for_file(&file).as_str()),
+                Some(self.project_index.alias_package_for_file(file).as_str()),
                 || {
                     // First definition wins, as in analysis (BT-3915).
                     beamtalk_core::semantic_analysis::trait_expansion::first_wins_protocol_map(
-                        self.project_index.cross_file_protocol_defs_for(&file),
+                        self.project_index.cross_file_protocol_defs_for(file),
                     )
                 },
             );
-        let aliases_changed;
-        if let Ok(mut class_hierarchy) = class_hierarchy_result {
-            // Register protocol definitions as synthetic class entries
-            // so LSP features (completions, has_class) work with protocol names.
-            class_hierarchy.register_protocol_classes(&module);
+        // Register protocol definitions as synthetic class entries
+        // so LSP features (completions, has_class) work with protocol names.
+        class_hierarchy.register_protocol_classes(&module);
 
-            // A file with parse errors may have an under-recovered
-            // method surface (error recovery can drop method definitions).
-            // Mark its classes so cross-file consumers of this file's
-            // hierarchy never emit unresolved-selector hints against a
-            // surface the parser never fully saw.
-            if has_parse_errors {
-                class_hierarchy.mark_module_classes_surface_incomplete(&module);
-            }
-
-            // A dependency's own `internal type` aliases are never seeded
-            // into a consumer's alias scope (ADR 0108), so expand them in the
-            // signatures this file exports, as the CLI does (BT-4778 /
-            // BT-4615 / BT-4707). Done after trait flattening above, which
-            // reads the unexpanded ASTs in the dependency's own scope.
-            let alias_infos =
-                beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
-            let mut protocol_infos =
-                beamtalk_core::semantic_analysis::ProtocolRegistry::extract_protocol_infos(&module);
-            let mut protocol_defs: Vec<_> = module
-                .protocols
-                .iter()
-                .filter(|p| {
-                    beamtalk_core::semantic_analysis::trait_expansion::is_carried_protocol(p)
-                })
-                .cloned()
-                .collect();
-            let is_dependency = crate::project_index::is_dependency_file(&file);
-            let old_internal_aliases = self.project_index.internal_aliases_of(&file);
-            if is_dependency {
-                // `internal` is package-private (ADR 0108): expand against
-                // every indexed file of this dependency, not just this one.
-                let mut package_aliases = self.project_index.dependency_sibling_aliases(&file);
-                package_aliases.extend(alias_infos.iter().cloned());
-                let expander =
-                    beamtalk_core::semantic_analysis::alias_expansion::InternalAliasExpander::from_alias_infos(
-                        &package_aliases,
-                    );
-                class_hierarchy.map_class_infos(|info| expander.expand_class_info(info));
-                for info in &mut protocol_infos {
-                    expander.expand_protocol_info(info);
-                }
-                beamtalk_project::dependency_aliases::expand_dependency_protocol_defs(
-                    &package_aliases,
-                    &mut protocol_defs,
-                );
-            }
-
-            // Update the project-wide index with this file's class hierarchy
-            self.project_index
-                .update_file(file.clone(), &class_hierarchy);
-
-            // ADR 0108 Phase 8: track this file's `type`
-            // declarations in the project-wide alias registry, so
-            // completions/goto-definition/find-references/hover can resolve
-            // alias names cross-file the same way they resolve classes.
-            self.project_index
-                .update_file_aliases(file.clone(), alias_infos);
-            aliases_changed = is_dependency
-                && self.project_index.internal_aliases_of(&file) != old_internal_aliases;
-
-            // Track this file's `Protocol define: ...` declarations
-            // too, so `extending:`/conformance checks against a protocol
-            // declared in a different project file or indexed dependency
-            // resolve during LSP diagnostics — mirrors the alias tracking
-            // immediately above (the CLI `build`/`lint` side of this is
-            // already wired; this closes the LSP parity gap).
-            self.project_index
-                .update_file_protocols(file.clone(), protocol_infos);
-
-            // Track this file's carried protocols' full ASTs
-            // (BT-3591) so a cross-file/cross-package `uses:` flattens
-            // during LSP diagnostics the same way `beamtalk build` already
-            // does, and record which protocols this file's own classes
-            // `uses:` (the protocol → users edge — see
-            // `ProjectIndex::users_of_protocol`'s doc), so an editor/LSP
-            // handler can re-analyse a protocol's open users after it changes.
-            self.project_index
-                .update_file_protocol_defs(file.clone(), protocol_defs);
-            self.project_index
-                .update_file_protocol_uses(file.clone(), &module);
-        } else {
-            // Hierarchy build failed: store the file with merged diagnostics
-            // but do not update the project index for this file.
-            let mut all_diagnostics = diagnostics;
-            all_diagnostics.extend(hierarchy_diags);
-            self.files.insert(
-                file,
-                FileData {
-                    source: content,
-                    module,
-                    diagnostics: all_diagnostics,
-                    has_parse_errors,
-                },
-            );
-            return false;
+        // A file with parse errors may have an under-recovered
+        // method surface (error recovery can drop method definitions).
+        // Mark its classes so cross-file consumers of this file's
+        // hierarchy never emit unresolved-selector hints against a
+        // surface the parser never fully saw.
+        if has_parse_errors {
+            class_hierarchy.mark_module_classes_surface_incomplete(&module);
         }
+
+        // A dependency's own `internal type` aliases are never seeded
+        // into a consumer's alias scope (ADR 0108), so expand them in the
+        // signatures this file exports, as the CLI does (BT-4778 /
+        // BT-4615 / BT-4707). Done after trait flattening above, which
+        // reads the unexpanded ASTs in the dependency's own scope.
+        let alias_infos =
+            beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let mut protocol_infos =
+            beamtalk_core::semantic_analysis::ProtocolRegistry::extract_protocol_infos(&module);
+        let mut protocol_defs: Vec<_> = module
+            .protocols
+            .iter()
+            .filter(|p| beamtalk_core::semantic_analysis::trait_expansion::is_carried_protocol(p))
+            .cloned()
+            .collect();
+        let is_dependency = crate::project_index::is_dependency_file(file);
+        let old_internal_aliases = self.project_index.internal_aliases_of(file);
+        if is_dependency {
+            // `internal` is package-private (ADR 0108): expand against
+            // every indexed file of this dependency, not just this one.
+            let mut package_aliases = self.project_index.dependency_sibling_aliases(file);
+            package_aliases.extend(alias_infos.iter().cloned());
+            let expander =
+                beamtalk_core::semantic_analysis::alias_expansion::InternalAliasExpander::from_alias_infos(
+                    &package_aliases,
+                );
+            class_hierarchy.map_class_infos(|info| expander.expand_class_info(info));
+            for info in &mut protocol_infos {
+                expander.expand_protocol_info(info);
+            }
+            beamtalk_project::dependency_aliases::expand_dependency_protocol_defs(
+                &package_aliases,
+                &mut protocol_defs,
+            );
+        }
+
+        // Update the project-wide index with this file's class hierarchy
+        self.project_index
+            .update_file(file.clone(), &class_hierarchy);
+
+        // ADR 0108 Phase 8: track this file's `type`
+        // declarations in the project-wide alias registry, so
+        // completions/goto-definition/find-references/hover can resolve
+        // alias names cross-file the same way they resolve classes.
+        self.project_index
+            .update_file_aliases(file.clone(), alias_infos);
+        let aliases_changed =
+            is_dependency && self.project_index.internal_aliases_of(file) != old_internal_aliases;
+
+        // Track this file's `Protocol define: ...` declarations
+        // too, so `extending:`/conformance checks against a protocol
+        // declared in a different project file or indexed dependency
+        // resolve during LSP diagnostics — mirrors the alias tracking
+        // immediately above (the CLI `build`/`lint` side of this is
+        // already wired; this closes the LSP parity gap).
+        self.project_index
+            .update_file_protocols(file.clone(), protocol_infos);
+
+        // Track this file's carried protocols' full ASTs
+        // (BT-3591) so a cross-file/cross-package `uses:` flattens
+        // during LSP diagnostics the same way `beamtalk build` already
+        // does, and record which protocols this file's own classes
+        // `uses:` (the protocol → users edge — see
+        // `ProjectIndex::users_of_protocol`'s doc), so an editor/LSP
+        // handler can re-analyse a protocol's open users after it changes.
+        self.project_index
+            .update_file_protocol_defs(file.clone(), protocol_defs);
+        self.project_index
+            .update_file_protocol_uses(file.clone(), &module);
 
         self.files.insert(
             file.clone(),
@@ -1061,7 +1041,7 @@ impl SimpleLanguageService {
         // exported signatures were expanded against the old set (or, during a
         // preload, before this file was indexed), so re-index them (BT-4778).
         if reindex_siblings && aliases_changed {
-            self.reindex_dependency_siblings(&file, false);
+            self.reindex_dependency_siblings(file, false);
         }
         aliases_changed
     }
@@ -1076,7 +1056,7 @@ impl SimpleLanguageService {
     pub fn update_files(&mut self, files: impl IntoIterator<Item = (Utf8PathBuf, String)>) {
         let mut stale_packages: Vec<Utf8PathBuf> = Vec::new();
         for (file, content) in files {
-            if self.index_file(file.clone(), content, false)
+            if self.index_file(&file, content, false)
                 && !stale_packages
                     .iter()
                     .any(|seen| crate::project_index::same_dependency_package(seen, &file))
@@ -1104,14 +1084,14 @@ impl SimpleLanguageService {
             .map(|(other, data)| (other.clone(), data.source.clone()))
             .collect();
         for (other, source) in siblings {
-            self.index_file(other, source, false);
+            self.index_file(&other, source, false);
         }
     }
 }
 
 impl LanguageService for SimpleLanguageService {
     fn update_file(&mut self, file: Utf8PathBuf, content: String) {
-        self.index_file(file, content, true);
+        self.index_file(&file, content, true);
     }
 
     fn remove_file(&mut self, file: &Utf8PathBuf) {
