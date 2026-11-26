@@ -137,7 +137,7 @@ When `strict-deps = true`, referencing a transitive dependency's class is a comp
 If two dependencies export the same class name, the compiler emits an **error** — not a warning, not silent shadowing:
 
 ```text
-error[E0301]: Class name 'Parser' is exported by multiple dependencies
+error: Class name 'Parser' is exported by multiple dependencies
   --> src/app.bt:5:12
    |
    = note: 'Parser' is defined in package 'json' (json@Parser)

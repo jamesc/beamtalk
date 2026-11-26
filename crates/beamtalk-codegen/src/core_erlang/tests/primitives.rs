@@ -26,18 +26,18 @@ fn test_generate_primitive_structural_intrinsic() {
     // `blockValue`/`blockValue1`/`blockValue2`/`blockValue3` no longer
     // hit the generic runtime-dispatch placeholder (see
     // `test_generate_primitive_block_value_structural_fallback` below) — use
-    // `classOf`, a structural intrinsic still on the generic placeholder path,
+    // `respondsTo`, a structural intrinsic still on the generic placeholder path,
     // to keep coverage of that fallback mechanism itself.
     let mut generator = CoreErlangGenerator::new("test");
     generator.set_class_identity(Some(util::ClassIdentity::new("Block")));
     generator.current_method_params = vec![];
 
     let doc = generator
-        .generate_primitive("classOf", false, Span::new(0, 0))
+        .generate_primitive("respondsTo", false, Span::new(0, 0))
         .unwrap();
     assert_eq!(
         doc.to_pretty_string(),
-        "call 'bt@stdlib@block':'dispatch'('classOf', [], Self)"
+        "call 'bt@stdlib@block':'dispatch'('respondsTo', [], Self)"
     );
 }
 
@@ -89,15 +89,15 @@ fn test_generate_primitive_hash_body_is_phash2() {
 fn test_generate_primitive_rejects_self_redispatching_placeholder() {
     // BT-4432 guard: a placeholder intrinsic declared by a method whose
     // selector equals the intrinsic name would re-dispatch to itself forever.
-    // `printString` is still a `Placeholder` entry, so declaring it from a
-    // `printString` method must fail the build.
+    // `respondsTo` is still a `Placeholder` entry, so declaring it from a
+    // `respondsTo` method must fail the build.
     let mut generator = CoreErlangGenerator::new("test");
     generator.set_class_identity(Some(util::ClassIdentity::new("Object")));
-    generator.current_method_selector = Some("printString".to_string());
+    generator.current_method_selector = Some("respondsTo".to_string());
     generator.current_method_params = vec![];
 
     let err = generator
-        .generate_primitive("printString", false, Span::new(0, 0))
+        .generate_primitive("respondsTo", false, Span::new(0, 0))
         .expect_err("a self-redispatching placeholder must be rejected");
     assert!(
         matches!(&err, CodeGenError::Internal(msg) if msg.contains("loop forever")),
@@ -109,7 +109,7 @@ fn test_generate_primitive_rejects_self_redispatching_placeholder() {
     generator.current_method_selector = Some("printOn:".to_string());
     assert!(
         generator
-            .generate_primitive("printString", false, Span::new(0, 0))
+            .generate_primitive("respondsTo", false, Span::new(0, 0))
             .is_ok()
     );
 }

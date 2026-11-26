@@ -284,15 +284,6 @@ shims_test() ->
     ?assertEqual(true, ms(1) =/= ms(2)).
 
 %%% ============================================================================
-%%% Cross-module helpers
-%%% ============================================================================
-
-is_duration_test() ->
-    ?assertEqual(true, beamtalk_duration:is_duration(ms(1))),
-    ?assertEqual(false, beamtalk_duration:is_duration(1)),
-    ?assertEqual(false, beamtalk_duration:is_duration(#{'$beamtalk_class' => 'DateTime'})).
-
-%%% ============================================================================
 %%% Integration — Timer accepts Duration
 %%% ============================================================================
 

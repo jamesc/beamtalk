@@ -1143,7 +1143,6 @@ beamtalk test              # Auto parallelism (default)
 beamtalk test --jobs 4     # Up to 4 classes concurrently
 beamtalk test -j 1         # Sequential (backward-compatible)
 beamtalk test --raw-mfa    # Every stack frame per failure (hidden ones too), raw module:function/arity beside each name
-# `--full-traces` still works but is deprecated: it is a hidden alias of `--raw-mfa`
 ```
 
 From code: `TestRunner runAll: 0` (auto), `TestRunner runAll: 4` (bounded), `TestRunner runAll` (sequential).

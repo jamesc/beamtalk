@@ -149,7 +149,7 @@ A compile-time analysis pass runs during `just build` to provide static guarante
 3. Extension declarations are written to a **type metadata file** that the gradual type checker reads, making extensions part of a class's typed method surface
 
 ```text
-error[E0451]: extension conflict on String>>json
+error: extension conflict on String>>json
   --> myapp/src/String+JSON.bt:3:1
    |
 3  | String >> json => ...

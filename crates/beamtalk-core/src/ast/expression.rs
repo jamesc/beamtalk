@@ -31,8 +31,6 @@ pub enum ExpectCategory {
     /// comments). Intended for test fixtures that deliberately pin a
     /// codegen shape the style lint would otherwise rewrite away.
     Lint,
-    /// Suppress deprecation warnings — wrong keyword/class-kind.
-    Deprecation,
     /// Suppress actor-new errors — using `new`/`new:` on an Actor subclass.
     ActorNew,
     /// Suppress visibility errors/warnings — cross-package internal method access (ADR 0071).
@@ -43,8 +41,6 @@ pub enum ExpectCategory {
     UnresolvedFfi,
     /// Suppress arity mismatch warnings.
     ArityMismatch,
-    /// Suppress workspace-binding-shadows-class warnings.
-    ShadowedClass,
     /// Suppress missing type annotation warnings in typed classes.
     TypeAnnotation,
     /// Suppress inheritance constraint errors — sealed subclass/method.
@@ -111,13 +107,11 @@ impl ExpectCategory {
             "unused" => Some(Self::Unused),
             "dead_assignment" => Some(Self::DeadAssignment),
             "lint" => Some(Self::Lint),
-            "deprecation" => Some(Self::Deprecation),
             "actor_new" => Some(Self::ActorNew),
             "visibility" => Some(Self::Visibility),
             "unresolved_class" => Some(Self::UnresolvedClass),
             "unresolved_ffi" => Some(Self::UnresolvedFfi),
             "arity_mismatch" => Some(Self::ArityMismatch),
-            "shadowed_class" => Some(Self::ShadowedClass),
             "type_annotation" => Some(Self::TypeAnnotation),
             "inheritance" => Some(Self::Inheritance),
             "sendability" => Some(Self::Sendability),
@@ -146,13 +140,11 @@ impl ExpectCategory {
             Self::Unused => "unused",
             Self::DeadAssignment => "dead_assignment",
             Self::Lint => "lint",
-            Self::Deprecation => "deprecation",
             Self::ActorNew => "actor_new",
             Self::Visibility => "visibility",
             Self::UnresolvedClass => "unresolved_class",
             Self::UnresolvedFfi => "unresolved_ffi",
             Self::ArityMismatch => "arity_mismatch",
-            Self::ShadowedClass => "shadowed_class",
             Self::TypeAnnotation => "type_annotation",
             Self::Inheritance => "inheritance",
             Self::Sendability => "sendability",
@@ -183,13 +175,11 @@ impl ExpectCategory {
             "unused",
             "dead_assignment",
             "lint",
-            "deprecation",
             "actor_new",
             "visibility",
             "unresolved_class",
             "unresolved_ffi",
             "arity_mismatch",
-            "shadowed_class",
             "type_annotation",
             "inheritance",
             "sendability",

@@ -118,11 +118,10 @@ dnu = "hint"                # ADR 0100 Rule 1 default
 unresolved-class = "warn"
 unresolved-ffi = "warn"
 arity-mismatch = "warn"
-deprecation = "warn"
 type = "hint"
 ```
 
-Keys are kebab-case diagnostic categories (`dnu`, `type`, `unused`, `empty-body`, `lint`, `dead-assignment`, `extension-conflict`, `deprecation`, `actor-new`, `visibility`, `unresolved-class`, `unresolved-ffi`, `arity-mismatch`, `shadowed-class`, `type-annotation`, `inheritance`, `sendability`, `native-declaration-location`, `file-class-name-mismatch`, `definite-assignment`, `unguarded-late-read`, `match-arm-block`, `class-method-process-resource`, `actor-state-abroad`, `ffi-nested-string`, `binary-string-compare`, `cascade-drops-update`, `handleinfo-no-catch-all`). Values are one of `"off"` (drop the diagnostic entirely), `"lint"`, `"hint"`, `"warn"`, or `"error"` (fails the build unconditionally, independent of `--warnings-as-errors`).
+Keys are kebab-case diagnostic categories (`dnu`, `type`, `unused`, `empty-body`, `lint`, `dead-assignment`, `actor-new`, `visibility`, `unresolved-class`, `unresolved-ffi`, `arity-mismatch`, `type-annotation`, `inheritance`, `sendability`, `native-declaration-location`, `file-class-name-mismatch`, `definite-assignment`, `unguarded-late-read`, `match-arm-block`, `class-method-process-resource`, `actor-state-abroad`, `ffi-nested-string`, `binary-string-compare`, `cascade-drops-update`, `handleinfo-no-catch-all`). Values are one of `"off"` (drop the diagnostic entirely), `"lint"`, `"hint"`, `"warn"`, or `"error"` (fails the build unconditionally, independent of `--warnings-as-errors`).
 
 `definite-assignment` ([ADR 0124](ADR/0124-slots-late-assignment-definite-assignment.md) §6) is the construction-site check that a declared, typed, no-default, non-nilable, non-`late` slot is actually supplied — see [Definite Assignment](beamtalk-language-features.md#definite-assignment-adr-0124) in the language reference. It has no site-level `@expect` category by design (the exemption is the `late` declaration, not an annotation), so this table is the only way to change its severity per project. Because a Value's `Warning` has no runtime backstop the way an Actor's does, `definite-assignment = "error"` is a more attractive escalation for a Value-heavy package than for most other categories here.
 
@@ -459,7 +458,7 @@ parse: input :: String -> json@Parser =>
 If two dependencies export the same class name and your code references that name, the compiler emits an error:
 
 ```text
-error[E0301]: Class name 'Parser' is exported by multiple dependencies
+error: Class name 'Parser' is exported by multiple dependencies
   --> src/app.bt:5:12
    |
    = note: 'Parser' is defined in package 'json' (json@Parser)
