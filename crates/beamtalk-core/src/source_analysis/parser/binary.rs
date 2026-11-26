@@ -1358,13 +1358,18 @@ impl Parser {
                 None
             }
             Ok(Literal::BigInteger(digits)) => {
-                self.diagnostics.push(Diagnostic::error(
+                let message = if digits.starts_with('-') {
+                    format!(
+                        "binary segment unit must be between 1 and 256, got {}",
+                        abbreviate_digits(&digits)
+                    )
+                } else {
                     format!(
                         "binary segment unit {} is too large; it must be between 1 and 256",
                         abbreviate_digits(&digits)
-                    ),
-                    span,
-                ));
+                    )
+                };
+                self.diagnostics.push(Diagnostic::error(message, span));
                 None
             }
             Ok(_) => {

@@ -896,3 +896,12 @@ fn negative_bignum_size_is_a_negative_size_error() {
         &format!("binary segment sizes must be non-negative, got -{BIG}"),
     );
 }
+
+#[test]
+fn negative_bignum_unit_is_out_of_range_not_too_large() {
+    assert_one(
+        &format!("<<1:8/unit:-{BIG}>>"),
+        Severity::Error,
+        &format!("binary segment unit must be between 1 and 256, got -{BIG}"),
+    );
+}
