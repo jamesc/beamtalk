@@ -687,6 +687,15 @@ impl Literal {
         )
     }
 
+    /// The finite `f64` an integer literal's decimal `digits` round to, or
+    /// `None` when none exists (a bignum of about 309 digits or more). The
+    /// one rule a `float` binary segment uses to fold a bignum, shared by the
+    /// parser's warning and codegen (BT-5239).
+    #[must_use]
+    pub fn bignum_as_f64(digits: &str) -> Option<f64> {
+        digits.parse::<f64>().ok().filter(|f| f.is_finite())
+    }
+
     /// The literal with its sign flipped, for a `-` written before a numeric
     /// literal (negative patterns). An integer that overflows `i64` on
     /// negation (`- -9223372036854775808`) becomes a [`Literal::BigInteger`];

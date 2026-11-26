@@ -160,7 +160,7 @@ pub(in crate::core_erlang) fn float_segment_value(lit: &Literal) -> Option<f64> 
     match lit {
         Literal::Float(f) => Some(*f),
         Literal::Integer(v) => Some(int_to_f64(*v)),
-        Literal::BigInteger(digits) => digits.parse::<f64>().ok().filter(|f| f.is_finite()),
+        Literal::BigInteger(digits) => Literal::bignum_as_f64(digits),
         Literal::Character(c) => Some(f64::from(u32::from(*c))),
         _ => None,
     }

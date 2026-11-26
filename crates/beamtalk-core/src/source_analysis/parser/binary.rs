@@ -851,7 +851,7 @@ impl Parser {
         // stand for it: a pattern arm never matches, a construction
         // fails at run time.
         if let Some((Literal::BigInteger(digits), value_span)) = literal
-            && !digits.parse::<f64>().is_ok_and(f64::is_finite)
+            && Literal::bignum_as_f64(digits).is_none()
         {
             self.diagnostics.push(Diagnostic::warning(
                 format!(
