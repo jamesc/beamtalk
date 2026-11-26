@@ -49,6 +49,10 @@
 //! - **Stdin.** Writes go to a per-child writer thread through a queue holding
 //!   at most [`STDIN_QUEUE_BYTES`]; a write that would overflow it fails with
 //!   an `error` event. The command thread never blocks on a child.
+//!   **Known limit (BT-5259, follow-up BT-5269):** `stdin_queued` means the line was queued, not
+//!   delivered. If the child exits or closes stdin before the writer thread
+//!   reads it, the failure is not reported for that line; only a later write
+//!   gets an `error`. Reporting it needs a writer-thread failure event.
 //! - **Port death.** Unix children run in their own session. They are killed
 //!   when the BEAM closes the port (stdin EOF), on SIGTERM/SIGHUP, and, when
 //!   the port dies any other way, by the [`watchdog`] process and (Linux,
