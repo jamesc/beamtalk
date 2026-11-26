@@ -222,7 +222,17 @@ pub(crate) struct BeamtalkHomeOverride {
 
 impl BeamtalkHomeOverride {
     pub(crate) fn new(dir: &Path) -> Self {
-        assert_no_home_override_held("BeamtalkHomeOverride::new()");
+        Self::with_value(Some(dir.as_os_str()))
+    }
+
+    /// Like [`Self::new`], but sets `BEAMTALK_HOME` to any value: `None`
+    /// unsets it, `Some("")` sets it empty. For a test of how the CLI reads
+    /// the variable itself (BT-5272). Such a test must still take the write
+    /// lock: a bare `set_var`/`remove_var` strips `BEAMTALK_HOME` from every
+    /// concurrent [`real_home_guard`] holder, whose next write then lands in
+    /// the real `$HOME/.beamtalk`.
+    pub(crate) fn with_value(value: Option<&std::ffi::OsStr>) -> Self {
+        assert_no_home_override_held("BeamtalkHomeOverride::with_value()");
         let lock = BEAMTALK_HOME_LOCK
             .write()
             .unwrap_or_else(PoisonError::into_inner);
@@ -230,7 +240,12 @@ impl BeamtalkHomeOverride {
         let prev = std::env::var("BEAMTALK_HOME").ok();
         // SAFETY: the exclusive write lock above guarantees no other thread is
         // reading BEAMTALK_HOME or the directory it controls concurrently.
-        unsafe { std::env::set_var("BEAMTALK_HOME", dir) };
+        unsafe {
+            match value {
+                Some(v) => std::env::set_var("BEAMTALK_HOME", v),
+                None => std::env::remove_var("BEAMTALK_HOME"),
+            }
+        }
         Self { _lock: lock, prev }
     }
 }
