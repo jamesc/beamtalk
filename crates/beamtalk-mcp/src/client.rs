@@ -23,7 +23,6 @@ use tokio_tungstenite::tungstenite::{
 };
 use tracing::instrument;
 
-/// Default timeout for REPL I/O operations.
 /// The `ChangeLog` author of an MCP `save_method` (ADR 0082: MCP saves are
 /// `agent`, not the connection's own `repl`/human).
 const MCP_SAVE_METHOD_AUTHOR: Author<'static> = Author {
@@ -37,6 +36,7 @@ const MCP_SAVE_CLASS_AUTHOR: Author<'static> = Author {
     kind: AuthorKind::Agent,
 };
 
+/// Default timeout for REPL I/O operations.
 const REPL_IO_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Timeout for `eval` operations.

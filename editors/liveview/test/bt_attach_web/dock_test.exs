@@ -558,6 +558,24 @@ defmodule BtAttachWeb.Live.DockTest do
       assert socket.assigns.flush_error == nil
     end
 
+    test "BT-5206: Save All to Disk shows conflicts as an error, not only a count" do
+      force_workspace_replies(%{
+        flush:
+          {:ok,
+           %{
+             "flushed" => 1,
+             "files" => ["src/a.bt"],
+             "skipped" => [],
+             "conflicts" => [%{"file" => "src/b.bt", "reason" => "external_edit"}]
+           }}
+      })
+
+      {:noreply, socket} = Dock.handle_event("flush", %{}, base_socket())
+
+      assert socket.assigns.flush_error =~ "src/b.bt (external_edit)"
+      assert socket.assigns.flush_result =~ "Flushed 1 change(s)"
+    end
+
     test "revert re-installs the prior body and refreshes the Changes pane" do
       {:noreply, socket} =
         Dock.handle_event(

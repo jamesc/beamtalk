@@ -305,7 +305,12 @@ defmodule BtAttachWeb.Live.Dock.GitChanges do
     case Facade.dispatch(:flush, %{}, RequestContext.build(socket)) do
       {:ok, summary} ->
         socket
-        |> assign(flush_result: Workspace.format_flush_summary(summary), flush_error: nil)
+        # BT-5206: a flush that returned conflicts did not write those files, so
+        # show them as an error beside the summary of what did land.
+        |> assign(
+          flush_result: Workspace.format_flush_summary(summary),
+          flush_error: Workspace.format_flush_conflicts(summary)
+        )
         |> WorkspaceLive.assign_changes()
         |> clear_flushed_badges(was_pending)
         # BT-2586: a flush writes pending edits to disk, so the post-flush
