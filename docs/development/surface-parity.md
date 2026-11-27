@@ -1314,7 +1314,9 @@ flattening implementation):
   `resolve_protocol_key`), after the module's own and every carried protocol.
   Their one source is `stdlib/src/*.bt` itself: `build-stdlib` generates
   `generated_stdlib_protocol_files()` (in `generated_builtins.rs`), an
-  `include_str!` table of the files declaring provision-bearing protocols,
+  `include_str!` table of the files declaring protocols (provision-bearing or
+  not; only the former join `uses:` resolution, the rest are seeded into the
+  checker's registry so bounds and annotations naming them are checked),
   parsed once by `semantic_analysis::stdlib_protocols`. Which `(class,
   protocol)` uses resolved to the stdlib is recorded per class
   (`trait_expansion::expand_module_with_stdlib_uses`, `AnalysisResult::stdlib_protocol_uses`,

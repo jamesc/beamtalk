@@ -489,7 +489,7 @@ pub(super) fn collect_stdlib_alias_sources(
 /// no `package` field (protocols have no `internal` modifier at the AST
 /// level — see `collect_project_protocol_and_alias_infos`'s doc in
 /// `build.rs`, which this mirrors). (User compilation gets the stdlib's
-/// provision-bearing protocols from `generated_builtins.rs`'s
+/// protocols from `generated_builtins.rs`'s
 /// `generated_stdlib_protocol_files()` table instead — see
 /// [`generate_protocol_files_section`]; this live pre-pass is what the stdlib
 /// build itself uses.) `ProtocolRegistry::extract_protocol_infos`
@@ -517,15 +517,22 @@ pub(super) fn collect_stdlib_alias_sources(
 /// The third element is each such protocol's source file (path + text —
 /// ADR 0127 §3, "Source locations"; BT-3625), so codegen can map a
 /// flattened provision's spans to lines of the *protocol's* file.
-#[allow(clippy::type_complexity)] // 3-tuple mirrors this module's other multi-output extractors
+///
+/// The fourth element is the file name of every stdlib source that declares
+/// any protocol, provision-bearing or not, sorted and deduplicated — the files
+/// `generate_protocol_files_section` embeds (BT-5338), so requirements-only
+/// protocols (`Printable`, `JsonRepresentable`) reach the type checker.
+#[allow(clippy::type_complexity)] // 4-tuple mirrors this module's other multi-output extractors
 pub(super) fn collect_stdlib_protocol_infos(
     source_files: &[Utf8PathBuf],
 ) -> (
     Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
     Vec<beamtalk_core::ast::ProtocolDefinition>,
     beamtalk_core::semantic_analysis::ProtocolSourceMap,
+    Vec<String>,
 ) {
     let mut all = Vec::new();
+    let mut declaring_files = Vec::new();
     let mut all_defs = Vec::new();
     let mut all_sources = beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
     for file in source_files {
@@ -534,6 +541,9 @@ pub(super) fn collect_stdlib_protocol_infos(
         };
         let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
         let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+        if !module.protocols.is_empty() {
+            declaring_files.extend(file.file_name().map(str::to_string));
+        }
         all.extend(
             beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::extract_protocol_infos(
                 &module,
@@ -555,7 +565,9 @@ pub(super) fn collect_stdlib_protocol_infos(
             all_defs.push(protocol);
         }
     }
-    (all, all_defs, all_sources)
+    declaring_files.sort();
+    declaring_files.dedup();
+    (all, all_defs, all_sources, declaring_files)
 }
 
 /// Extracts `alias_sources`' declaration texts sorted by alias *name* (not

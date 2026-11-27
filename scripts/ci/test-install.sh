@@ -306,4 +306,69 @@ for plat in macos-x86_64 windows-x86_64; do
     check "--edge on ${plat} is a clear error before any download" $?
 done
 
+# 14. BT-5337: --edge retries while edge is being republished (asset or checksum
+# briefly missing, or an archive next to its old checksum), never skips the
+# checksum, and fails cleanly when the problem persists. Non-edge installs make a
+# single attempt. A flaky curl fails the first FLAKY_FAILS requests whose name
+# ends in FLAKY_SUFFIX (counted in FLAKY_COUNT); mode "stale" serves a wrong
+# checksum instead of failing.
+mkdir -p "$T/flakybin"
+cat > "$T/flakybin/curl" <<'FLAKY'
+#!/bin/sh
+out=""; url=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -o) out="$2"; shift 2 ;;
+        --proto|--proto-redir) shift 2 ;;
+        -*) shift ;;
+        *) url="$1"; shift ;;
+    esac
+done
+name="$(basename "$url")"
+case "$name" in
+    *"$FLAKY_SUFFIX")
+        n=$(cat "$FLAKY_COUNT" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$FLAKY_COUNT"
+        if [ "$n" -le "$FLAKY_FAILS" ]; then
+            if [ "$FLAKY_MODE" = stale ]; then
+                echo "0000000000000000000000000000000000000000000000000000000000000000  x" > "$out"; exit 0
+            fi
+            exit 22
+        fi ;;
+esac
+src="$FAKE_RELEASE_DIR/$name"
+[ -f "$src" ] || exit 22
+cp "$src" "$out"
+FLAKY
+chmod +x "$T/flakybin/curl"
+
+run_flaky() { # prefix, suffix, mode, fails, args...
+    prefix="$1"; fsuf="$2"; fmode="$3"; ffails="$4"; shift 4
+    rm -f "$T/flaky.count"
+    read -r s m <<<"$(uname_for linux-x86_64)"
+    PATH="$T/unamebin:$T/flakybin:$PATH" FAKE_UNAME_S="$s" FAKE_UNAME_M="$m" \
+        FAKE_RELEASE_DIR="$T/edge" FLAKY_SUFFIX="$fsuf" FLAKY_MODE="$fmode" FLAKY_FAILS="$ffails" \
+        FLAKY_COUNT="$T/flaky.count" BEAMTALK_RETRY_DELAY=0 \
+        BEAMTALK_PREFIX="$prefix" sh "$SCRIPT" "$@" >"$T/out" 2>&1
+}
+
+for spec in "missing archive:tar.gz:missing" "missing checksum:sha256:missing" "stale checksum:sha256:stale"; do
+    label="${spec%%:*}"; rest="${spec#*:}"; suf="${rest%%:*}"; mode="${rest#*:}"
+    P="$T/p14-$mode-$suf"
+    run_flaky "$P" "$suf" "$mode" 2 --edge; rc=$?
+    [ $rc -eq 0 ] && [ -x "$P/bin/beamtalk" ] && grep -q "Checksum verified" "$T/out" \
+        && grep -q "Retrying in" "$T/out"
+    check "--edge retries a $label and then installs" $?
+done
+
+P="$T/p14-persist"
+run_flaky "$P" sha256 stale 99 --edge; rc=$?
+[ $rc -ne 0 ] && [ ! -e "$P/bin/beamtalk" ] && grep -q "Checksum verification failed" "$T/out" \
+    && [ "$(cat "$T/flaky.count")" -eq 4 ]
+check "--edge gives up after 4 attempts on a persistent mismatch, installing nothing" $?
+
+P="$T/p14-nonedge"
+run_flaky "$P" tar.gz missing 1 --version 9.9.9; rc=$?
+[ $rc -ne 0 ] && ! grep -q "Retrying in" "$T/out" && [ "$(cat "$T/flaky.count")" -eq 1 ]
+check "a non-edge install makes a single attempt" $?
+
 exit $FAILED
