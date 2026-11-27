@@ -277,8 +277,12 @@ impl TypeChecker {
                     let union_display = expected
                         .display_for_diagnostic()
                         .unwrap_or_else(|| EcoString::from("Dynamic"));
-                    let actual_display =
-                        InferredType::class_name_for_diagnostic(actual_ty.as_str());
+                    // BT-5300: keep the type arguments (`Result(Dictionary,
+                    // ZErr)`), as the non-union arm does, so a generic body
+                    // is not reduced to its bare class name.
+                    let actual_display = body_type.display_for_diagnostic().unwrap_or_else(|| {
+                        InferredType::class_name_for_diagnostic(actual_ty.as_str())
+                    });
                     self.diagnostics.push(
                         Diagnostic::warning(
                             site.message(&selector, class_name, &union_display, &actual_display),
@@ -354,10 +358,22 @@ impl TypeChecker {
             None,
             self.alias_registry.as_deref(),
         );
-        match Self::result_type_args(&expected) {
-            Some((declared_success, _)) => Self::with_result_success(ty, declared_success.clone()),
-            None => ty.clone(),
+        if let Some((declared_success, _)) = Self::result_type_args(&expected) {
+            return Self::with_result_success(ty, declared_success.clone());
         }
+        // BT-5300: a union return (`Result(U, E') | Nil`) has no single
+        // success type unless exactly one member is a `Result`; take that
+        // member's success slot, else leave it `Dynamic` (wording only — it
+        // fits any declared success, so the verdict is unchanged).
+        if let InferredType::Union { members, .. } = &expected {
+            let mut results = members.iter().filter_map(Self::result_type_args);
+            let success = match (results.next(), results.next()) {
+                (Some((s, _)), None) => s.clone(),
+                _ => InferredType::Dynamic(DynamicReason::Unknown),
+            };
+            return Self::with_result_success(ty, success);
+        }
+        ty.clone()
     }
 
     /// BT-4440: warn when a method whose body is a class object (`C class` /

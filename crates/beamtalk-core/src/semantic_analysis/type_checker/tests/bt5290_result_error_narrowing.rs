@@ -630,3 +630,52 @@ fn cascade_receiver_block_rebinding_drops_narrowing() {
         "the cascade's condition block re-runs after the body rebinds `line`: {diags:?}"
     );
 }
+
+// ---- BT-5300: a union return type still names the error type -------------
+
+/// `^r` under `r isError ifTrue:` against `Result(Dictionary, Error) | Nil`:
+/// the `Result` member of the union supplies the success type, so the message
+/// names the offending error type instead of a bare `Result`.
+#[test]
+fn union_return_names_error_type_using_result_member() {
+    let diags = type_messages(
+        r"Value subclass: ZErr
+Object subclass: Probe
+  class src -> Result(List(String), ZErr) => Result ok: #()
+  class a -> Result(Dictionary, Error) | Nil =>
+    r := self src
+    r isError ifTrue: [^r]
+    nil
+",
+    );
+    let mismatches = return_mismatches(&diags);
+    assert_eq!(mismatches.len(), 1, "one return mismatch: {diags:?}");
+    assert!(
+        mismatches[0].contains(
+            "`^` returns Result(Dictionary, ZErr), but method 'a' in Probe declares return type Result(Dictionary, Error) | Nil"
+        ),
+        "must name the error type: {diags:?}"
+    );
+}
+
+/// With no single `Result` member in the union, the success slot is unknown:
+/// the message still names the error type.
+#[test]
+fn union_return_without_single_result_member_names_error_type() {
+    let diags = type_messages(
+        r"Value subclass: ZErr
+Object subclass: Probe
+  class src -> Result(List(String), ZErr) => Result ok: #()
+  class a -> Result(Dictionary, Error) | Result(String, Error) | Nil =>
+    r := self src
+    r isError ifTrue: [^r]
+    nil
+",
+    );
+    let mismatches = return_mismatches(&diags);
+    assert_eq!(mismatches.len(), 1, "one return mismatch: {diags:?}");
+    assert!(
+        mismatches[0].contains("`^` returns Result(Dynamic, ZErr), but method 'a'"),
+        "must name the error type: {diags:?}"
+    );
+}
