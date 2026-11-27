@@ -31,8 +31,10 @@ looks like. BT-5344 asks for map patterns with optional keys.
 ### What exists today
 
 - **Map patterns** (BT-1296) take a symbol or string key and a value that is a
-  variable, `_`, a literal, or a type pattern `x :: T` / `_ :: T` (BT-5284,
-  BT-5294). Parser: `parse_map_pattern` in
+  variable, `_`, a literal, or a type pattern `x :: T` (BT-5284, BT-5294).
+  `_ :: T` is documented as nesting too, but in a map value it does not parse
+  today: `parse_map_pattern_value` takes `_` as a wildcard before it looks for
+  `::`. The implementation fixes this. Parser: `parse_map_pattern` in
   `crates/beamtalk-core/src/source_analysis/parser/patterns.rs`. AST:
   `Pattern::Map { pairs: Vec<MapPatternPair> }` in
   `crates/beamtalk-core/src/ast/pattern.rs`.
@@ -81,8 +83,21 @@ followed by `= default`, the same marker as a `state:`/`field:` default.
 ```text
 MapPatternPair := [ '?' ] Key '=>' Value [ '=' Default ]     // '= Default' only after '?'
 Key            := SymbolLiteral | StringLiteral
-Default        := Literal | 'nil' | 'true' | 'false'
-                | '#(' Defaults ')' | '#[' Defaults ']' | '#{' DefaultPairs '}' | '{' Defaults '}'
+Default        := Number | '-' Number | String | Symbol | Character
+                | 'nil' | 'true' | 'false' | '#()' | '#{}'
+```
+
+In the REPL:
+
+```text
+> #{?#port => port = 80, #host => host} := #{#host => "example.com"}
+=> #{#host => "example.com"}
+> port
+=> 80
+> #{?#port => p2} := #{#host => "example.com"}
+=> #{#host => "example.com"}
+> p2
+=> nil
 ```
 
 ```beamtalk
@@ -111,16 +126,35 @@ Rules:
   to `"blocks"`" is rarely meant, and a reader would misread it. A bare `_`
   (`?#k => _`) tests nothing, so it is a warning: "an optional key bound to
   `_` has no effect; remove the entry".
-- **A default is a constant**: a number (negative too), string, symbol,
-  character, `nil`, `true`, `false`, or a list, array, tuple or map literal
-  whose elements are constants (`#()`, `#{}`, `#("a", "b")`). It is evaluated
-  at compile time, so the pattern stays side-effect free. A default that is not
+- **A default is a scalar constant**: a number (negative too), string, symbol,
+  character, `nil`, `true`, `false`, the empty list `#()` or the empty map
+  `#{}`. Together these cover every default in the evidence. Each one is a
+  Core Erlang constant (`[]`, `~{}~`, an atom, a number, a tagged string
+  tuple), so the pattern stays side-effect free and `maps:get/3` evaluates
+  nothing. Arrays (`#[]` builds through `beamtalk_array:from_list`) and
+  collections with contents are left out. A default that is not
   a constant is a compile error at the default:
   `the default of an optional key must be a literal; bind the key without a
   default and use ifNil: for a computed value`. A default on `_ :: T`, or on a
   key without `?`, is a compile error.
-- **Order.** Required and optional pairs may be mixed in any order. Duplicate
-  keys follow today's map-pattern rules.
+- **Order.** Required and optional pairs may be mixed in any order. A key that
+  appears both required and optional (`#{#k => a, ?#k => b}`) is a compile
+  error. Two required pairs on the same key keep today's behaviour.
+- **Top level only.** An optional key is allowed only in a map pattern that is
+  a whole `match:` arm pattern or a whole destructuring target. In a map nested
+  inside a tuple, list or `Result ok:` pattern it is a compile error for now:
+  `optional keys are supported only in a top-level map pattern`. A nested map
+  has no variable for `maps:get/3` to read. Lifting this needs an alias
+  variable for the nested map, which is a separate change.
+- **The scrutinee must be a `Dictionary`.** A pattern that has an optional key
+  first checks that the value is an untagged map, the same test
+  `_ :: Dictionary` uses (`wrap_untagged_map_test`). Value objects, arrays and
+  other tagged maps are Erlang maps at run time. In a `match:` arm a failed
+  check falls through to the next arm. In a destructure it raises
+  `#pattern_mismatch`. Without this check,
+  `#{?#k => v}` would match every one of them and bind `nil`. (A pattern with
+  only required keys can already match a tagged map that holds those keys.
+  That is a separate, pre-existing gap. This ADR leaves it unchanged.)
 - **Lexing.** `?#k`, `?"k"`, `, ?#k` and `,?#k` all parse: as in a shape type,
   the parser splits a `,?` token. `= -1` parses; `=-1` lexes `=-` as one
   token, and the parser splits it the same way. `fmt` always prints `?` with
@@ -128,18 +162,21 @@ Rules:
 
 ### 2. Types
 
-The binding's type is the type of the value at that key, joined with `Nil`
-when there is no default, or with the default's type when there is one.
-ADR 0147 gives `at: #k ifAbsent: [b]` the same rule: `T | B`.
+An optional binding has the type a required binding would have at that key,
+joined with `Nil` when there is no default, or with the default's type `D`
+when there is one. ADR 0147 gives `at: #k ifAbsent: [b]` the same rule:
+`T | B`. Today a map-pattern binding is typed only when the scrutinee is a
+shape (symbol keys, BT-5336). Otherwise it stays untyped (`Dynamic`), and
+optional keys do not change that. String keys, which every downstream example
+uses, therefore type through the `x :: T` columns only.
 
 | Scrutinee | `?#k => v` | `?#k => v = d` | `?#k => v :: T` | `?#k => v :: T = d` |
 |---|---|---|---|---|
 | shape, `#k => S` (required) | `S` | `S` | `S & T` | `S & T` |
-| shape, `?#k => S` (optional) | `S \| Nil` | `S \| D` | `(S & T) \| Nil` | `S & T` |
+| shape, `?#k => S` (optional) | `S \| Nil` | `S \| D` | `(S & T) \| Nil` | `(S & T) \| D` |
 | shape, `#k` not named, closed | `Nil` + warning | `D` + warning | `Nil` + warning | `D` + warning |
 | shape, `#k` not named, open | `Object \| Nil` | `Object \| D` | `T \| Nil` | `T` |
-| `Dictionary(K, V)` | `V \| Nil` | `V \| D` | `(V & T) \| Nil` | `V & T` |
-| `Dynamic` / unknown | `Dynamic` | `Dynamic` | `T \| Nil` | `T` |
+| not a shape (`Dictionary(K, V)`, `Dynamic`, string keys) | `Dynamic` | `Dynamic` | `T \| Nil` | `T` |
 
 The `:: T` columns describe a `match:` arm, where `x :: T` is a test. In a
 destructure it is the declared type of the local (see §3).
@@ -150,8 +187,9 @@ gives the bare `T`. Two further rules:
 
 - **A default must fit a type test.** In `?#k => n :: Integer = 0` the default
   is checked against `Integer` at compile time. If it does not fit
-  (`= "none"`), the compiler warns `default "none" is not an Integer`. This is
-  why the `:: T = d` columns give `T`, not `T | D`.
+  (`= "none"`), the compiler warns `default "none" is not an Integer`. A
+  default can fit `T` without fitting the shape's `S` (`S = Integer`,
+  `T = Number`, `= 0.5`), hence `(S & T) | D`.
 - **An absent key in a closed shape** is always absent, so the pattern binds
   the default or `nil`. The compiler warns `no key #k in <shape>; it is always
   absent`, as ADR 0147 warns for `at:ifAbsent:` on such a key. A `?` on a
@@ -171,10 +209,17 @@ gives the bare `T`. Two further rules:
 In a `match:` arm the type test runs only when the key is present. A present
 value of the wrong class falls through to the next arm. The test runs in source
 order with the other nested type tests, after the shape match and before the
-`when:` guard. The guard sees every binding. A pattern whose keys are all
-optional still needs a map: `#{?#k => v}` matches any `Dictionary` and nothing
+`when:` guard. The guard sees every binding. Because of the untagged-map check,
+a pattern whose keys are all optional matches any `Dictionary` and nothing
 else. Exhaustiveness is unchanged: a map pattern never makes a `match:`
 exhaustive over a non-map type.
+
+**JSON `null`.** A present `nil` fails `?#k => x :: T`, because `nil` is not a
+`T` and a type pattern names one class (`x :: String | Nil` is not a type
+pattern). An API that sends explicit nulls is read with `?#k => x`, without the
+test, or the arm matches `nil` first. Union type patterns would cover this
+case. They are a separate feature, and this ADR keeps "optional means absent"
+rather than special-casing `nil`.
 
 ### 3. Destructuring
 
@@ -191,16 +236,27 @@ Optional keys work the same in `#{...} := m` as in a `match:` arm, except that
   binds `nil`. With a default it declares `T`, and the default is checked
   against `T` like any assignment.
 
-The parser sends a destructure through the pattern grammar when it sees a `?`
-(or `,?`) inside the leading `#{`. The test is the same lookahead
-`leading_collection_is_typed_destructure` already uses for `::`.
+The parser sends a destructure through the pattern grammar when it sees a `?`,
+`,?` or `=` inside the leading `#{`. The test is the same lookahead
+`leading_collection_is_typed_destructure` already uses for `::`. With `=` in
+the lookahead, `#{#id => id = 0} := m` reaches the pattern parser and gets the
+specific "only an optional key can have a default" error, not the generic
+"'=' is not an operator".
 
 ### 4. Codegen
 
-Required pairs stay in the native map pattern. Each optional pair becomes one
-`maps:get/3` with the constant default (`'nil'` when there is none). An
-optional pair with a nested type test adds one `is_map_key` test, so the test
-runs only on a present value. No new runtime function is needed.
+Required pairs stay in the native map pattern. In a destructure, each optional
+pair becomes one `maps:get/3` with the constant default (`'nil'` when there is
+none). In a `match:` arm, an optional pair with a nested type test becomes one
+`maps:find/2`, so the test runs only on a present value and the key is looked
+up once. No new runtime function is needed.
+
+An arm that has an optional pair always leaves the native single-`case` fast
+path. Its bindings come from `let`s after the clause matches, so a `when:`
+guard in clause position could not see them. Such an arm goes through
+`generate_nested_type_arm`, the path nested type tests already take, with the
+guard run last. The predicate that selects that path (`pattern_has_nested_type`)
+also checks for an optional pair.
 
 **Destructure.** `#{?"request" => request = #{}, ?"request_id" => requestId} := msg`
 
@@ -223,26 +279,31 @@ A symbol key is a plain atom.)
 ```erlang
 case _Match@7 of
   <~{ <"id"> := Id@ }~> when 'true' ->
-    let P@ = call 'maps':'get'(<"priority">, _Match@7, 'nil') in
-    let _OptOk@20 =
-      case call 'erlang':'is_map_key'(<"priority">, _Match@7) of
-        <'true'>  when 'true' -> call 'erlang':'is_integer'(P@)    % the existing type test,
-        <'false'> when 'true' -> 'true'                            % rendered as a boolean
-      end in
-    case _OptOk@20 of
-      <'true'>  when 'true' -> {Id@, P@}
+    case <UNTAGGED-MAP TEST on _Match@7> of           % wrap_untagged_map_test
+      <'true'> when 'true' ->
+        let <_OptOk@20, P@> =
+          case call 'maps':'find'(<"priority">, _Match@7) of
+            <{'ok', _V@21}> when 'true' ->
+              <call 'erlang':'is_integer'(_V@21), _V@21>     % the existing type test, as a boolean
+            <'error'> when 'true' -> <'true', 'nil'>         % or the default
+          end in
+        case _OptOk@20 of
+          <'true'>  when 'true' -> {Id@, P@}
+          <'false'> when 'true' -> apply '_Fallthrough@14'/0 ()
+        end
       <'false'> when 'true' -> apply '_Fallthrough@14'/0 ()
     end
   <_NoMatch@8> when 'true' -> apply '_Fallthrough@14'/0 ()
 end
 ```
 
-The type test inside `_OptOk` is the test that `dispatch_type_pattern_strategy`
-already builds for a hoisted type pattern. It is built with `'true'` as the
-success continuation and `'false'` as the failure, so every class strategy
-works: BIF guards, the `String` tag, the class tag, and `isKindOf:` for
-classes with subclasses. The arm body appears once. Without a type test, the
-optional pair is only the `maps:get/3` line.
+The type test in the `ok` branch is the test that
+`dispatch_type_pattern_strategy` already builds for a hoisted type pattern. It
+is built with `'true'` as the success continuation and `'false'` as the
+failure, so every class strategy works: BIF guards, the `String` tag, the class
+tag, and `isKindOf:` for classes with subclasses. The arm body appears once.
+Without a type test the pair is
+`let P@ = call 'maps':'get'(<"priority">, _Match@7, 'nil')`.
 
 **Cost compared with `at:ifAbsent:`.** Today `node at: "priority" ifAbsent:
 [nil]` compiles to an `is_map` test, a `maps:get('$beamtalk_class', …)` tag
@@ -250,8 +311,9 @@ lookup, an `is_map_key('__class_mod__', …)` test, a closure allocation for the
 block, and a remote call to `bt@stdlib@dictionary:dispatch/3`. That call
 dispatches `at:ifAbsent:` and applies the closure when the key is missing. The
 pattern lowering is one `maps:get/3` BIF per key, plus one `is_map_key` per key
-that has a type test. It allocates nothing, makes no remote call and does no
-per-key class-tag check.
+with a type test, which uses one `maps:find/2` instead. The untagged-map check
+runs once per pattern. The pattern allocates nothing and makes no remote call.
+`at:ifAbsent:` repeats its class-tag check for every key.
 
 The state-threading machinery is not involved. Defaults are constants and
 patterns contain no sends, so no `ThreadedIr` node changes. The implementation
@@ -260,10 +322,10 @@ PR still carries `ci:corpus`, because it touches `match:` arm lowering.
 ### 5. Formatter and LSP
 
 - **AST.** `MapPatternPair` gains `optional: Option<Span>` (the `?`) and
-  `default: Option<Box<Expression>>`. The default is a constant expression,
-  checked in the parser, so the walkers that visit expressions
-  (`ast_walker`, `method_source_walker`, the name resolver) reach it without
-  special cases.
+  `default: Option<(MapPatternDefault, Span)>`. `MapPatternDefault` is a
+  `Literal`, `Nil`, `True`, `False`, `EmptyList` or `EmptyMap`, so constness
+  holds by construction and codegen renders it as a leaf. It contains no
+  names, so the pattern walkers need only carry the new fields.
 - **`fmt` / unparse** prints `?` directly before the key and ` = <default>`
   after the value. The BT-5299 wrapping rule is unchanged: a map pattern that
   does not fit goes one pair per line, with a trailing comma, and each optional
@@ -299,6 +361,9 @@ class fromNode: node :: Dictionary -> IssueRef =>
   #{?"name" => state} := stateNode
   self new: #{#id => id, #identifier => identifier, #state => state}
 ```
+
+A `state` that is present but `null` still raises at the second destructure,
+just as `nil at: "name" ifAbsent:` raises today.
 
 **beamtalk-linear, `Issue fromNode:`** (`src/issue.bt`): twelve
 `at:ifAbsent:` lookups become one pattern that lists the node's keys:
@@ -438,6 +503,9 @@ because the shim fills missing parts with `nil`. That site stays as it is.
 
 #{?"timeout" => t = defaults timeout} := config
 // error: the default of an optional key must be a literal
+
+{#ok, #{?#k => v}} := pair
+// error: optional keys are supported only in a top-level map pattern
 //   hint: bind the key without a default and use `t ifNil: [defaults timeout]`
 
 #{#id => id = 0} := node
@@ -543,15 +611,32 @@ one-character marker.
 
 ## Alternatives Considered
 
+### Status quo: keep `at:ifAbsent:`
+It needs no change, and `at:ifAbsent:` already allows computed defaults. It was
+rejected because the evidence is three packages in which adopters wanted a
+pattern and could not use one. A column of lookups hides which keys a record
+has and costs a closure and a dispatch per key.
+
+### A library helper instead of syntax
+For example `node valuesAt: #("id", "title") ifAbsent: nil`, answering a list.
+It needs no grammar change. It was rejected because positional results lose
+the key-to-name pairing, defaults would be per call rather than per key, and
+nothing reaches the type checker or a `match:` arm.
+
+### One marker for the whole pattern (`#?{ ... }`, every key optional)
+Most evidence patterns are entirely optional (Linear 12 of 12 keys, the oauth
+callback 5 of 5, the agents config 6 of 6). It was rejected because claims,
+token-info bodies and shapes mix required and optional keys, so a per-key
+marker is needed anyway. A whole-pattern form could be added later as sugar.
+
 See the Steelman Analysis above for the syntax alternatives (postfix `?`,
 `| default`, keyword-style default, default-only) and the semantic ones
 (computed defaults, implicit `nil` in destructuring). Two lowerings were also
 considered:
 
-- **`maps:find/2` with a `case` per optional key.** It binds the value in each
-  branch, so the arm body (or its continuation) would be duplicated, or wrapped
-  in a local fun, for every optional key with a type test. The chosen
-  `maps:get/3` + `is_map_key` keeps one body.
+- **`maps:get/3` followed by an `is_map_key` gate.** Two lookups per
+  type-tested key. The chosen `maps:find/2`, returning a `<Ok, Value>` value
+  list, does one lookup and also keeps one body.
 - **A guard** `when not is_map_key(K, M) orelse is_integer(map_get(K, M))`.
   It is guard-safe only for BIF-tested classes, not for tagged or
   subclass-aware classes. It could be a later optimization for the BIF cases.
@@ -575,9 +660,17 @@ considered:
   "wrong type" is caught only in a `match:` arm. This is already true of
   required keys.
 
+- Optional keys are top-level only, and a present `nil` fails `?#k => x :: T`.
+  Both are deliberate limits, with follow-ups noted above: nested optional maps,
+  and union type patterns.
+- `= default` takes the obvious spelling for a future alias pattern
+  (`p = #{...}`). An alias would need another spelling, such as `as`.
+
 ### Neutral
 - Nested map or tuple patterns inside a map value are still not supported
   (separate gap). The Linear `state { name }` example uses two destructures.
+- A future `...rest` in map patterns would leave optional keys out of the
+  rest map.
 - `at:ifAbsent:` is unchanged and remains the tool for computed defaults and
   dynamic keys.
 
@@ -587,14 +680,16 @@ One PR (size M), labelled `ci:corpus`:
 
 1. **AST + parser** (`ast/pattern.rs`, `parser/patterns.rs`,
    `parser/mod.rs`): `optional` / `default` on `MapPatternPair`; the `?` and
-   `,?` / `=-` splitting; constant-default validation; the destructure
-   lookahead trigger on `?`.
+   `,?` / `=-` splitting; default validation; the destructure lookahead
+   trigger on `?` and `=`; the top-level-only and mixed-duplicate errors; and
+   the `_ :: T` map-value parse fix.
 2. **Semantic analysis / type checker** (`type_checker/shape_keyed.rs`,
    `inference/flow.rs`, `pattern_bindings.rs`): the binding types in §2, the
    default-vs-type-test warning, and the always-absent warning.
 3. **Codegen** (`patterns/match_lowering.rs`, `type_tests.rs`,
-   `destructure.rs`): optional pairs left out of the native pattern,
-   `maps:get/3`, and an `is_map_key`-gated boolean type test.
+   `destructure.rs`): optional pairs left out of the native pattern; arms with
+   optional pairs routed through `generate_nested_type_arm`; the untagged-map
+   check; `maps:get/3`, and `maps:find/2` with a boolean type test.
 4. **fmt / unparse** (`unparse/expressions.rs`) and **LSP** hover/semantic
    tokens.
 5. **Tests**: key present; key absent; key absent with a default; present but
@@ -609,6 +704,11 @@ One PR (size M), labelled `ci:corpus`:
 Downstream (after the PR merges and edge is republished): rewrite at least one
 site per package in beamtalk-linear, beamtalk-agents and beamtalk-oauth, one PR
 per repo.
+
+## Migration Path
+
+None. The change is additive. Every existing map pattern means what it meant
+before, and `?` and `=` were not valid in a map pattern until now.
 
 ## References
 - Related issues: BT-5344 (this), BT-5221 (adoption epic), BT-5225, BT-5226
