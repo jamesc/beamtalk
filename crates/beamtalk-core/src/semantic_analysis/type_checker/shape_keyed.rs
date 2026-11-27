@@ -418,6 +418,35 @@ impl TypeChecker {
         );
     }
 
+    /// The value types a map pattern's `key` can bind, one per shape of
+    /// `split` that names it (`Object` for an open shape that does not).
+    fn shape_value_parts(split: &SplitReceiver<'_>, key: &str) -> Vec<InferredType> {
+        let mut parts = Vec::new();
+        for shape in &split.shapes {
+            match lookup(shape, key) {
+                Some(KeyLookup::Field(f)) => parts.push(f.value.clone()),
+                Some(KeyLookup::OpenUnnamed) => parts.push(object()),
+                _ => {}
+            }
+        }
+        parts
+    }
+
+    /// BT-5336: the type of the value at `key` in a map pattern matched
+    /// against `scrutinee_ty`, or `None` when the scrutinee is not purely
+    /// shapes (and `Nil`) or no shape names the key.
+    pub(super) fn map_pattern_value_type(
+        scrutinee_ty: &InferredType,
+        key: &str,
+    ) -> Option<InferredType> {
+        let split = SplitReceiver::of(scrutinee_ty)?;
+        if !split.others.is_empty() {
+            return None;
+        }
+        let parts = Self::shape_value_parts(&split, key);
+        (!parts.is_empty()).then(|| InferredType::union_of(&parts))
+    }
+
     /// Types the variables of a top-level map pattern `#{#k => v}` matched
     /// against `scrutinee_ty` (a shape, or a union of shapes and `Nil`):
     /// `v :: T` for a named key, `v :: Object` for an unnamed key of an open
@@ -443,14 +472,7 @@ impl TypeChecker {
             let MapPatternKey::Symbol(key) = &pair.key else {
                 continue;
             };
-            let mut parts = Vec::new();
-            for shape in &split.shapes {
-                match lookup(shape, key) {
-                    Some(KeyLookup::Field(f)) => parts.push(f.value.clone()),
-                    Some(KeyLookup::OpenUnnamed) => parts.push(object()),
-                    _ => {}
-                }
-            }
+            let parts = Self::shape_value_parts(&split, key);
             if parts.is_empty() {
                 self.warn_key_not_in_shape(
                     scrutinee_ty,
