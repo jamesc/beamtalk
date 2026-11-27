@@ -26,7 +26,8 @@ set -euo pipefail
 #   MISE_VERSION    - mise version to install (default: v2026.6.3, matches Dockerfile)
 #   SKIP_RUST_TOOLS - set to 1 to skip cargo tool installation
 #   SKIP_ERLANG     - set to 1 to skip Erlang installation (mise erlang)
-#   SKIP_ELIXIR     - set to 1 to skip Elixir installation (mise elixir)
+#   SKIP_ELIXIR     - set to 1 to skip Elixir installation (mise elixir); implied
+#                     when .tool-versions does not pin elixir (e.g. satellite repos)
 #   SKIP_NODE       - set to 1 to skip Node.js installation
 #   SKIP_SKILLS     - set to 1 to skip Claude Code skills setup
 
@@ -119,6 +120,20 @@ if [ ! -f "${TOOL_VERSIONS}" ]; then
     TOOL_VERSIONS="${REPO_ROOT}/.tool-versions"
     warn "No checkout found — using BEAM pins from origin/${_PINS_REF}"
   fi
+fi
+
+# BEAM pins, read once from the resolved .tool-versions; the install and verify
+# steps both key off these. Optional tools (elixir, rebar3) are installed and
+# verified only when pinned: a satellite checkout (e.g. jamesc/beamtalk-uat) may
+# pin only erlang + rebar, and requiring Elixir there made verify exit 1
+# (BT-5341). erlang is always installed/verified. A missing .tool-versions has no
+# pins; the "No .tool-versions" failure below still fires as before.
+PIN_ERLANG="$(awk '/^erlang[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null || true)"
+PIN_ELIXIR="$(awk '/^elixir[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null || true)"
+PIN_REBAR="$(awk '/^rebar[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null || true)"
+if [ -f "${TOOL_VERSIONS}" ] && [ -z "${PIN_ELIXIR}" ]; then
+  [ "${SKIP_ELIXIR:-}" = "1" ] || warn "elixir not pinned in ${TOOL_VERSIONS} — not installing or verifying it"
+  SKIP_ELIXIR=1
 fi
 
 # The repo ships a committed mise.toml. mise refuses to read ANY config in a
@@ -588,9 +603,6 @@ set +e +o pipefail
 
 # Read the pins so the assertions stay in lockstep with .tool-versions /
 # rust-toolchain.toml — the single sources of truth.
-PIN_ERLANG="$(awk '/^erlang[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
-PIN_ELIXIR="$(awk '/^elixir[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
-PIN_REBAR="$(awk '/^rebar[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
 PIN_RUST="$(awk -F'"' '/^[[:space:]]*channel[[:space:]]*=/{print $2}' "${REPO_ROOT}/rust-toolchain.toml" 2>/dev/null)"
 # Elixir's pin carries an -otp-NN suffix that `elixir --version` never prints,
 # so compare against just the numeric Elixir version (e.g. 1.20.1-otp-28 -> 1.20.1).
@@ -635,19 +647,29 @@ else
 fi
 check_version "erlang" "${PIN_ERLANG}" "${ERL_VER}"
 
-if have elixir; then
-  ELIXIR_VER="$(elixir --version 2>/dev/null | grep -o 'Elixir [0-9][0-9.]*' | awk '{print $2}')"
+# elixir (and mix, which ships with it) are checked only when pinned.
+if [ -n "${PIN_ELIXIR}" ]; then
+  if have elixir; then
+    ELIXIR_VER="$(elixir --version 2>/dev/null | grep -o 'Elixir [0-9][0-9.]*' | awk '{print $2}')"
+  else
+    ELIXIR_VER=""
+  fi
+  check_version "elixir" "${PIN_ELIXIR_NUM}" "${ELIXIR_VER}"
 else
-  ELIXIR_VER=""
+  warn "elixir not pinned — skipping elixir/mix verification"
 fi
-check_version "elixir" "${PIN_ELIXIR_NUM}" "${ELIXIR_VER}"
 
-if have rebar3; then
-  REBAR_VER="$(rebar3 --version 2>/dev/null | awk '/^rebar[[:space:]]/{print $2}')"
+# rebar3 is installed only when pinned (see step 4 above), so verify likewise.
+if [ -n "${PIN_REBAR}" ]; then
+  if have rebar3; then
+    REBAR_VER="$(rebar3 --version 2>/dev/null | awk '/^rebar[[:space:]]/{print $2}')"
+  else
+    REBAR_VER=""
+  fi
+  check_version "rebar3" "${PIN_REBAR}" "${REBAR_VER}"
 else
-  REBAR_VER=""
+  warn "rebar not pinned — skipping rebar3 verification"
 fi
-check_version "rebar3" "${PIN_REBAR}" "${REBAR_VER}"
 
 # rustc: rust-toolchain.toml pins the toolchain rustup auto-installs per-project,
 # so the *ambient* rustc (often the base image's, e.g. 1.94.1 vs a 1.94.0 pin)
@@ -672,9 +694,10 @@ fi
 # .tool-versions nodejs pin isn't a guarantee here — asserting it would fail
 # spuriously on any LTS patch drift. mix tracks elixir, npm tracks node, cargo
 # tracks rustc.
-for cmd in cargo mix node npm gh just; do
+for cmd in cargo node npm gh just; do
   check_present "$cmd"
 done
+[ -z "${PIN_ELIXIR}" ] || check_present mix
 
 echo ""
 if [ "$ERRORS" -gt 0 ]; then

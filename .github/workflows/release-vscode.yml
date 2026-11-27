@@ -3,9 +3,21 @@
 #
 # VS Code Extension Release Pipeline
 # ====================================
-# Packages a single universal .vsix file and publishes to the VS Code Marketplace
-# when the VSCE_PAT secret is set; a publish requested without it still attaches
-# the .vsix to the GitHub Release, then fails the run.
+# Packages a single universal .vsix file. It has two halves (ADR 0154 § 10,
+# BT-5313):
+#
+#   build-and-attach  (`attach_to_release` + `tag`) package the .vsix and attach
+#                     it to the GitHub (pre-)release named by `tag`. release.yml's
+#                     tag flow runs this, so uat tests the exact .vsix.
+#   publish           (`publish`) push a .vsix to the VS Code Marketplace. With
+#                     `tag` it publishes the .vsix ATTACHED to that release (the
+#                     tested bytes) and does not rebuild; without `tag` it
+#                     packages a fresh one (an independent, LSP-only release).
+#                     Callable only from promote.yml once RELEASE_PUBLISH_MODE=
+#                     promote (scripts/ci/publish-guard.sh); until then
+#                     release.yml's interim-publish job calls it after a tag
+#                     push, as the release used to. A publish without the
+#                     VSCE_PAT secret fails the run.
 #
 # The extension no longer bundles a platform-specific beamtalk-lsp binary.
 # Instead, it discovers beamtalk-lsp at runtime via `beamtalk --print-sysroot`,
@@ -17,17 +29,17 @@
 #   3. LSP-only bugfixes can ship without a full compiler release
 #
 # Trigger modes:
-#   - workflow_call: Invoked by release.yml during a full release (publishes by default)
-#   - workflow_dispatch: Manual trigger for independent extension releases
-#     (e.g., LSP-only bugfix without a full compiler release)
+#   - workflow_call: release.yml (build-and-attach; interim publish) and, from
+#     BT-5315, promote.yml (publish)
+#   - workflow_dispatch: manual build, attach or publish (e.g. an LSP-only
+#     bugfix without a full compiler release)
 #
 # Inside a called workflow `github.event_name` is the CALLER's event, so no
-# condition here may test for 'workflow_call' (BT-5094). What the job does is
-# decided by its inputs: `publish` gates the whole publish job, and
-# `attach_to_release` + `tag` say which GitHub Release gets the .vsix.
+# condition here may test for 'workflow_call' (BT-5094). What runs is decided by
+# the inputs alone.
 #
 # Related: release.yml (compiler/runtime distribution)
-# Issue: BT-1013
+# Issue: BT-1013, BT-5313
 
 name: Release VS Code Extension
 
@@ -35,7 +47,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: 'Publish to VS Code Marketplace (otherwise just build .vsix artifact)'
+        description: 'Publish to the VS Code Marketplace: the .vsix attached to `tag` if given, else a fresh build. Refused unless RELEASE_PUBLISH_MODE allows this caller.'
         required: false
         type: boolean
         default: false
@@ -45,24 +57,29 @@ on:
         type: boolean
         default: false
       tag:
-        description: 'Release tag to attach the .vsix to (required with attach_to_release)'
+        description: 'Release tag to attach the .vsix to, or to publish the attached .vsix from'
         required: false
         type: string
         default: ''
   workflow_call:
     inputs:
+      ref:
+        description: 'Commit to package (default: the caller''s ref)'
+        required: false
+        type: string
+        default: ''
       publish:
-        description: 'Publish to VS Code Marketplace'
+        description: 'Publish to the VS Code Marketplace: the .vsix attached to `tag` if given, else a fresh build'
         required: false
         type: boolean
-        default: true
+        default: false
       attach_to_release:
         description: 'Also attach the .vsix to the GitHub Release named by `tag`'
         required: false
         type: boolean
         default: false
       tag:
-        description: 'Release tag to attach the .vsix to (required with attach_to_release)'
+        description: 'Release tag to attach the .vsix to, or to publish the attached .vsix from'
         required: false
         type: string
         default: ''
@@ -71,7 +88,9 @@ on:
         required: false
 
 concurrency:
-  group: release-vscode-${{ github.ref }}
+  # Keyed by tag/commit too: two release.yml runs from one branch must not
+  # cancel each other's lane and leave a half-attached pre-release.
+  group: release-vscode-${{ inputs.tag || inputs.ref || github.ref }}-${{ inputs.publish && 'publish' || 'build' }}
   cancel-in-progress: true
 
 permissions:
@@ -79,8 +98,12 @@ permissions:
 
 jobs:
   # ─── Package universal VS Code extension ──────────────────────────────
+  # Skipped only for a publish of an already-attached .vsix (publish + tag,
+  # no attach): that publish must not rebuild what uat tested.
   package-vscode:
-    runs-on: ubuntu-latest
+    if: ${{ inputs.tag == '' || inputs.attach_to_release || !inputs.publish }}
+    # Pinned, not floating (ADR 0154 § 3): uat tests this exact .vsix.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
       vsix_name: ${{ steps.version.outputs.vsix_name }}
@@ -88,6 +111,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       - name: Setup Node.js
@@ -118,22 +142,14 @@ jobs:
           path: beamtalk-vscode-${{ steps.version.outputs.version }}.vsix
           retention-days: 7
 
-  # ─── Publish VS Code extension to marketplace ─────────────────────────
-  publish-vscode:
+  # ─── Build-and-attach: the .vsix onto the GitHub (pre-)release ────────
+  attach-vscode:
     needs: package-vscode
-    runs-on: ubuntu-latest
+    if: ${{ inputs.attach_to_release }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      contents: write
-    # BT-5137: either input runs the job; each step below gates on its own input,
-    # so `attach_to_release` works without `publish`.
-    if: inputs.publish || inputs.attach_to_release
-    # Mapped at job level: a step's `if:` is evaluated before that step's own
-    # `env:` is applied, so a secret mapped only on the step is always empty
-    # in the condition (BT-5094).
-    env:
-      VSCE_PAT: ${{ secrets.VSCE_PAT }}
-      VSIX_NAME: ${{ needs.package-vscode.outputs.vsix_name }}
+      contents: write # gh release upload
     steps:
       - name: Download VSIX
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
@@ -141,10 +157,10 @@ jobs:
           name: beamtalk-vscode-${{ needs.package-vscode.outputs.version }}
 
       - name: Upload VSIX to GitHub Release
-        if: inputs.attach_to_release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
+          VSIX_NAME: ${{ needs.package-vscode.outputs.vsix_name }}
         run: |
           if [ -z "$RELEASE_TAG" ]; then
             echo "::error::attach_to_release is set but no tag was given"
@@ -154,42 +170,89 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 
-      # This job has no other checkout; setup-node reads the Node version from
-      # .tool-versions, and `vsce` is the pinned devDependency of
-      # editors/vscode (BT-5137), so fetch just those files. Into a
-      # subdirectory: a checkout into the workspace root would clean away the
-      # .vsix downloaded above.
+  # ─── Publish: the .vsix to the VS Code Marketplace ────────────────────
+  publish-vscode:
+    needs: [package-vscode, attach-vscode]
+    # After attach when both are asked for; on its own for a publish of an
+    # attached .vsix (package-vscode skipped).
+    if: >-
+      ${{ !cancelled() && inputs.publish
+      && contains(fromJSON('["success","skipped"]'), needs.package-vscode.result)
+      && contains(fromJSON('["success","skipped"]'), needs.attach-vscode.result) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    # Mapped at job level: a step's `if:` is evaluated before that step's own
+    # `env:` is applied, so a secret mapped only on the step is always empty
+    # in the condition (BT-5094).
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      # setup-node reads the Node version from .tool-versions, and `vsce` is the
+      # pinned devDependency of editors/vscode (BT-5137), so fetch just those
+      # files and the guard. Into a subdirectory, so the .vsix fetched below
+      # lands in a clean workspace root.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: inputs.publish && env.VSCE_PAT != ''
         with:
           path: .node-version-src
           sparse-checkout: |
             .tool-versions
             editors/vscode/package.json
             editors/vscode/package-lock.json
+            scripts/ci/publish-guard.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
 
+      - name: Check this caller may publish
+        env:
+          RELEASE_PUBLISH_MODE: ${{ vars.RELEASE_PUBLISH_MODE }}
+        run: .node-version-src/scripts/ci/publish-guard.sh "VS Code Marketplace publish"
+
+      # A publish that was asked for must not go green without doing so (BT-5137).
+      - name: Fail when VSCE_PAT is missing
+        if: env.VSCE_PAT == ''
+        run: |
+          echo "::error::VSCE_PAT is not set: the VS Code Marketplace publish did not run. Set the secret and re-run, or dispatch with publish=false."
+          exit 1
+
+      # With a tag: the tested bytes, exactly as attached to the release.
+      - name: Download the attached VSIX
+        if: env.RELEASE_TAG != ''
+        id: attached
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'beamtalk-vscode-*.vsix'
+          shopt -s nullglob
+          files=(beamtalk-vscode-*.vsix)
+          if [ "${#files[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one beamtalk-vscode-*.vsix on $RELEASE_TAG, found ${#files[@]}"
+            exit 1
+          fi
+          echo "vsix_name=${files[0]}" >> "$GITHUB_OUTPUT"
+          echo "Publishing ${files[0]} from $RELEASE_TAG, sha256 $(sha256sum "${files[0]}" | cut -d' ' -f1)"
+
+      # Without a tag: the .vsix this run just packaged.
+      - name: Download the packaged VSIX
+        if: env.RELEASE_TAG == ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: beamtalk-vscode-${{ needs.package-vscode.outputs.version }}
+
       - name: Setup Node.js
-        if: inputs.publish && env.VSCE_PAT != ''
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
           node-version-file: .node-version-src/.tool-versions
 
       - name: Install vsce (locked)
-        if: inputs.publish && env.VSCE_PAT != ''
         working-directory: .node-version-src/editors/vscode
         run: npm ci --quiet --ignore-scripts
 
       - name: Publish to VS Code Marketplace
-        if: inputs.publish && env.VSCE_PAT != ''
         working-directory: .node-version-src/editors/vscode
+        env:
+          VSIX_NAME: ${{ steps.attached.outputs.vsix_name || needs.package-vscode.outputs.vsix_name }}
         run: npx --no-install vsce publish --packagePath "$GITHUB_WORKSPACE/$VSIX_NAME"
-
-      # A release that was asked to publish must not go green without doing so
-      # (BT-5137). Last, so the .vsix is already attached to the release.
-      - name: Fail when VSCE_PAT is missing
-        if: inputs.publish && env.VSCE_PAT == ''
-        run: |
-          echo "::error::VSCE_PAT is not set: the VS Code Marketplace publish did not run (the .vsix is attached to the release). Set the secret and re-run, or dispatch with publish=false."
-          exit 1
