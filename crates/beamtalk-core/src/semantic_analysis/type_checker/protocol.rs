@@ -269,6 +269,26 @@ impl TypeChecker {
             }
         }
 
+        // Protocol required-method signatures (instance and class side)
+        // (BT-5345): `take: b :: Boxed(X) -> Boxed(Y)` is an annotation site
+        // like a class method's.
+        for protocol in &module.protocols {
+            for sig in protocol
+                .method_signatures
+                .iter()
+                .chain(protocol.class_method_signatures.iter())
+            {
+                for param in &sig.parameters {
+                    if let Some(ref ann) = param.type_annotation {
+                        self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+                    }
+                }
+                if let Some(ref ann) = sig.return_type {
+                    self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+                }
+            }
+        }
+
         // Top-level script / REPL statements (`b :: Boxed(X) := ...`, typed
         // block parameters)
         self.check_bounds_in_body_annotations(&module.expressions, hierarchy, protocol_registry);

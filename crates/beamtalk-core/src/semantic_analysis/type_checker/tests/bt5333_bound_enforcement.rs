@@ -344,3 +344,37 @@ Object subclass: H
 ";
     assert!(violations(source).is_empty(), "{:?}", violations(source));
 }
+
+// --- BT-5345: protocol required-method signatures ---------------------------
+
+#[test]
+fn protocol_required_method_signatures_are_bound_checked() {
+    let source = format!(
+        "{LOCAL_PROTOCOL}\nProtocol define: Wants\n  take: b :: Boxed(Integer) -> Boxed(String)\n"
+    );
+    assert_eq!(
+        violations(&source),
+        vec![
+            "Type argument Integer for T in Boxed does not conform to Frob",
+            "Type argument String for T in Boxed does not conform to Frob",
+        ]
+    );
+}
+
+#[test]
+fn protocol_required_method_with_conforming_args_is_clean() {
+    let source = r"
+Protocol define: Frob
+  frob -> Object
+
+Value subclass: Boxed(T :: Frob)
+  field: item :: T = 0
+
+Value subclass: Good
+  frob -> Object => self
+
+Protocol define: Wants
+  take: b :: Boxed(Good) -> Boxed(Good)
+";
+    assert!(violations(source).is_empty(), "{:?}", violations(source));
+}
