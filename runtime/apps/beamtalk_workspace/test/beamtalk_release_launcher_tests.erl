@@ -348,8 +348,7 @@ collect_port(Port, Acc) ->
             Out = iolist_to_binary([Acc, Data]),
             case marked_answer(Out) of
                 {ok, Answer} ->
-                    catch port_command(Port, <<"\n">>),
-                    catch port_close(Port),
+                    end_key_wait(Port),
                     Answer;
                 more ->
                     collect_port(Port, Out)
@@ -358,6 +357,16 @@ collect_port(Port, Acc) ->
             error({erl_exited_without_answer, Status, Acc})
     after 30000 -> error({erl_timeout, Acc})
     end.
+
+%% The port may already be closed if erl exited first; either way it is done.
+end_key_wait(Port) ->
+    try
+        port_command(Port, <<"\n">>),
+        port_close(Port)
+    catch
+        error:badarg -> ok
+    end,
+    ok.
 
 marked_answer(Out) ->
     case binary:split(Out, ?ERL_ANSWER_MARK, [global]) of
