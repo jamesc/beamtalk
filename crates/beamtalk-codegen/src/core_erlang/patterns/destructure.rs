@@ -383,18 +383,25 @@ impl CoreErlangGenerator {
                         "destructure",
                         "value does not match the destructuring pattern",
                     );
-                    docs.push(docvec![
-                        indent,
-                        leaf::var(ok_var),
-                        " = case ",
+                    let check = form::case_of(
                         is_dict,
-                        " of <'true'> when 'true' -> 'ok' <",
-                        leaf::var(not_dict_var),
-                        "> when 'true' -> ",
-                        mismatch_raise,
-                        " end",
-                        terminator,
-                    ]);
+                        [
+                            form::clause(
+                                [leaf::atom("true")],
+                                None,
+                                leaf::atom("ok"),
+                                Layout::Flat,
+                            ),
+                            form::clause(
+                                [leaf::var(not_dict_var)],
+                                None,
+                                mismatch_raise,
+                                Layout::Flat,
+                            ),
+                        ],
+                        Layout::Flat,
+                    );
+                    docs.push(docvec![indent, leaf::var(ok_var), " = ", check, terminator]);
                 }
                 for pair in pairs {
                     match &pair.value {

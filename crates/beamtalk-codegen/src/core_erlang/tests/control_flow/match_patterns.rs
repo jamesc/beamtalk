@@ -917,6 +917,36 @@ fn test_match_optional_map_key_guard_sees_binding() {
 }
 
 #[test]
+fn test_match_optional_map_key_ordering_guard_requires_non_nil() {
+    // An absent optional key with no default binds `nil`; an ordering guard
+    // on it must fail rather than compare by Erlang term order (an atom is
+    // greater than every number). A key with a default needs no such check.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #{?#n => n, ?#m => m = 0} when: [n > m] -> #big;\n      _ -> #small\n    ]\n";
+    let code = codegen_named(src, "foo");
+    assert_has(
+        "the nil check wraps the comparison",
+        &code,
+        &["call 'erlang':'and'(call 'erlang':'=/='(N@, 'nil'), call 'erlang':'>'(N@, M@))"],
+    );
+    assert_lacks(
+        "no nil check for the defaulted key",
+        &code,
+        &["'=/='(M@, 'nil')"],
+    );
+}
+
+#[test]
+fn test_match_required_map_key_ordering_guard_is_unchanged() {
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #{#n => n} when: [n > 5] -> #big;\n      _ -> #small\n    ]\n";
+    let code = codegen_named(src, "foo");
+    assert_lacks(
+        "no nil check outside optional-key arms",
+        &code,
+        &["'=/='(N@, 'nil')"],
+    );
+}
+
+#[test]
 fn test_destructure_optional_map_key_uses_maps_get_and_required_uses_map_get() {
     let src = "Object subclass: Foo\n  test: x =>\n    #{#host => h, ?\"port\" => p = 80, ?#path => q} := x\n    {h, p, q}\n";
     let code = codegen_named(src, "foo");

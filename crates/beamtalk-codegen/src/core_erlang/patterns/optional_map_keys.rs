@@ -153,10 +153,29 @@ impl CoreErlangGenerator {
         for (name, var) in &optional_bindings {
             self.bind_var(name, var);
         }
-        let guard_doc = match &arm.guard {
-            Some(guard) => Some(self.generate_guard_expression(guard)?),
-            None => None,
-        };
+        // An optional binding with no default is `nil` when its key is absent;
+        // the guard must not order it by Erlang term order.
+        let outer_nil_vars = std::mem::replace(
+            &mut self.nil_when_absent_guard_vars,
+            pairs
+                .iter()
+                .filter(|p| p.is_optional() && p.default.is_none())
+                .filter_map(|p| match &p.value {
+                    Pattern::Variable(id) => Some(Self::to_core_erlang_var(&id.name)),
+                    Pattern::Type { binding, .. } if binding.name != "_" => {
+                        Some(Self::to_core_erlang_var(&binding.name))
+                    }
+                    _ => None,
+                })
+                .collect(),
+        );
+        let guard_doc = arm
+            .guard
+            .as_ref()
+            .map(|guard| self.generate_guard_expression(guard))
+            .transpose();
+        self.nil_when_absent_guard_vars = outer_nil_vars;
+        let guard_doc = guard_doc?;
         let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
         self.pop_scope();
 

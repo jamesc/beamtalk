@@ -261,6 +261,13 @@ pub struct CoreErlangGenerator {
     /// control-transferring `call`/`apply` inside a `let`/`case` annotate that
     /// node with this line through `annotate_current_send_call`.
     pub(in crate::core_erlang) current_send_span: Option<beamtalk_core::source_analysis::Span>,
+    /// ADR 0155: while the `when:` guard of an optional-map-key arm lowers,
+    /// the Core variables of the optional bindings that bind `nil` when
+    /// their key is absent (no default). An ordering comparison (`<`, `>`,
+    /// `<=`, `>=`) on one of them also requires it to be non-nil: `nil > 5`
+    /// raises in a body, so the guard fails rather than compare by Erlang
+    /// term order (an atom is greater than every number). Empty elsewhere.
+    pub(in crate::core_erlang) nil_when_absent_guard_vars: Vec<String>,
     /// ADR 0131 Phase 2 (BT-3749): the paren-unwrapped spans of the
     /// current method body's sequenced operand sites
     /// (`beamtalk_core`'s `sequenced_operand_sites` over each statement) —
@@ -700,6 +707,7 @@ impl CoreErlangGenerator {
             current_class_field_types: std::collections::HashMap::new(),
             precompiled_subexprs: std::collections::HashMap::new(),
             current_send_span: None,
+            nil_when_absent_guard_vars: Vec::new(),
             local_producer_sites: std::collections::HashSet::new(),
             repl_map_vars: std::collections::HashSet::new(),
             repl_active_seeds: Vec::new(),

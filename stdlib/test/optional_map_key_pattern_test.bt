@@ -109,6 +109,27 @@ TestCase subclass: OptionalMapKeyPatternTest
     self assert: (self guardedOf: #{}) equals: #absent
     self assert: (self guardedOf: #{"n" => "9"}) equals: #other
 
+  orderedGuardOf: d :: Dictionary -> Symbol =>
+    // No nil-first arm: an absent key binds nil, and ordering nil must fail
+    // the guard rather than compare by Erlang term order.
+    d match: [
+      #{?"n" => n :: Integer} when: [n > 5] -> #big;
+      _ -> #notBig
+    ]
+
+  untypedOrderedGuardOf: d :: Dictionary -> Symbol =>
+    d match: [
+      #{?#n => n} when: [5 < n] -> #big;
+      _ -> #notBig
+    ]
+
+  testOrderingGuardFailsOnAbsentKey =>
+    self assert: (self orderedGuardOf: #{}) equals: #notBig
+    self assert: (self orderedGuardOf: #{"n" => 9}) equals: #big
+    self assert: (self orderedGuardOf: #{"n" => 2}) equals: #notBig
+    self assert: (self untypedOrderedGuardOf: #{}) equals: #notBig
+    self assert: (self untypedOrderedGuardOf: #{#n => 9}) equals: #big
+
   wildcardTypeOf: d :: Dictionary -> Symbol =>
     d match: [
       #{?#k => _ :: String} -> #stringOrAbsent;

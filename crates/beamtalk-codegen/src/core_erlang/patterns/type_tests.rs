@@ -1096,26 +1096,42 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         let tagged = self.fresh_temp_var("Tagged");
         let v = leaf::var(match_var.to_string());
-        docvec![
-            "case call 'erlang':'is_map'(",
-            v.clone(),
-            ") of ",
-            "<'true'> when 'true' -> ",
-            "case call 'maps':'get'(",
-            leaf::atom(sentinel_tags::CLASS_TAG),
-            ", ",
-            v.clone(),
-            ", 'undefined') of ",
-            "<'undefined'> when 'true' -> ",
-            "call 'erlang':'not'(call 'erlang':'is_map_key'(",
-            leaf::atom(sentinel_tags::CLASS_MOD),
-            ", ",
-            v,
-            ")) ",
-            "<",
-            leaf::var(tagged),
-            "> when 'true' -> 'false' end ",
-            "<'false'> when 'true' -> 'false' end"
-        ]
+        let untagged = form::case_of(
+            form::call(
+                "maps",
+                "get",
+                [
+                    leaf::atom(sentinel_tags::CLASS_TAG),
+                    v.clone(),
+                    leaf::atom("undefined"),
+                ],
+            ),
+            [
+                form::clause(
+                    [leaf::atom("undefined")],
+                    None,
+                    form::call(
+                        "erlang",
+                        "not",
+                        [form::call(
+                            "erlang",
+                            "is_map_key",
+                            [leaf::atom(sentinel_tags::CLASS_MOD), v.clone()],
+                        )],
+                    ),
+                    form::Layout::Flat,
+                ),
+                form::clause([leaf::var(tagged)], None, false_doc(), form::Layout::Flat),
+            ],
+            form::Layout::Flat,
+        );
+        form::case_of(
+            form::call("erlang", "is_map", [v]),
+            [
+                form::clause([leaf::atom("true")], None, untagged, form::Layout::Flat),
+                form::clause([leaf::atom("false")], None, false_doc(), form::Layout::Flat),
+            ],
+            form::Layout::Flat,
+        )
     }
 }

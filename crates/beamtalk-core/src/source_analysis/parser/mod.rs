@@ -2610,12 +2610,14 @@ impl Parser {
     }
 
     /// Whether the `#[` / `#{` at the cursor opens an array or map pattern
-    /// that carries a `::` annotation and is followed by `:=` (BT-5284).
+    /// that only the pattern grammar can express and is followed by `:=`:
+    /// one that carries a `::` annotation (BT-5284), an optional-key marker
+    /// `?` / `,?`, or a default `=` / `=-` (ADR 0155).
     ///
     /// Scans to the matching close, counting every bracket kind. Only a
-    /// literal that holds a `::` at some depth qualifies, so unannotated
-    /// array/map destructuring keeps its existing expression-then-convert
-    /// path unchanged.
+    /// literal that holds one of those tokens at some depth qualifies, so
+    /// other array/map destructuring keeps its existing
+    /// expression-then-convert path unchanged.
     pub(super) fn leading_collection_is_typed_destructure(&self) -> bool {
         let mut depth: usize = 0;
         let mut saw_annotation = false;

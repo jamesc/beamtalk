@@ -1127,15 +1127,34 @@ impl CoreErlangGenerator {
                         span: Some(expr.span()),
                     });
                 };
-                Ok(docvec![
+                let comparison = docvec![
                     "call 'erlang':",
                     leaf::atom(erlang_op),
                     "(",
-                    left,
+                    left.clone(),
                     ", ",
-                    right,
+                    right.clone(),
                     ")",
-                ])
+                ];
+                // ADR 0155: an absent optional key binds `nil`; ordering it
+                // fails the guard instead of comparing by term order.
+                if !matches!(op.as_str(), "<" | ">" | "<=" | ">=") {
+                    return Ok(comparison);
+                }
+                let mut guarded = comparison;
+                for (operand, doc) in [(&arguments[0], right), (receiver.as_ref(), left)] {
+                    if self.is_nil_when_absent_guard_operand(operand) {
+                        guarded = form::call(
+                            "erlang",
+                            "and",
+                            [
+                                form::call("erlang", "=/=", [doc, leaf::atom("nil")]),
+                                guarded,
+                            ],
+                        );
+                    }
+                }
+                Ok(guarded)
             }
             _ => Err(CodeGenError::UnsupportedFeature {
                 feature: "complex guard expression (only comparisons and arithmetic allowed)"
@@ -1143,6 +1162,16 @@ impl CoreErlangGenerator {
                 span: Some(expr.span()),
             }),
         }
+    }
+
+    /// Whether `operand` names an optional map-key binding that is `nil`
+    /// when its key is absent (ADR 0155), while its arm's guard lowers.
+    fn is_nil_when_absent_guard_operand(&self, operand: &Expression) -> bool {
+        let Expression::Identifier(id) = operand else {
+            return false;
+        };
+        self.lookup_var(&id.name)
+            .is_some_and(|var| self.nil_when_absent_guard_vars.contains(var))
     }
 
     /// Collects all variable names from a pattern and calls the callback
