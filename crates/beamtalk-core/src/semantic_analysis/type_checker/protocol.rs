@@ -278,6 +278,21 @@ impl TypeChecker {
             }
         }
 
+        // Provided methods no class carries a copy of (a protocol-only file, or
+        // every user drops or overrides them): the flattener never splices them
+        // into a class, so they would otherwise go unchecked.
+        for method in module.unused_protocol_provided_methods() {
+            for param in &method.parameters {
+                if let Some(ref ann) = param.type_annotation {
+                    self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+                }
+            }
+            if let Some(ref ann) = method.return_type {
+                self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+            }
+            self.check_bounds_in_body_annotations(&method.body, hierarchy, protocol_registry);
+        }
+
         // Top-level script / REPL statements (`b :: Boxed(X) := ...`, typed
         // block parameters)
         self.check_bounds_in_body_annotations(&module.expressions, hierarchy, protocol_registry);

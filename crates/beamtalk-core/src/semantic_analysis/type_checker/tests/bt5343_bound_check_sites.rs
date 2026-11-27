@@ -61,9 +61,30 @@ fn state_default_with_conforming_arg_is_clean() {
 }
 
 #[test]
+fn unused_protocol_provided_method_is_bound_checked() {
+    let source = format!(
+        "{FIXTURE}\nProtocol define: Pick\n  pick -> Object\n  wrap => [:b :: Boxed(Plain) | b]\n  take: x :: Boxed(Plain) => x\n"
+    );
+    parses_clean(&source);
+    assert_eq!(violations(&source), vec![VIOLATION, VIOLATION]);
+}
+
+#[test]
 fn match_arm_body_annotations_are_bound_checked() {
     let source = format!(
         "{FIXTURE}\nObject subclass: H\n  go: v =>\n    v match: [\n      _ -> [:b :: Boxed(Plain) | b]\n    ]\n"
+    );
+    parses_clean(&source);
+    assert_eq!(violations(&source), vec![VIOLATION]);
+    // A typed local annotation inside an arm body.
+    let source = format!(
+        "{FIXTURE}\nObject subclass: H\n  go: v =>\n    v match: [\n      _ -> [c :: Boxed(Plain) := nil. c]\n    ]\n"
+    );
+    parses_clean(&source);
+    assert_eq!(violations(&source), vec![VIOLATION]);
+    // A state default containing a `match:`.
+    let source = format!(
+        "{FIXTURE}\nObject subclass: H\n  state: f = [:v | v match: [_ -> [:b :: Boxed(Plain) | b]]]\n"
     );
     parses_clean(&source);
     assert_eq!(violations(&source), vec![VIOLATION]);
@@ -81,4 +102,10 @@ fn typed_pattern_binding_cannot_carry_type_arguments() {
             .contains("generic type arguments are not supported")),
         "{diags:?}"
     );
+    // A parseable typed pattern raises no bound-check noise.
+    let ok = format!(
+        "{FIXTURE}\nObject subclass: H\n  go: v =>\n    v match: [\n      {{#ok, n :: Integer}} -> n;\n      _ -> 0\n    ]\n"
+    );
+    parses_clean(&ok);
+    assert!(violations(&ok).is_empty(), "{:?}", violations(&ok));
 }
