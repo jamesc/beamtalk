@@ -591,6 +591,9 @@ pub struct ResultBranchShape {
     /// 0-based index of the block that runs only for the error variant, or
     /// `None` when the selector has no error block (`ifOk:`).
     pub error_block_index: Option<usize>,
+    /// 0-based index of the block that runs only for the ok variant, or
+    /// `None` when the selector has no ok block (`ifError:`).
+    pub ok_block_index: Option<usize>,
     /// Whether the selector has two arms of which exactly one runs
     /// (`ifOk:ifError:`).
     pub exclusive_arms: bool,
@@ -600,16 +603,19 @@ pub struct ResultBranchShape {
 pub const RESULT_BRANCH_SHAPES: &[ResultBranchShape] = &[
     ResultBranchShape {
         selector: "ifOk:",
+        ok_block_index: Some(0),
         error_block_index: None,
         exclusive_arms: false,
     },
     ResultBranchShape {
         selector: "ifError:",
+        ok_block_index: None,
         error_block_index: Some(0),
         exclusive_arms: false,
     },
     ResultBranchShape {
         selector: "ifOk:ifError:",
+        ok_block_index: Some(0),
         error_block_index: Some(1),
         exclusive_arms: true,
     },
@@ -633,6 +639,14 @@ pub fn is_result_branch_selector(sel: &str) -> bool {
 #[must_use]
 pub fn result_error_block_index(sel: &str) -> Option<usize> {
     result_branch_shape(sel).and_then(|row| row.error_block_index)
+}
+
+/// The index of the ok block among the arguments of the `Result` branch
+/// selector `sel` (`ifOk:` and `ifOk:ifError:` → 0), or `None` for a
+/// selector without one.
+#[must_use]
+pub fn result_ok_block_index(sel: &str) -> Option<usize> {
+    result_branch_shape(sel).and_then(|row| row.ok_block_index)
 }
 
 /// Whether `sel` is a `Result` branch selector with two exclusive arms
@@ -1466,6 +1480,16 @@ mod tests {
                 );
             }
             assert!(!row.exclusive_arms || arity == 2, "{}", row.selector);
+            if let Some(i) = row.ok_block_index {
+                assert!(i < arity, "{}: ok index {i} >= arity {arity}", row.selector);
+                assert_ne!(Some(i), row.error_block_index, "{}", row.selector);
+            }
+            assert!(
+                row.ok_block_index.is_some() || row.error_block_index.is_some(),
+                "{} has no branch block",
+                row.selector
+            );
+            assert_eq!(result_ok_block_index(row.selector), row.ok_block_index);
             assert!(is_result_branch_selector(row.selector));
             assert_eq!(
                 result_error_block_index(row.selector),

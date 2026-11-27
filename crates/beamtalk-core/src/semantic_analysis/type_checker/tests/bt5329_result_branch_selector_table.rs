@@ -34,14 +34,24 @@ fn inference_sites_do_not_spell_result_branch_selectors() {
     let mut offenders = Vec::new();
     for file in files {
         // The test fixtures spell selectors as Beamtalk source, not as a list.
-        if file.components().any(|c| c.as_os_str() == "tests") {
+        // Relative to `dir`: the checkout itself may live under a `tests` dir.
+        let rel = file.strip_prefix(&dir).expect("file under dir");
+        if rel.components().any(|c| c.as_os_str() == "tests") {
             continue;
         }
         let src = std::fs::read_to_string(&file).expect("read source");
-        for (n, line) in src.lines().enumerate() {
+        let lines: Vec<&str> = src.lines().collect();
+        for (n, line) in lines.iter().enumerate() {
             let code = line.trim_start();
-            // Inline `#[cfg(test)]` modules build selectors as test input.
-            if code.starts_with("#[cfg(test)]") {
+            // An inline `#[cfg(test)] mod … {` builds selectors as test input.
+            // Other `#[cfg(test)]` items (`mod tests;`, a `use`, a helper fn)
+            // do not end the production code.
+            if code.starts_with("#[cfg(test)]")
+                && lines.get(n + 1).is_some_and(|next| {
+                    let next = next.trim();
+                    next.starts_with("mod ") && next.ends_with('{')
+                })
+            {
                 break;
             }
             if code.starts_with("//") {

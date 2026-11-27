@@ -136,7 +136,9 @@ pub(crate) fn classify(
             // checker does not attempt data-flow analysis *inside* an
             // arbitrary block body.
             if crate::state_threading_selectors::is_result_exclusive_arms_selector(name.as_str())
-                && let [Expression::Block(ok_block), _] = arguments.as_slice()
+                && let Some(ok_index) =
+                    crate::state_threading_selectors::result_ok_block_index(name.as_str())
+                && let Some(Expression::Block(ok_block)) = arguments.get(ok_index)
                 && is_trivial_param_forward(ok_block)
             {
                 return classify(receiver, is_remote_ident);
