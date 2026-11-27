@@ -73,23 +73,22 @@ fn dynamic_argument_to_protocol_param_hits_dynamic_in_typed_class_lint() {
     );
 }
 
-const GENERIC_SINK: &str = r"
-Object subclass: ListSink
-  take: xs :: List(Integer) => xs
-";
-
 /// BT-5345: the type-argument mismatch warning points at the argument.
 #[test]
 fn type_argument_mismatch_points_at_the_argument() {
-    let source = format!(
-        "{GENERIC_SINK}\nObject subclass: H\n  go => ListSink new take: #('a', 'b')\n"
-    );
-    let diags: Vec<_> = analyse_diags(&source)
+    let source = r#"
+Object subclass: Box(Item)
+  addAll: xs :: List(Item) -> Integer => 1
+
+Object subclass: Caller
+  run: b :: Box(Integer) => b addAll: #("a")
+"#;
+    let diags: Vec<_> = analyse_diags(source)
         .into_iter()
-        .filter(|d| d.message.contains("Argument 1 of 'take:'"))
+        .filter(|d| d.message.contains("Argument 1 of 'addAll:'"))
         .collect();
     assert_eq!(diags.len(), 1, "{diags:?}");
-    let arg = "#('a', 'b')";
+    let arg = r#"#("a")"#;
     let start = source.rfind(arg).expect("argument in source");
     assert_eq!(
         (diags[0].span.start() as usize, diags[0].span.end() as usize),

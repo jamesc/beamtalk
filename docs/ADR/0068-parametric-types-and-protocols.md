@@ -631,12 +631,18 @@ is by a class-typed parameter. This is gradual typing; the original design
 warned here ("cannot verify Printable conformance for Dynamic value"), which
 BT-5338 removed because it failed `--warnings-as-errors` builds on every untyped
 value. Strictness for untyped values belongs to the "Dynamic in typed class"
-lint:
+lint, which fires on the argument expression itself (BT-5345):
 
 ```beamtalk
-display: someUnknownValue
-// No warning — someUnknownValue is Dynamic
+typed Object subclass: Shower
+  show: someUnknownValue => Sink new display: someUnknownValue
+// No conformance warning — someUnknownValue is Dynamic.
+// "Dynamic in typed class" warns on the argument (unannotated parameter).
 ```
+
+The lint is scoped to `typed` classes and skips an explicit `Dynamic`
+annotation, so an untyped class, or a value the author declared `Dynamic`,
+passes silently.
 
 #### Diagnostic Philosophy: Warnings, Never Errors
 

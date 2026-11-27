@@ -705,7 +705,7 @@ impl TypeChecker {
                                     "Type arguments are not compatible: expected {expected_display}, got {arg_display}"
                                 );
                                 self.diagnostics.push(
-                                    Diagnostic::warning(message, send.span)
+                                    Diagnostic::warning(message, arg.span())
                                         .with_category(DiagnosticCategory::Type)
                                         .with_hint(hint),
                                 );
