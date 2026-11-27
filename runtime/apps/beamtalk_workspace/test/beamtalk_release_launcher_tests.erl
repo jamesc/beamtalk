@@ -6,6 +6,9 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
+%% Brackets the answer the probe erl prints (see collect_port/2).
+-define(ERL_ANSWER_MARK, <<"@@bt-erl-answer@@">>).
+
 %%% Covers `beamtalk_release_launcher:rpc_entry/3` — the function
 %%% `rpc_client_main/0` dispatches into over distribution (BT-3573). The
 %%% halting entry points (`eval_main/0`, `rpc_client_main/0`,
@@ -334,11 +337,98 @@ vm_args_matches_erl_test_() ->
                 end}
     end.
 
+%% Reads the port until the marked answer arrives, then closes it. erlexec may
+%% write around the answer: `-emu_args` prints its `Executing: ...` line, which
+%% a Windows erl flushes into the output (a POSIX erl loses it at exec), and
+%% `-keep_window` makes a Windows erl wait for a key after `halt()`. A newline
+%% on erl's stdin, then closing it with the port, ends that wait (BT-4775).
 collect_port(Port, Acc) ->
     receive
-        {Port, {data, Data}} -> collect_port(Port, [Acc, Data]);
-        {Port, {exit_status, _}} -> lists:flatten(io_lib:format("~ts", [Acc]))
-    after 30000 -> error(erl_timeout)
+        {Port, {data, Data}} ->
+            Out = iolist_to_binary([Acc, Data]),
+            case marked_answer(Out) of
+                {ok, Answer} ->
+                    end_key_wait(Port),
+                    Answer;
+                more ->
+                    collect_port(Port, Out)
+            end;
+        {Port, {exit_status, Status}} ->
+            error({erl_exited_without_answer, Status, Acc})
+    after 30000 -> error({erl_timeout, Acc})
+    end.
+
+%% The port may already be closed if erl exited first; either way it is done.
+end_key_wait(Port) ->
+    try
+        port_command(Port, <<"\n">>),
+        port_close(Port)
+    catch
+        error:badarg -> ok
+    end,
+    ok.
+
+marked_answer(Out) ->
+    case binary:split(Out, ?ERL_ANSWER_MARK, [global]) of
+        [_Before, Answer, _After | _] -> {ok, unicode:characters_to_list(Answer)};
+        _ -> more
+    end.
+
+%% erl's answer is read between two marks, so text erlexec prints around it is
+%% not parsed as part of the term.
+marked_answer_test_() ->
+    Mark = binary_to_list(?ERL_ANSWER_MARK),
+    [
+        ?_assertEqual({ok, "[a]."}, marked_answer(list_to_binary(Mark ++ "[a]." ++ Mark))),
+        ?_assertEqual(
+            {ok, "[a]."},
+            marked_answer(
+                list_to_binary(
+                    "Executing: C:\\erl\\erts\\bin\\erl.exe -noshell\r\n\r\n" ++
+                        Mark ++ "[a]." ++ Mark ++ "\r\nPress any key to close window.\r\n"
+                )
+            )
+        ),
+        %% `-emu_args` echoes the `-eval` text, which holds the mark only split.
+        ?_assertEqual(
+            {ok, "[a]."},
+            marked_answer(
+                list_to_binary(
+                    "Executing: erl.exe -eval M = \"" ++ lists:sublist(Mark, 4) ++ "\" ++ \"" ++
+                        lists:nthtail(4, Mark) ++ "\", io:format(\"~s~w.~s\", [M, x, M])\r\n" ++
+                        Mark ++ "[a]." ++ Mark
+                )
+            )
+        ),
+        ?_assertEqual(more, marked_answer(list_to_binary(Mark ++ "[a")))
+    ].
+
+%% A Windows erl run with `-keep_window` prints its answer, then waits on stdin
+%% for a key. A stand-in that does the same returns its answer at once rather
+%% than timing out. Needs `/bin/sh`, so runs on POSIX hosts; the Windows run of
+%% vm_args_matches_erl_test_ covers the real erl.
+collect_port_ends_a_wait_for_a_key_test_() ->
+    case {os:type(), os:find_executable("sh")} of
+        {{unix, _}, Sh} when is_list(Sh) ->
+            {setup, fun() -> beamtalk_test_fs:tmp_dir("bt4775_keep_window") end,
+                fun beamtalk_test_fs:rm_rf/1, fun(Dir) ->
+                    ?_test(begin
+                        Mark = binary_to_list(?ERL_ANSWER_MARK),
+                        Script = filename:join(Dir, "erl_keep_window.sh"),
+                        ok = file:write_file(
+                            Script,
+                            "printf '%s[a].%s\\nPress any key to close window.\\n' '" ++
+                                Mark ++ "' '" ++ Mark ++ "'\nread key\n"
+                        ),
+                        Port = open_port(
+                            {spawn_executable, Sh},
+                            [{args, [Script]}, exit_status, stderr_to_stdout]
+                        ),
+                        ?assertEqual("[a].", collect_port(Port, []))
+                    end)
+                end};
+        _ ->
+            []
     end.
 
 ours_dist_words(Text) ->
@@ -349,9 +439,14 @@ ours_dist_words(Text) ->
 erl_dist_words(Erl, Dir, N, Text) ->
     File = filename:join(Dir, "t" ++ integer_to_list(N) ++ ".args"),
     ok = file:write_file(File, Text),
+    %% The mark is built when erl runs, so the command line (which `-emu_args`
+    %% echoes) never holds it whole.
+    {MarkHead, MarkTail} = lists:split(4, binary_to_list(?ERL_ANSWER_MARK)),
     Eval =
-        "io:format(\"~w.\", [[{K, case init:get_argument(K) of {ok, L} -> lists:append(L); "
-        "error -> [] end} || K <- [ssl_dist_opt, ssl_dist_optfile, proto_dist]]]), halt().",
+        "M = \"" ++ MarkHead ++ "\" ++ \"" ++ MarkTail ++
+            "\", io:format(\"~s~w.~s\", [M, [{K, case init:get_argument(K) of "
+            "{ok, L} -> lists:append(L); error -> [] end} || "
+            "K <- [ssl_dist_opt, ssl_dist_optfile, proto_dist]], M]), halt().",
     Port = open_port(
         {spawn_executable, Erl},
         [{args, ["-noshell", "-args_file", File, "-eval", Eval]}, exit_status, stderr_to_stdout]
