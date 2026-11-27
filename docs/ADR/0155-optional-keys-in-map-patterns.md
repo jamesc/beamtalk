@@ -1,7 +1,10 @@
 # ADR 0155: Optional Keys in Map Patterns
 
 ## Status
-Proposed (2026-11-27)
+Accepted (2026-11-27)
+
+Accepted as recommended. That includes strict "optional means absent, not
+nil": a present `nil` fails `?k => x :: T`.
 
 ## Context
 
@@ -116,6 +119,18 @@ node match: [
 
 Rules:
 
+- **Any key kind.** Every key a map pattern accepts, a symbol or a string
+  literal, can be optional and can have a default. API data is usually
+  string-keyed, so `?"due" => d` and `?"k" => v = 0` work exactly like
+  `?#due => d` and `?#k => v = 0`:
+
+  ```beamtalk
+  #{?"due" => due, ?"retries" => retries = 3} := json      // string keys
+  #{?#due => due, ?#retries => retries = 3} := opts        // symbol keys
+  ```
+
+  Both kinds share one lowering (`map_pattern_key_doc`: an atom, or a tagged
+  string). Tests cover each case for both kinds.
 - **Optional means absent, not nil.** `?#k => v` binds `nil` when the key is
   missing. When the key is present it binds the value, even if the value is
   `nil`. A default replaces only a missing key, as `at:ifAbsent:` does. This
