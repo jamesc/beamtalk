@@ -189,9 +189,12 @@ jobs:
           import sys
           import xml.etree.ElementTree as ET
 
+          # nextest puts `time` on each testcase, not on the testsuite.
           rows = []
           for suite in ET.parse(sys.argv[1]).getroot().iter("testsuite"):
-              rows.append((float(suite.get("time", 0)), suite.get("name"), int(suite.get("tests", 0))))
+              cases = list(suite.iter("testcase"))
+              total = sum(float(case.get("time", 0)) for case in cases)
+              rows.append((total or float(suite.get("time", 0)), suite.get("name"), len(cases)))
           rows.sort(reverse=True)
           print("### Rust fast tier: slowest test binaries (summed test time, not wall-clock)")
           print("")
