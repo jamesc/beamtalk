@@ -1026,6 +1026,33 @@ reuse; an ADR 0113-style hard gate on lossy reloads.
 
 All nine issues shipped; the epic is closed.
 
+## Adoption note (2026-11-27, BT-5227)
+
+Evidence from the downstream adoption epic (BT-5221; full report in
+`docs/research/feature-adoption-2026.md`). The ADR has one downstream user.
+
+- **Used.** beamtalk-exdura's `ExduraHttpServer` declares `shapeVersion: 2`
+  with `migrateFromV1:`. The migration derives a new `listening` field from the
+  presence of a `late` slot, which the structural reconcile cannot express, and
+  `migrateShape:from:` made it easy to test. The hot-reload path of a bound
+  server was not exercised in a test because it would start a real listener
+  (BT-5224, BT-5282).
+- **No site.** beamtalk-symphony keeps all actor state ephemeral by design and
+  rebuilds it from the tracker, and its `Orchestrator` has not changed its
+  `state:` slots. A hot reload that adds a slot is already served by the slot
+  default. Writing a migration there would have added code only to raise a
+  usage count (BT-5287).
+- **Gap, open (BT-5282).** `shapeVersion:` does not reach persisted `Value`
+  state. exdura persists `StoredSnapshot` and `ReplaySnapshot` with `Binary
+  serialize:` and reads them back with `Binary deserialize:`. The versioned
+  envelope (`pack/1`, `unpack/1`) is runtime-only, so a `Value` read from disk
+  is never migrated and carries no shape version.
+- **Suggested narrowing (BT-5287, open).** State the intended audience as
+  actors whose new slots need values derived from old slots. Ephemeral OTP-style
+  services will not use it. Until BT-5282 is settled, the ADR should say that
+  persisted `Value`s are out of scope.
+- **Verdict.** Niche but justified.
+
 ## References
 - Related issues: [BT-3524](https://linear.app/beamtalk/issue/BT-3524)
   (this ADR); blocks [BT-3527](https://linear.app/beamtalk/issue/BT-3527)

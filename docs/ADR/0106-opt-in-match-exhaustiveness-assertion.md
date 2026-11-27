@@ -290,6 +290,30 @@ variant, for the reasons given there.
   (`crates/beamtalk-core/src/queries/completion_provider.rs`) for surface
   parity with `match:`.
 
+## Adoption note (2026-11-27, BT-5227)
+
+Evidence from the downstream adoption epic (BT-5221; full report in
+`docs/research/feature-adoption-2026.md`):
+
+- **Used.** beamtalk-exdura declares `type WorkflowStatus = #running |
+  #completed | #failed | #cancelled | #continued_as_new` and asserts it in four
+  wait loops, so adding a state breaks every loop at compile time (BT-5224).
+  beamtalk-buccaneer uses it twice (`Exchange>>commit`, `sendHeaders:`)
+  (BT-5222). `examples/getting-started/src/shipping.bt` uses it over
+  `type ShippingSpeed` (BT-5219).
+- **Not used, with reasons.** Most scrutinees downstream are open sets: exdura
+  event types, symphony tracker states and exit reasons, catalina option and
+  error sets, agents message kinds, announcement classes. liquid dispatches
+  virtually (`render:` / `eval:`), so no ladder exists. buccaneer rejected
+  `WriteState`, `CompressionMethod`, `Dynamic` tuple scrutinees, `HttpVersion`
+  and `Object`-typed frames.
+- **Gap, fixed.** A `Result(T, E)` scrutinee was rejected as "not a closed
+  union" (BT-5278); `Result ok:` / `error:` now counts as a closed pair.
+- **Verdict.** Niche but justified, and underused rather than useless: the
+  closed sets exist through `type` aliases and adopters rarely reached for
+  them. The `beamtalk new` `AGENTS.md` template now teaches the closed-alias
+  idiom (BT-5228). The feature stays.
+
 ## References
 - Related issues: BT-2763, BT-2745, BT-2738 (epic)
 - Related ADRs: ADR 0102 §4 (advisory exhaustiveness — the check this

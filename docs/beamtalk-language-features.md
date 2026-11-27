@@ -5687,6 +5687,105 @@ In an actor method, an evaluated block literal (`[...] value`, `[:k | ...] value
 
 The REPL displays the same value. Destructuring is not an expression, so it cannot appear as an operand (`r := ({a, b} := pair)` is a compile error).
 
+### Patterns in Real Code
+
+These sites come from the downstream adoption of the pattern features
+(BT-5221; verdicts in `docs/research/feature-adoption-2026.md`). Each is
+quoted from a public package so the forms shown are ones that compile and run.
+
+**A closed set, asserted.** exdura declares the lifecycle states once as a
+`type` alias, and each wait loop uses `matchExhaustive:`, so adding a state
+breaks every loop at compile time
+(`jamesc/beamtalk-exdura`, `src/workflow/workflow_status.bt` and `workflow_handle.bt`):
+
+```beamtalk
+type WorkflowStatus = #running | #completed | #failed | #cancelled | #continued_as_new
+
+exec status matchExhaustive: [
+  #running -> nil;
+  #completed -> [^exec result] value;
+  #failed -> self error: "Workflow failed: {exec result}";
+  #cancelled -> self error: "Workflow cancelled: {self workflowId}";
+  #continued_as_new -> nil
+]
+```
+
+**`Result` constructor patterns** replace an `isOk ifTrue:` ladder when both
+branches use the value or the error (`jamesc/beamtalk-catalina`, `src/socket.bt`):
+
+```beamtalk
+send: data :: Object -> Result(Nil, Object) =>
+  result := self.transport send: self.socket data: data
+  self isTraced
+    ifTrue: [
+      result match: [
+        Result ok: _ -> self untimed: #send measurements: #{#data => data};
+        Result error: reason -> self event: #send_error measurements: #{
+          #data => data,
+          #error => reason
+        }
+      ]
+    ]
+  result
+```
+
+**Type, `nil` and wildcard arms** replace an `isKindOf:` ladder
+(`jamesc/beamtalk-liquid`, `src/liquid/renderer.bt`):
+
+```beamtalk
+class stringify: value :: Object | Nil -> String =>
+  value match: [
+    nil -> "";
+    s :: String -> s;
+    items :: List -> items inject: "" into: [:acc :: String :each :: Object |
+      acc ++ (self stringify: each)
+    ];
+    _ -> value displayString
+  ]
+```
+
+**A binary pattern whose size is computed from an earlier segment** parses a
+padded HTTP/2 DATA frame. The size expression `room - padLength` uses only
+locals and segments, as the size rules above require; the `_` arm is the only
+place a malformed frame can be reported, because a failed binary match carries
+no position or reason (`jamesc/beamtalk-mint`, `src/mint_h2frame.bt`):
+
+```beamtalk
+room := payload size - 1
+payload match: [
+  <<padLength:8, body:(room - padLength)/binary, _padding:padLength/binary>> -> {#ok, {#data, sid, (self flagSet: flags bit: 0), body}};
+  _ -> {#error, "DATA frame with invalid padding length"}
+]
+```
+
+**Map destructuring of an always-complete map, typed by a shape.** The shim's
+token map has every key, with `nil` for a part the provider did not send, so a
+map pattern fits and the shape type checks literals at call sites. It does not
+check the map the shim returns, which arrives as `Dynamic`
+(`jamesc/beamtalk-oauth`, `src/oauth_flows.bt`):
+
+```beamtalk
+type TokenResponse = #{
+  #access_token => String | Nil,
+  #token_type => String | Nil,
+  #expires_in => Integer | Nil,
+  #refresh_token => String | Nil,
+  #scope => String | Nil,
+  #id_token_claims => Dictionary | Nil,
+  #id_token => String | Nil
+}
+
+class tokenSetFrom: toks :: TokenResponse obtainedAt: sentAt :: Integer -> TokenSet =>
+  #{#access_token => accessToken, #token_type => tokenType, #expires_in => expiresIn, #refresh_token => refreshToken, #scope => scope, #id_token_claims => claims, #id_token => idToken} := toks
+  // ... builds the TokenSet from the bound names
+```
+
+Where the forms did not fit, the adopters kept the older code: a map pattern
+requires every listed key, so API nodes with optional keys keep
+`at:ifAbsent:`; a `match:` arm is a single expression, so a multi-statement
+arm becomes a helper method; and an `isError ifTrue: [^x]` guard stays when
+matching would nest the happy path.
+
 ---
 
 ## Live Patching

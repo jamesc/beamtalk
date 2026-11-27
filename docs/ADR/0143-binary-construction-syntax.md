@@ -370,6 +370,32 @@ segments, with no disambiguation benefit once the leading-`<<` rule exists.
 **Status:** Implemented — BT-4346 (#4782), BT-4347 (#4787), BT-4348; follow-ups BT-4406, BT-4407, BT-4414
 **Note:** BT-4142 (design + build monolith) retired as superseded by this split; BT-4143 (match-side parity) landed in #4729 and BT-4376 (`erlc` unit/float alignment) in #4759; BT-4380 amended this ADR to match them.
 
+## Adoption note (2026-11-27, BT-5227)
+
+Evidence from the downstream adoption epic (BT-5221; full report in
+`docs/research/feature-adoption-2026.md`). Binary construction and patterns now
+have real users in four packages.
+
+- **Used.** beamtalk-mint builds HTTP/2 frame headers and integer encoders with
+  `<<...>>`, splits payloads with sized patterns, and strips padding with a size
+  computed from the pad-length segment (`body:(room - padLength)/binary`). 41
+  truncated, malformed and layout tests pass on old and new code, and 141 tests
+  were green after the change (BT-5223). beamtalk-hpack used binary patterns
+  already for integers, string literals, representation dispatch and Huffman;
+  computed sizes, bit-level flags and nibble splitting worked well. beamtalk-http
+  decodes `%XX` with a binary pattern. buccaneer's inventory has 24 binary arms
+  (BT-5222).
+- **Performance.** mint 48.3 ms before and 45.3 ms after; hpack 55.5 ms before
+  and 48.7 ms after, reported as noise. No slowdown was recorded.
+- **Frictions.** A failed match gives no position or reason, so every parser
+  needs an explicit error arm (hpack). A segment size cannot contain a message
+  send; BT-5285 filed the unlocated codegen error and the reference now says to
+  bind the size to a local first. On a `String` scrutinee, `rest/binary` answers
+  a `Binary`, so recursing needs `asStringUnchecked` (BT-5279, open).
+- **No site.** HTTP/1 parsing (CRLF search and byte loops), hpack's encoders,
+  and a native port (mint has none).
+- **Verdict.** Established.
+
 ## References
 - Related issues: BT-4142 (superseded), BT-4143, BT-4097, BT-4173, BT-4376, BT-4380, BT-4346, BT-4347, BT-4348
 - Related ADRs: ADR 0023 (interpolation compiles to binary construction),

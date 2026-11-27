@@ -834,6 +834,19 @@ exercised only by their own tests. Reconsider the feature at the next review:
 keep it if downstream code has started to use it, otherwise weigh its
 maintenance cost against that. Nothing is removed here.
 
+### Downstream search (2026-11-27, BT-5227)
+
+The downstream adoption epic (BT-5221) extended the search to the 15 public
+satellite packages. A grep of their `src/` and `test/` found no annotation
+using `A \ B` or `A & B`. The adoption child issues were not scoped to look for
+these operators, so this is a grep result, not a per-repo review. The only
+users remain `stdlib/test/set_theoretic_operators_e2e_test.bt` and the
+language reference. The report `docs/research/feature-adoption-2026.md` rates
+the surface syntax a candidate for removal, and BT-5349 asks the owner to
+decide. Note that the checker's `Negation` type also drives narrowing of
+`Symbol` after a failed comparison, so the decision is not syntax-only.
+Nothing is removed here.
+
 ## References
 - Related issues: Epic BT-2738 (implementation — see Implementation Tracking
   above for BT-2739…BT-2746); builds on BT-2617,
