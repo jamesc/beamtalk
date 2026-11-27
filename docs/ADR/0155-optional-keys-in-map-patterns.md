@@ -503,10 +503,10 @@ because the shim fills missing parts with `nil`. That site stays as it is.
 
 #{?"timeout" => t = defaults timeout} := config
 // error: the default of an optional key must be a literal
+//   hint: bind the key without a default and use `t ifNil: [defaults timeout]`
 
 {#ok, #{?#k => v}} := pair
 // error: optional keys are supported only in a top-level map pattern
-//   hint: bind the key without a default and use `t ifNil: [defaults timeout]`
 
 #{#id => id = 0} := node
 // error: only an optional key (`?#id`) can have a default
