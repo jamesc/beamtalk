@@ -22,19 +22,28 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 /// The selector spellings of the table appear as string literals in no
-/// inference file: a site that matches `"ifError:"` by hand has its own list.
+/// type-checker source file (test fixtures excepted). Line-based: a selector
+/// split across lines or built with `concat!` is not caught.
+/// A site that matches `"ifError:"` by hand has its own list.
 #[test]
 fn inference_sites_do_not_spell_result_branch_selectors() {
-    let dir =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/semantic_analysis/type_checker/inference");
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/semantic_analysis/type_checker");
     let mut files = Vec::new();
     rust_files(&dir, &mut files);
     assert!(!files.is_empty());
     let mut offenders = Vec::new();
     for file in files {
+        // The test fixtures spell selectors as Beamtalk source, not as a list.
+        if file.components().any(|c| c.as_os_str() == "tests") {
+            continue;
+        }
         let src = std::fs::read_to_string(&file).expect("read source");
         for (n, line) in src.lines().enumerate() {
             let code = line.trim_start();
+            // Inline `#[cfg(test)]` modules build selectors as test input.
+            if code.starts_with("#[cfg(test)]") {
+                break;
+            }
             if code.starts_with("//") {
                 continue;
             }

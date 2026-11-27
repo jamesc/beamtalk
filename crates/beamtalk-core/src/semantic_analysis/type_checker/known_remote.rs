@@ -135,7 +135,7 @@ pub(crate) fn classify(
             // followed, matching the "flow-local, shallow" contract: the
             // checker does not attempt data-flow analysis *inside* an
             // arbitrary block body.
-            if name == "ifOk:ifError:"
+            if crate::state_threading_selectors::is_result_exclusive_arms_selector(name.as_str())
                 && let [Expression::Block(ok_block), _] = arguments.as_slice()
                 && is_trivial_param_forward(ok_block)
             {
