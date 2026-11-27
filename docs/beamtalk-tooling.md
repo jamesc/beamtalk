@@ -11,6 +11,8 @@ beamtalk new myapp --app    # Create new application project (supervisor + Main)
 beamtalk build              # Compile to BEAM
 beamtalk run                # Compile and start (status to stderr, program output to stdout)
 beamtalk check              # Check for errors without compiling
+beamtalk agents refresh     # Rewrite the generated region of AGENTS.md and .github/copilot-instructions.md from this toolchain's template
+beamtalk agents check       # Exit non-zero if either generated region is out of date (BT-5228)
 
 # Dependencies (see Package Management guide)
 beamtalk deps add json --git https://github.com/jamesc/beamtalk-json --tag v1.0.0
@@ -50,7 +52,7 @@ For full details on `beamtalk.toml`, dependencies, lockfiles, qualified names, a
 | Library (default) | `beamtalk new foo` | `beamtalk.toml`, `src/foo.bt`, `test/foo_test.bt` |
 | Application | `beamtalk new foo --app` | Above plus `[application]` in toml, `src/foo_app_sup.bt`, `src/main.bt` |
 
-Both variants generate a `Justfile`, `.github/workflows/ci.yml`, `AGENTS.md`, and `.mcp.json`.
+Both variants generate a `Justfile`, `.github/workflows/ci.yml`, `AGENTS.md`, and `.mcp.json`. The generated part of `AGENTS.md` and `.github/copilot-instructions.md` sits between `<!-- beamtalk:template begin -->` and `<!-- beamtalk:template end -->` markers; `beamtalk agents refresh` rewrites only that region (text outside the markers is kept) and `beamtalk agents check` fails when it differs from the installed toolchain's template. A file with no marker pair is reported as an error, and a missing file is skipped (BT-5228).
 
 ### Standard Justfile Targets
 
