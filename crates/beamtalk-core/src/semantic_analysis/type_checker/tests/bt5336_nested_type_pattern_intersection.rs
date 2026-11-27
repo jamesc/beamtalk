@@ -53,7 +53,7 @@ fn tuple_position_intersects() {
 #[test]
 fn tuple_union_column_intersects() {
     assert_binds_list_of_integer(
-        "Tuple(Symbol, List(Integer)) | Tuple(Symbol, List(Integer))",
+        "Tuple(Symbol, List(Integer)) | Tuple(Symbol, List(Integer) | Nil)",
         "{#ok, l :: List}",
     );
 }
@@ -109,6 +109,47 @@ fn object_type_pattern_over_known_position_stays_dynamic() {
         "Tuple(Symbol, Integer)",
         "{#ok, o :: Object}",
         "self needsStr: o",
+    ));
+    assert!(msgs.is_empty(), "unexpected diagnostics: {msgs:?}");
+}
+
+#[test]
+fn nil_bearing_position_intersects() {
+    assert_binds_list_of_integer("Tuple(Symbol, List(Integer) | Nil)", "{#ok, l :: List}");
+}
+
+#[test]
+fn nil_bearing_scrutinee_intersects() {
+    assert_binds_list_of_integer("Tuple(Symbol, List(Integer)) | Nil", "{#ok, l :: List}");
+}
+
+#[test]
+fn disjoint_position_keeps_the_bare_declared_type() {
+    // `Integer` and `String` are disjoint: the binding must stay `String`
+    // (not `Never`), so the checker still flags the bad send.
+    let bad = type_messages(&fixture(
+        "Tuple(Symbol, Integer)",
+        "{#ok, s :: String}",
+        "self needsInt: s",
+    ));
+    assert!(
+        bad.iter().any(|m| m.contains("expects")),
+        "`s` must stay `String`: {bad:?}"
+    );
+    let good = type_messages(&fixture(
+        "Tuple(Symbol, Integer)",
+        "{#ok, s :: String}",
+        "self needsStr: s",
+    ));
+    assert!(good.is_empty(), "unexpected diagnostics: {good:?}");
+}
+
+#[test]
+fn guard_sees_the_intersected_binding() {
+    let msgs = type_messages(&fixture(
+        "Tuple(Symbol, List(Integer))",
+        "{#ok, l :: List} when: [(self needsInt: l first) > 0]",
+        "self needsInt: l first",
     ));
     assert!(msgs.is_empty(), "unexpected diagnostics: {msgs:?}");
 }

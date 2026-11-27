@@ -202,12 +202,20 @@ impl TypeChecker {
                     (Some(pos), InferredType::Known { class_name, .. })
                         if !Self::is_dynamic_position(pos, hierarchy) =>
                     {
-                        Self::intersect_with_class(
+                        let refined = Self::intersect_with_class(
                             pos,
                             class_name,
                             hierarchy,
                             self.protocol_registry.as_deref(),
-                        )
+                        );
+                        // A position disjoint from `T` intersects to `Never`,
+                        // which would silence every later check on the
+                        // binding. Keep the bare `T` (BT-5332) instead.
+                        if matches!(refined, InferredType::Never) {
+                            declared
+                        } else {
+                            refined
+                        }
                     }
                     _ => declared,
                 };
@@ -245,7 +253,7 @@ impl TypeChecker {
                         class_name,
                         type_args,
                         ..
-                    } if class_name == class.name && class_name == "Result" => Some(type_args),
+                    } if class_name == "Result" => Some(type_args),
                     _ => None,
                 });
                 for (kw, e) in keywords {
