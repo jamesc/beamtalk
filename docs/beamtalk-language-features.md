@@ -5695,17 +5695,18 @@ quoted from a public package so the forms shown are ones that compile and run.
 
 **A closed set, asserted.** exdura declares the lifecycle states once as a
 `type` alias, and each wait loop uses `matchExhaustive:`, so adding a state
-breaks every loop at compile time
-(`jamesc/beamtalk-exdura`, `src/workflow/workflow_status.bt` and `workflow_handle.bt`):
+breaks every loop at compile time. This is the form the package documents in
+`src/workflow/workflow_status.bt`; its loops in `workflow_handle.bt` have the
+same arms with the bodies adapted to the loop:
 
 ```beamtalk
 type WorkflowStatus = #running | #completed | #failed | #cancelled | #continued_as_new
 
 exec status matchExhaustive: [
   #running -> nil;
-  #completed -> [^exec result] value;
-  #failed -> self error: "Workflow failed: {exec result}";
-  #cancelled -> self error: "Workflow cancelled: {self workflowId}";
+  #completed -> exec result;
+  #failed -> self error: "failed";
+  #cancelled -> self error: "cancelled";
   #continued_as_new -> nil
 ]
 ```

@@ -18,8 +18,9 @@ report turns the per-repo notes into one verdict per feature.
 - **Candidates for removal (no real use after a deliberate search):** bounded
   type parameters, protocol `extending:`, difference and intersection types,
   trait `overriding:`. Each has a `needs-spec` issue. These are questions for
-  the owner, not recommendations to delete. Two of them carry a strong caveat
-  (see [Removal candidates](#removal-candidates)).
+  the owner, not recommendations to delete. Bounded type parameters (enforcement
+  is a day old) and `overriding:` (half of ADR 0127's conflict rule) carry the
+  strongest caveats; see [Removal candidates](#removal-candidates).
 - **Not assessable:** list cons patterns. The pattern form is still rejected
   (BT-5301, open).
 - The type patterns (`x :: T`), literal patterns and `nil` arms that the epic
@@ -53,6 +54,19 @@ Two cautions:
   checklists give the reason it was rejected where one exists.
 
 Unless a line says otherwise, "no site" means a session looked and recorded it.
+
+The sweep is reproducible. Clones were `git clone --depth 1` of each
+`jamesc/beamtalk-<name>` on 2026-11-27 at: agents `eb2dcbc`, announcements
+`077df9d`, buccaneer `dd1825c`, catalina `c994d00`, collections `22702af`,
+exdura `a7fade2`, hpack `6e2e0d9`, http `1520c25`, linear `d9311d4`, liquid
+`82ac634`, mint `80e811f`, oauth `b4c92a3`, symphony `4274c66`, watcher
+`b8eff1e`, yaml `48aac7d`. The searches were `grep -rE --include=*.bt` over
+`src/` and `test/` for: `matchExhaustive:`; `shapeVersion:|migrateFromV`;
+`extending:`; `uses: .*(excluding:|overriding:)`; `subclass: \w+\([A-Z]\w* ::`
+(bounded parameters, also checked by listing every `subclass: Name(T` header);
+`<<` (binary); `type \w+ = #\{` (shapes); `:: [^=]*[A-Za-z)] (&|\\) [#A-Z(]`
+(intersection and difference); `#\([a-z_]+ \|` (cons); and the destructuring
+forms `^\s*(\{...\}|#\[...\]|#\{...\}) :=`.
 
 ## Verdicts
 
@@ -99,10 +113,10 @@ compile-time guarantee that a new state breaks every wait loop. Adopters rarely
 reached for the idiom, so BT-5228 now teaches it in the `beamtalk new`
 `AGENTS.md` template, including a closed-set alias example.
 
-Two compiler gaps showed up and are fixed: `Result` scrutinees were rejected
-(BT-5278) and a bare `Symbol` scrutinee is still rejected by design (hpack's
-dispatch needs a closed union; see the language-features text on
-non-closed scrutinees).
+One compiler gap showed up and is fixed: `Result` scrutinees were rejected
+(BT-5278). A bare `Symbol` scrutinee is still rejected, by design: dispatch like
+hpack's needs a closed union (see the language-features text on non-closed
+scrutinees).
 
 ### Bounded type parameters
 
@@ -180,7 +194,7 @@ Done unless the status column says otherwise.
 | BT-5284 | Tuple destructuring could not carry `::` annotations | Done |
 | BT-5285 | Binary segment size with a send passed analysis and failed codegen with an unlocated error | Done |
 | BT-5289, BT-5291 | ThreadedIr verifier failures for a `match:` whose scrutinee advances State (`NonLinearVersion`, `UnbracketedNlrClosure`) | Done |
-| BT-5290 | The `^` return check rejected `x isError ifTrue: [^x]` (13 methods in mint alone) | [#5869](https://github.com/jamesc/beamtalk/pull/5869) |
+| BT-5290 | The `^` return check rejected `x isError ifTrue: [^x]` (13 methods in mint's `mint_http1.bt`) | [#5869](https://github.com/jamesc/beamtalk/pull/5869) |
 | BT-5292 | Early-`^` diagnostics anchored on the method, and a union-tail member was reported twice | [#5872](https://github.com/jamesc/beamtalk/pull/5872) |
 | BT-5294 | Type patterns could not nest in tuple or constructor patterns, and `_ :: T` did not parse | [#5880](https://github.com/jamesc/beamtalk/pull/5880) |
 | BT-5298 | A `nil`-initialised local reassigned in a loop was typed `Nil` at `^Result error: x` | [#5881](https://github.com/jamesc/beamtalk/pull/5881) |
@@ -195,10 +209,11 @@ Done unless the status column says otherwise.
 | BT-5279 | A `rest/binary` tail of a `String` scrutinee is a `Binary`, so recursing needs `asStringUnchecked` | **Open** (Backlog) |
 | BT-5282, BT-5287 | ADR 0123 feedback: persisted Values are not migrated; ephemeral services have no site | **Open**, no labels |
 
-Pattern: the adoption found no bug in the pattern *semantics* themselves. The
-bugs were at the edges: where a pattern met state-threading codegen (BT-5281,
-5289, 5291), where a pattern met the type checker (BT-5283 family, 5294 family),
-and where a pattern met the formatter (BT-5299).
+Pattern: once a pattern compiled, the adoption found no bug in what it
+matched. The bugs were in what the pattern forms accepted and where they met
+other machinery: pattern syntax and codegen limits (BT-5277, 5284, 5285, 5294,
+5328), state-threading codegen (BT-5281, 5289, 5291), the type checker (the
+BT-5283 and BT-5332 families) and the formatter (BT-5299).
 
 ## Recommendations
 
@@ -263,7 +278,7 @@ return type. It caught genuine bugs, fixed in BT-5330:
 | http | `readChunk` declared `Error` for what are Symbols (`#not_supported`, `#timeout`, `#closed`) |
 
 False positives, all fixed in the checker, not downstream: `x isError ifTrue:
-[^x]` (BT-5290; about 30 sites in mint alone, urgent), a `nil` local reassigned
+[^x]` (BT-5290; 13 methods in mint's `mint_http1.bt`, about 30 `^` sites that would have needed rewriting), a `nil` local reassigned
 in a loop (BT-5298), and double-reported or mis-anchored diagnostics (BT-5292).
 BT-5296 was a false alarm: `tryDo:` catches every `Exception`.
 
@@ -304,7 +319,7 @@ candidate. Nothing is removed. Each has a `needs-spec` issue.
 |---|---|---|
 | Bounded type parameters | BT-5347 | Enforcement landed in the last 24 hours, so there has been no time for use. The only fit found is a class that calls `<` on its type argument |
 | Protocol `extending:` | BT-5348 | Zero uses anywhere, including stdlib. ADR 0068 specified it |
-| Difference and intersection types | BT-5349 | The ADR 0102 review note of 2026-11-26 already asked to reconsider. Used only by their own tests |
+| Difference and intersection types | BT-5349 | The ADR 0102 review note of 2026-11-26 already asked to reconsider. Used only by their own tests. Not a syntax-only removal: the checker's `Negation` type also drives `Symbol` narrowing after a failed comparison |
 | Trait `overriding:` | BT-5350 | The acknowledgement half of ADR 0127's conflict rule. Zero uses because no conflict has arisen, not because it is wrong |
 
 ## Open items

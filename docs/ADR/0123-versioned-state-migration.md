@@ -1036,7 +1036,7 @@ Evidence from the downstream adoption epic (BT-5221; full report in
   presence of a `late` slot, which the structural reconcile cannot express, and
   `migrateShape:from:` made it easy to test. The hot-reload path of a bound
   server was not exercised in a test because it would start a real listener
-  (BT-5224, BT-5282).
+  (BT-5224; the test gap is recorded in BT-5282).
 - **No site.** beamtalk-symphony keeps all actor state ephemeral by design and
   rebuilds it from the tracker, and its `Orchestrator` has not changed its
   `state:` slots. A hot reload that adds a slot is already served by the slot
