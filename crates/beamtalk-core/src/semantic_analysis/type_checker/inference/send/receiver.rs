@@ -602,11 +602,8 @@ impl TypeChecker {
             ..
         } = *ctx;
         // Index of the error block in the argument list.
-        let error_index = match selector_name.as_str() {
-            "ifError:" => 0,
-            "ifOk:ifError:" => 1,
-            _ => return None,
-        };
+        let error_index =
+            crate::state_threading_selectors::result_error_block_index(selector_name.as_str())?;
         let var_key = extract_variable_name(receiver)?;
         if !matches!(var_key, EnvKey::Local(_)) {
             return None;

@@ -89,7 +89,7 @@ fn args_run_at_most_once(selector: &MessageSelector) -> bool {
         || state_threading_selectors::lookup_shape(name).is_some()
         || state_threading_selectors::is_try_do_selector(name)
         || name == super::blocks::THEN_SELECTOR
-        || matches!(name, "ifOk:" | "ifError:" | "ifOk:ifError:")
+        || state_threading_selectors::is_result_branch_selector(name)
 }
 
 /// Whether a block literal *receiving* `selector` runs at most once per
@@ -425,5 +425,34 @@ impl TypeChecker {
         self.known_remote_spans = snapshot.known_remote_spans;
         self.block_param_pushdown = snapshot.block_param_pushdown;
         self.unresolved_selector_sends = snapshot.unresolved_selector_sends;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{KeywordPart, MessageSelector};
+    use crate::source_analysis::Span;
+
+    fn keyword(sel: &str) -> MessageSelector {
+        MessageSelector::Keyword(
+            sel.split_inclusive(':')
+                .map(|part| KeywordPart::new(part, Span::new(0, 0)))
+                .collect(),
+        )
+    }
+
+    /// BT-5329: every row of the shared `Result` branch table runs its
+    /// blocks at most once, so the run-once decision cannot drift from the
+    /// table the error-variant narrowing reads.
+    #[test]
+    fn every_result_branch_selector_runs_its_blocks_at_most_once() {
+        for row in state_threading_selectors::RESULT_BRANCH_SHAPES {
+            assert!(
+                args_run_at_most_once(&keyword(row.selector)),
+                "{} must run its blocks at most once",
+                row.selector
+            );
+        }
     }
 }
