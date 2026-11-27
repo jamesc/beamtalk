@@ -24,6 +24,25 @@ pub(super) fn pattern_has_optional_key(pattern: &Pattern) -> bool {
     matches!(pattern, Pattern::Map { pairs, .. } if pairs.iter().any(MapPatternPair::is_optional))
 }
 
+impl CoreErlangGenerator {
+    /// The Core variable an optional pair's binding `name` is bound to: the
+    /// name-derived one when the pair has a default, else a fresh one,
+    /// recorded in `nil_when_absent`.
+    fn optional_binding_var(
+        &mut self,
+        name: &str,
+        pair: &MapPatternPair,
+        nil_when_absent: &mut Vec<String>,
+    ) -> String {
+        if pair.default.is_some() {
+            return Self::to_core_erlang_var(name);
+        }
+        let var = self.fresh_temp_var("OptNil");
+        nil_when_absent.push(var.clone());
+        var
+    }
+}
+
 /// One test an optional-key arm runs after the native match, in source order.
 enum ArmTest {
     /// A required pair's nested `x :: T`, hoisted to `var`.
@@ -78,6 +97,12 @@ impl CoreErlangGenerator {
         let mut lookups: Vec<(Vec<Document<'static>>, Document<'static>)> = Vec::new();
         let mut tests: Vec<ArmTest> = Vec::new();
         let mut optional_bindings: Vec<(String, String)> = Vec::new();
+        // The Core variables of the optional bindings that are `nil` when
+        // their key is absent (no default). Each gets a fresh variable rather
+        // than the name-derived one, so the guard's nil check keys on this
+        // binding: a nested pattern that shadows the name binds the
+        // name-derived variable and is not checked.
+        let mut nil_when_absent: Vec<String> = Vec::new();
         for pair in pairs {
             if !pair.is_optional() {
                 if matches!(pair.value, Pattern::Type { .. }) {
@@ -92,7 +117,7 @@ impl CoreErlangGenerator {
             let default = super::map_pattern_default_doc(pair);
             match &pair.value {
                 Pattern::Variable(id) => {
-                    let var = Self::to_core_erlang_var(&id.name);
+                    let var = self.optional_binding_var(&id.name, pair, &mut nil_when_absent);
                     optional_bindings.push((id.name.to_string(), var.clone()));
                     lookups.push((
                         vec![leaf::var(var)],
@@ -107,7 +132,8 @@ impl CoreErlangGenerator {
                     let var = if binding.name == "_" {
                         self.fresh_temp_var("TypeNested")
                     } else {
-                        let var = Self::to_core_erlang_var(&binding.name);
+                        let var =
+                            self.optional_binding_var(&binding.name, pair, &mut nil_when_absent);
                         optional_bindings.push((binding.name.to_string(), var.clone()));
                         var
                     };
@@ -158,18 +184,7 @@ impl CoreErlangGenerator {
         // `match:` nested in its body, must not order it by Erlang term order.
         // The set is extended for the guard and the body, then restored.
         let outer_len = self.nil_when_absent_guard_vars.len();
-        self.nil_when_absent_guard_vars.extend(
-            pairs
-                .iter()
-                .filter(|p| p.is_optional() && p.default.is_none())
-                .filter_map(|p| match &p.value {
-                    Pattern::Variable(id) => Some(Self::to_core_erlang_var(&id.name)),
-                    Pattern::Type { binding, .. } if binding.name != "_" => {
-                        Some(Self::to_core_erlang_var(&binding.name))
-                    }
-                    _ => None,
-                }),
-        );
+        self.nil_when_absent_guard_vars.extend(nil_when_absent);
         let lowered = arm
             .guard
             .as_ref()

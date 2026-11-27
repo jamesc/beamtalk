@@ -926,7 +926,10 @@ fn test_match_optional_map_key_ordering_guard_requires_non_nil() {
     assert_has(
         "the nil check wraps the comparison",
         &code,
-        &["call 'erlang':'and'(call 'erlang':'=/='(N@, 'nil'), call 'erlang':'>'(N@, M@))"],
+        &[
+            "call 'erlang':'and'(call 'erlang':'=/='(_OptNil",
+            ", 'nil'), call 'erlang':'>'(_OptNil",
+        ],
     );
     assert_lacks(
         "no nil check for the defaulted key",
@@ -942,7 +945,7 @@ fn test_match_optional_map_key_parenthesised_guard_operand_requires_non_nil() {
     assert_has(
         "nil check on a parenthesised operand",
         &code,
-        &["'=/='(P@, 'nil')"],
+        &["'=/='(_OptNil"],
     );
 }
 
@@ -952,11 +955,7 @@ fn test_match_optional_map_key_nested_match_guard_requires_non_nil() {
     // optional binding gets the same nil check.
     let src = "Object subclass: Foo\n  test: x y: y =>\n    x match: [\n      #{?#p => p} -> y match: [_ when: [p > 5] -> #big; _ -> #small];\n      _ -> #none\n    ]\n";
     let code = codegen_named(src, "foo");
-    assert_has(
-        "nil check in the nested guard",
-        &code,
-        &["'=/='(P@, 'nil')"],
-    );
+    assert_has("nil check in the nested guard", &code, &["'=/='(_OptNil"]);
 }
 
 #[test]
@@ -967,6 +966,24 @@ fn test_match_required_map_key_ordering_guard_is_unchanged() {
         "no nil check outside optional-key arms",
         &code,
         &["'=/='(N@, 'nil')"],
+    );
+}
+
+#[test]
+fn test_match_optional_map_key_shadowing_nested_binding_has_no_nil_check() {
+    // A nested arm that rebinds `p` from a required key is not optional: its
+    // guard compares like the same `match:` outside an optional arm.
+    let src = "Object subclass: Foo\n  test: x y: y =>\n    x match: [\n      #{?#p => p} -> y match: [#{#p => p} when: [p > 5] -> #big; _ -> #small];\n      _ -> #none\n    ]\n";
+    let code = codegen_named(src, "foo");
+    assert_has(
+        "the inner guard compares the inner binding",
+        &code,
+        &["call 'erlang':'>'(P@, 5)"],
+    );
+    assert_lacks(
+        "no nil check on the shadowing binding",
+        &code,
+        &["'=/='(P@, 'nil')", "'=/='(_OptNil"],
     );
 }
 
