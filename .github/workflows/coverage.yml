@@ -5,7 +5,7 @@ name: Nightly Coverage
 
 # Rust and Erlang line coverage, measured nightly rather than on every merge
 # (BT-4609). Coverage re-runs the whole Rust and Erlang suites instrumented,
-# about 43 runner-minutes per run; on every push to main (and every PR that
+# about 65 runner-minutes per run (41 + 24, BT-5356); on every push to main (and every PR that
 # touched the Justfile or ci.yml) that competed with PR jobs for the
 # account's concurrent-runner limit. The floors are a trend signal, not a
 # merge gate, so a daily measurement is enough. A failed leg is triaged like
@@ -66,7 +66,7 @@ jobs:
   # - publish-coverage: on a run of main, publishes each leg's badge from
   #   whatever report that leg produced — even when the leg failed its
   #   threshold (the badge goes red) — so a miss never freezes the badges
-  #   at the last passing value. The failed leg job stays the signal.
+  #   at the last passing value. `coverage-status` stays the signal.
   # A recipe change is exercised before merge by dispatching this workflow
   # on the PR branch (BT-4379); only a run of main publishes.
   # Pass 1 excludes the corpus_tests slow tier (see Justfile's
@@ -469,7 +469,7 @@ jobs:
             name="${leg%%:*}"
             result="${leg#*:}"
             if [ "$result" != "success" ]; then
-              echo "::error title=${name} ${result}::${name} finished '${result}' (cancelled = job timeout or runner loss); no report from it this run, its badge is stale."
+              echo "::error title=${name} ${result}::${name} finished '${result}' (cancelled = job timeout or runner loss); no report from it this run, its badge is stale. Read that leg's own job log for the cause: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
               status=1
             fi
           done
@@ -482,8 +482,8 @@ jobs:
     # (BT-4379). Each leg writes its percentage output *before* its
     # threshold check exits non-zero, and a failed job's step outputs are
     # still visible through `needs`, so a below-floor value arrives here and
-    # is published as a red badge. The failed leg job — not this one — stays
-    # the workflow's failure signal. Runs of main only: a dispatch on any
+    # is published as a red badge. `coverage-status` — not this job — is the
+    # workflow's failure signal. Runs of main only: a dispatch on any
     # other branch measures coverage but never publishes it.
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
     needs: [coverage-rust, coverage-erlang]

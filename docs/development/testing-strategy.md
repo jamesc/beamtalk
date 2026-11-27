@@ -171,7 +171,7 @@ Coverage reports are saved to:
 The Nightly Coverage workflow (`coverage.yml`) measures coverage in two
 parallel legs, `coverage-rust` and `coverage-erlang`. It runs once a day on
 `main` (05:00 UTC), not on every PR or merge: re-running both suites
-instrumented costs about 43 runner-minutes, which competed with PR jobs for
+instrumented costs about 65 runner-minutes (BT-5356 measurement), which competed with PR jobs for
 runners (BT-4609). A failed leg is triaged like a red `main` by
 `ci-triage.yml`. To exercise a coverage-recipe change before it merges,
 dispatch the workflow on the branch: `gh workflow run coverage.yml --ref
