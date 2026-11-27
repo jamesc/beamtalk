@@ -146,10 +146,19 @@ fn disjoint_position_keeps_the_bare_declared_type() {
 
 #[test]
 fn guard_sees_the_intersected_binding() {
-    let msgs = type_messages(&fixture(
+    let bad = type_messages(&fixture(
+        "Tuple(Symbol, List(Integer))",
+        "{#ok, l :: List} when: [(self needsStr: l first) > 0]",
+        "0",
+    ));
+    assert!(
+        bad.iter().any(|m| m.contains("expects")),
+        "guard must see `l first` as Integer: {bad:?}"
+    );
+    let good = type_messages(&fixture(
         "Tuple(Symbol, List(Integer))",
         "{#ok, l :: List} when: [(self needsInt: l first) > 0]",
         "self needsInt: l first",
     ));
-    assert!(msgs.is_empty(), "unexpected diagnostics: {msgs:?}");
+    assert!(good.is_empty(), "unexpected diagnostics: {good:?}");
 }
