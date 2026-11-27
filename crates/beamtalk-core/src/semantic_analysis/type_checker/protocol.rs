@@ -261,15 +261,7 @@ impl TypeChecker {
 
             // Check method parameter and return type annotations
             for method in class.methods.iter().chain(class.class_methods.iter()) {
-                for param in &method.parameters {
-                    if let Some(ref ann) = param.type_annotation {
-                        self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
-                    }
-                }
-                if let Some(ref ann) = method.return_type {
-                    self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
-                }
-                self.check_bounds_in_body_annotations(&method.body, hierarchy, protocol_registry);
+                self.check_bounds_in_method(method, hierarchy, protocol_registry);
             }
 
             // Check superclass type args (e.g., `Logger(Integer) subclass: SpecialLogger`)
@@ -282,15 +274,7 @@ impl TypeChecker {
         // every user drops or overrides them): the flattener never splices them
         // into a class, so they would otherwise go unchecked.
         for method in module.unused_protocol_provided_methods() {
-            for param in &method.parameters {
-                if let Some(ref ann) = param.type_annotation {
-                    self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
-                }
-            }
-            if let Some(ref ann) = method.return_type {
-                self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
-            }
-            self.check_bounds_in_body_annotations(&method.body, hierarchy, protocol_registry);
+            self.check_bounds_in_method(method, hierarchy, protocol_registry);
         }
 
         // Top-level script / REPL statements (`b :: Boxed(X) := ...`, typed
@@ -299,20 +283,27 @@ impl TypeChecker {
 
         // Check standalone method definitions
         for standalone in &module.method_definitions {
-            for param in &standalone.method.parameters {
-                if let Some(ref ann) = param.type_annotation {
-                    self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
-                }
-            }
-            if let Some(ref ann) = standalone.method.return_type {
+            self.check_bounds_in_method(&standalone.method, hierarchy, protocol_registry);
+        }
+    }
+
+    /// Check bounds on a method's parameter and return annotations and on the
+    /// annotations in its body. The one place this per-method rule lives.
+    fn check_bounds_in_method(
+        &mut self,
+        method: &crate::ast::MethodDefinition,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        for param in &method.parameters {
+            if let Some(ref ann) = param.type_annotation {
                 self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
             }
-            self.check_bounds_in_body_annotations(
-                &standalone.method.body,
-                hierarchy,
-                protocol_registry,
-            );
         }
+        if let Some(ref ann) = method.return_type {
+            self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+        }
+        self.check_bounds_in_body_annotations(&method.body, hierarchy, protocol_registry);
     }
 
     /// Check bounds on local-variable annotations (`b :: Boxed(X) := …`) in a
