@@ -151,7 +151,7 @@ jobs:
       # instrumented under llvm-cov, and the spawned BEAM nodes only need the
       # stdlib .beam files — see `coverage-build` in the Justfile.
       - name: Build coverage prerequisites
-        timeout-minutes: 12
+        timeout-minutes: 1
         run: just coverage-build
 
       - name: Generate Rust coverage (Cobertura format for action)
@@ -348,7 +348,7 @@ jobs:
       # drive `cargo run --bin beamtalk`, which builds just the binary and
       # its deps on demand — see `coverage-build` in the Justfile.
       - name: Build coverage prerequisites
-        timeout-minutes: 12
+        timeout-minutes: 1
         run: just coverage-build
 
       - name: Generate Erlang coverage (unit + E2E + stdlib)
