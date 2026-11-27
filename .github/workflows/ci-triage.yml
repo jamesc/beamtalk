@@ -21,7 +21,9 @@ on:
     # desktop run. Its schedule runs report head_branch main with event `schedule`, so
     # they pass the guard below, as does its push-to-main cache-warming run
     # (BT-5273); its labelled PR runs have event `pull_request` and do
-    # not. "Nightly Coverage" (coverage.yml) and "Corpus Tier" (corpus.yml) moved out
+    # not. A scheduled "Nightly Coverage" run that concludes `cancelled` (a
+    # job-level timeout rolls up that way, BT-5356) is triaged too; no other
+    # cancelled run is. "Nightly Coverage" (coverage.yml) and "Corpus Tier" (corpus.yml) moved out
     # of CI in BT-4609; their main runs pass the same guard. If any of these
     # workflows is renamed, update this list.
     workflows: ["CI", "Nightly", "CI (all platforms)", "Nightly Coverage", "Corpus Tier"]
@@ -42,7 +44,10 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'failure' &&
+      ((github.event.workflow_run.conclusion == 'failure' ||
+        (github.event.workflow_run.conclusion == 'cancelled' &&
+         github.event.workflow_run.name == 'Nightly Coverage' &&
+         github.event.workflow_run.event == 'schedule')) &&
        github.event.workflow_run.head_repository.full_name == github.repository &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.event != 'pull_request')

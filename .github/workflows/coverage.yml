@@ -5,11 +5,28 @@ name: Nightly Coverage
 
 # Rust and Erlang line coverage, measured nightly rather than on every merge
 # (BT-4609). Coverage re-runs the whole Rust and Erlang suites instrumented,
-# about 43 runner-minutes per run; on every push to main (and every PR that
+# about 65 runner-minutes per run (41 + 24, BT-5356); on every push to main (and every PR that
 # touched the Justfile or ci.yml) that competed with PR jobs for the
 # account's concurrent-runner limit. The floors are a trend signal, not a
 # merge gate, so a daily measurement is enough. A failed leg is triaged like
 # a red main (ci-triage.yml watches this workflow).
+#
+# Artifacts (30-day retention), the only copies of the nightly reports, so
+# consumers such as the nightly-test-coverage routine must read these names
+# from the latest successful run of this workflow (not from ci.yml's old
+# `coverage-reports`, which has not been produced since BT-4609):
+#   rust-coverage-reports    coverage-rust leg:   coverage.cobertura.xml,
+#                                                 rust-coverage-results.md
+#   erlang-coverage-reports  coverage-erlang leg: erlang-coverage-results.md,
+#                                                 cover/index.html + aggregate/*.html,
+#                                                 covertool/*.xml (one per runtime app)
+#
+# Failure signal: a job killed by its job-level timeout concludes `cancelled`,
+# and GitHub rolls any cancelled job up as a cancelled run — grey, never
+# `failure` for ci-triage.yml — even with another job failing. So the long
+# steps have their own timeout-minutes (a step timeout is a plain failure),
+# and `coverage-status` fails the run when either leg did not succeed.
+# ci-triage.yml also triages a cancelled scheduled run of this workflow.
 #
 # To exercise a coverage-recipe change before it merges:
 #   gh workflow run coverage.yml --ref <branch>
@@ -51,7 +68,7 @@ jobs:
   # - publish-coverage: on a run of main, publishes each leg's badge from
   #   whatever report that leg produced — even when the leg failed its
   #   threshold (the badge goes red) — so a miss never freezes the badges
-  #   at the last passing value. The failed leg job stays the signal.
+  #   at the last passing value. `coverage-status` stays the signal.
   # A recipe change is exercised before merge by dispatching this workflow
   # on the PR branch (BT-4379); only a run of main publishes.
   # Pass 1 excludes the corpus_tests slow tier (see Justfile's
@@ -60,14 +77,34 @@ jobs:
   # cost ~17 min alone.
   coverage-rust:
     runs-on: ubuntu-latest
-    # Measured ~22 min (instrumented build ~10, fast tier ~6.5, serialized
-    # e2e ~5); 40 leaves headroom for cold caches.
-    timeout-minutes: 40
+    # Measured cold on 2026-11-26 (run 45842761744, 4-core runner; the cache
+    # never saved because the leg never finished): setup ~5 min, instrumented
+    # build ~12, fast tier 16.3 (13421 tests), serialized e2e pass 6.5,
+    # report ~1.5: ~41 min, past the old 40. With debuginfo off (below) the
+    # dispatch on BT-5356's branch (run 46011136633) took 29 min, still cold.
+    # One job rather than shards: every shard pays the setup + instrumented
+    # build again (cargo-llvm-cov cannot merge profiles across runners without
+    # the instrumented binaries), so sharding costs runner-minutes to save
+    # wall-clock a nightly trend job does not need. Run-to-run variance on the
+    # hosted runners is large (the same config took 29 and 38 min in two
+    # dispatches, Erlang 27 and 19), so the generate step is capped at 50 (35 min
+    # worst seen: 30% headroom) and the job at 70, above setup (~1 min) + the
+    # two step caps (12 + 50), so a slow leg trips a step timeout first.
+    #
+    # The long steps carry their own timeout-minutes: a step timeout fails the
+    # step and so the job and the run (red, triaged), while this job-level
+    # timeout concludes `cancelled`, which GitHub rolls up as a cancelled run
+    # even with coverage-status failing (verified on a probe run). The job
+    # timeout is only the backstop for a hang outside those steps.
+    timeout-minutes: 70
     permissions:
       contents: read
     outputs:
       rust_coverage: ${{ steps.rust_thresholds.outputs.rust_coverage }}
     steps:
+      - name: Record leg start time
+        run: echo "LEG_START=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -118,12 +155,54 @@ jobs:
       # instrumented under llvm-cov, and the spawned BEAM nodes only need the
       # stdlib .beam files — see `coverage-build` in the Justfile.
       - name: Build coverage prerequisites
+        timeout-minutes: 12
         run: just coverage-build
 
       - name: Generate Rust coverage (Cobertura format for action)
+        timeout-minutes: 50
         # Excludes test-harness/build-tooling crates (see `llvm_cov_ignore` in
         # the Justfile) so the badge reflects product-code coverage.
+        env:
+          # Coverage maps come from the instrumentation, not DWARF: dropping
+          # debuginfo shrinks and speeds up the ~48 instrumented test
+          # binaries' compile and link. NEXTEST_PROFILE (not `--profile`,
+          # which `cargo llvm-cov` takes for the cargo profile) selects
+          # .config/nextest.toml's `coverage` profile, which writes the JUnit
+          # report summarised below.
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          CARGO_PROFILE_TEST_DEBUG: "0"
+          NEXTEST_PROFILE: coverage
         run: just coverage-rust-cobertura
+
+      - name: Slowest test binaries (nextest JUnit)
+        # Where the fast tier's time goes, so the next trim or shard is chosen
+        # from a measurement (BT-5356). Never fails the leg.
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          junit=$(find target -name junit.xml -path '*nextest/coverage*' | head -1)
+          if [ -z "$junit" ]; then
+            echo "No nextest JUnit report found"
+            exit 0
+          fi
+          python3 -I - "$junit" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import sys
+          import xml.etree.ElementTree as ET
+
+          # nextest puts `time` on each testcase, not on the testsuite.
+          rows = []
+          for suite in ET.parse(sys.argv[1]).getroot().iter("testsuite"):
+              cases = list(suite.iter("testcase"))
+              total = sum(float(case.get("time", 0)) for case in cases)
+              rows.append((total or float(suite.get("time", 0)), suite.get("name"), len(cases)))
+          rows.sort(reverse=True)
+          print("### Rust fast tier: slowest test binaries (summed test time, not wall-clock)")
+          print("")
+          print("| Binary | Tests | Summed time (s) |")
+          print("|---|---|---|")
+          for time, name, tests in rows[:15]:
+              print(f"| {name} | {tests} | {time:.0f} |")
+          PY
 
       - name: Dump workspace startup logs
         # coverage-rust-cobertura's --ignored pass spawns real REPL/BEAM
@@ -167,6 +246,11 @@ jobs:
             rust-coverage-results.md
             coverage.cobertura.xml
           retention-days: 30
+
+      - name: Leg timing
+        if: ${{ !cancelled() }}
+        # 52 = 75% of the job's 70-minute timeout, rounded down: the 25% headroom.
+        run: scripts/ci/coverage-leg-timing.sh coverage-rust "$LEG_START" 52
 
       - name: Add Rust Coverage to Job Summary
         run: |
@@ -226,14 +310,23 @@ jobs:
 
   coverage-erlang:
     runs-on: ubuntu-latest
-    # Measured ~10.5 min (eunit + stdlib + BUnit with cover); 25 leaves
-    # headroom for cold caches.
-    timeout-minutes: 25
+    # Measured ~24 min on 2026-11-26 (run 45842761744) and 26.7 min on the
+    # BT-5356 dispatch (run 46011136633): setup + build ~4, eunit ~9, E2E ~6,
+    # BUnit ~4, merge + report ~1. That was 96% of the old 25-minute limit.
+    # Only coverage-all's last step needs all four coverdata files together, so
+    # splitting would add an artifact handoff and a second ~4 min build to
+    # save wall-clock a nightly job does not need; 50 leaves 47% headroom, and is
+    # above setup (~1 min) + the two step caps (12 + 32).
+    # The long steps carry their own timeout-minutes, see coverage-rust.
+    timeout-minutes: 50
     permissions:
       contents: read
     outputs:
       erlang_coverage: ${{ steps.erlang_thresholds.outputs.erlang_coverage }}
     steps:
+      - name: Record leg start time
+        run: echo "LEG_START=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -263,9 +356,11 @@ jobs:
       # drive `cargo run --bin beamtalk`, which builds just the binary and
       # its deps on demand — see `coverage-build` in the Justfile.
       - name: Build coverage prerequisites
+        timeout-minutes: 12
         run: just coverage-build
 
       - name: Generate Erlang coverage (unit + E2E + stdlib)
+        timeout-minutes: 32
         # `coverage-all` runs its own E2E pass (`coverage-e2e`) on this
         # runner, so the legs stay independent (no cross-job artifact wait).
         run: just coverage-all
@@ -315,6 +410,11 @@ jobs:
             runtime/_build/test/cover/aggregate/*.html
             runtime/_build/test/covertool/*.xml
           retention-days: 30
+
+      - name: Leg timing
+        if: ${{ !cancelled() }}
+        # 37 = 75% of the job's 50-minute timeout, rounded down: the 25% headroom.
+        run: scripts/ci/coverage-leg-timing.sh coverage-erlang "$LEG_START" 37
 
       - name: Add Erlang Coverage to Job Summary
         run: |
@@ -366,6 +466,35 @@ jobs:
           echo "❌ Erlang coverage thresholds not met (see above for details)"
           exit 1
 
+  # The run's red/green signal for a leg that did not succeed for any reason
+  # (threshold, test failure, step timeout, backstop job timeout). Without it
+  # publish-coverage succeeded regardless and a timed-out leg left a grey run
+  # with a stale badge for a week (BT-5356). Note a job-level timeout still
+  # rolls the run up as `cancelled`; the long steps' own timeouts keep that
+  # case a red `failure`. `!cancelled()` runs this after a leg timeout (the
+  # run itself is not cancelled) but not when a person cancels the run.
+  coverage-status:
+    if: ${{ !cancelled() }}
+    needs: [coverage-rust, coverage-erlang]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail unless both legs succeeded
+        env:
+          RUST_RESULT: ${{ needs.coverage-rust.result }}
+          ERLANG_RESULT: ${{ needs.coverage-erlang.result }}
+        run: |
+          status=0
+          for leg in "coverage-rust:$RUST_RESULT" "coverage-erlang:$ERLANG_RESULT"; do
+            name="${leg%%:*}"
+            result="${leg#*:}"
+            if [ "$result" != "success" ]; then
+              echo "::error title=${name} ${result}::${name} finished '${result}' (cancelled = job timeout or runner loss); no report from it this run, its badge is stale. Read that leg's own job log for the cause: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              status=1
+            fi
+          done
+          exit "$status"
+
   publish-coverage:
     # `!cancelled()` (always(), minus a cancelled run): a leg that fails its
     # threshold must not stop publishing, or the badges freeze at the last
@@ -373,8 +502,8 @@ jobs:
     # (BT-4379). Each leg writes its percentage output *before* its
     # threshold check exits non-zero, and a failed job's step outputs are
     # still visible through `needs`, so a below-floor value arrives here and
-    # is published as a red badge. The failed leg job — not this one — stays
-    # the workflow's failure signal. Runs of main only: a dispatch on any
+    # is published as a red badge. `coverage-status` — not this job — is the
+    # workflow's failure signal. Runs of main only: a dispatch on any
     # other branch measures coverage but never publishes it.
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
     needs: [coverage-rust, coverage-erlang]

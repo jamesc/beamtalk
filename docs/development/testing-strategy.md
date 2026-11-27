@@ -171,7 +171,7 @@ Coverage reports are saved to:
 The Nightly Coverage workflow (`coverage.yml`) measures coverage in two
 parallel legs, `coverage-rust` and `coverage-erlang`. It runs once a day on
 `main` (05:00 UTC), not on every PR or merge: re-running both suites
-instrumented costs about 43 runner-minutes, which competed with PR jobs for
+instrumented costs about 65 runner-minutes (BT-5356 measurement), which competed with PR jobs for
 runners (BT-4609). A failed leg is triaged like a red `main` by
 `ci-triage.yml`. To exercise a coverage-recipe change before it merges,
 dispatch the workflow on the branch: `gh workflow run coverage.yml --ref
@@ -181,8 +181,30 @@ uploads it as an artifact.
 On a run of `main`, `publish-coverage` then updates the Rust and Erlang
 badges on the `badges` branch from whatever report each leg produced — even
 when a leg failed its threshold, in which case its badge goes red. A leg
-that produced no report at all leaves its badge unchanged. The failed leg
-job, not the badge, is what fails the run.
+that produced no report at all leaves its badge unchanged.
+
+The run's red/green signal is the `coverage-status` job, which fails unless
+both legs succeeded. A job killed by its job-level timeout concludes
+`cancelled`, and GitHub rolls any cancelled job up as a cancelled run (grey)
+even when another job fails; `ci-triage.yml` triages `failure`, so before
+BT-5356 the Rust leg timed out on most nights and the run looked grey with a
+stale badge. The long steps therefore carry their own `timeout-minutes` (a
+step timeout is a plain failure) and the job timeouts are only a backstop;
+`ci-triage.yml` also triages a cancelled scheduled run of this workflow. Each
+leg prints its wall time and warns above a budget of 75% of its job timeout
+(`coverage-rust` 52 of 70 min, `coverage-erlang` 37 of 50 min), so growth
+shows up before it becomes a timeout. `coverage-rust` also lists its slowest
+test binaries in its job summary (nextest's `coverage` profile,
+`.config/nextest.toml`).
+
+**Artifacts** (30-day retention; these are the only copies of the nightly
+reports, so read them from the latest successful `coverage.yml` run, not from
+the old `coverage-reports` artifact of `ci.yml`, which stopped in BT-4609):
+
+| Artifact | Produced by | Contents |
+|----------|-------------|----------|
+| `rust-coverage-reports` | `coverage-rust` | `coverage.cobertura.xml`, `rust-coverage-results.md` |
+| `erlang-coverage-reports` | `coverage-erlang` | `erlang-coverage-results.md`, `cover/index.html`, `cover/aggregate/*.html`, `covertool/*.xml` (one per runtime app) |
 
 **Coverage Thresholds:**
 
