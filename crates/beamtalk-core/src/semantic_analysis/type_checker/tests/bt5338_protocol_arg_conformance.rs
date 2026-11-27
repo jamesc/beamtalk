@@ -4,6 +4,10 @@
 //! BT-5338: protocol-typed call-site arguments. A `Dynamic` argument is
 //! accepted (gradual typing), and a conformance diagnostic points at the
 //! offending argument, not the whole send.
+//!
+//! BT-5345 adds: a `Dynamic` argument is still flagged by the "Dynamic in typed
+//! class" lint inside a `typed` class, and the type-argument mismatch warning
+//! also points at the argument.
 
 use super::common::*;
 

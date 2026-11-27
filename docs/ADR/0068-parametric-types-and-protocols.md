@@ -635,7 +635,8 @@ lint, which fires on the argument expression itself (BT-5345):
 
 ```beamtalk
 typed Object subclass: Shower
-  show: someUnknownValue => Sink new display: someUnknownValue
+  show: someUnknownValue => Printer new display: someUnknownValue
+// where Printer>>display: takes a `:: Printable` parameter
 // No conformance warning — someUnknownValue is Dynamic.
 // "Dynamic in typed class" warns on the argument (unannotated parameter).
 ```
