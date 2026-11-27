@@ -192,7 +192,7 @@ stale badge. The long steps therefore carry their own `timeout-minutes` (a
 step timeout is a plain failure) and the job timeouts are only a backstop;
 `ci-triage.yml` also triages a cancelled scheduled run of this workflow. Each
 leg prints its wall time and warns above a budget of 75% of its job timeout
-(`coverage-rust` 41 of 55 min, `coverage-erlang` 37 of 50 min), so growth
+(`coverage-rust` 52 of 70 min, `coverage-erlang` 37 of 50 min), so growth
 shows up before it becomes a timeout. `coverage-rust` also lists its slowest
 test binaries in its job summary (nextest's `coverage` profile,
 `.config/nextest.toml`).

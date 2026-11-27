@@ -85,16 +85,18 @@ jobs:
     # One job rather than shards: every shard pays the setup + instrumented
     # build again (cargo-llvm-cov cannot merge profiles across runners without
     # the instrumented binaries), so sharding costs runner-minutes to save
-    # wall-clock a nightly trend job does not need. 55 leaves 47% headroom, and
-    # is above setup (~1 min) + the two step caps (12 + 38), so a slow leg trips
-    # a step timeout first.
+    # wall-clock a nightly trend job does not need. Run-to-run variance on the
+    # hosted runners is large (the same config took 29 and 38 min in two
+    # dispatches, Erlang 27 and 19), so the generate step is capped at 50 (35 min
+    # worst seen: 30% headroom) and the job at 70, above setup (~1 min) + the
+    # two step caps (12 + 50), so a slow leg trips a step timeout first.
     #
     # The long steps carry their own timeout-minutes: a step timeout fails the
     # step and so the job and the run (red, triaged), while this job-level
     # timeout concludes `cancelled`, which GitHub rolls up as a cancelled run
     # even with coverage-status failing (verified on a probe run). The job
     # timeout is only the backstop for a hang outside those steps.
-    timeout-minutes: 55
+    timeout-minutes: 70
     permissions:
       contents: read
     outputs:
@@ -157,7 +159,7 @@ jobs:
         run: just coverage-build
 
       - name: Generate Rust coverage (Cobertura format for action)
-        timeout-minutes: 38
+        timeout-minutes: 50
         # Excludes test-harness/build-tooling crates (see `llvm_cov_ignore` in
         # the Justfile) so the badge reflects product-code coverage.
         env:
@@ -183,7 +185,7 @@ jobs:
             echo "No nextest JUnit report found"
             exit 0
           fi
-          python3 -I - "$junit" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          python3 -I - "$junit" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
           import sys
           import xml.etree.ElementTree as ET
 
@@ -244,8 +246,8 @@ jobs:
 
       - name: Leg timing
         if: ${{ !cancelled() }}
-        # 41 = 75% of the job's 55-minute timeout, rounded down: the 25% headroom.
-        run: scripts/ci/coverage-leg-timing.sh coverage-rust "$LEG_START" 41
+        # 52 = 75% of the job's 70-minute timeout, rounded down: the 25% headroom.
+        run: scripts/ci/coverage-leg-timing.sh coverage-rust "$LEG_START" 52
 
       - name: Add Rust Coverage to Job Summary
         run: |
