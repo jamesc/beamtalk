@@ -411,6 +411,7 @@ mod keyed_fold_corpus;
 mod late_field_operand_order;
 mod late_field_operand_order_corpus;
 mod late_reconcile_conformance;
+mod list_pattern_corpus;
 mod local_assignment_producer;
 mod local_producer_agreement;
 mod local_producer_agreement_conditional;

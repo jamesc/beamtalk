@@ -194,6 +194,9 @@ impl Parser {
             // Array pattern: #[p1, p2, ...]
             TokenKind::ArrayOpen => self.parse_array_pattern(),
 
+            // List pattern: #(), #(p1, p2), #(h | t), #(a, b | t) (BT-5301)
+            TokenKind::ListOpen => self.parse_list_pattern(),
+
             // Map pattern: #{#key => var, "key" => var, ...}
             TokenKind::MapOpen => self.parse_map_pattern(),
 
@@ -441,6 +444,99 @@ impl Parser {
             rest,
             list_syntax: false,
             span: start.merge(end),
+        }
+    }
+
+    /// Parses a list pattern (BT-5301): `#()`, `#(p1, p2)`, `#(h | t)`,
+    /// `#(a, b | t)`, the pattern form of the list literal and its cons form.
+    ///
+    /// Without a `|` tail the pattern matches a list of exactly that many
+    /// elements; with one, a list of at least that many, the tail pattern
+    /// matching the rest. Elements and the tail are full patterns, so lists
+    /// nest (`#(a | #(b | t))`) and an element may be `x :: T`.
+    ///
+    /// Note: see the same note on [`Self::parse_tuple_pattern`] —
+    /// nested type-pattern error recovery relies on `,`/`|`/`)` never being
+    /// consumed as a "malformed type name" token.
+    fn parse_list_pattern(&mut self) -> Pattern {
+        self.parse_list_pattern_with(false)
+    }
+
+    /// [`Self::parse_list_pattern`] on the left of `:=`, where a fixed-length
+    /// `#(a :: Integer, ...rest)` may also end in the array-destructuring
+    /// rest element (BT-1251), exactly as the unannotated `#(a, ...rest)`
+    /// may. That form is a positional [`Pattern::Array`] (`list_syntax`).
+    pub(super) fn parse_list_destructure_pattern(&mut self) -> Pattern {
+        self.parse_list_pattern_with(true)
+    }
+
+    fn parse_list_pattern_with(&mut self, allow_rest: bool) -> Pattern {
+        let start = self
+            .expect(&TokenKind::ListOpen, "Expected '#('")
+            .map_or_else(|| self.current_token().span(), |t: Token| t.span());
+
+        let mut elements = Vec::new();
+        let mut tail = None;
+        let mut rest = None;
+
+        if !self.check(&TokenKind::RightParen) {
+            loop {
+                if self.check(&TokenKind::Ellipsis) {
+                    let rest_pattern = self.parse_rest_pattern();
+                    if allow_rest {
+                        rest = Some(Box::new(rest_pattern));
+                    } else {
+                        // `...rest` is the array-destructuring rest form; a
+                        // `match:` list pattern takes its tail with `|`.
+                        self.diagnostics.push(Diagnostic::error(
+                            "a `#( ... )` list pattern takes its tail with `|`, not `...`: write `#(a | rest)`",
+                            rest_pattern.span(),
+                        ));
+                        tail = Some(Box::new(Pattern::Wildcard(rest_pattern.span())));
+                    }
+                    break;
+                }
+                if self.check(&TokenKind::Pipe) {
+                    let span = self.current_token().span();
+                    let message = if elements.is_empty() {
+                        "a `#( ... | tail)` list pattern needs at least one element before `|`"
+                    } else {
+                        "unexpected `,` before `|` in a list pattern: write `#(a, b | tail)`"
+                    };
+                    self.diagnostics.push(Diagnostic::error(message, span));
+                } else {
+                    elements.push(self.parse_pattern());
+                }
+                if self.match_token(&TokenKind::Pipe) {
+                    tail = Some(Box::new(self.parse_pattern()));
+                    break;
+                }
+                if !self.match_binary_selector(",") || self.check(&TokenKind::RightParen) {
+                    break; // end of elements, or a trailing comma
+                }
+            }
+        }
+
+        let end = self
+            .expect(
+                &TokenKind::RightParen,
+                "Expected ')' to close the list pattern",
+            )
+            .map_or(start, |t: Token| t.span());
+        let span = start.merge(end);
+
+        if rest.is_some() {
+            return Pattern::Array {
+                elements,
+                rest,
+                list_syntax: true,
+                span,
+            };
+        }
+        Pattern::List {
+            elements,
+            tail,
+            span,
         }
     }
 

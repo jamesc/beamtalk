@@ -193,6 +193,12 @@ impl Parser {
         // `#{#k => v :: Integer} := expr` (BT-5284). The expression-then-
         // convert path below cannot carry `x :: T`, so a collection literal
         // that holds a `::` before its `:=` goes through the pattern parser.
+        // List-pattern destructure (BT-5301): `#(h | t) := xs`, `#() := xs`
+        // and `#(a :: Integer, b) := xs` also need the pattern grammar.
+        if self.check(&TokenKind::ListOpen) && self.leading_list_is_pattern_destructure() {
+            return self.parse_list_destructure();
+        }
+
         if matches!(
             self.current_kind(),
             TokenKind::ArrayOpen | TokenKind::MapOpen
@@ -256,6 +262,51 @@ impl Parser {
         }
     }
 
+    /// Parses a `#( ... ) := expr` destructure through the pattern grammar
+    /// (BT-5301). Only reached when [`Self::leading_list_is_pattern_destructure`]
+    /// has seen `:=` after the matching `)`.
+    ///
+    /// A cons pattern (`#(h | t)`) and the empty pattern `#()` stay list
+    /// patterns: the value must be a list of that shape. A fixed-length
+    /// pattern (`#(a :: Integer, b)`) keeps the positional meaning of
+    /// unannotated `#(a, b) := xs`, which reads `at: 1`, `at: 2`, ... from
+    /// any sequence, so annotating an element never changes what matches;
+    /// it may end in `...rest` like `#(a, ...rest) := xs` (BT-1251).
+    fn parse_list_destructure(&mut self) -> Expression {
+        let start = self.current_token().span();
+        // The nesting guard `parse_pattern` puts around every pattern.
+        let pattern = match self.with_nesting(
+            start,
+            |p| Pattern::Wildcard(start.merge(p.skip_bracketed_group())),
+            Self::parse_list_destructure_pattern,
+        ) {
+            Pattern::List {
+                elements,
+                tail: None,
+                span,
+            } if !elements.is_empty() => Pattern::Array {
+                elements,
+                rest: None,
+                list_syntax: true,
+                span,
+            },
+            other => other,
+        };
+        self.expect(
+            &TokenKind::Assign,
+            "Expected ':=' after destructuring pattern",
+        );
+        let value = Box::new(self.parse_after_gap(GapSlot::BeforeValue, |p| {
+            p.with_expression_nesting(start, Self::parse_assignment)
+        }));
+        let span = start.merge(value.span());
+        Expression::DestructureAssignment {
+            pattern,
+            value,
+            span,
+        }
+    }
+
     /// Parses a tuple destructuring assignment (`{a, b} := expr`).
     ///
     /// Only reached when [`Self::leading_brace_is_destructure`] has seen `:=`
@@ -280,24 +331,6 @@ impl Parser {
     /// Dispatches to collection destructuring, map destructuring, or simple
     /// assignment depending on the LHS expression form.
     fn parse_assign_rhs(&mut self, expr: Expression) -> Expression {
-        // Reject cons-style list syntax on the LHS: `#(a | rest) := expr`.
-        if let Expression::ListLiteral {
-            tail: Some(_),
-            span: lhs_span,
-            ..
-        } = &expr
-        {
-            let span = *lhs_span;
-            self.diagnostics.push(Diagnostic::error(
-                "Cons syntax `#(head | tail)` is not supported in destructuring patterns; use `#(a, b, c) := expr` instead",
-                span,
-            ));
-            return Expression::Error {
-                message: "Invalid destructuring pattern".into(),
-                span,
-            };
-        }
-
         // Array destructuring: `#[a, b] := expr`
         // List destructuring: `#(a, b) := expr`
         let list_syntax = matches!(&expr, Expression::ListLiteral { tail: None, .. });
