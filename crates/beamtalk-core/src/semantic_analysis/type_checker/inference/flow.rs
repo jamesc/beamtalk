@@ -828,7 +828,8 @@ impl TypeChecker {
                         arm_env.set(key.clone(), residual_scrutinee_ty.clone());
                     }
                 }
-                // BT-5332/BT-5336: nested `x :: T` bindings narrow to `T` (intersected with the position type when known), after the scrutinee-key
+                // BT-5332/BT-5336: nested `x :: T` bindings narrow to `T`
+                // (intersected with the position type when known), after the scrutinee-key
                 // rewrite above so a nested binding that shadows the
                 // scrutinee variable keeps its narrowed type.
                 self.narrow_nested_type_patterns(
