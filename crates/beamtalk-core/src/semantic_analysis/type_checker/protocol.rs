@@ -248,6 +248,15 @@ impl TypeChecker {
                 if let Some(ref ann) = state_decl.type_annotation {
                     self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
                 }
+                // BT-5343: block parameters and local annotations inside the
+                // default expression.
+                if let Some(ref default) = state_decl.default_value {
+                    self.check_bounds_in_expression_annotations(
+                        default,
+                        hierarchy,
+                        protocol_registry,
+                    );
+                }
             }
 
             // Check method parameter and return type annotations
@@ -300,23 +309,41 @@ impl TypeChecker {
         protocol_registry: &ProtocolRegistry,
     ) {
         for statement in body {
-            crate::ast_walker::walk_expression(&statement.expression, &mut |e| match e {
-                crate::ast::Expression::Assignment {
-                    type_annotation: Some(ann),
-                    ..
-                } => {
-                    self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
-                }
-                crate::ast::Expression::Block(block) => {
-                    for param in &block.parameters {
-                        if let Some(ann) = &param.type_annotation {
-                            self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
-                        }
+            self.check_bounds_in_expression_annotations(
+                &statement.expression,
+                hierarchy,
+                protocol_registry,
+            );
+        }
+    }
+
+    /// Check bounds on every assignment annotation and typed block parameter
+    /// in one expression tree (BT-5333, BT-5343). Typed pattern bindings
+    /// (`b :: T`) name a bare class — type arguments there are a parse error
+    /// (ADR 0107) — so patterns carry nothing to check; match-arm bodies are
+    /// ordinary expression children.
+    fn check_bounds_in_expression_annotations(
+        &mut self,
+        expr: &crate::ast::Expression,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        crate::ast_walker::walk_expression(expr, &mut |e| match e {
+            crate::ast::Expression::Assignment {
+                type_annotation: Some(ann),
+                ..
+            } => {
+                self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
+            }
+            crate::ast::Expression::Block(block) => {
+                for param in &block.parameters {
+                    if let Some(ann) = &param.type_annotation {
+                        self.check_bounds_in_type_annotation(ann, hierarchy, protocol_registry);
                     }
                 }
-                _ => {}
-            });
-        }
+            }
+            _ => {}
+        });
     }
 
     /// Check type parameter bounds within a single type annotation.
