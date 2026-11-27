@@ -347,7 +347,9 @@ impl TypeChecker {
             // protocol-typed parameter, as it is by a class-typed one. Unions
             // containing `Dynamic` are skipped the same way (see
             // `check_union_argument_conformance`); strictness for untyped
-            // values belongs to the "Dynamic in typed class" lint.
+            // values belongs to the "Dynamic in typed class" lint, which warns on the
+            // argument expression itself inside a `typed` class (BT-5345; not
+            // for an explicit `Dynamic` annotation, nor outside `typed` classes).
             InferredType::Dynamic(_)
             | InferredType::Never
             | InferredType::ProtocolMeta { .. }
