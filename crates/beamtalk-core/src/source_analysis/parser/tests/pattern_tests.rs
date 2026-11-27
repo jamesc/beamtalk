@@ -1048,6 +1048,37 @@ fn parse_fixed_list_destructure_keeps_positional_array_form() {
 }
 
 #[test]
+fn parse_list_pattern_comma_before_pipe_names_the_comma() {
+    let (_module, diags) = parse_source("xs match: [#(a, | t) -> t; _ -> 0]");
+    assert_eq!(diags.len(), 1, "expected one diagnostic, got: {diags:?}");
+    assert!(
+        diags[0].message.contains("unexpected `,` before `|`"),
+        "got: {diags:?}"
+    );
+}
+
+#[test]
+fn parse_annotated_fixed_list_destructure_keeps_rest_element() {
+    // `#(a :: Integer, ...rest) := xs` is the annotated form of the
+    // positional `#(a, ...rest) := xs`, so it keeps the rest element.
+    let annotated = destructure_pattern("#(a :: Integer, ...rest) := xs");
+    let plain = destructure_pattern("#(a, ...rest) := xs");
+    for pattern in [&annotated, &plain] {
+        assert!(
+            matches!(
+                pattern,
+                Pattern::Array {
+                    list_syntax: true,
+                    rest: Some(_),
+                    ..
+                }
+            ),
+            "{pattern:?}"
+        );
+    }
+}
+
+#[test]
 fn parse_cons_literal_is_still_an_expression() {
     let (module, diags) = parse_source("#(0 | tail) size");
     assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");

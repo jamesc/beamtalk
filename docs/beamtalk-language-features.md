@@ -5699,10 +5699,11 @@ coverage warns as unreachable.
 A fixed-length `#(a, b) := xs` keeps its older positional meaning: it reads `xs at: 1`,
 `xs at: 2`, ... from any sequence (List or Array) and ignores extra elements, annotated or not.
 Use a cons pattern for an exact list shape. As elsewhere in destructuring, `x :: T` is a trusted
-annotation, not a runtime test (BT-5284). A list destructure may nest tuple, list and map
+annotation, not a runtime test (BT-5284), and the positional form may still end in `...rest`
+(`#(a :: Integer, ...rest) := xs`). A cons or empty destructure may nest tuple, list and map
 patterns; an array, binary or constructor pattern inside one is a compile error (match the
-value with `match:` instead). A list pattern takes its tail with `|`; `...rest` is the array
-form and is rejected inside `#( ... )`.
+value with `match:` instead). The positional form takes no nested patterns, like `#[a, b] :=`.
+In a `match:` arm a list pattern takes its tail with `|`; `...rest` there is rejected.
 
 ### Rest Patterns in Destructuring (BT-1251)
 

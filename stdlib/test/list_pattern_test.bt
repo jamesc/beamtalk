@@ -176,3 +176,9 @@ TestCase subclass: ListPatternTest
     self assert: a + b equals: 3
     #(c :: Integer, d) := #(4, 5, 6)
     self assert: c + d equals: 9
+
+  testAnnotatedPositionalDestructureKeepsRest =>
+    // The positional form reads any sequence; `...rest` slices an Array.
+    #(a :: Integer, ...rest) := #[1, 2, 3]
+    self assert: a equals: 1
+    self assert: rest equals: #[2, 3]

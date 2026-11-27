@@ -270,10 +270,16 @@ impl Parser {
     /// patterns: the value must be a list of that shape. A fixed-length
     /// pattern (`#(a :: Integer, b)`) keeps the positional meaning of
     /// unannotated `#(a, b) := xs`, which reads `at: 1`, `at: 2`, ... from
-    /// any sequence, so annotating an element never changes what matches.
+    /// any sequence, so annotating an element never changes what matches;
+    /// it may end in `...rest` like `#(a, ...rest) := xs` (BT-1251).
     fn parse_list_destructure(&mut self) -> Expression {
         let start = self.current_token().span();
-        let pattern = match self.parse_pattern() {
+        // The nesting guard `parse_pattern` puts around every pattern.
+        let pattern = match self.with_nesting(
+            start,
+            |p| Pattern::Wildcard(start.merge(p.skip_bracketed_group())),
+            Self::parse_list_destructure_pattern,
+        ) {
             Pattern::List {
                 elements,
                 tail: None,
