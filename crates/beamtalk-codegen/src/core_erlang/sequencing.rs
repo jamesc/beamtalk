@@ -29,7 +29,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::{Block, Expression};
+use beamtalk_core::ast::{Block, Expression, Identifier};
 use beamtalk_core::source_analysis::Span;
 
 /// One entry of [`CoreErlangGenerator::precompiled_subexprs`] — see that
@@ -524,6 +524,11 @@ impl CoreErlangGenerator {
     /// operand prelude). Inside an actor closure (ADR 0137 §3) a field read is
     /// a live cell lookup that a sibling `blk value` writing the field through
     /// the cell changes, so there it races like any send.
+    ///
+    /// BT-5339: a read of a `late` field is not stable: it raises
+    /// `uninitialized_state_error` while the slot is unassigned, so it races
+    /// like a send. `#(self.a, self.b)` with both unassigned must raise for
+    /// `a`, the first operand, but in place erlc evaluated `self.b` first.
     pub(super) fn last_racing_operand(&self, exprs: &[&Expression]) -> Option<usize> {
         // BT-4591 fault: the in-place list builder BT-4296 removed.
         if fault!(OperandsInPlace) {
@@ -547,7 +552,9 @@ impl CoreErlangGenerator {
                 continue;
             }
             match inner {
-                Expression::FieldAccess { .. } if stable_field_reads => {}
+                Expression::FieldAccess {
+                    receiver, field, ..
+                } if stable_field_reads && !self.field_read_may_raise(receiver, field) => {}
                 _ => runs.push(i),
             }
         }
@@ -557,20 +564,33 @@ impl CoreErlangGenerator {
         runs.last().into_iter().chain(live.last()).max().copied()
     }
 
-    /// BT-4722: the hoisting point [`Self::sequence_children`] extends to when
-    /// a child is a block literal whose capture reads live state and a sibling
-    /// child runs code and so races with it: the last racing operand
-    /// ([`Self::last_racing_operand`]), or `None` when no such block exists.
-    /// Without it `sequence_children` hoists only to the last child that needs
-    /// a prelude.
-    pub(super) fn last_racing_block_capture(&self, children: &[&Expression]) -> Option<usize> {
+    /// BT-5339: whether evaluating the field read `receiver.field` may raise:
+    /// a read of a `late` field of `self` ([`Self::is_late_state_field`])
+    /// raises `uninitialized_state_error` while the slot is unassigned
+    /// (ADR 0124 §3). Any other field read answers a value.
+    fn field_read_may_raise(&self, receiver: &Expression, field: &Identifier) -> bool {
+        if fault!(LateFieldReadsStable) {
+            return false;
+        }
+        receiver.is_self() && self.is_late_state_field(&self.class_name(), field.name.as_str())
+    }
+
+    /// The racing point [`Self::sequence_children`] extends its hoisting point
+    /// to: [`Self::last_racing_operand`]. Under
+    /// `Fault::SequenceChildrenBlockCapturesOnly`, the pre-BT-5339 rule: only
+    /// when a child is a block literal whose capture reads live state (BT-4722;
+    /// the fault does not peel parentheses, which no fault-driven test needs).
+    pub(super) fn sequence_children_racing_point(&self, children: &[&Expression]) -> Option<usize> {
         let racing = self.last_racing_operand(children)?;
-        children
-            .iter()
-            .any(|c| {
-                matches!(c.unwrap_parens(), Expression::Block(b) if self.block_capture_reads_live_state(b))
-            })
-            .then_some(racing)
+        if fault!(SequenceChildrenBlockCapturesOnly) {
+            return children
+                .iter()
+                .any(
+                    |c| matches!(c, Expression::Block(b) if self.block_capture_reads_live_state(b)),
+                )
+                .then_some(racing);
+        }
+        Some(racing)
     }
 
     /// BT-4722: whether creating `block` here reads live mutable state: a

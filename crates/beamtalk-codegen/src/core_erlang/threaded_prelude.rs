@@ -1318,13 +1318,18 @@ impl CoreErlangGenerator {
     ) -> Result<(Vec<ThreadedStmt>, PrecompiledScope)> {
         let mut prelude: Vec<ThreadedStmt> = Vec::new();
         let mut scope = PrecompiledScope::new();
-        // BT-4722: a block literal whose capture reads live state races with a
-        // sibling that runs code (`last_racing_operand`), so the hoisting point
-        // extends to it; the sibling is bound to a temp ahead of the capture.
+        // BT-4722 / BT-5339: a child that needs no prelude can still race with
+        // a sibling: a block literal whose capture reads live state, a `late`
+        // field read that may raise, a call that may raise. The parent may
+        // build its operands in place (a self-send's argument list,
+        // `capture_argument_list_doc`), where erlc evaluates them last-first,
+        // so the hoisting point extends to the last racing operand
+        // (`last_racing_operand`, the rule `thread_subexprs` applies) and every
+        // racing child before it is bound to a temp in source order.
         let Some(k) = children
             .iter()
             .rposition(|child| self.subexpr_needs_prelude(child))
-            .max(self.last_racing_block_capture(children))
+            .max(self.sequence_children_racing_point(children))
         else {
             return Ok((prelude, scope));
         };
