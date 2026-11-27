@@ -181,8 +181,26 @@ uploads it as an artifact.
 On a run of `main`, `publish-coverage` then updates the Rust and Erlang
 badges on the `badges` branch from whatever report each leg produced — even
 when a leg failed its threshold, in which case its badge goes red. A leg
-that produced no report at all leaves its badge unchanged. The failed leg
-job, not the badge, is what fails the run.
+that produced no report at all leaves its badge unchanged.
+
+The run's red/green signal is the `coverage-status` job, which fails unless
+both legs succeeded. A leg killed by its job timeout concludes `cancelled`,
+which neither `publish-coverage` nor `ci-triage.yml` (it triages `failure`
+only) would otherwise notice; before BT-5356 the Rust leg timed out on most
+nights and the run looked grey with a stale badge. Each leg also prints its
+wall time and warns above a budget of 75% of its timeout (`coverage-rust`
+45 of 60 min, `coverage-erlang` 26 of 35 min), so growth shows up before it
+becomes a timeout. `coverage-rust` also lists its slowest test binaries in
+its job summary (nextest's `coverage` profile, `.config/nextest.toml`).
+
+**Artifacts** (30-day retention; these are the only copies of the nightly
+reports, so read them from the latest successful `coverage.yml` run, not from
+the old `coverage-reports` artifact of `ci.yml`, which stopped in BT-4609):
+
+| Artifact | Produced by | Contents |
+|----------|-------------|----------|
+| `rust-coverage-reports` | `coverage-rust` | `coverage.cobertura.xml`, `rust-coverage-results.md` |
+| `erlang-coverage-reports` | `coverage-erlang` | `erlang-coverage-results.md`, `cover/index.html`, `cover/aggregate/*.html`, `covertool/*.xml` (one per runtime app) |
 
 **Coverage Thresholds:**
 

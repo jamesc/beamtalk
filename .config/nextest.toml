@@ -1,0 +1,7 @@
+# Nextest profiles. The default profile is unchanged; `coverage` is selected
+# by coverage.yml's coverage-rust leg (NEXTEST_PROFILE, because
+# `cargo llvm-cov` owns the `--profile` flag) and writes a JUnit report whose
+# per-binary times the leg prints in its job summary (BT-5356).
+
+[profile.coverage.junit]
+path = "junit.xml"
