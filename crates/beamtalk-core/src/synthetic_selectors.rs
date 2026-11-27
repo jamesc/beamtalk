@@ -245,6 +245,48 @@ mod tests {
         assert!(!is_with_star_selector("withCounter"));
     }
 
+    fn slot(name: &str, ty: Option<&str>) -> StateDeclaration {
+        use crate::ast::{Identifier, TypeAnnotation};
+        use crate::source_analysis::Span;
+        let span = Span::default();
+        StateDeclaration {
+            type_annotation: ty.map(|t| TypeAnnotation::Simple(Identifier::new(t, span))),
+            ..StateDeclaration::new(Identifier::new(name, span), span)
+        }
+    }
+
+    #[test]
+    fn copy_return_type_is_self_type() {
+        // `Self`, not the class name, so generic receivers keep type args.
+        assert_eq!(synthesized_copy_return_type(), DeclaredType::SelfType);
+    }
+
+    #[test]
+    fn constructor_return_type_is_the_defining_class() {
+        // Not `Self`: an inherited constructor still builds the defining class.
+        assert_eq!(
+            synthesized_constructor_return_type("Point"),
+            DeclaredType::simple("Point")
+        );
+    }
+
+    #[test]
+    fn typed_slot_propagates_declared_type_to_all_synthesized_signatures() {
+        let s = slot("x", Some("Integer"));
+        let expected = Some(DeclaredType::simple("Integer"));
+        assert_eq!(synthesized_getter_return_type(&s), expected);
+        assert_eq!(synthesized_copy_param_type(&s), expected);
+        assert_eq!(synthesized_constructor_param_type(&s), expected);
+    }
+
+    #[test]
+    fn untyped_slot_yields_no_declared_types() {
+        let s = slot("x", None);
+        assert_eq!(synthesized_getter_return_type(&s), None);
+        assert_eq!(synthesized_copy_param_type(&s), None);
+        assert_eq!(synthesized_constructor_param_type(&s), None);
+    }
+
     /// `with_star_selector` has a hand-rolled Erlang mirror,
     /// `beamtalk_recheck:with_star_selector/1`
     /// (`runtime/apps/beamtalk_workspace/src/beamtalk_recheck.erl`), needed
