@@ -21,7 +21,7 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::{Expression, Pattern};
+use beamtalk_core::ast::{Expression, MapPatternPair, Pattern};
 
 impl CoreErlangGenerator {
     /// Generates flat `let` bindings for a destructuring assignment.
@@ -371,6 +371,31 @@ impl CoreErlangGenerator {
                 }
             }
             Pattern::Map { pairs, .. } => {
+                // ADR 0155: a pattern with an optional key first checks that the
+                // value is a plain `Dictionary`, so an all-optional pattern does
+                // not quietly bind `nil` from a value object or another tagged map.
+                if pairs.iter().any(MapPatternPair::is_optional) {
+                    let ok_var = self.fresh_temp_var("DictOk");
+                    let not_dict_var = self.fresh_temp_var("NotDict");
+                    let is_dict = self.untagged_map_test_doc(rhs_var);
+                    let mismatch_raise = self.pattern_mismatch_raise_doc(
+                        rhs_var,
+                        "destructure",
+                        "value does not match the destructuring pattern",
+                    );
+                    docs.push(docvec![
+                        indent,
+                        leaf::var(ok_var),
+                        " = case ",
+                        is_dict,
+                        " of <'true'> when 'true' -> 'ok' <",
+                        leaf::var(not_dict_var),
+                        "> when 'true' -> ",
+                        mismatch_raise,
+                        " end",
+                        terminator,
+                    ]);
+                }
                 for pair in pairs {
                     match &pair.value {
                         // `x :: T` binds like `x`: the annotation is a trusted declared type
@@ -381,14 +406,29 @@ impl CoreErlangGenerator {
                             let core_var = Self::to_core_erlang_var(&id.name);
                             self.bind_var(&id.name, &core_var);
                             let key_doc = super::map_pattern_key_doc(&pair.key);
+                            let lookup = if pair.is_optional() {
+                                // ADR 0155: an absent optional key binds its default.
+                                form::call(
+                                    "maps",
+                                    "get",
+                                    [
+                                        key_doc,
+                                        leaf::var(rhs_var.to_string()),
+                                        super::map_pattern_default_doc(pair),
+                                    ],
+                                )
+                            } else {
+                                form::call(
+                                    "erlang",
+                                    "map_get",
+                                    [key_doc, leaf::var(rhs_var.to_string())],
+                                )
+                            };
                             docs.push(docvec![
                                 indent,
                                 leaf::var(core_var.clone()),
-                                " = call 'erlang':'map_get'(",
-                                key_doc,
-                                ", ",
-                                leaf::var(rhs_var.to_string()),
-                                ")",
+                                " = ",
+                                lookup,
                                 terminator,
                             ]);
                             bound_pairs.push((id.name.to_string(), core_var));

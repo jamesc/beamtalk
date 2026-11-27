@@ -1,0 +1,210 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Optional keys in map patterns (ADR 0155, BT-5344): `?k => v` binds nil
+// when the key is absent, `?k => v = literal` binds the default. Optional
+// means absent, not nil. Every case runs with a string key and a symbol key.
+// The scrutinees go through `Dictionary`-typed helpers so the type checker
+// does not see literal shapes.
+
+TestCase subclass: OptionalMapKeyPatternTest
+
+  // --- match: arms, string keys ---
+  priorityOf: d :: Dictionary -> Object =>
+    d match: [
+      #{"id" => id, ?"priority" => p :: Integer} -> {id, p};
+      _ -> #nomatch
+    ]
+
+  testStringKeyPresentInArm =>
+    self assert: (self priorityOf: #{"id" => 1, "priority" => 3}) equals: {1, 3}
+
+  testStringKeyAbsentInArmBindsNil =>
+    self assert: (self priorityOf: #{"id" => 1}) equals: {1, nil}
+
+  testStringKeyWrongTypeInArmFallsThrough =>
+    self assert: (self priorityOf: #{
+      "id" => 1,
+      "priority" => "high"
+    }) equals: #nomatch
+
+  testStringKeyPresentNilFailsTypeTest =>
+    // Optional means absent, not nil: a present nil is not an Integer.
+    self assert: (self priorityOf: #{
+      "id" => 1,
+      "priority" => nil
+    }) equals: #nomatch
+
+  testRequiredKeyStillRequiredInArm =>
+    self assert: (self priorityOf: #{"priority" => 3}) equals: #nomatch
+
+  retriesOf: d :: Dictionary -> Object =>
+    d match: [
+      #{?"retries" => n :: Integer = 3} -> n;
+      _ -> #nomatch
+    ]
+
+  testStringKeyAbsentWithDefaultInArm =>
+    self assert: (self retriesOf: #{}) equals: 3
+
+  testStringKeyPresentWithDefaultInArm =>
+    self assert: (self retriesOf: #{"retries" => 7}) equals: 7
+
+  testStringKeyWrongTypeWithDefaultFallsThrough =>
+    self assert: (self retriesOf: #{"retries" => "7"}) equals: #nomatch
+
+  // --- match: arms, symbol keys ---
+  portOf: d :: Dictionary -> Object =>
+    d match: [
+      #{#host => h, ?#port => p :: Integer = 80} -> {h, p};
+      _ -> #nomatch
+    ]
+
+  testSymbolKeyPresentInArm =>
+    self assert: (self portOf: #{
+      #host => "a",
+      #port => 8080
+    }) equals: {"a", 8080}
+
+  testSymbolKeyAbsentWithDefaultInArm =>
+    self assert: (self portOf: #{#host => "a"}) equals: {"a", 80}
+
+  testSymbolKeyWrongTypeInArmFallsThrough =>
+    self assert: (self portOf: #{#host => "a", #port => "80"}) equals: #nomatch
+
+  untypedOf: d :: Object -> Object =>
+    d match: [
+      #{?#tag => t} -> t;
+      _ -> #nomatch
+    ]
+
+  testSymbolKeyAbsentNoTypeBindsNil =>
+    self assert: (self untypedOf: #{}) equals: nil
+
+  testSymbolKeyPresentNilWithoutTypeTestBindsNil =>
+    self assert: (self untypedOf: #{#tag => nil}) equals: nil
+
+  testSymbolKeyAnyValueWithoutTypeTest =>
+    self assert: (self untypedOf: #{#tag => "x"}) equals: "x"
+
+  // --- the scrutinee must be a Dictionary ---
+  testAllOptionalArmDoesNotMatchTaggedValue =>
+    self assert: (self untypedOf: (Result ok: 1)) equals: #nomatch
+
+  testAllOptionalArmDoesNotMatchNonMap =>
+    self assert: (self untypedOf: 42) equals: #nomatch
+
+  // --- guards and wildcard type tests ---
+  guardedOf: d :: Dictionary -> Symbol =>
+    d match: [
+      #{?"n" => n :: Integer} when: [n =:= nil] -> #absent;
+      #{?"n" => n :: Integer} when: [n > 5] -> #big;
+      #{?"n" => n :: Integer} -> #small;
+      _ -> #other
+    ]
+
+  testGuardSeesOptionalBinding =>
+    self assert: (self guardedOf: #{"n" => 9}) equals: #big
+    self assert: (self guardedOf: #{"n" => 2}) equals: #small
+    self assert: (self guardedOf: #{}) equals: #absent
+    self assert: (self guardedOf: #{"n" => "9"}) equals: #other
+
+  wildcardTypeOf: d :: Dictionary -> Symbol =>
+    d match: [
+      #{?#k => _ :: String} -> #stringOrAbsent;
+      _ -> #other
+    ]
+
+  testOptionalWildcardTypePattern =>
+    self assert: (self wildcardTypeOf: #{#k => "x"}) equals: #stringOrAbsent
+    self assert: (self wildcardTypeOf: #{}) equals: #stringOrAbsent
+    self assert: (self wildcardTypeOf: #{#k => 1}) equals: #other
+
+  requiredWildcardTypeOf: d :: Dictionary -> Symbol =>
+    d match: [
+      #{#k => _ :: String} -> #string;
+      _ -> #other
+    ]
+
+  testRequiredWildcardTypePatternInMap =>
+    // `_ :: T` as a map value (BT-5294) parses and tests the class.
+    self assert: (self requiredWildcardTypeOf: #{#k => "x"}) equals: #string
+    self assert: (self requiredWildcardTypeOf: #{#k => 1}) equals: #other
+
+  // --- destructuring ---
+  configFrom: d :: Dictionary -> Tuple =>
+    #{
+      ?"command" => command = "claude",
+      ?"timeout" => timeout = 5000,
+      ?"tools" => tools = #(),
+      ?"extra" => extra = #{},
+      ?"offset" => offset = -1,
+      ?"mode" => mode = #auto,
+      ?"verbose" => verbose = true,
+      ?"session" => session
+    } := d
+    {command, timeout, tools, extra, offset, mode, verbose, session}
+
+  testDestructureStringKeysAbsentUseDefaults =>
+    self assert: (self configFrom: #{}) equals: {"claude", 5000, #(), #{}, -1, #auto, true, nil}
+
+  testDestructureStringKeysPresent =>
+    d := #{
+      "command" => "x",
+      "timeout" => 1,
+      "tools" => #("a"),
+      "extra" => #{"k" => 1},
+      "offset" => 2,
+      "mode" => #manual,
+      "verbose" => false,
+      "session" => "s1"
+    }
+    self assert: (self configFrom: d) equals: {"x", 1, #("a"), #{
+      "k" => 1
+    }, 2, #manual, false, "s1"}
+
+  testDestructurePresentNilIsNotReplacedByDefault =>
+    self assert: ((self configFrom: #{"command" => nil}) at: 1) equals: nil
+
+  symbolDestructure: d :: Dictionary -> Tuple =>
+    #{#host => host, ?#port => port = 80, ?#path => path} := d
+    {host, port, path}
+
+  testDestructureSymbolKeysAbsent =>
+    self assert: (self symbolDestructure: #{
+      #host => "h"
+    }) equals: {"h", 80, nil}
+
+  testDestructureSymbolKeysPresent =>
+    self assert: (self symbolDestructure: #{
+      #host => "h",
+      #port => 1,
+      #path => "/"
+    }) equals: {"h", 1, "/"}
+
+  testDestructureRequiredKeyStillRaisesKeyError =>
+    result := [
+      self symbolDestructure: #{#port => 1}
+      #did_not_raise
+    ] on: RuntimeError do: [:e | e kind]
+    self assert: result equals: #key_error
+
+  annotatedDestructure: d :: Dictionary -> Object =>
+    #{?#n => n :: Integer} := d
+    n
+
+  testDestructureAnnotationIsTrusted =>
+    // In a destructure `x :: T` is a declared type, not a runtime test (BT-5284).
+    self assert: (self annotatedDestructure: #{#n => "x"}) equals: "x"
+    self assert: (self annotatedDestructure: #{}) equals: nil
+
+  optionalOnly: d :: Object -> Object =>
+    #{?#k => v} := d
+    v
+
+  testDestructureOfTaggedValueIsPatternMismatch =>
+    result := [
+      self optionalOnly: (Result ok: 1)
+      #did_not_raise
+    ] on: RuntimeError do: [:e | e kind]
+    self assert: result equals: #pattern_mismatch

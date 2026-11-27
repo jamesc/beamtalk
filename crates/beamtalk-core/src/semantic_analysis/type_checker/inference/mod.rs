@@ -1025,6 +1025,7 @@ impl TypeChecker {
                 Self::bind_destructure_vars(pattern, &value_ty, hierarchy, env);
                 self.bind_map_pattern_types(pattern, &value_ty, env);
                 self.bind_annotated_destructure_vars(pattern, &value_ty, hierarchy, env);
+                self.widen_optional_map_key_types(pattern, &value_ty, hierarchy, env);
                 InferredType::Dynamic(DynamicReason::Unknown)
             }
         };

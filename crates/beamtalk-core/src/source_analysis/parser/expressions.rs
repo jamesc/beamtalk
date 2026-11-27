@@ -247,6 +247,7 @@ impl Parser {
     fn parse_pattern_destructure(&mut self) -> Expression {
         let start = self.current_token().span();
         let pattern = self.parse_pattern();
+        self.reject_nested_optional_keys(&pattern);
         self.expect(
             &TokenKind::Assign,
             "Expected ':=' after destructuring pattern",
@@ -292,6 +293,7 @@ impl Parser {
             },
             other => other,
         };
+        self.reject_nested_optional_keys(&pattern);
         self.expect(
             &TokenKind::Assign,
             "Expected ':=' after destructuring pattern",
@@ -314,6 +316,7 @@ impl Parser {
     fn parse_tuple_destructure(&mut self) -> Expression {
         let start = self.current_token().span();
         let pattern = self.parse_tuple_pattern();
+        self.reject_nested_optional_keys(&pattern);
         self.expect(&TokenKind::Assign, "Expected ':=' after tuple pattern");
         let value = Box::new(self.parse_after_gap(GapSlot::BeforeValue, |p| {
             p.with_expression_nesting(start, Self::parse_assignment)
@@ -541,11 +544,7 @@ impl Parser {
                 Expression::Identifier(id) => Pattern::Variable(id.clone()),
                 _ => return Err(pair.value.span()),
             };
-            pattern_pairs.push(MapPatternPair {
-                key,
-                value,
-                span: pair.span,
-            });
+            pattern_pairs.push(MapPatternPair::required(key, value, pair.span));
         }
         Ok(Pattern::Map {
             pairs: pattern_pairs,
@@ -1992,6 +1991,7 @@ impl Parser {
     fn parse_match_arm(&mut self) -> MatchArm {
         let comments = self.collect_comment_attachment();
         let pattern = self.parse_pattern();
+        self.reject_nested_optional_keys(&pattern);
         let pat_span = pattern.span();
 
         // Check for optional guard: `when: [guard_expr]`

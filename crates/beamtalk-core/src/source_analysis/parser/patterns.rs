@@ -9,7 +9,9 @@
 //! literals, tuple / array / map / constructor patterns and rest patterns.
 //! Binary patterns (`<<...>>`) live in [`super::binary`].
 
-use crate::ast::{Expression, Identifier, Literal, MapPatternKey, MapPatternPair, Pattern};
+use crate::ast::{
+    Expression, Identifier, Literal, MapPatternDefault, MapPatternKey, MapPatternPair, Pattern,
+};
 use crate::source_analysis::{Span, Token, TokenKind};
 
 use super::{Diagnostic, Parser};
@@ -612,7 +614,12 @@ impl Parser {
         match self.current_kind() {
             TokenKind::Identifier(name) if name.as_str() == "_" => {
                 let span = self.advance().span();
-                Pattern::Wildcard(span)
+                if matches!(self.current_kind(), TokenKind::DoubleColon) {
+                    // `_ :: ClassName` (BT-5294): a type test that binds nothing.
+                    self.finish_variable_or_type_pattern(Identifier::new("_", span), span)
+                } else {
+                    Pattern::Wildcard(span)
+                }
             }
             TokenKind::Identifier(_) => {
                 let token = self.advance();
@@ -670,18 +677,65 @@ impl Parser {
         }
     }
 
+    /// Reports an optional map key (ADR 0155) anywhere below the top of a
+    /// whole `match:` arm pattern or destructuring target: a nested map has
+    /// no variable for the `maps:get/3` lowering to read.
+    pub(super) fn reject_nested_optional_keys(&mut self, pattern: &Pattern) {
+        fn nested(pattern: &Pattern, top: bool, out: &mut Vec<Span>) {
+            let children: Vec<&Pattern> = match pattern {
+                Pattern::Map { pairs, .. } => {
+                    if !top {
+                        out.extend(pairs.iter().filter_map(|p| p.optional));
+                    }
+                    pairs.iter().map(|p| &p.value).collect()
+                }
+                Pattern::Tuple { elements, .. } => elements.iter().collect(),
+                Pattern::List { elements, tail, .. } => {
+                    elements.iter().chain(tail.as_deref()).collect()
+                }
+                Pattern::Array { elements, rest, .. } => {
+                    elements.iter().chain(rest.as_deref()).collect()
+                }
+                Pattern::Constructor { keywords, .. } => keywords.iter().map(|(_, b)| b).collect(),
+                Pattern::Binary { .. }
+                | Pattern::Type { .. }
+                | Pattern::Wildcard(_)
+                | Pattern::Literal(..)
+                | Pattern::Nil(_)
+                | Pattern::Variable(_) => Vec::new(),
+            };
+            for child in children {
+                nested(child, false, out);
+            }
+        }
+        let mut spans = Vec::new();
+        nested(pattern, true, &mut spans);
+        for span in spans {
+            self.diagnostics.push(Diagnostic::error(
+                "optional keys are supported only in a top-level map pattern",
+                span,
+            ));
+        }
+    }
+
     /// Parses a map destructuring pattern: `#{key => value, ...}`
     ///
     /// Keys must be symbol literals (`#key`) or string literals (`"key"`).
     /// Bare lowercase identifiers are a compile error; use `#key` instead.
-    /// Values may be variable identifiers, `_` wildcards, or literals (for equality
-    /// matching in `match:` arms).
+    /// Values may be variable identifiers, `_` wildcards, type patterns, or
+    /// literals (for equality matching in `match:` arms).
+    ///
+    /// A key may be marked optional with a leading `?` and given a constant
+    /// default with a trailing `= literal` (ADR 0155):
+    /// `#{#id => id, ?#port => port = 80}`.
     fn parse_map_pattern(&mut self) -> Pattern {
         let start = self
             .expect(&TokenKind::MapOpen, "Expected '#{'")
             .map_or_else(|| self.current_token().span(), |t: Token| t.span());
 
-        let mut pairs = Vec::new();
+        let mut pairs: Vec<MapPatternPair> = Vec::new();
+        // The `?` split off a `,?` separator, applied to the next pair.
+        let mut pending_optional: Option<Span> = None;
 
         if !self.check(&TokenKind::RightBrace) {
             loop {
@@ -689,6 +743,10 @@ impl Parser {
                     break;
                 }
                 let pair_start = self.current_token().span();
+                let optional = pending_optional.take().or_else(|| {
+                    matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == "?")
+                        .then(|| self.advance().span())
+                });
                 let key_opt = self.parse_map_pattern_key();
 
                 if !matches!(self.current_kind(), TokenKind::FatArrow) {
@@ -702,25 +760,47 @@ impl Parser {
                 self.advance(); // consume '=>'
 
                 let value = self.parse_map_pattern_value();
+                let default = self.parse_map_pattern_default();
+                if let Some(question) = optional {
+                    self.check_optional_map_value(&value, default.as_ref(), question);
+                } else if let Some((_, default_span)) = &default {
+                    self.diagnostics.push(
+                        Diagnostic::error("only an optional key can have a default", *default_span)
+                            .with_hint("mark the key optional with `?`, e.g. `?#k => v = 0`"),
+                    );
+                }
                 // Only push the pair if the key was valid; skip error-recovery pairs
                 // so downstream passes don't see a synthetic `#_` lookup key.
                 if let Some(key) = key_opt {
-                    let pair_span = pair_start.merge(value.span());
+                    let end = default.as_ref().map_or(value.span(), |(_, sp)| *sp);
+                    let pair_span = optional.unwrap_or(pair_start).merge(end);
+                    self.check_mixed_optional_duplicate(
+                        &pairs,
+                        &key,
+                        optional.is_some(),
+                        pair_span,
+                    );
                     pairs.push(MapPatternPair {
                         key,
                         value,
+                        optional,
+                        default,
                         span: pair_span,
                     });
                 }
 
-                if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",")
-                {
-                    self.advance();
-                    if self.check(&TokenKind::RightBrace) {
-                        break; // trailing comma
+                match self.current_kind() {
+                    TokenKind::BinarySelector(s) if s.as_str() == "," => {
+                        self.advance();
+                        if self.check(&TokenKind::RightBrace) {
+                            break; // trailing comma
+                        }
                     }
-                } else {
-                    break;
+                    // `,?` lexes as one binary selector: split off the `?`.
+                    TokenKind::BinarySelector(s) if s.as_str() == ",?" => {
+                        pending_optional = Some(self.advance().span());
+                    }
+                    _ => break,
                 }
             }
         }
@@ -732,6 +812,179 @@ impl Parser {
         Pattern::Map {
             pairs,
             span: start.merge(end),
+        }
+    }
+
+    /// Parses the `= default` after an optional map-pattern value (ADR 0155),
+    /// if there is one. A default is a scalar constant: a number (negative
+    /// too), string, symbol, character, `nil`, `true`, `false`, `#()` or
+    /// `#{}`. Anything else is reported and skipped up to the next `,` / `}`.
+    fn parse_map_pattern_default(&mut self) -> Option<(MapPatternDefault, Span)> {
+        let negative = match self.current_kind() {
+            TokenKind::BinarySelector(s) if s.as_str() == "=" => false,
+            // `=-1` lexes `=-` as one binary selector: split off the `-`.
+            TokenKind::BinarySelector(s) if s.as_str() == "=-" => true,
+            _ => return None,
+        };
+        let eq_span = self.advance().span();
+        let negative = negative
+            || (matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == "-")
+                && matches!(
+                    self.peek_kind(),
+                    Some(TokenKind::Integer(_) | TokenKind::Float(_))
+                )
+                && {
+                    self.advance();
+                    true
+                });
+        let value_span = self.current_token().span();
+        let parsed = match self.current_kind() {
+            TokenKind::Integer(_) | TokenKind::Float(_) => {
+                let expr = self.parse_literal();
+                match expr {
+                    Expression::Literal(lit, span) => Some((
+                        MapPatternDefault::Literal(if negative { lit.negated() } else { lit }),
+                        span,
+                    )),
+                    _ => None,
+                }
+            }
+            _ if negative => None,
+            TokenKind::String(_) | TokenKind::Symbol(_) | TokenKind::Character(_) => {
+                match self.parse_literal() {
+                    Expression::Literal(lit, span) => Some((MapPatternDefault::Literal(lit), span)),
+                    _ => None,
+                }
+            }
+            TokenKind::Identifier(name)
+                if matches!(name.as_str(), "nil" | "true" | "false")
+                    && Self::ends_map_pattern_entry(self.peek_kind()) =>
+            {
+                let default = match name.as_str() {
+                    "nil" => MapPatternDefault::Nil,
+                    "true" => MapPatternDefault::True,
+                    _ => MapPatternDefault::False,
+                };
+                Some((default, self.advance().span()))
+            }
+            TokenKind::ListOpen if matches!(self.peek_kind(), Some(TokenKind::RightParen)) => {
+                self.advance();
+                let end = self.advance().span();
+                Some((
+                    MapPatternDefault::Literal(Literal::List(Vec::new())),
+                    value_span.merge(end),
+                ))
+            }
+            TokenKind::MapOpen if matches!(self.peek_kind(), Some(TokenKind::RightBrace)) => {
+                self.advance();
+                let end = self.advance().span();
+                Some((MapPatternDefault::EmptyMap, value_span.merge(end)))
+            }
+            _ => None,
+        };
+        let parsed = parsed.filter(|_| Self::ends_map_pattern_entry(Some(self.current_kind())));
+        if let Some((default, span)) = parsed {
+            return Some((default, if negative { eq_span.merge(span) } else { span }));
+        }
+        let bad = self.skip_to_map_pattern_entry_end(value_span);
+        self.diagnostics.push(
+            Diagnostic::error("the default of an optional key must be a literal", bad).with_hint(
+                "use a number, string, symbol, character, nil, true, false, #() or #{}; \
+                 for a computed default, bind the key without one and use `ifNil:`",
+            ),
+        );
+        None
+    }
+
+    /// Whether `kind` can follow a complete map-pattern entry.
+    fn ends_map_pattern_entry(kind: Option<&TokenKind>) -> bool {
+        matches!(kind, None | Some(TokenKind::RightBrace | TokenKind::Eof))
+            || matches!(kind, Some(TokenKind::BinarySelector(s)) if s.as_str() == "," || s.as_str() == ",?")
+    }
+
+    /// Skips tokens up to the next top-level `,`, `,?` or `}` of the enclosing
+    /// map pattern, and answers the span skipped (at least `from`).
+    fn skip_to_map_pattern_entry_end(&mut self, from: Span) -> Span {
+        let mut span = from;
+        let mut depth: usize = 0;
+        loop {
+            let kind = self.current_kind();
+            if depth == 0 && Self::ends_map_pattern_entry(Some(kind)) || self.is_at_end() {
+                return span;
+            }
+            match kind {
+                TokenKind::LeftBrace
+                | TokenKind::MapOpen
+                | TokenKind::ArrayOpen
+                | TokenKind::ListOpen
+                | TokenKind::LeftBracket
+                | TokenKind::LeftParen => depth += 1,
+                TokenKind::RightBrace | TokenKind::RightBracket | TokenKind::RightParen => {
+                    depth = depth.saturating_sub(1);
+                }
+                _ => {}
+            }
+            span = span.merge(self.advance().span());
+        }
+    }
+
+    /// Reports an optional key's value that is not a binding (ADR 0155): a
+    /// literal is an error, a bare `_` tests nothing (warning), and a
+    /// default needs a name to bind.
+    fn check_optional_map_value(
+        &mut self,
+        value: &Pattern,
+        default: Option<&(MapPatternDefault, Span)>,
+        question: Span,
+    ) {
+        match value {
+            Pattern::Variable(_) => {}
+            Pattern::Type { binding, .. } if binding.name != "_" => {}
+            Pattern::Type { .. } => {
+                if let Some((_, span)) = default {
+                    self.diagnostics.push(Diagnostic::error(
+                        "a default needs a name to bind; `_ :: T` binds nothing",
+                        *span,
+                    ));
+                }
+            }
+            Pattern::Wildcard(span) => {
+                self.diagnostics.push(
+                    Diagnostic::warning(
+                        "an optional key bound to `_` has no effect",
+                        question.merge(*span),
+                    )
+                    .with_hint("remove the entry"),
+                );
+            }
+            other => {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "an optional key must bind a variable or a type pattern, not a literal",
+                        other.span(),
+                    )
+                    .with_hint("match the key as required, or bind it and compare"),
+                );
+            }
+        }
+    }
+
+    /// Reports a key that is both required and optional in one map pattern.
+    fn check_mixed_optional_duplicate(
+        &mut self,
+        pairs: &[MapPatternPair],
+        key: &MapPatternKey,
+        optional: bool,
+        span: Span,
+    ) {
+        if pairs
+            .iter()
+            .any(|p| &p.key == key && p.is_optional() != optional)
+        {
+            self.diagnostics.push(Diagnostic::error(
+                "a key cannot be both required and optional in one map pattern",
+                span,
+            ));
         }
     }
 

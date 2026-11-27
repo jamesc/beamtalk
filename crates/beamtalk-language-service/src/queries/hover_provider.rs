@@ -1773,6 +1773,30 @@ mod tests {
     }
 
     #[test]
+    fn hover_on_optional_map_key_binding_shows_nil_widened_type() {
+        // ADR 0155: `?#a => v` over `#{?#a => Integer}` binds `Integer | Nil`;
+        // with a fitting default it binds `Integer`.
+        let src = "Object subclass: M\n  run: o :: #{?#a => Integer} =>\n    #{?#a => v, ?#a => w = 0} := o\n    v printString\n    w printString\n";
+        let v = hover_at(src, Position::new(3, 4)).expect("hover on v");
+        assert!(v.contents.contains("Integer | Nil"), "got: {}", v.contents);
+        let w = hover_at(src, Position::new(4, 4)).expect("hover on w");
+        assert!(
+            w.contents.contains("Integer") && !w.contents.contains("Nil"),
+            "got: {}",
+            w.contents
+        );
+    }
+
+    #[test]
+    fn hover_on_optional_map_key_pattern_variable_names_it() {
+        // The binding site of an optional key is a pattern variable like any other.
+        let src = "x match: [#{?#port => p = 80} -> p]";
+        let col = u32::try_from(src.find("p =").expect("binding")).expect("small");
+        let hover = hover_at(src, Position::new(0, col)).expect("hover on p");
+        assert!(hover.contents.contains("`p`"), "got: {}", hover.contents);
+    }
+
+    #[test]
     fn hover_omits_tier_for_sendable() {
         let src = "Object subclass: M\n  run: n :: Integer =>\n    n printString\n";
         let hover = hover_at(src, Position::new(2, 4)).expect("hover");

@@ -329,11 +329,7 @@ fn map_pat(pairs: Vec<MapPatternPair>) -> Pattern {
 }
 
 fn sym_pair(key: &str, value: Pattern) -> MapPatternPair {
-    MapPatternPair {
-        key: MapPatternKey::Symbol(key.into()),
-        value,
-        span: s(),
-    }
+    MapPatternPair::required(MapPatternKey::Symbol(key.into()), value, s())
 }
 
 // generate_destructure_bindings_from_var: exercises the delegating path through

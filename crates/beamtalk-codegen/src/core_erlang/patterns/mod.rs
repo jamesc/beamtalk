@@ -12,6 +12,8 @@
 //! - [`type_tests`] — the `Pattern::Type` (`binding :: ClassName`) runtime
 //!   test strategies `generate_match`'s chain dispatches to (ADR 0107
 //!   Phase A)
+//! - [`optional_map_keys`] — `match:` arms whose map pattern has an
+//!   optional key (ADR 0155)
 //! - [`destructure`] — the general-purpose destructuring-assignment
 //!   extraction helpers shared by block bodies, loop/conditional/exception
 //!   bodies, and the REPL (`beamtalk-repl`)
@@ -23,6 +25,7 @@ mod array_patterns;
 pub(in crate::core_erlang) mod binary_patterns;
 mod destructure;
 pub(in crate::core_erlang) mod match_lowering;
+mod optional_map_keys;
 mod type_tests;
 
 pub(super) use match_lowering::MatchThreading;
@@ -30,7 +33,7 @@ pub(in crate::core_erlang) use type_tests::guard_boolean_test;
 
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::MapPatternKey;
+use beamtalk_core::ast::{MapPatternDefault, MapPatternKey, MapPatternPair};
 
 /// Generates a Core Erlang document for a map pattern key.
 ///
@@ -47,6 +50,19 @@ fn map_pattern_key_doc(key: &MapPatternKey) -> Document<'static> {
     match key {
         MapPatternKey::Symbol(s) => leaf::atom(s.as_str()),
         MapPatternKey::StringLit(s) => leaf::tagged_string_lit(s.as_str()),
+    }
+}
+
+/// The Core Erlang constant an optional map-pattern key binds when it is
+/// absent (ADR 0155): its default, or `'nil'` when it has none. Shared by
+/// the `match:` arm and destructure lowerings.
+fn map_pattern_default_doc(pair: &MapPatternPair) -> Document<'static> {
+    match pair.default.as_ref().map(|(d, _)| d) {
+        None | Some(MapPatternDefault::Nil) => leaf::atom("nil"),
+        Some(MapPatternDefault::True) => leaf::atom("true"),
+        Some(MapPatternDefault::False) => leaf::atom("false"),
+        Some(MapPatternDefault::EmptyMap) => Document::Str("~{}~"),
+        Some(MapPatternDefault::Literal(lit)) => super::CoreErlangGenerator::literal_doc(lit),
     }
 }
 

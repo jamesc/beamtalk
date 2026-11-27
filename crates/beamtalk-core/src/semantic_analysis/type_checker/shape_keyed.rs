@@ -447,6 +447,15 @@ impl TypeChecker {
         (!parts.is_empty()).then(|| InferredType::union_of(&parts))
     }
 
+    /// Whether `key` is absent from every value of `scrutinee_ty`: the type is
+    /// purely closed shapes (and `Nil`), and none of them names the key
+    /// (ADR 0155).
+    pub(super) fn map_key_always_absent(scrutinee_ty: &InferredType, key: &str) -> bool {
+        SplitReceiver::of(scrutinee_ty).is_some_and(|split| {
+            split.others.is_empty() && Self::shape_value_parts(&split, key).is_empty()
+        })
+    }
+
     /// Types the variables of a top-level map pattern `#{#k => v}` matched
     /// against `scrutinee_ty` (a shape, or a union of shapes and `Nil`):
     /// `v :: T` for a named key, `v :: Object` for an unnamed key of an open
@@ -474,13 +483,14 @@ impl TypeChecker {
             };
             let parts = Self::shape_value_parts(&split, key);
             if parts.is_empty() {
-                self.warn_key_not_in_shape(
-                    scrutinee_ty,
-                    &split,
-                    key,
-                    "This pattern can never match",
-                    pair.span,
-                );
+                // ADR 0155: an optional key the shape does not name is always
+                // absent, so the pattern still matches and binds the default.
+                let consequence = if pair.is_optional() {
+                    "The key is always absent, so the pattern binds its default (or nil)"
+                } else {
+                    "This pattern can never match"
+                };
+                self.warn_key_not_in_shape(scrutinee_ty, &split, key, consequence, pair.span);
             } else if let Pattern::Variable(id) = &pair.value {
                 env.set_local(id.name.clone(), InferredType::union_of(&parts));
             }

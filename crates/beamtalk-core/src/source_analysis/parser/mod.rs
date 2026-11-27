@@ -2624,6 +2624,13 @@ impl Parser {
             match self.peek_at(offset) {
                 None | Some(TokenKind::Eof) => return false,
                 Some(TokenKind::DoubleColon) => saw_annotation = true,
+                // An optional map key (`?`, or `,?`) or its default (`=`,
+                // `=-`), ADR 0155: only the pattern grammar has them.
+                Some(TokenKind::BinarySelector(s))
+                    if matches!(s.as_str(), "?" | ",?" | "=" | "=-") =>
+                {
+                    saw_annotation = true;
+                }
                 Some(
                     TokenKind::LeftBrace
                     | TokenKind::MapOpen

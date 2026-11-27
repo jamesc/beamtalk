@@ -217,3 +217,76 @@ fn protocol_type_pattern_keeps_the_shape() {
     // `Dictionary` is `Printable`, so the arm is reachable and `v` is not `Never`.
     silent("  m: o :: #{#a => Integer} => o match: [p :: Printable -> p printString; _ -> \"\"]");
 }
+
+// ── ADR 0155 / BT-5344: optional map-pattern keys ─────────────
+
+#[test]
+fn optional_key_without_default_binds_value_or_nil() {
+    // A shape key binds `T | Nil` behind `?`, in an arm and a destructure.
+    expects(
+        "  m: o :: #{?#a => Integer} => o match: [#{?#a => v} -> self takeInteger: v; _ -> 0]",
+        "got Integer | Nil",
+    );
+    expects(
+        "  m: o :: #{?#a => Integer} =>\n    #{?#a => v} := o\n    self takeInteger: v",
+        "got Integer | Nil",
+    );
+}
+
+#[test]
+fn optional_key_with_fitting_default_binds_value_type() {
+    silent(
+        "  m: o :: #{?#a => Integer} => o match: [#{?#a => v = 0} -> self takeInteger: v; _ -> 0]",
+    );
+    silent("  m: o :: #{?#a => Integer} =>\n    #{?#a => v = 0} := o\n    self takeInteger: v");
+    expects(
+        "  m: o :: #{?#a => Integer} =>\n    #{?#a => v = \"none\"} := o\n    self takeInteger: v",
+        "got Integer | String",
+    );
+}
+
+#[test]
+fn optional_key_with_type_test_binds_tested_type() {
+    // String keys type through the `x :: T` test: `T | Nil`, or `T` with a
+    // fitting default.
+    expects(
+        "  m: o :: Dictionary => o match: [#{?\"n\" => n :: Integer} -> self takeString: n; _ -> 0]",
+        "got Integer | Nil",
+    );
+    silent(
+        "  m: o :: Dictionary => o match: [#{?\"n\" => n :: Integer = 3} -> self takeInteger: n; _ -> 0]",
+    );
+    silent(
+        "  m: o :: Dictionary =>\n    #{?\"n\" => n :: Integer = 3} := o\n    self takeInteger: n",
+    );
+}
+
+#[test]
+fn optional_key_default_must_fit_type_test() {
+    expects(
+        "  m: o :: Dictionary => o match: [#{?#n => n :: Integer = \"none\"} -> n; _ -> 0]",
+        "String",
+    );
+}
+
+#[test]
+fn optional_key_not_in_closed_shape_is_always_absent() {
+    expects(
+        "  m: o :: #{#a => Integer} =>\n    #{?#b => v} := o\n    v",
+        "`#b` is not a key of",
+    );
+    // Always absent: the binding is exactly the default's type, so the
+    // not-a-key warning is the only diagnostic.
+    let msgs = messages(
+        "  m: o :: #{#a => Integer} => o match: [#{?#b => v = 0} -> self takeInteger: v; _ -> 0]",
+    );
+    assert_eq!(msgs.len(), 1, "got {msgs:#?}");
+    assert!(msgs[0].contains("`#b` is not a key of"), "got {msgs:#?}");
+}
+
+#[test]
+fn optional_key_over_untyped_dictionary_stays_dynamic() {
+    silent(
+        "  m: o :: Dictionary =>\n    #{?\"a\" => v, ?#b => w = 1} := o\n    self takeInteger: v\n    self takeString: w",
+    );
+}

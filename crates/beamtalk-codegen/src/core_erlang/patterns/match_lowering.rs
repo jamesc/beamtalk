@@ -22,6 +22,7 @@ use super::super::control_flow::ArmFrame;
 use super::super::threaded_ir::{ThreadedValue, VersionPrefix};
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use super::binary_patterns::{binary_needs_segmented, nested_split_span, pattern_has_binary};
+use super::optional_map_keys::pattern_has_optional_key;
 use super::type_tests::pattern_has_nested_type;
 use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::Document;
@@ -214,6 +215,7 @@ impl CoreErlangGenerator {
         let has_type_arm = arms.iter().any(|arm| {
             matches!(arm.pattern, Pattern::Type { .. })
                 || (pattern_has_nested_type(&arm.pattern) && !pattern_has_binary(&arm.pattern))
+                || pattern_has_optional_key(&arm.pattern)
         });
         // BT-4173: a top-level binary arm unwraps a `String` scrutinee to
         // its bytes before the native binary match (see
@@ -791,6 +793,14 @@ impl CoreErlangGenerator {
         // position, which is not expressible as a single Core Erlang guard.
         if let Pattern::Type { binding, class, .. } = &arm.pattern {
             return self.generate_type_pattern(match_var, arm, binding, class, rest, threading);
+        }
+
+        // ADR 0155: an optional map key is read after the native match, so
+        // its binding is a `let` the clause guard could not see.
+        if let Pattern::Map { pairs, .. } = &arm.pattern
+            && pattern_has_optional_key(&arm.pattern)
+        {
+            return self.generate_optional_map_arm(match_var, arm, pairs, rest, threading);
         }
 
         // BT-4096: a top-level binary pattern with dependent sizes compiles

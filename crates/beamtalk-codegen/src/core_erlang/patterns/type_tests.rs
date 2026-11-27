@@ -249,7 +249,7 @@ impl CoreErlangGenerator {
     /// `case 'true' of <'true'> when GUARD -> body <'true'> when 'true' ->
     /// rest end`: the guard sits in Core Erlang guard position, so a guard
     /// that raises fails silently and falls through to `rest`.
-    fn guarded_success_doc(
+    pub(super) fn guarded_success_doc(
         guard_doc: Document<'static>,
         body_doc: Document<'static>,
         rest_doc: &Document<'static>,
@@ -1082,9 +1082,21 @@ impl CoreErlangGenerator {
         success: Document<'static>,
         rest: &Document<'static>,
     ) -> Document<'static> {
+        let is_untagged = self.untagged_map_test_doc(match_var);
+        Self::branch_on_test(is_untagged, success, rest)
+    }
+
+    /// A boolean expression: whether `match_var` is a plain `Dictionary`, an
+    /// Erlang map with no class tag (`'$beamtalk_class'`) and no class-module
+    /// key. Shared by the `x :: Dictionary` type test and the optional-key
+    /// map patterns of ADR 0155.
+    pub(in crate::core_erlang) fn untagged_map_test_doc(
+        &mut self,
+        match_var: &str,
+    ) -> Document<'static> {
         let tagged = self.fresh_temp_var("Tagged");
         let v = leaf::var(match_var.to_string());
-        let is_untagged = docvec![
+        docvec![
             "case call 'erlang':'is_map'(",
             v.clone(),
             ") of ",
@@ -1104,7 +1116,6 @@ impl CoreErlangGenerator {
             leaf::var(tagged),
             "> when 'true' -> 'false' end ",
             "<'false'> when 'true' -> 'false' end"
-        ];
-        Self::branch_on_test(is_untagged, success, rest)
+        ]
     }
 }

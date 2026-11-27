@@ -11,7 +11,9 @@
 //! `ifTrue:`/`ifFalse:` guard (ADR 0068 Phase 1g), and the `Never`/divergence
 //! detection ([`Self::block_diverges`]) that narrowing depends on.
 
-use crate::ast::{Expression, MatchArm, MessageSelector, Pattern, WellKnownSelector};
+use crate::ast::{
+    Expression, MapPatternDefault, MatchArm, MessageSelector, Pattern, WellKnownSelector,
+};
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
@@ -188,6 +190,73 @@ impl TypeChecker {
                 self.emit_assignment_type_mismatch(&mismatch, binding.span.merge(class.span));
             }
             env.set_local(binding.name.clone(), declared);
+        }
+    }
+
+    /// Widen the bindings of a top-level map pattern's optional keys
+    /// (ADR 0155), once every other rule has typed them: an absent key binds
+    /// the default `D`, or `nil`, so a binding of type `T` becomes `T | D`
+    /// or `T | Nil`. A `Dynamic` binding stays `Dynamic`. A key that no
+    /// closed shape of the scrutinee names is always absent and binds exactly
+    /// `D` (or `Nil`). A default that does not fit the pair's `x :: T` draws
+    /// a warning.
+    pub(in crate::semantic_analysis::type_checker) fn widen_optional_map_key_types(
+        &mut self,
+        pattern: &Pattern,
+        scrutinee_ty: &InferredType,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+    ) {
+        let Pattern::Map { pairs, .. } = pattern else {
+            return;
+        };
+        for pair in pairs.iter().filter(|p| p.is_optional()) {
+            let default_ty = pair.default.as_ref().map(|(d, _)| match d {
+                MapPatternDefault::Literal(lit) => Self::infer_literal(lit),
+                MapPatternDefault::Nil => {
+                    InferredType::known(WellKnownClass::UndefinedObject.as_str())
+                }
+                MapPatternDefault::True | MapPatternDefault::False => {
+                    InferredType::known(WellKnownClass::Boolean.as_str())
+                }
+                MapPatternDefault::EmptyMap => InferredType::known("Dictionary"),
+            });
+            if let (Pattern::Type { class, .. }, Some((_, span)), Some(d)) =
+                (&pair.value, &pair.default, &default_ty)
+            {
+                let declared = self.resolve_pattern_class(class);
+                if let Some(mismatch) = Self::detect_assignment_type_mismatch(
+                    d,
+                    &declared,
+                    hierarchy,
+                    self.protocol_registry.as_deref(),
+                ) {
+                    self.emit_assignment_type_mismatch(&mismatch, *span);
+                }
+            }
+            let name = match &pair.value {
+                Pattern::Variable(id) => &id.name,
+                Pattern::Type { binding, .. } if binding.name != "_" => &binding.name,
+                _ => continue,
+            };
+            let absent_ty = default_ty
+                .unwrap_or_else(|| InferredType::known(WellKnownClass::UndefinedObject.as_str()));
+            let always_absent = match &pair.key {
+                crate::ast::MapPatternKey::Symbol(key) => {
+                    Self::map_key_always_absent(scrutinee_ty, key)
+                }
+                crate::ast::MapPatternKey::StringLit(_) => false,
+            };
+            let bound = if always_absent {
+                absent_ty
+            } else {
+                match env.get_local(name) {
+                    Some(ty @ (InferredType::Dynamic(_) | InferredType::Never)) => ty,
+                    Some(ty) => InferredType::union_of(&[ty, absent_ty]),
+                    None => continue,
+                }
+            };
+            env.set_local(name.clone(), bound);
         }
     }
 
@@ -914,6 +983,13 @@ impl TypeChecker {
                 // rewrite above so a nested binding that shadows the
                 // scrutinee variable keeps its narrowed type.
                 self.narrow_nested_type_patterns(
+                    &arm.pattern,
+                    &residual_scrutinee_ty,
+                    hierarchy,
+                    &mut arm_env,
+                );
+                // ADR 0155: an optional key may be absent.
+                self.widen_optional_map_key_types(
                     &arm.pattern,
                     &residual_scrutinee_ty,
                     hierarchy,

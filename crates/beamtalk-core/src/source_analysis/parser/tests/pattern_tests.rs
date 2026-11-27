@@ -1087,3 +1087,115 @@ fn parse_cons_literal_is_still_an_expression() {
         Expression::MessageSend { .. }
     ));
 }
+
+// ── ADR 0155 / BT-5344: optional map-pattern keys ─────────────
+
+fn messages(src: &str, severity: crate::source_analysis::Severity) -> Vec<String> {
+    let (_module, diags) = parse_source(src);
+    diags
+        .iter()
+        .filter(|d| d.severity == severity)
+        .map(|d| d.message.to_string())
+        .collect()
+}
+
+fn in_method(body: &str) -> String {
+    format!("Object subclass: Foo\n  m: x =>\n    {body}\n")
+}
+
+#[test]
+fn optional_map_keys_parse_for_string_and_symbol_keys() {
+    use crate::source_analysis::Severity;
+    for body in [
+        "#{?\"id\" => id, ?#port => port = 80} := x",
+        "#{#a => a,?#b => b} := x",
+        "#{?#n => n = -1, ?#m => m =-2} := x",
+        "#{?#t => t = #(), ?#d => d = #{}, ?#b => b = true, ?#c => c = false, ?#e => e = nil} := x",
+        "#{?\"s\" => s = \"x\", ?#y => y = #sym, ?#ch => ch = $a, ?#f => f = 1.5} := x",
+        "x match: [#{#id => id, ?\"p\" => p :: Integer = 3} -> p; _ -> 0]",
+        "x match: [#{?#k => _ :: String} -> 1; _ -> 0]",
+        "x match: [#{#k => _ :: String} -> 1; _ -> 0]",
+    ] {
+        let errors = messages(&in_method(body), Severity::Error);
+        assert!(errors.is_empty(), "`{body}` should parse, got: {errors:?}");
+    }
+}
+
+#[test]
+fn optional_map_key_pair_records_marker_and_default() {
+    let (module, diags) = parse_source("#{?#port => port = 80} := x");
+    assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
+    let crate::ast::Expression::DestructureAssignment { pattern, .. } =
+        &module.expressions[0].expression
+    else {
+        panic!("expected a destructure");
+    };
+    let Pattern::Map { pairs, .. } = pattern else {
+        panic!("expected a map pattern, got {pattern:?}");
+    };
+    assert!(pairs[0].is_optional());
+    assert!(matches!(
+        pairs[0].default,
+        Some((
+            crate::ast::MapPatternDefault::Literal(crate::ast::Literal::Integer(80)),
+            _
+        ))
+    ));
+}
+
+#[test]
+fn optional_map_key_misuse_is_reported() {
+    use crate::source_analysis::Severity;
+    for (body, expected) in [
+        (
+            "#{?#type => \"blocks\"} := x",
+            "an optional key must bind a variable or a type pattern, not a literal",
+        ),
+        (
+            "#{?\"t\" => t = defaults timeout} := x",
+            "the default of an optional key must be a literal",
+        ),
+        (
+            "#{?#t => t = #(1)} := x",
+            "the default of an optional key must be a literal",
+        ),
+        (
+            "#{#id => id = 0} := x",
+            "only an optional key can have a default",
+        ),
+        (
+            "#{?#k => _ :: String = \"a\"} := x",
+            "a default needs a name to bind",
+        ),
+        (
+            "#{#k => a, ?#k => b} := x",
+            "a key cannot be both required and optional in one map pattern",
+        ),
+        (
+            "{#ok, #{?#k => v}} := x",
+            "optional keys are supported only in a top-level map pattern",
+        ),
+        (
+            "x match: [Result ok: #{?#k => v} -> v; _ -> 0]",
+            "optional keys are supported only in a top-level map pattern",
+        ),
+    ] {
+        let errors = messages(&in_method(body), Severity::Error);
+        assert!(
+            errors.iter().any(|m| m.contains(expected)),
+            "`{body}` should report `{expected}`, got: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn optional_map_key_bound_to_wildcard_warns() {
+    use crate::source_analysis::Severity;
+    let warnings = messages(&in_method("#{?#k => _} := x"), Severity::Warning);
+    assert!(
+        warnings
+            .iter()
+            .any(|m| m.contains("an optional key bound to `_` has no effect")),
+        "got: {warnings:?}"
+    );
+}

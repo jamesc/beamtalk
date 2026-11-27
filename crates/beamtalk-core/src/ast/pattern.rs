@@ -230,8 +230,52 @@ pub struct MapPatternPair {
     pub key: MapPatternKey,
     /// The pattern to bind the value to.
     pub value: Pattern,
+    /// Span of the `?` marker when the key is optional (ADR 0155): an
+    /// absent key binds the default, or `nil`, instead of failing the match.
+    pub optional: Option<Span>,
+    /// The constant an optional key binds when it is absent (ADR 0155),
+    /// with its span. Only an optional key can have one.
+    pub default: Option<(MapPatternDefault, Span)>,
     /// Source location.
     pub span: Span,
+}
+
+impl MapPatternPair {
+    /// A required pair: `key => value`.
+    #[must_use]
+    pub fn required(key: MapPatternKey, value: Pattern, span: Span) -> Self {
+        Self {
+            key,
+            value,
+            optional: None,
+            default: None,
+            span,
+        }
+    }
+
+    /// Whether the key is optional (`?key => value`, ADR 0155).
+    #[must_use]
+    pub const fn is_optional(&self) -> bool {
+        self.optional.is_some()
+    }
+}
+
+/// The default of an optional map-pattern key (ADR 0155): a scalar constant,
+/// so a pattern stays free of side effects and lowers to a Core Erlang
+/// constant.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MapPatternDefault {
+    /// A number, string, symbol or character literal, or the empty list
+    /// `#()` (`Literal::List(vec![])`).
+    Literal(Literal),
+    /// `nil`.
+    Nil,
+    /// `true`.
+    True,
+    /// `false`.
+    False,
+    /// The empty map `#{}`.
+    EmptyMap,
 }
 
 /// A segment in a binary pattern or a binary construction.
