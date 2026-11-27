@@ -679,3 +679,65 @@ Object subclass: Probe
         "must name the error type: {diags:?}"
     );
 }
+
+/// A union with no `Result` member names the error type too.
+#[test]
+fn union_return_with_no_result_member_names_error_type() {
+    let diags = type_messages(
+        r"Value subclass: ZErr
+Object subclass: Probe
+  class src -> Result(List(String), ZErr) => Result ok: #()
+  class a -> String | Nil =>
+    r := self src
+    r isError ifTrue: [^r]
+    nil
+",
+    );
+    let mismatches = return_mismatches(&diags);
+    assert_eq!(mismatches.len(), 1, "one return mismatch: {diags:?}");
+    assert!(
+        mismatches[0].contains("`^` returns Result(Dynamic, ZErr)"),
+        "must name the error type: {diags:?}"
+    );
+}
+
+/// Wording only: a union `Result` member whose error type fits stays silent,
+/// with a typed or a bare `Result` member.
+#[test]
+fn union_return_with_fitting_error_type_stays_silent() {
+    for declared in ["Result(Dictionary, Object) | Nil", "Result | Nil"] {
+        let source = format!(
+            "Value subclass: ZErr
+Object subclass: Probe
+  class src -> Result(List(String), ZErr) => Result ok: #()
+  class a -> {declared} =>
+    r := self src
+    r isError ifTrue: [^r]
+    nil
+"
+        );
+        let diags = type_messages(&source);
+        assert!(
+            return_mismatches(&diags).is_empty(),
+            "`{declared}` accepts a `ZErr` error variant: {diags:?}"
+        );
+    }
+}
+
+/// The tail site (`body returns ...`) of a union return keeps a generic
+/// body's type arguments, and is still reported exactly once.
+#[test]
+fn union_return_tail_site_keeps_type_arguments() {
+    let diags = type_messages(
+        r#"Object subclass: Probe
+  class a -> Integer | Nil =>
+    #("x") collect: [:e | e]
+"#,
+    );
+    let mismatches = return_mismatches(&diags);
+    assert_eq!(mismatches.len(), 1, "one return mismatch: {diags:?}");
+    assert!(
+        mismatches[0].contains("declares return type Integer | Nil, but body returns List(String)"),
+        "{diags:?}"
+    );
+}

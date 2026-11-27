@@ -342,8 +342,10 @@ impl TypeChecker {
     /// `-> Result(U, E')`, giving `Result(U, E)`. It is checked the same way
     /// (`Never` and `U` both fit `U`), but a mismatch then reads "body returns
     /// `Result(U, E)`" and names the error type, not a `Never` the user never
-    /// wrote. A declared return that is not a two-argument `Result` leaves
-    /// `ty` unchanged.
+    /// wrote. For a union return (BT-5300) the success slot comes from the
+    /// union's single `Result` member, else `Dynamic` (no single member to
+    /// copy; rendered as `Dynamic`). Any other declared return leaves `ty`
+    /// unchanged.
     pub(in super::super) fn error_variant_as_declared_success(
         &self,
         method: &crate::ast::MethodDefinition,
