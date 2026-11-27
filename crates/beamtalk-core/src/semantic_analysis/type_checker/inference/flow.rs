@@ -248,18 +248,16 @@ impl TypeChecker {
             Pattern::Constructor {
                 class, keywords, ..
             } => {
-                let args = position.and_then(|p| match Self::non_nil_type(p) {
-                    InferredType::Known {
-                        class_name,
-                        type_args,
-                        ..
-                    } if class.name == "Result" && class_name == "Result" => Some(type_args),
-                    _ => None,
-                });
+                // `Result(T, E)` payload slots: `ok:` is `T`, `error:` is `E`.
+                let scrutinee = position.map(Self::non_nil_type);
+                let args = scrutinee
+                    .as_ref()
+                    .filter(|_| class.name == "Result")
+                    .and_then(Self::result_type_args);
                 for (kw, e) in keywords {
-                    let pos = args.as_ref().and_then(|a| match kw.name.as_str() {
-                        "ok:" => a.first(),
-                        "error:" => a.get(1),
+                    let pos = args.and_then(|(ok, err)| match kw.name.as_str() {
+                        "ok:" => Some(ok),
+                        "error:" => Some(err),
                         _ => None,
                     });
                     self.narrow_in_position(e, pos, hierarchy, env);
@@ -830,7 +828,7 @@ impl TypeChecker {
                         arm_env.set(key.clone(), residual_scrutinee_ty.clone());
                     }
                 }
-                // BT-5332: nested `x :: T` bindings narrow to `T`, after the scrutinee-key
+                // BT-5332/BT-5336: nested `x :: T` bindings narrow to `T` (intersected with the position type when known), after the scrutinee-key
                 // rewrite above so a nested binding that shadows the
                 // scrutinee variable keeps its narrowed type.
                 self.narrow_nested_type_patterns(
