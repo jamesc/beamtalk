@@ -380,6 +380,17 @@ marked_answer_test_() ->
                 )
             )
         ),
+        %% `-emu_args` echoes the `-eval` text, which holds the mark only split.
+        ?_assertEqual(
+            {ok, "[a]."},
+            marked_answer(
+                list_to_binary(
+                    "Executing: erl.exe -eval M = \"" ++ lists:sublist(Mark, 4) ++ "\" ++ \"" ++
+                        lists:nthtail(4, Mark) ++ "\", io:format(\"~s~w.~s\", [M, x, M])\r\n" ++
+                        Mark ++ "[a]." ++ Mark
+                )
+            )
+        ),
         ?_assertEqual(more, marked_answer(list_to_binary(Mark ++ "[a")))
     ].
 
@@ -419,11 +430,14 @@ ours_dist_words(Text) ->
 erl_dist_words(Erl, Dir, N, Text) ->
     File = filename:join(Dir, "t" ++ integer_to_list(N) ++ ".args"),
     ok = file:write_file(File, Text),
-    Mark = binary_to_list(?ERL_ANSWER_MARK),
+    %% The mark is built when erl runs, so the command line (which `-emu_args`
+    %% echoes) never holds it whole.
+    {MarkHead, MarkTail} = lists:split(4, binary_to_list(?ERL_ANSWER_MARK)),
     Eval =
-        "io:format(\"" ++ Mark ++ "~w." ++ Mark ++
-            "\", [[{K, case init:get_argument(K) of {ok, L} -> lists:append(L); "
-            "error -> [] end} || K <- [ssl_dist_opt, ssl_dist_optfile, proto_dist]]]), halt().",
+        "M = \"" ++ MarkHead ++ "\" ++ \"" ++ MarkTail ++
+            "\", io:format(\"~s~w.~s\", [M, [{K, case init:get_argument(K) of "
+            "{ok, L} -> lists:append(L); error -> [] end} || "
+            "K <- [ssl_dist_opt, ssl_dist_optfile, proto_dist]], M]), halt().",
     Port = open_port(
         {spawn_executable, Erl},
         [{args, ["-noshell", "-args_file", File, "-eval", Eval]}, exit_status, stderr_to_stdout]

@@ -75,10 +75,11 @@ check_segments(Path, OsType) ->
 
 %% Absolute on any platform: a leading separator (POSIX root, UNC) or a drive
 %% (`C:`, `C:\\`), whatever the node's own OS. A Windows node also reads any
-%% `L:` prefix as a drive (`a:b` is drive-relative there), so it refuses that
-%% too; a POSIX node reads `a:b` as an ordinary file name. This is the rule
-%% `filename:pathtype/1` applies on each OS, spelled out so a test on one OS can
-%% check the other's reading.
+%% one byte then `:` as a drive (`a:b` and `1:b` are drive-relative there, as
+%% OTP's own win32 `filename:pathtype/1` says), so it refuses that too; a POSIX
+%% node reads `a:b` as an ordinary file name. So every path the host's
+%% `pathtype` calls non-relative is refused, and on a Windows host the two agree
+%% exactly; beamtalk_repl_paths_tests checks both over every first byte.
 -spec is_absolute(binary(), {atom(), atom()}) -> boolean().
 is_absolute(<<C, _/binary>>, _OsType) when C =:= $/; C =:= $\\ -> true;
 is_absolute(<<L, $:>>, _OsType) when ?IS_LETTER(L) -> true;
@@ -86,6 +87,7 @@ is_absolute(<<L, $:, Sep, _/binary>>, _OsType) when
     ?IS_LETTER(L), Sep =:= $/ orelse Sep =:= $\\
 ->
     true;
-is_absolute(<<L, $:, _/binary>>, {win32, _}) when ?IS_LETTER(L) -> true;
+is_absolute(<<_Drive, $:, _/binary>>, {win32, _}) ->
+    true;
 is_absolute(_Path, _OsType) ->
     false.

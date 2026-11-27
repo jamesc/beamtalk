@@ -39,37 +39,32 @@ drive_relative_names_depend_on_the_os_test_() ->
             ?_assertEqual(ok, beamtalk_repl_paths:check_relative(Path, ?POSIX)),
             ?_assertEqual({error, absolute}, beamtalk_repl_paths:check_relative(Path, ?WINDOWS))
         ]
-     || Path <- [<<"Z:x.bt">>, <<"a:notes.bt">>]
+     || Path <- [<<"Z:x.bt">>, <<"a:notes.bt">>, <<"1:x.bt">>, <<"_:x">>]
     ].
 
 %% check_relative/1 reads a path as this node's OS does, whichever OS runs the
-%% test: every path `filename:pathtype/1` calls absolute here is refused, and
-%% for the names only the drive rule decides (no leading separator, no `C:` or
-%% `C:\\`, which every OS refuses), the two agree exactly.
+%% test, over every first byte before `:`: each path `filename:pathtype/1` calls
+%% non-relative here is refused, and on a Windows host nothing else is (a POSIX
+%% host also refuses `C:` and `C:/`, which name a drive on any client).
 agrees_with_the_host_pathtype_test_() ->
-    [
-        ?_assertEqual(
-            {Path, filename:pathtype(Path) =/= relative},
-            {Path, beamtalk_repl_paths:check_relative(Path) =:= {error, absolute}}
-        )
-     || Path <- [<<"src/Counter.bt">>, <<"Z:x.bt">>, <<"a:notes.bt">>, <<"src/C:/x">>]
-    ] ++
-        [
-            ?_assertEqual(
-                {Path, {error, absolute}}, {Path, beamtalk_repl_paths:check_relative(Path)}
-            )
-         || Path <- [
-                <<"/etc/passwd">>,
-                <<"\\windows">>,
-                <<"\\\\server\\share\\x">>,
-                <<"C:\\x.bt">>,
-                <<"c:/x.bt">>,
-                <<"C:">>,
-                <<"Z:x.bt">>,
-                <<"a:notes.bt">>
+    Win32 = element(1, os:type()) =:= win32,
+    Paths =
+        [<<"src/Counter.bt">>, <<"src/C:/x">>] ++
+            [
+                <<B, Suffix/binary>>
+             || B <- lists:seq(1, 255), Suffix <- [<<":">>, <<":x">>, <<":/">>, <<":\\">>]
             ],
-            filename:pathtype(Path) =/= relative
-        ].
+    [
+        ?_test(begin
+            HostAbsolute = filename:pathtype(Path) =/= relative,
+            Refused = beamtalk_repl_paths:check_relative(Path) =:= {error, absolute},
+            case Win32 of
+                true -> ?assertEqual({Path, HostAbsolute}, {Path, Refused});
+                false -> ?assertEqual({Path, true}, {Path, Refused orelse not HostAbsolute})
+            end
+        end)
+     || Path <- Paths
+    ].
 
 refuses_absolute_paths_test_() ->
     [
