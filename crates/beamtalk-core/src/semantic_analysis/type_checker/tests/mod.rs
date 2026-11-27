@@ -92,6 +92,7 @@ mod bt5329_result_branch_selector_table;
 mod bt5332_nested_type_pattern_narrowing;
 mod bt5333_bound_enforcement;
 mod bt5338_protocol_arg_conformance;
+mod bt5343_bound_check_sites;
 mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;
