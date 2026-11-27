@@ -19,7 +19,7 @@ report turns the per-repo notes into one verdict per feature.
   type parameters, protocol `extending:`, difference and intersection types,
   trait `overriding:`. Each has a `needs-spec` issue. These are questions for
   the owner, not recommendations to delete. Bounded type parameters (enforcement
-  is a day old) and `overriding:` (half of ADR 0127's conflict rule) carry the
+  landed 2026-11-26 and 27) and `overriding:` (half of ADR 0127's conflict rule) carry the
   strongest caveats; see [Removal candidates](#removal-candidates).
 - **Not assessable:** list cons patterns. The pattern form is still rejected
   (BT-5301, open).
@@ -317,7 +317,7 @@ candidate. Nothing is removed. Each has a `needs-spec` issue.
 
 | Feature | Issue | Caveat the owner should weigh |
 |---|---|---|
-| Bounded type parameters | BT-5347 | Enforcement landed in the last 24 hours, so there has been no time for use. The only fit found is a class that calls `<` on its type argument |
+| Bounded type parameters | BT-5347 | Enforcement landed on 2026-11-26 and 2026-11-27 (#5887, #5890, #5897, #5899), so there has been no time for use. The only fit found is a class that calls `<` on its type argument |
 | Protocol `extending:` | BT-5348 | Zero uses anywhere, including stdlib. ADR 0068 specified it |
 | Difference and intersection types | BT-5349 | The ADR 0102 review note of 2026-11-26 already asked to reconsider. Used only by their own tests. Not a syntax-only removal: the checker's `Negation` type also drives `Symbol` narrowing after a failed comparison |
 | Trait `overriding:` | BT-5350 | The acknowledgement half of ADR 0127's conflict rule. Zero uses because no conflict has arisen, not because it is wrong |
