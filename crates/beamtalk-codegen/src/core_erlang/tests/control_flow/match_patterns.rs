@@ -936,6 +936,30 @@ fn test_match_optional_map_key_ordering_guard_requires_non_nil() {
 }
 
 #[test]
+fn test_match_optional_map_key_parenthesised_guard_operand_requires_non_nil() {
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #{?#p => p} when: [(p) > 5] -> #big;\n      _ -> #small\n    ]\n";
+    let code = codegen_named(src, "foo");
+    assert_has(
+        "nil check on a parenthesised operand",
+        &code,
+        &["'=/='(P@, 'nil')"],
+    );
+}
+
+#[test]
+fn test_match_optional_map_key_nested_match_guard_requires_non_nil() {
+    // A guard of a `match:` nested in the arm body that orders the outer
+    // optional binding gets the same nil check.
+    let src = "Object subclass: Foo\n  test: x y: y =>\n    x match: [\n      #{?#p => p} -> y match: [_ when: [p > 5] -> #big; _ -> #small];\n      _ -> #none\n    ]\n";
+    let code = codegen_named(src, "foo");
+    assert_has(
+        "nil check in the nested guard",
+        &code,
+        &["'=/='(P@, 'nil')"],
+    );
+}
+
+#[test]
 fn test_match_required_map_key_ordering_guard_is_unchanged() {
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #{#n => n} when: [n > 5] -> #big;\n      _ -> #small\n    ]\n";
     let code = codegen_named(src, "foo");

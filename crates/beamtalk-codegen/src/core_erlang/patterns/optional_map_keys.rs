@@ -153,10 +153,12 @@ impl CoreErlangGenerator {
         for (name, var) in &optional_bindings {
             self.bind_var(name, var);
         }
-        // An optional binding with no default is `nil` when its key is absent;
-        // the guard must not order it by Erlang term order.
-        let outer_nil_vars = std::mem::replace(
-            &mut self.nil_when_absent_guard_vars,
+        // An optional binding with no default is `nil` when its key is absent:
+        // an ordering comparison on it, in this arm's guard or in a guard of a
+        // `match:` nested in its body, must not order it by Erlang term order.
+        // The set is extended for the guard and the body, then restored.
+        let outer_len = self.nil_when_absent_guard_vars.len();
+        self.nil_when_absent_guard_vars.extend(
             pairs
                 .iter()
                 .filter(|p| p.is_optional() && p.default.is_none())
@@ -166,17 +168,19 @@ impl CoreErlangGenerator {
                         Some(Self::to_core_erlang_var(&binding.name))
                     }
                     _ => None,
-                })
-                .collect(),
+                }),
         );
-        let guard_doc = arm
+        let lowered = arm
             .guard
             .as_ref()
             .map(|guard| self.generate_guard_expression(guard))
-            .transpose();
-        self.nil_when_absent_guard_vars = outer_nil_vars;
-        let guard_doc = guard_doc?;
-        let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
+            .transpose()
+            .and_then(|guard_doc| {
+                let body_doc = self.generate_match_arm_body(&arm.body, threading)?;
+                Ok((guard_doc, body_doc))
+            });
+        self.nil_when_absent_guard_vars.truncate(outer_len);
+        let (guard_doc, body_doc) = lowered?;
         self.pop_scope();
 
         let shared = self.generate_shared_rest(match_var, rest_arms, threading)?;

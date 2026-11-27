@@ -130,6 +130,21 @@ TestCase subclass: OptionalMapKeyPatternTest
     self assert: (self untypedOrderedGuardOf: #{}) equals: #notBig
     self assert: (self untypedOrderedGuardOf: #{#n => 9}) equals: #big
 
+  nestedGuardOf: d :: Dictionary -> Symbol =>
+    // A guard in a `match:` nested in the arm body orders the outer optional
+    // binding: it must fail on an absent key too.
+    d match: [
+      #{?#p => p} -> 0 match: [
+        _ when: [p > 5] -> #big;
+        _ -> #notBig
+      ];
+      _ -> #other
+    ]
+
+  testNestedMatchGuardFailsOnAbsentKey =>
+    self assert: (self nestedGuardOf: #{}) equals: #notBig
+    self assert: (self nestedGuardOf: #{#p => 9}) equals: #big
+
   wildcardTypeOf: d :: Dictionary -> Symbol =>
     d match: [
       #{?#k => _ :: String} -> #stringOrAbsent;
