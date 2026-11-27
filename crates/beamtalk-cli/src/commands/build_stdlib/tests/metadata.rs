@@ -667,7 +667,7 @@ fn test_collect_stdlib_protocol_infos_skips_unreadable_file() {
     let real = dir.join("printable.bt");
     fs::write(&real, "Protocol define: Printable\n  asString -> String\n").unwrap();
 
-    let (infos, defs, _sources) = collect_stdlib_protocol_infos(&[missing, real]);
+    let (infos, defs, _sources, _files) = collect_stdlib_protocol_infos(&[missing, real]);
     assert_eq!(infos.len(), 1);
     assert_eq!(infos[0].name.as_str(), "Printable");
     // `Printable` here declares no provided methods, so it contributes
@@ -698,7 +698,7 @@ fn test_collect_stdlib_protocol_infos_collects_provision_bearing_protocol_defs()
     )
     .unwrap();
 
-    let (infos, defs, _sources) =
+    let (infos, defs, _sources, files) =
         collect_stdlib_protocol_infos(&[requirement_only, with_provision]);
     assert_eq!(infos.len(), 2, "both protocols are tracked as ProtocolInfo");
     assert_eq!(
@@ -707,6 +707,11 @@ fn test_collect_stdlib_protocol_infos_collects_provision_bearing_protocol_defs()
         "only the provision-bearing protocol contributes a full AST: {defs:?}"
     );
     assert_eq!(defs[0].name.name.as_str(), "Comparable");
+    assert_eq!(
+        files,
+        vec!["comparable.bt".to_string(), "printable.bt".to_string()],
+        "every protocol-declaring file is embedded, requirements-only included (BT-5338)"
+    );
 }
 
 // --- alias_source_texts_sorted_by_name ---

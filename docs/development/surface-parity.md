@@ -375,6 +375,7 @@ These CLI subcommands are build/tooling commands that operate offline (no worksp
 | `test-script` | -- | -- | `surface-specific: btscript expression tests (CI)` |
 | `test-docs` | -- | -- | `surface-specific: doctest runner (CI)` |
 | `doctor` | -- | -- | `surface-specific: environment health check` |
+| `agents refresh` / `agents check` | -- | -- | `surface-specific: regenerate or verify the templated region of AGENTS.md and copilot-instructions.md (BT-5228)` |
 | `warm-otp-cache` | -- | -- | `surface-specific: background OTP type-spec cache warming` (BT-2471). Hidden CLI command with no project/`beamtalk.toml` of its own — the `SessionStart` hook (`.claude/hooks/worktree-init.sh`) backgrounds it in remote sessions so the shared, OTP-version-keyed cache (ADR 0075/BT-2470) is warm before the first interactive `beamtalk build`. No REPL/MCP/LSP analogue; it exists purely as a session-setup tooling hook, not a user-facing operation. |
 | `deps add` | -- | -- | `surface-specific: package management`. With none of `--path`/`--git` given, `NAME` resolves through the package registry (`deps::registry`, BT-2978) — pinned to `--version` if given, else the latest published release (BT-2979) — then flows through the same git-dependency machinery a `--git` dependency uses. |
 | `deps list` | -- | -- | `surface-specific: package management`. A registry dependency's row shows its resolved git URL/tag/commit provenance alongside the requested version, matching a `--git` dependency's row (BT-2979). |
@@ -1313,7 +1314,9 @@ flattening implementation):
   `resolve_protocol_key`), after the module's own and every carried protocol.
   Their one source is `stdlib/src/*.bt` itself: `build-stdlib` generates
   `generated_stdlib_protocol_files()` (in `generated_builtins.rs`), an
-  `include_str!` table of the files declaring provision-bearing protocols,
+  `include_str!` table of the files declaring protocols (provision-bearing or
+  not; only the former join `uses:` resolution, the rest are seeded into the
+  checker's registry so bounds and annotations naming them are checked),
   parsed once by `semantic_analysis::stdlib_protocols`. Which `(class,
   protocol)` uses resolved to the stdlib is recorded per class
   (`trait_expansion::expand_module_with_stdlib_uses`, `AnalysisResult::stdlib_protocol_uses`,

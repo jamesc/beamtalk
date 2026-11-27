@@ -625,11 +625,17 @@ Actor subclass: Proxy
 display: Proxy spawn       // ✅ No warning — Proxy has DNU override
 ```
 
-When conformance cannot be verified (Dynamic values, runtime-constructed classes):
+A `Dynamic` argument (a value whose class is unknown, such as an unannotated
+parameter) is accepted by a protocol-typed parameter without a warning, as it
+is by a class-typed parameter. This is gradual typing; the original design
+warned here ("cannot verify Printable conformance for Dynamic value"), which
+BT-5338 removed because it failed `--warnings-as-errors` builds on every untyped
+value. Strictness for untyped values belongs to the "Dynamic in typed class"
+lint:
 
 ```beamtalk
 display: someUnknownValue
-// ⚠️ Warning: cannot verify Printable conformance for Dynamic value
+// No warning — someUnknownValue is Dynamic
 ```
 
 #### Diagnostic Philosophy: Warnings, Never Errors
@@ -639,7 +645,7 @@ The type system — including generics and protocol conformance — **never prod
 | Situation | Diagnostic | Severity |
 |---|---|---|
 | Unknown message send | "Counter does not respond to 'foo'" | Warning |
-| Protocol conformance unverifiable | "cannot verify Printable conformance" | Warning |
+| Protocol conformance unverifiable (`Dynamic` argument) | none — accepted (gradual typing, BT-5338) | — |
 | Type mismatch in argument | "expected Integer, got String" | Warning |
 | Missing annotation in `typed` class | "untyped parameter in typed class" | Warning |
 | Unparameterized generic return | "someMethod returns unparameterized Result" | Warning + hint |
