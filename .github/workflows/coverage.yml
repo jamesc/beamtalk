@@ -85,14 +85,16 @@ jobs:
     # One job rather than shards: every shard pays the setup + instrumented
     # build again (cargo-llvm-cov cannot merge profiles across runners without
     # the instrumented binaries), so sharding costs runner-minutes to save
-    # wall-clock a nightly trend job does not need. 45 leaves 35% headroom.
+    # wall-clock a nightly trend job does not need. 55 leaves 47% headroom, and
+    # is above setup (~1 min) + the two step caps (12 + 38), so a slow leg trips
+    # a step timeout first.
     #
     # The long steps carry their own timeout-minutes: a step timeout fails the
     # step and so the job and the run (red, triaged), while this job-level
     # timeout concludes `cancelled`, which GitHub rolls up as a cancelled run
     # even with coverage-status failing (verified on a probe run). The job
     # timeout is only the backstop for a hang outside those steps.
-    timeout-minutes: 45
+    timeout-minutes: 55
     permissions:
       contents: read
     outputs:
@@ -242,8 +244,8 @@ jobs:
 
       - name: Leg timing
         if: ${{ !cancelled() }}
-        # 33 = 75% of the job's 45-minute timeout, rounded down: the 25% headroom.
-        run: scripts/ci/coverage-leg-timing.sh coverage-rust "$LEG_START" 33
+        # 41 = 75% of the job's 55-minute timeout, rounded down: the 25% headroom.
+        run: scripts/ci/coverage-leg-timing.sh coverage-rust "$LEG_START" 41
 
       - name: Add Rust Coverage to Job Summary
         run: |
@@ -308,9 +310,10 @@ jobs:
     # BUnit ~4, merge + report ~1. That was 96% of the old 25-minute limit.
     # Only coverage-all's last step needs all four coverdata files together, so
     # splitting would add an artifact handoff and a second ~4 min build to
-    # save wall-clock a nightly job does not need; 40 leaves 33% headroom.
+    # save wall-clock a nightly job does not need; 50 leaves 47% headroom, and is
+    # above setup (~1 min) + the two step caps (12 + 32).
     # The long steps carry their own timeout-minutes, see coverage-rust.
-    timeout-minutes: 40
+    timeout-minutes: 50
     permissions:
       contents: read
     outputs:
@@ -405,8 +408,8 @@ jobs:
 
       - name: Leg timing
         if: ${{ !cancelled() }}
-        # 30 = 75% of the job's 40-minute timeout: the 25% headroom.
-        run: scripts/ci/coverage-leg-timing.sh coverage-erlang "$LEG_START" 30
+        # 37 = 75% of the job's 50-minute timeout, rounded down: the 25% headroom.
+        run: scripts/ci/coverage-leg-timing.sh coverage-erlang "$LEG_START" 37
 
       - name: Add Erlang Coverage to Job Summary
         run: |
