@@ -665,6 +665,29 @@ To migrate an option alias:
 Field defaults such as `field: websocket :: WebSocketOptions = Dictionary new`
 keep working under the gradual rule.
 
+## Adoption note (2026-11-27, BT-5227)
+
+Evidence from the downstream adoption epic (BT-5221; full report in
+`docs/research/feature-adoption-2026.md`). Shapes are used in three packages.
+beamtalk-buccaneer and beamtalk-http are the motivating code and predate the
+epic. beamtalk-oauth tried one on a real response during the epic (BT-5225):
+`type TokenResponse` describes the native shim's 7-key token map, with
+`String | Nil` and `Integer | Nil` values, and is the parameter type of
+`OAuthFlows class tokenSetFrom:obtainedAt:`. It was kept. A literal with a
+missing or mistyped key at a call site is rejected (`key #access_token expects
+String | UndefinedObject, got Integer`).
+
+The limit: the real response comes from FFI as `Dynamic`, so the check covers
+literals at call sites, not the shim's output. The Erlang side is still guarded
+only by `token_to_map/1`'s contract. beamtalk-catalina decodes no dictionaries
+and had no site.
+
+Map *patterns* do not yet have the optional-key form that shapes have (`?#k =>
+T`). Every key a pattern lists must be present, so linear, agents and oauth
+keep `at:ifAbsent:` lookups for optional keys (BT-5344, `needs-spec`).
+
+Verdict: established.
+
 ## References
 - Related issues: BT-4725 (this ADR), BT-4719 (narrowing casts), BT-4709 (narrowing gaps), BT-2949 (generic container element checks)
 - Related ADRs: ADR 0025 (gradual typing), ADR 0068 (parametric types), ADR 0075 (FFI type definitions), ADR 0100 (open-world diagnostic policy), ADR 0102 (set-theoretic operators), ADR 0108 (type aliases)
