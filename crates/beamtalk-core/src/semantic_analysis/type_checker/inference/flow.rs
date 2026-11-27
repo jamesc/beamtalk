@@ -253,7 +253,7 @@ impl TypeChecker {
                         class_name,
                         type_args,
                         ..
-                    } if class_name == "Result" => Some(type_args),
+                    } if class.name == "Result" && class_name == "Result" => Some(type_args),
                     _ => None,
                 });
                 for (kw, e) in keywords {
