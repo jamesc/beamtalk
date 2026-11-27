@@ -21,10 +21,12 @@ name: Nightly Coverage
 #                                                 cover/index.html + aggregate/*.html,
 #                                                 covertool/*.xml (one per runtime app)
 #
-# Failure signal: a leg killed by its job timeout concludes `cancelled`, which
-# leaves a run whose other jobs passed `cancelled` too — grey, not red, and not
-# `failure` for ci-triage.yml. `coverage-status` fails the run when either leg
-# did not succeed, whatever the reason, so the run is red and triaged.
+# Failure signal: a job killed by its job-level timeout concludes `cancelled`,
+# and GitHub rolls any cancelled job up as a cancelled run — grey, never
+# `failure` for ci-triage.yml — even with another job failing. So the long
+# steps have their own timeout-minutes (a step timeout is a plain failure),
+# and `coverage-status` fails the run when either leg did not succeed.
+# ci-triage.yml also triages a cancelled scheduled run of this workflow.
 #
 # To exercise a coverage-recipe change before it merges:
 #   gh workflow run coverage.yml --ref <branch>
@@ -75,17 +77,22 @@ jobs:
   # cost ~17 min alone.
   coverage-rust:
     runs-on: ubuntu-latest
-    # Measured cold on 2026-11-26 (run 45842761744, 4-core runner, the cache
-    # never saves because the leg never finishes): setup ~5 min, instrumented
-    # build ~12 (4 bins ~7, test binaries ~5), fast tier 16.3 (13421 tests),
-    # serialized e2e pass 6.5, report ~1.5: ~41 min, past the old 40. The
-    # leg is one job rather than shards because every shard pays the ~17 min
-    # setup + instrumented build again (cargo-llvm-cov cannot merge profiles
-    # across runners without the instrumented binaries), so two shards would
-    # cost ~+17 runner-minutes a night to save wall-clock that a nightly
-    # trend job does not need. 60 gives the 25% headroom over the ~45 min
-    # budget below; the timing step warns when the leg passes that budget.
-    timeout-minutes: 60
+    # Measured cold on 2026-11-26 (run 45842761744, 4-core runner; the cache
+    # never saved because the leg never finished): setup ~5 min, instrumented
+    # build ~12, fast tier 16.3 (13421 tests), serialized e2e pass 6.5,
+    # report ~1.5: ~41 min, past the old 40. With debuginfo off (below) the
+    # dispatch on BT-5356's branch (run 46011136633) took 29 min, still cold.
+    # One job rather than shards: every shard pays the setup + instrumented
+    # build again (cargo-llvm-cov cannot merge profiles across runners without
+    # the instrumented binaries), so sharding costs runner-minutes to save
+    # wall-clock a nightly trend job does not need. 45 leaves 35% headroom.
+    #
+    # The long steps carry their own timeout-minutes: a step timeout fails the
+    # step and so the job and the run (red, triaged), while this job-level
+    # timeout concludes `cancelled`, which GitHub rolls up as a cancelled run
+    # even with coverage-status failing (verified on a probe run). The job
+    # timeout is only the backstop for a hang outside those steps.
+    timeout-minutes: 45
     permissions:
       contents: read
     outputs:
@@ -144,9 +151,11 @@ jobs:
       # instrumented under llvm-cov, and the spawned BEAM nodes only need the
       # stdlib .beam files — see `coverage-build` in the Justfile.
       - name: Build coverage prerequisites
+        timeout-minutes: 12
         run: just coverage-build
 
       - name: Generate Rust coverage (Cobertura format for action)
+        timeout-minutes: 38
         # Excludes test-harness/build-tooling crates (see `llvm_cov_ignore` in
         # the Justfile) so the badge reflects product-code coverage.
         env:
@@ -233,8 +242,8 @@ jobs:
 
       - name: Leg timing
         if: ${{ !cancelled() }}
-        # 45 = 75% of the job's 60-minute timeout: the 25% headroom.
-        run: scripts/ci/coverage-leg-timing.sh coverage-rust "$LEG_START" 45
+        # 33 = 75% of the job's 45-minute timeout, rounded down: the 25% headroom.
+        run: scripts/ci/coverage-leg-timing.sh coverage-rust "$LEG_START" 33
 
       - name: Add Rust Coverage to Job Summary
         run: |
@@ -294,14 +303,14 @@ jobs:
 
   coverage-erlang:
     runs-on: ubuntu-latest
-    # Measured ~24 min on 2026-11-26 (run 45842761744): setup + build ~3.5,
-    # eunit 9.3, E2E 5.7, stdlib 0.1, BUnit 3.7, merge + report ~0.8. That
-    # was 96% of the old 25-minute limit. The legs run in parallel and only
-    # coverage-all's last step needs all four coverdata files together, so
-    # splitting would add an artifact handoff and a second ~3.5 min build to
-    # save wall-clock a nightly job does not need; 35 gives the 25% headroom
-    # over the ~26 min budget below.
-    timeout-minutes: 35
+    # Measured ~24 min on 2026-11-26 (run 45842761744) and 26.7 min on the
+    # BT-5356 dispatch (run 46011136633): setup + build ~4, eunit ~9, E2E ~6,
+    # BUnit ~4, merge + report ~1. That was 96% of the old 25-minute limit.
+    # Only coverage-all's last step needs all four coverdata files together, so
+    # splitting would add an artifact handoff and a second ~4 min build to
+    # save wall-clock a nightly job does not need; 40 leaves 33% headroom.
+    # The long steps carry their own timeout-minutes, see coverage-rust.
+    timeout-minutes: 40
     permissions:
       contents: read
     outputs:
@@ -339,9 +348,11 @@ jobs:
       # drive `cargo run --bin beamtalk`, which builds just the binary and
       # its deps on demand — see `coverage-build` in the Justfile.
       - name: Build coverage prerequisites
+        timeout-minutes: 12
         run: just coverage-build
 
       - name: Generate Erlang coverage (unit + E2E + stdlib)
+        timeout-minutes: 32
         # `coverage-all` runs its own E2E pass (`coverage-e2e`) on this
         # runner, so the legs stay independent (no cross-job artifact wait).
         run: just coverage-all
@@ -394,8 +405,8 @@ jobs:
 
       - name: Leg timing
         if: ${{ !cancelled() }}
-        # 26 = 75% of the job's 35-minute timeout (rounded down): the 25% headroom.
-        run: scripts/ci/coverage-leg-timing.sh coverage-erlang "$LEG_START" 26
+        # 30 = 75% of the job's 40-minute timeout: the 25% headroom.
+        run: scripts/ci/coverage-leg-timing.sh coverage-erlang "$LEG_START" 30
 
       - name: Add Erlang Coverage to Job Summary
         run: |
@@ -447,12 +458,13 @@ jobs:
           echo "❌ Erlang coverage thresholds not met (see above for details)"
           exit 1
 
-  # The run's red/green signal. A leg killed by its timeout is `cancelled`,
-  # and publish-coverage succeeds regardless, so without this job the run
-  # concluded `cancelled` (grey; ci-triage.yml triages `failure` only) and the
-  # badge sat stale for a week (BT-5356). `!cancelled()` runs it after a leg
-  # timeout (the run itself is not cancelled) but not when a person cancels
-  # the run, which stays quietly cancelled.
+  # The run's red/green signal for a leg that did not succeed for any reason
+  # (threshold, test failure, step timeout, backstop job timeout). Without it
+  # publish-coverage succeeded regardless and a timed-out leg left a grey run
+  # with a stale badge for a week (BT-5356). Note a job-level timeout still
+  # rolls the run up as `cancelled`; the long steps' own timeouts keep that
+  # case a red `failure`. `!cancelled()` runs this after a leg timeout (the
+  # run itself is not cancelled) but not when a person cancels the run.
   coverage-status:
     if: ${{ !cancelled() }}
     needs: [coverage-rust, coverage-erlang]

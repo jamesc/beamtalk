@@ -184,14 +184,18 @@ when a leg failed its threshold, in which case its badge goes red. A leg
 that produced no report at all leaves its badge unchanged.
 
 The run's red/green signal is the `coverage-status` job, which fails unless
-both legs succeeded. A leg killed by its job timeout concludes `cancelled`,
-which neither `publish-coverage` nor `ci-triage.yml` (it triages `failure`
-only) would otherwise notice; before BT-5356 the Rust leg timed out on most
-nights and the run looked grey with a stale badge. Each leg also prints its
-wall time and warns above a budget of 75% of its timeout (`coverage-rust`
-45 of 60 min, `coverage-erlang` 26 of 35 min), so growth shows up before it
-becomes a timeout. `coverage-rust` also lists its slowest test binaries in
-its job summary (nextest's `coverage` profile, `.config/nextest.toml`).
+both legs succeeded. A job killed by its job-level timeout concludes
+`cancelled`, and GitHub rolls any cancelled job up as a cancelled run (grey)
+even when another job fails; `ci-triage.yml` triages `failure`, so before
+BT-5356 the Rust leg timed out on most nights and the run looked grey with a
+stale badge. The long steps therefore carry their own `timeout-minutes` (a
+step timeout is a plain failure) and the job timeouts are only a backstop;
+`ci-triage.yml` also triages a cancelled scheduled run of this workflow. Each
+leg prints its wall time and warns above a budget of 75% of its job timeout
+(`coverage-rust` 33 of 45 min, `coverage-erlang` 30 of 40 min), so growth
+shows up before it becomes a timeout. `coverage-rust` also lists its slowest
+test binaries in its job summary (nextest's `coverage` profile,
+`.config/nextest.toml`).
 
 **Artifacts** (30-day retention; these are the only copies of the nightly
 reports, so read them from the latest successful `coverage.yml` run, not from
