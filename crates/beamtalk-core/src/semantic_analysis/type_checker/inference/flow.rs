@@ -156,34 +156,108 @@ impl TypeChecker {
         )
     }
 
-    /// BT-5332: narrow every `x :: T` nested inside a composite match-arm
-    /// pattern (tuple, list, map value, constructor keyword, array) to `T`,
-    /// like a top-level `x :: T` arm. The runtime class test guarantees the
-    /// type inside the arm. A top-level type pattern is narrowed by
-    /// `infer_match` itself, from the scrutinee's residual type; `_ :: T`
-    /// binds nothing.
+    /// BT-5332 / BT-5336: narrow every `x :: T` nested inside a composite
+    /// match-arm pattern (tuple, list, map value, constructor keyword, array)
+    /// like a top-level `x :: T` arm. The runtime class test guarantees `T`
+    /// inside the arm; where the scrutinee's type at that position is known
+    /// (tuple element, map-shape value, `Result ok:`/`error:` payload) the
+    /// binding is `intersect_with_class(position, T)`, exactly as a top-level
+    /// arm. Elsewhere it is the bare `T`. A top-level type pattern is
+    /// narrowed by `infer_match` itself, from the scrutinee's residual type;
+    /// `_ :: T` binds nothing.
     fn narrow_nested_type_patterns(
         &mut self,
         pattern: &Pattern,
+        scrutinee_ty: &InferredType,
         hierarchy: &ClassHierarchy,
         env: &mut TypeEnv,
     ) {
         if matches!(pattern, Pattern::Type { .. }) {
             return;
         }
-        let mut nested = Vec::new();
-        Self::collect_type_patterns(pattern, &mut |binding, class, _| {
-            nested.push((binding.name.clone(), class));
-        });
-        for (name, class) in nested {
-            if name != "_" {
+        self.narrow_in_position(pattern, Some(scrutinee_ty), hierarchy, env);
+    }
+
+    /// Walk `pattern`, which is matched against a value of type `position`
+    /// (`None` when unknown), binding each nested `x :: T`.
+    fn narrow_in_position(
+        &mut self,
+        pattern: &Pattern,
+        position: Option<&InferredType>,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+    ) {
+        match pattern {
+            Pattern::Type { binding, class, .. } => {
+                if binding.name == "_" {
+                    return;
+                }
                 let declared = self.resolve_pattern_class(class);
                 // `Object` is never a useful typed-send target; keep the
                 // unchecked `Dynamic` binding, as destructuring does.
-                if !Self::is_dynamic_position(&declared, hierarchy) {
-                    env.set_local(name, declared);
+                if Self::is_dynamic_position(&declared, hierarchy) {
+                    return;
+                }
+                let narrowed = match (position, &declared) {
+                    (Some(pos), InferredType::Known { class_name, .. })
+                        if !Self::is_dynamic_position(pos, hierarchy) =>
+                    {
+                        Self::intersect_with_class(
+                            pos,
+                            class_name,
+                            hierarchy,
+                            self.protocol_registry.as_deref(),
+                        )
+                    }
+                    _ => declared,
+                };
+                env.set_local(binding.name.clone(), narrowed);
+            }
+            Pattern::Tuple { elements, .. } => {
+                let positions = position
+                    .and_then(|p| Self::tuple_positions(&Self::non_nil_type(p), elements.len()));
+                for (i, e) in elements.iter().enumerate() {
+                    let pos = positions.as_ref().and_then(|p| p.get(i));
+                    self.narrow_in_position(e, pos, hierarchy, env);
                 }
             }
+            Pattern::Array { elements, .. } => {
+                for e in elements {
+                    self.narrow_in_position(e, None, hierarchy, env);
+                }
+            }
+            Pattern::Map { pairs, .. } => {
+                for pair in pairs {
+                    let pos = match (&pair.key, position) {
+                        (crate::ast::MapPatternKey::Symbol(key), Some(p)) => {
+                            Self::map_pattern_value_type(p, key)
+                        }
+                        _ => None,
+                    };
+                    self.narrow_in_position(&pair.value, pos.as_ref(), hierarchy, env);
+                }
+            }
+            Pattern::Constructor {
+                class, keywords, ..
+            } => {
+                let args = position.and_then(|p| match Self::non_nil_type(p) {
+                    InferredType::Known {
+                        class_name,
+                        type_args,
+                        ..
+                    } if class_name == class.name && class_name == "Result" => Some(type_args),
+                    _ => None,
+                });
+                for (kw, e) in keywords {
+                    let pos = args.as_ref().and_then(|a| match kw.name.as_str() {
+                        "ok:" => a.first(),
+                        "error:" => a.get(1),
+                        _ => None,
+                    });
+                    self.narrow_in_position(e, pos, hierarchy, env);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -751,7 +825,12 @@ impl TypeChecker {
                 // BT-5332: nested `x :: T` bindings narrow to `T`, after the scrutinee-key
                 // rewrite above so a nested binding that shadows the
                 // scrutinee variable keeps its narrowed type.
-                self.narrow_nested_type_patterns(&arm.pattern, hierarchy, &mut arm_env);
+                self.narrow_nested_type_patterns(
+                    &arm.pattern,
+                    &residual_scrutinee_ty,
+                    hierarchy,
+                    &mut arm_env,
+                );
                 // Guard sees `binding`/scrutinee already narrowed
                 // above (ADR 0107: "scope includes the arm's `when:`
                 // guard, not just its body").
