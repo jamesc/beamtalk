@@ -575,6 +575,24 @@ impl CoreErlangGenerator {
         receiver.is_self() && self.is_late_state_field(&self.class_name(), field.name.as_str())
     }
 
+    /// The racing point [`Self::sequence_children`] extends its hoisting point
+    /// to: [`Self::last_racing_operand`]. Under
+    /// `Fault::SequenceChildrenBlockCapturesOnly`, the pre-BT-5339 rule: only
+    /// when a child is a block literal whose capture reads live state (BT-4722;
+    /// the fault does not peel parentheses, which no fault-driven test needs).
+    pub(super) fn sequence_children_racing_point(&self, children: &[&Expression]) -> Option<usize> {
+        let racing = self.last_racing_operand(children)?;
+        if fault!(SequenceChildrenBlockCapturesOnly) {
+            return children
+                .iter()
+                .any(
+                    |c| matches!(c, Expression::Block(b) if self.block_capture_reads_live_state(b)),
+                )
+                .then_some(racing);
+        }
+        Some(racing)
+    }
+
     /// BT-4722: whether creating `block` here reads live mutable state: a
     /// block nested in an actor closure binds `beamtalk_actor_state:capture`
     /// (a live cell read) when it touches the actor state or carries it out

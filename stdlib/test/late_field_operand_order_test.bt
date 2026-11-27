@@ -54,8 +54,11 @@ TestCase subclass: LateFieldOperandOrderTest
       a armListOfBoth: true
     ]) includesSubstring: "'first'")
 
-  // `self.count / 0` raises bad arithmetic (a type_error) before `self.first`
-  // is read; out of order it raised uninitialized_state_error.
+  // `self.count / 0` raises before `self.first` is read; out of order it
+  // raised uninitialized_state_error. `/` on a non-literal receiver goes
+  // through the guarded operator path, which reports a zero divisor as
+  // `#type_error` (as `test_case_assertion_test.bt` does for `1 / 0`);
+  // only a constant-folded `5 / 0` raises a bare `#badarith`.
   testADivisionBeforeALateReadRaisesFirst =>
     a := LateOperandOrderActor spawn
     self should: [a divThenLate] raise: #type_error

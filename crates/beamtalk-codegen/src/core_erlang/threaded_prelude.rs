@@ -1329,7 +1329,7 @@ impl CoreErlangGenerator {
         let Some(k) = children
             .iter()
             .rposition(|child| self.subexpr_needs_prelude(child))
-            .max(self.last_racing_operand(children))
+            .max(self.sequence_children_racing_point(children))
         else {
             return Ok((prelude, scope));
         };

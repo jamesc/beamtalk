@@ -92,5 +92,9 @@ fn self_send_arguments_that_may_raise_are_sequenced() {
             "typed Actor subclass: SelfArgs\n  late state: first :: Integer\n  late state: second :: Integer\n  state: count :: Integer = 0\n\n  pair: a :: Object with: b :: Object -> Object => a\n\n  {body}\n"
         );
         assert_eq!(verifier_report(&src, None), None, "{body}");
+        // The pre-BT-5339 `sequence_children` rule leaves them in place.
+        let report = verifier_report(&src, Some(Fault::SequenceChildrenBlockCapturesOnly))
+            .unwrap_or_else(|| panic!("pre-fix sequence_children rule not reported: {body}"));
+        assert!(report.contains("RacingOperands"), "{body}: {report}");
     }
 }
