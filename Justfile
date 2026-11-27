@@ -2425,12 +2425,15 @@ test-runtime: build-stdlib
     fi
     echo "✅ Runtime tests complete"
 
+# `ForEach-Object { "$_" }` turns each stderr line (a PowerShell ErrorRecord
+# under `2>&1`) back into its plain text, so rebar3's compiler warnings print
+# as themselves rather than as NativeCommandError blocks (BT-4775).
 [windows]
 [working-directory: 'runtime']
 test-runtime: build-stdlib
     @echo "🧪 Running Erlang runtime unit tests..."
-    @$ErrorActionPreference = 'Continue'; $env:BEAMTALK_NO_FILE_LOG = "1"; $env:BEAMTALK_NO_FOREGROUND_PRUNE = "1"; $output = rebar3 eunit '--cover=false' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; $output | bash ../scripts/ci/eunit-failure-summary.sh "EUnit runtime+workspace+compiler"; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
-    @$ErrorActionPreference = 'Continue'; $env:BEAMTALK_NO_FILE_LOG = "1"; $env:BEAMTALK_NO_FOREGROUND_PRUNE = "1"; $output = rebar3 eunit '--cover=false' '--dir=apps/beamtalk_stdlib/test' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; $output | bash ../scripts/ci/eunit-failure-summary.sh "EUnit stdlib"; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
+    @$ErrorActionPreference = 'Continue'; $env:BEAMTALK_NO_FILE_LOG = "1"; $env:BEAMTALK_NO_FOREGROUND_PRUNE = "1"; $output = rebar3 eunit '--cover=false' 2>&1 | ForEach-Object { "$_" } | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; $output | bash ../scripts/ci/eunit-failure-summary.sh "EUnit runtime+workspace+compiler"; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
+    @$ErrorActionPreference = 'Continue'; $env:BEAMTALK_NO_FILE_LOG = "1"; $env:BEAMTALK_NO_FOREGROUND_PRUNE = "1"; $output = rebar3 eunit '--cover=false' '--dir=apps/beamtalk_stdlib/test' 2>&1 | ForEach-Object { "$_" } | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; $output | bash ../scripts/ci/eunit-failure-summary.sh "EUnit stdlib"; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
     @echo "✅ Runtime tests complete"
 
 # EUnit test-isolation check (BT-4934): catches test modules that rely on state

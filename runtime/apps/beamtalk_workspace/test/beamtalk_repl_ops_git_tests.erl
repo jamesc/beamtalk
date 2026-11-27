@@ -422,6 +422,10 @@ make_repo() ->
     git(Dir, ["config", "user.email", "test@example.com"]),
     git(Dir, ["config", "user.name", "Test"]),
     git(Dir, ["config", "commit.gpgsign", "false"]),
+    %% The tests compare file bytes after a checkout (git-revert-file). A host
+    %% `core.autocrlf=true` (the Windows runner's default) would write the
+    %% restored file with CRLF, so the fixture repository pins it off (BT-4775).
+    git(Dir, ["config", "core.autocrlf", "false"]),
     Dir.
 
 %% Test setup only: the code under test runs git through beamtalk_git.

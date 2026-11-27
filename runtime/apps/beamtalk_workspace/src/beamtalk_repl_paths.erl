@@ -19,7 +19,7 @@ could name anything outside the root, and leaves it to the caller (git, the
 loader) to resolve what is inside it.
 """.
 
--export([check_relative/1]).
+-export([check_relative/1, check_relative/2]).
 
 -define(IS_LETTER(L), ((L >= $a andalso L =< $z) orelse (L >= $A andalso L =< $Z))).
 
@@ -35,24 +35,34 @@ node reads it as drive-relative and refuses it) or `parent_segment` (a `..` segm
 such as `.` or `./`, which a git write would read as "every file").
 """.
 -spec check_relative(term()) -> ok | {error, refusal()}.
-check_relative(Path) when not is_binary(Path) ->
-    {error, not_a_string};
-check_relative(<<>>) ->
-    {error, empty};
 check_relative(Path) ->
+    check_relative(Path, os:type()).
+
+-doc """
+`check_relative/1` as a node of the given `os:type()` reads the path. Only the
+drive rule differs: a `win32` node also refuses a drive-relative name such as
+`a:b.bt`. Exported so both readings are tested on any host.
+""".
+-spec check_relative(term(), {atom(), atom()}) -> ok | {error, refusal()}.
+check_relative(Path, _OsType) when not is_binary(Path) ->
+    {error, not_a_string};
+check_relative(<<>>, _OsType) ->
+    {error, empty};
+check_relative(Path, OsType) ->
     case binary:match(Path, <<0>>) of
-        nomatch -> check_segments(Path);
+        nomatch -> check_segments(Path, OsType);
         _ -> {error, nul}
     end.
 
--spec check_segments(binary()) -> ok | {error, absolute | parent_segment | whole_tree}.
-check_segments(Path) ->
+-spec check_segments(binary(), {atom(), atom()}) ->
+    ok | {error, absolute | parent_segment | whole_tree}.
+check_segments(Path, OsType) ->
     Segments = binary:split(Path, [<<"/">>, <<"\\">>], [global]),
     case lists:member(<<"..">>, Segments) of
         true ->
             {error, parent_segment};
         false ->
-            case is_absolute(Path) of
+            case is_absolute(Path, OsType) of
                 true ->
                     {error, absolute};
                 false ->
@@ -64,10 +74,18 @@ check_segments(Path) ->
     end.
 
 %% Absolute on any platform: a leading separator (POSIX root, UNC) or a drive
-%% (`C:`, `C:\\`), whatever the node's own OS says. The OS's own `pathtype` then
-%% adds what only it knows (a Windows node also refuses drive-relative `a:b`).
--spec is_absolute(binary()) -> boolean().
-is_absolute(<<C, _/binary>>) when C =:= $/; C =:= $\\ -> true;
-is_absolute(<<L, $:>>) when ?IS_LETTER(L) -> true;
-is_absolute(<<L, $:, Sep, _/binary>>) when ?IS_LETTER(L), Sep =:= $/ orelse Sep =:= $\\ -> true;
-is_absolute(Path) -> filename:pathtype(binary_to_list(Path)) =/= relative.
+%% (`C:`, `C:\\`), whatever the node's own OS. A Windows node also reads any
+%% `L:` prefix as a drive (`a:b` is drive-relative there), so it refuses that
+%% too; a POSIX node reads `a:b` as an ordinary file name. This is the rule
+%% `filename:pathtype/1` applies on each OS, spelled out so a test on one OS can
+%% check the other's reading.
+-spec is_absolute(binary(), {atom(), atom()}) -> boolean().
+is_absolute(<<C, _/binary>>, _OsType) when C =:= $/; C =:= $\\ -> true;
+is_absolute(<<L, $:>>, _OsType) when ?IS_LETTER(L) -> true;
+is_absolute(<<L, $:, Sep, _/binary>>, _OsType) when
+    ?IS_LETTER(L), Sep =:= $/ orelse Sep =:= $\\
+->
+    true;
+is_absolute(<<L, $:, _/binary>>, {win32, _}) when ?IS_LETTER(L) -> true;
+is_absolute(_Path, _OsType) ->
+    false.
