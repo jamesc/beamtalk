@@ -249,7 +249,7 @@ impl CoreErlangGenerator {
     /// `case 'true' of <'true'> when GUARD -> body <'true'> when 'true' ->
     /// rest end`: the guard sits in Core Erlang guard position, so a guard
     /// that raises fails silently and falls through to `rest`.
-    fn guarded_success_doc(
+    pub(super) fn guarded_success_doc(
         guard_doc: Document<'static>,
         body_doc: Document<'static>,
         rest_doc: &Document<'static>,
@@ -1082,29 +1082,56 @@ impl CoreErlangGenerator {
         success: Document<'static>,
         rest: &Document<'static>,
     ) -> Document<'static> {
+        let is_untagged = self.untagged_map_test_doc(match_var);
+        Self::branch_on_test(is_untagged, success, rest)
+    }
+
+    /// A boolean expression: whether `match_var` is a plain `Dictionary`, an
+    /// Erlang map with no class tag (`'$beamtalk_class'`) and no class-module
+    /// key. Shared by the `x :: Dictionary` type test and the optional-key
+    /// map patterns of ADR 0155.
+    pub(in crate::core_erlang) fn untagged_map_test_doc(
+        &mut self,
+        match_var: &str,
+    ) -> Document<'static> {
         let tagged = self.fresh_temp_var("Tagged");
         let v = leaf::var(match_var.to_string());
-        let is_untagged = docvec![
-            "case call 'erlang':'is_map'(",
-            v.clone(),
-            ") of ",
-            "<'true'> when 'true' -> ",
-            "case call 'maps':'get'(",
-            leaf::atom(sentinel_tags::CLASS_TAG),
-            ", ",
-            v.clone(),
-            ", 'undefined') of ",
-            "<'undefined'> when 'true' -> ",
-            "call 'erlang':'not'(call 'erlang':'is_map_key'(",
-            leaf::atom(sentinel_tags::CLASS_MOD),
-            ", ",
-            v,
-            ")) ",
-            "<",
-            leaf::var(tagged),
-            "> when 'true' -> 'false' end ",
-            "<'false'> when 'true' -> 'false' end"
-        ];
-        Self::branch_on_test(is_untagged, success, rest)
+        let untagged = form::case_of(
+            form::call(
+                "maps",
+                "get",
+                [
+                    leaf::atom(sentinel_tags::CLASS_TAG),
+                    v.clone(),
+                    leaf::atom("undefined"),
+                ],
+            ),
+            [
+                form::clause(
+                    [leaf::atom("undefined")],
+                    None,
+                    form::call(
+                        "erlang",
+                        "not",
+                        [form::call(
+                            "erlang",
+                            "is_map_key",
+                            [leaf::atom(sentinel_tags::CLASS_MOD), v.clone()],
+                        )],
+                    ),
+                    form::Layout::Flat,
+                ),
+                form::clause([leaf::var(tagged)], None, false_doc(), form::Layout::Flat),
+            ],
+            form::Layout::Flat,
+        );
+        form::case_of(
+            form::call("erlang", "is_map", [v]),
+            [
+                form::clause([leaf::atom("true")], None, untagged, form::Layout::Flat),
+                form::clause([leaf::atom("false")], None, false_doc(), form::Layout::Flat),
+            ],
+            form::Layout::Flat,
+        )
     }
 }

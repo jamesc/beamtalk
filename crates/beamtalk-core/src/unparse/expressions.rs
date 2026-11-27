@@ -8,10 +8,10 @@ use super::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, BlockParameter,
     CascadeMessage, CommentAttachment, CommentKind, Document, Expression, ExpressionStatement,
     GapComments, GapSlot, Identifier, Literal, LiteralCommentSlots, LiteralComments, MapPair,
-    MapPatternKey, MatchArm, MessageSelector, Pattern, PipelineSends, Span, StringSegment,
-    TypeAnnotation, binary_binding_power, break_, concat, docvec, group, join_docs, leaf, line,
-    nest, nil, unparse_comment, unparse_comment_attachment_leading, unparse_expect_categories,
-    unparse_keyword_part, unparse_type_annotation,
+    MapPatternDefault, MapPatternKey, MatchArm, MessageSelector, Pattern, PipelineSends, Span,
+    StringSegment, TypeAnnotation, binary_binding_power, break_, concat, docvec, group, join_docs,
+    leaf, line, nest, nil, unparse_comment, unparse_comment_attachment_leading,
+    unparse_expect_categories, unparse_keyword_part, unparse_type_annotation,
 };
 use crate::source_analysis::{TokenKind, lex_with_eof, parse_integer_literal};
 
@@ -1484,7 +1484,20 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
                         MapPatternKey::Symbol(s) => unparse_literal(&Literal::Symbol(s.clone())),
                         MapPatternKey::StringLit(s) => unparse_literal(&Literal::String(s.clone())),
                     };
-                    docvec![key_doc, " => ", unparse_pattern(&p.value)]
+                    // ADR 0155: `?` sits directly before the key, and a
+                    // default follows the value with a space on each side.
+                    let marker = if p.is_optional() { "?" } else { "" };
+                    let default_doc = match &p.default {
+                        Some((default, _)) => docvec![" = ", unparse_map_pattern_default(default)],
+                        None => Document::Nil,
+                    };
+                    docvec![
+                        marker,
+                        key_doc,
+                        " => ",
+                        unparse_pattern(&p.value),
+                        default_doc
+                    ]
                 })
                 .collect();
             unparse_wrapped_map(pair_docs)
@@ -1501,6 +1514,17 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
             }
             Document::Vec(parts)
         }
+    }
+}
+
+/// The default of an optional map-pattern key (ADR 0155).
+fn unparse_map_pattern_default(default: &MapPatternDefault) -> Document<'static> {
+    match default {
+        MapPatternDefault::Literal(lit) => unparse_literal(lit),
+        MapPatternDefault::Nil => Document::Str("nil"),
+        MapPatternDefault::True => Document::Str("true"),
+        MapPatternDefault::False => Document::Str("false"),
+        MapPatternDefault::EmptyMap => Document::Str("#{}"),
     }
 }
 

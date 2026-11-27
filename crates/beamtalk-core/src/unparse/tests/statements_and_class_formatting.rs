@@ -560,6 +560,52 @@ fn map_pattern_comment_between_entries_is_rejected_not_dropped() {
     }
 }
 
+// --- ADR 0155 / BT-5344: optional map-pattern keys and defaults ---
+
+#[test]
+fn optional_map_pattern_keys_round_trip_both_key_kinds() {
+    for source in [
+        "Object subclass: Probe\n  class a: m :: Dictionary -> Object =>\n    #{?\"id\" => id, ?#port => port = 80} := m\n",
+        "Object subclass: Probe\n  class a: m :: Dictionary -> Object =>\n    #{#host => h, ?\"retries\" => n = -1, ?#tags => t = #(), ?#extra => e = #{}} := m\n",
+        "Object subclass: Probe\n  class a: m :: Dictionary -> Object =>\n    #{?#on => on = true, ?#off => off = false, ?#v => v = nil, ?#s => s = #auto} := m\n",
+        "Object subclass: Probe\n\n  a: m => m match: [#{?\"p\" => p :: Integer = 3, ?#k => _ :: String} -> p; _ -> 0]\n",
+    ] {
+        let once = format_source(source).expect("source must parse");
+        let pattern = source[source.find("#{").expect("a map pattern")..]
+            .split(" := ")
+            .next()
+            .and_then(|p| p.split(" -> ").next())
+            .expect("pattern text");
+        // A long pattern wraps one pair per line; compare it unwrapped.
+        let flat = once
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .replace("#{ ", "#{")
+            .replace(" }", "}");
+        assert!(flat.contains(pattern), "pattern changed: {once}");
+        let twice = format_source(&once).expect("formatted output must re-parse");
+        assert_eq!(once, twice, "not idempotent:\n{once}");
+    }
+}
+
+#[test]
+fn optional_map_pattern_comma_question_and_tight_default_normalise() {
+    // `,?` and `=-` each lex as one token; fmt prints `, ?` and ` = -`.
+    let source = "Object subclass: Probe\n  class a: m :: Dictionary -> Object =>\n    #{#a => a,?#b => b =-1} := m\n";
+    let formatted = format_source(source).expect("source must parse");
+    assert!(
+        formatted.contains("#{#a => a, ?#b => b = -1} := m"),
+        "optional pair should normalise: {formatted}"
+    );
+}
+
+#[test]
+fn optional_map_pattern_long_wraps_one_pair_per_line() {
+    let source = "Object subclass: Probe\n\n  class a: m :: Dictionary -> Object =>\n    #{\n      ?\"command\" => command = \"claude\",\n      ?\"permissionMode\" => permissionMode = \"acceptEdits\",\n      ?\"readTimeoutMs\" => readTimeoutMs = 5000,\n      ?\"resumeSessionId\" => resumeSessionId\n    } := m\n";
+    assert_identity(source);
+}
+
 // --- BT-5024: package-qualified superclass keeps its `package@` prefix ---
 
 #[test]

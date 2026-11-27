@@ -22,6 +22,7 @@ use super::super::control_flow::ArmFrame;
 use super::super::threaded_ir::{ThreadedValue, VersionPrefix};
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use super::binary_patterns::{binary_needs_segmented, nested_split_span, pattern_has_binary};
+use super::optional_map_keys::pattern_has_optional_key;
 use super::type_tests::pattern_has_nested_type;
 use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::Document;
@@ -214,6 +215,7 @@ impl CoreErlangGenerator {
         let has_type_arm = arms.iter().any(|arm| {
             matches!(arm.pattern, Pattern::Type { .. })
                 || (pattern_has_nested_type(&arm.pattern) && !pattern_has_binary(&arm.pattern))
+                || pattern_has_optional_key(&arm.pattern)
         });
         // BT-4173: a top-level binary arm unwraps a `String` scrutinee to
         // its bytes before the native binary match (see
@@ -793,6 +795,14 @@ impl CoreErlangGenerator {
             return self.generate_type_pattern(match_var, arm, binding, class, rest, threading);
         }
 
+        // ADR 0155: an optional map key is read after the native match, so
+        // its binding is a `let` the clause guard could not see.
+        if let Pattern::Map { pairs, .. } = &arm.pattern
+            && pattern_has_optional_key(&arm.pattern)
+        {
+            return self.generate_optional_map_arm(match_var, arm, pairs, rest, threading);
+        }
+
         // BT-4096: a top-level binary pattern with dependent sizes compiles
         // to nested matches (Core sizes must be bound before the pattern),
         // which needs per-arm fallthrough like the Array/Type arms above.
@@ -1117,15 +1127,34 @@ impl CoreErlangGenerator {
                         span: Some(expr.span()),
                     });
                 };
-                Ok(docvec![
+                let comparison = docvec![
                     "call 'erlang':",
                     leaf::atom(erlang_op),
                     "(",
-                    left,
+                    left.clone(),
                     ", ",
-                    right,
+                    right.clone(),
                     ")",
-                ])
+                ];
+                // ADR 0155: an absent optional key binds `nil`; ordering it
+                // fails the guard instead of comparing by term order.
+                if !matches!(op.as_str(), "<" | ">" | "<=" | ">=") {
+                    return Ok(comparison);
+                }
+                let mut guarded = comparison;
+                for (operand, doc) in [(&arguments[0], right), (receiver.as_ref(), left)] {
+                    if self.is_nil_when_absent_guard_operand(operand) {
+                        guarded = form::call(
+                            "erlang",
+                            "and",
+                            [
+                                form::call("erlang", "=/=", [doc, leaf::atom("nil")]),
+                                guarded,
+                            ],
+                        );
+                    }
+                }
+                Ok(guarded)
             }
             _ => Err(CodeGenError::UnsupportedFeature {
                 feature: "complex guard expression (only comparisons and arithmetic allowed)"
@@ -1133,6 +1162,16 @@ impl CoreErlangGenerator {
                 span: Some(expr.span()),
             }),
         }
+    }
+
+    /// Whether `operand` names an optional map-key binding that is `nil`
+    /// when its key is absent (ADR 0155), while its arm's guard lowers.
+    fn is_nil_when_absent_guard_operand(&self, operand: &Expression) -> bool {
+        let Expression::Identifier(id) = operand else {
+            return false;
+        };
+        self.lookup_var(&id.name)
+            .is_some_and(|var| self.nil_when_absent_guard_vars.contains(var))
     }
 
     /// Collects all variable names from a pattern and calls the callback

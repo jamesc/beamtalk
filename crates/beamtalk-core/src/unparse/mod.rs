@@ -49,9 +49,9 @@ use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, BlockParameter,
     CascadeMessage, ClassDefinition, Comment, CommentAttachment, CommentKind, ExpectCategory,
     Expression, ExpressionStatement, GapComments, GapSlot, Identifier, KeywordPart, Literal,
-    LiteralCommentSlots, LiteralComments, MapPair, MapPatternKey, MatchArm, MessageSelector,
-    MethodDefinition, Module, NativeDeclaration, ParameterDefinition, Pattern, PipelineSends,
-    ProtocolDefinition, ProtocolMethodSignature, ProtocolUse, ShapeField, SlotKind,
+    LiteralCommentSlots, LiteralComments, MapPair, MapPatternDefault, MapPatternKey, MatchArm,
+    MessageSelector, MethodDefinition, Module, NativeDeclaration, ParameterDefinition, Pattern,
+    PipelineSends, ProtocolDefinition, ProtocolMethodSignature, ProtocolUse, ShapeField, SlotKind,
     StandaloneMethodDefinition, StateDeclaration, StringSegment, TypeAliasDefinition,
     TypeAnnotation,
 };

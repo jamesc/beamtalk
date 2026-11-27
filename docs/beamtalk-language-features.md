@@ -5534,7 +5534,7 @@ Four runtime-representation nuances (see ADR 0107 Implementation for the full co
 | Array | `#[a, b]` | Match and destructure an Array by exact size; nested arrays supported; element names must be distinct in destructuring (BT-5052) |
 | List | `#()`, `#(a, b)`, `#(h \| t)`, `#(a, b \| rest)` | Match a List: without `\|`, exactly that many elements; with it, at least that many, the tail binding the rest. Elements and tail are full patterns, so lists nest (`#(a \| #(b \| t))`). See [List Patterns](#list-patterns-bt-5301) (BT-5301) |
 | Array rest | `#[a, ...rest]` | Destructure first elements, bind remaining to a sub-array (destructuring assignment only); the rest name must not repeat an element name (BT-5050) |
-| Dict/Map | `#{#k => v}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored) |
+| Dict/Map | `#{#k => v}`, `#{?#k => v}`, `#{?"k" => v = 0}` | Match a Dictionary containing key `#k`, bind value to `v`; partial match (other keys ignored). A `?` key is optional: absent binds `nil` or the `= literal` default. See [Optional Map Keys](#optional-map-keys-adr-0155) (ADR 0155) |
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
 | Binary | `<<n:8, payload:n/binary>>` | Match bytes/bits; sizes may name earlier segments, params/locals, or parenthesized exprs; `bits` for unaligned tails; `utf8`/`utf16`/`utf32` and `unit:N`; integer, float, character and string literal values; a misfit literal warns (BT-663, BT-4096, BT-4097, BT-4143, BT-4376) |
 | Nil | `nil` | Matches `nil` exactly; narrows subsequent arms to exclude `Nil` (BT-2854, ADR 0107) |
@@ -5646,6 +5646,63 @@ t match: [{#ok, v} -> v; {#error, _} -> 0]
 [{#ok, _v} := {#error, 42}] on: Error do: [:e | e kind]
 // => #pattern_mismatch
 ```
+
+### Optional Map Keys (ADR 0155)
+
+A map-pattern key marked with a leading `?` is optional. When the key is absent,
+the pattern still matches and binds `nil`, or the default written after the
+value as `= literal`. This works for symbol and string keys alike, in `match:`
+arms and in destructuring, and uses the same `?` that marks an optional key in a
+[shape type](ADR/0147-map-shape-types.md):
+
+```beamtalk
+#{#host => host, ?#port => port = 80, ?#path => path} := #{#host => "a"}
+port
+// => 80
+path
+// => nil
+
+#{"id" => 1} match: [
+  #{"id" => id, ?"priority" => p :: Integer} -> {id, p};
+  _ -> #nomatch
+]
+// => {1, nil}
+```
+
+- **Optional means absent, not nil.** A key that is present binds its value,
+  even `nil`. The default replaces only a missing key, as `at:ifAbsent:` does.
+- **A type test runs only on a present value.** In a `match:` arm,
+  `?"n" => n :: Integer` matches when the key is absent (`n` is `nil`, or the
+  default) or holds an `Integer`. A present value of another class, `nil`
+  included, falls through to the next arm. In a destructure, `x :: T` stays a
+  trusted annotation (BT-5284), as for a required key.
+- **Destructuring never raises on an optional key.** A missing *required* key
+  still raises `#key_error`.
+- **The value must be a `Dictionary`.** A pattern with an optional key does not
+  match a value object, an array, or any other tagged map. A destructure of one
+  raises `#pattern_mismatch`.
+- **A default is a scalar constant:** a number (negative too), string, symbol,
+  character, `nil`, `true`, `false`, `#()` or `#{}`. For a computed default,
+  bind the key without one and use `ifNil:`.
+- **The value of an optional key** is a variable, `x :: T` or `_ :: T`. A literal
+  value is a compile error, and `?#k => _` warns that it has no effect.
+- **Top level only.** An optional key may appear only in a map pattern that is
+  the whole arm pattern or the whole destructuring target. In a map nested
+  inside a tuple, list or `Result ok:` pattern it is a compile error.
+- A key cannot be both required and optional in one pattern.
+
+**Types.** An optional binding has the type a required binding would have,
+joined with `Nil`, or with the default's type when there is one. Over
+`#{?#port => Integer}`, `?#port => p` binds `Integer | Nil` and
+`?#port => p = 80` binds `Integer`. Over an untyped `Dictionary` the binding
+stays `Dynamic`, but `?"n" => n :: Integer` binds `Integer | Nil` (or `Integer`
+with a fitting default). A default that does not fit the `:: T` warns. An
+optional key that no closed shape names is always absent, and warns.
+
+**Lowering.** Required keys stay in the native Erlang map pattern. An optional
+key is one `maps:get/3` with its constant default, or one `maps:find/2` when it
+carries a type test. No closure is built and nothing is dispatched, so a pattern
+costs less than the equivalent `at:ifAbsent:` lookups.
 
 ### List Patterns (BT-5301)
 
@@ -5841,8 +5898,9 @@ class tokenSetFrom: toks :: TokenResponse obtainedAt: sentAt :: Integer -> Token
 ```
 
 Where the forms did not fit, the adopters kept the older code: a map pattern
-requires every listed key, so API nodes with optional keys keep
-`at:ifAbsent:`; a `match:` arm is a single expression, so a multi-statement
+required every listed key, so API nodes with optional keys kept `at:ifAbsent:`
+(now covered by [optional keys](#optional-map-keys-adr-0155), ADR 0155); a
+`match:` arm is a single expression, so a multi-statement
 arm becomes a helper method; and an `isError ifTrue: [^x]` guard stays when
 matching would nest the happy path.
 

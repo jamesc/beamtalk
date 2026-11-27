@@ -849,3 +849,166 @@ fn test_list_destructure_rejects_nested_array_pattern() {
         "{err:?}"
     );
 }
+
+// ── ADR 0155 / BT-5344: optional map-pattern keys ─────────────
+
+#[test]
+fn test_match_optional_map_key_lowers_to_maps_get_after_dictionary_check() {
+    // An optional key without a type test is one `maps:get/3` with its
+    // default, read after the native match of the required keys and the
+    // untagged-map (`Dictionary`) check; it is not in the native pattern.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #{#id => id, ?#port => p = 80} -> {id, p};\n      _ -> 0\n    ]\n";
+    let code = codegen_named(src, "foo");
+    assert_has(
+        "required key native, optional key read with its default",
+        &code,
+        &["~{ 'id' := Id@ }~", "call 'maps':'get'('port', ", ", 80)"],
+    );
+    assert_lacks(
+        "the optional key is not in the native pattern",
+        &code,
+        &["'port' :="],
+    );
+    let native_at = code.find("~{ 'id' := Id@ }~").expect("native pattern");
+    let arm = &code[native_at..];
+    let dict_at = arm.find("'$beamtalk_class'").expect("dictionary check");
+    let get_at = arm.find("call 'maps':'get'('port'").expect("maps:get");
+    assert!(
+        dict_at < get_at,
+        "native match, then the Dictionary check, then the lookup. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_optional_map_key_with_type_test_uses_maps_find() {
+    // `?k => n :: Integer` looks the key up once with `maps:find/2`: the
+    // test runs on a present value, and an absent key passes with its default.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #{?\"n\" => n :: Integer = 3} -> n;\n      _ -> 0\n    ]\n";
+    let code = codegen_named(src, "foo");
+    assert_has(
+        "one maps:find, the class test, and the default on error",
+        &code,
+        &[
+            "call 'maps':'find'(",
+            "'erlang':'is_integer'",
+            "<'error'> when 'true' -> <'true', 3>",
+        ],
+    );
+    assert_lacks(
+        "no second lookup",
+        &code,
+        &["call 'maps':'get'({'beamtalk_string'"],
+    );
+}
+
+#[test]
+fn test_match_optional_map_key_guard_sees_binding() {
+    // The arm's `when:` guard runs after the optional lookup, so it can name
+    // the optional binding (the native fast path would put the guard in
+    // clause position, before the binding exists).
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #{?#n => n = 0} when: [n > 5] -> #big;\n      _ -> #small\n    ]\n";
+    let code = codegen_named(src, "foo");
+    let get_at = code.find("call 'maps':'get'('n'").expect("maps:get");
+    let guard_at = code.find("call 'erlang':'>'(N").expect("guard on N");
+    assert!(
+        get_at < guard_at,
+        "lookup must precede the guard. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_match_optional_map_key_ordering_guard_requires_non_nil() {
+    // An absent optional key with no default binds `nil`; an ordering guard
+    // on it must fail rather than compare by Erlang term order (an atom is
+    // greater than every number). A key with a default needs no such check.
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #{?#n => n, ?#m => m = 0} when: [n > m] -> #big;\n      _ -> #small\n    ]\n";
+    let code = codegen_named(src, "foo");
+    assert_has(
+        "the nil check wraps the comparison",
+        &code,
+        &[
+            "call 'erlang':'and'(call 'erlang':'=/='(_OptNil",
+            ", 'nil'), call 'erlang':'>'(_OptNil",
+        ],
+    );
+    assert_lacks(
+        "no nil check for the defaulted key",
+        &code,
+        &["'=/='(M@, 'nil')"],
+    );
+}
+
+#[test]
+fn test_match_optional_map_key_parenthesised_guard_operand_requires_non_nil() {
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #{?#p => p} when: [(p) > 5] -> #big;\n      _ -> #small\n    ]\n";
+    let code = codegen_named(src, "foo");
+    assert_has(
+        "nil check on a parenthesised operand",
+        &code,
+        &["'=/='(_OptNil"],
+    );
+}
+
+#[test]
+fn test_match_optional_map_key_nested_match_guard_requires_non_nil() {
+    // A guard of a `match:` nested in the arm body that orders the outer
+    // optional binding gets the same nil check.
+    let src = "Object subclass: Foo\n  test: x y: y =>\n    x match: [\n      #{?#p => p} -> y match: [_ when: [p > 5] -> #big; _ -> #small];\n      _ -> #none\n    ]\n";
+    let code = codegen_named(src, "foo");
+    assert_has("nil check in the nested guard", &code, &["'=/='(_OptNil"]);
+}
+
+#[test]
+fn test_match_required_map_key_ordering_guard_is_unchanged() {
+    let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #{#n => n} when: [n > 5] -> #big;\n      _ -> #small\n    ]\n";
+    let code = codegen_named(src, "foo");
+    assert_lacks(
+        "no nil check outside optional-key arms",
+        &code,
+        &["'=/='(N@, 'nil')"],
+    );
+}
+
+#[test]
+fn test_match_optional_map_key_shadowing_nested_binding_has_no_nil_check() {
+    // A nested arm that rebinds `p` from a required key is not optional: its
+    // guard compares like the same `match:` outside an optional arm.
+    let src = "Object subclass: Foo\n  test: x y: y =>\n    x match: [\n      #{?#p => p} -> y match: [#{#p => p} when: [p > 5] -> #big; _ -> #small];\n      _ -> #none\n    ]\n";
+    let code = codegen_named(src, "foo");
+    assert_has(
+        "the inner guard compares the inner binding",
+        &code,
+        &["call 'erlang':'>'(P@, 5)"],
+    );
+    assert_lacks(
+        "no nil check on the shadowing binding",
+        &code,
+        &["'=/='(P@, 'nil')", "'=/='(_OptNil"],
+    );
+}
+
+#[test]
+fn test_destructure_optional_map_key_uses_maps_get_and_required_uses_map_get() {
+    let src = "Object subclass: Foo\n  test: x =>\n    #{#host => h, ?\"port\" => p = 80, ?#path => q} := x\n    {h, p, q}\n";
+    let code = codegen_named(src, "foo");
+    assert_has(
+        "required key raises, optional keys default",
+        &code,
+        &[
+            "call 'erlang':'map_get'('host', ",
+            "call 'maps':'get'({'beamtalk_string'",
+            ", 80)",
+            "call 'maps':'get'('path', ",
+            ", 'nil')",
+            "'pattern_mismatch'",
+        ],
+    );
+}
+
+#[test]
+fn test_destructure_required_only_map_has_no_dictionary_check() {
+    // Unchanged lowering for a pattern with no optional key.
+    let src = "Object subclass: Foo\n  test: x =>\n    #{#host => h} := x\n    h\n";
+    let code = codegen_named(src, "foo");
+    assert_lacks("no Dictionary check", &code, &["DictOk"]);
+}
