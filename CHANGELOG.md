@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **New: list patterns `#()`, `#(a, b)`, `#(h | t)` in `match:` arms and destructuring (BT-5301).** `#( ... )` is now a pattern as well as a literal. Without `|` it matches exactly that many elements; with `|` at least that many, the tail binding the rest, and elements and the tail are full patterns, so lists nest (`#(a | #(b | t))`). Over a `List(T)` an element binds `T` and a tail binds `List(T)`, and `matchExhaustive:` treats `#()` plus `#(h | t)` as exhaustive and names a missing shape. A fixed-length `#(a, b) := xs` keeps its positional `at:` meaning; a cons or empty destructure is a strict list match. `beamtalk fmt` prints list patterns as `#( ... )` (they used to print as `[ ... ]`). See `docs/beamtalk-language-features.md` § List Patterns.
+
+- **New: optional keys in map patterns, `?key => v` and `?key => v = default` (BT-5344, ADR 0155).** In a `match:` arm or `:=` destructuring, a `?`-marked symbol or string key matches when absent, binding `nil` or the literal default; a present value (even `nil`) binds as is. Types are `T | Nil`, or `T` with a default. `_ :: T` as a map-pattern value now works too (BT-5294). `beamtalk fmt` and LSP hover cover the new form. See `docs/beamtalk-language-features.md` § Optional Map Keys.
+
+- **Fix: nested `x :: T` pattern bindings intersect with the scrutinee's type at that position (BT-5336).** Over a `Tuple(Symbol, List(Integer))`, `{#ok, l :: List}` now binds `List(Integer)` instead of the bare `List`.
+
+- **Fix: protocol method signatures are bound-checked, and the type-argument mismatch warning points at the argument (BT-5345).** A `T :: Bound` violation in a protocol's required-method parameter or return annotation is reported, and "Type arguments are not compatible" is anchored on the offending argument instead of the whole send.
+
+- **Fix: `late` field reads evaluate in source order in operand lists (BT-5339).** With two unassigned `late` fields, a list, map or tuple literal, an actor send or a self-send argument list that read both raised `uninitialized_state_error` for the second field in release builds; it now names the first.
+
+- **Internal: Windows nightly Test Erlang runtime failures fixed (BT-4775); the coverage workflow fits both legs under their timeouts and goes red when a leg fails (BT-5356); a downstream feature-adoption report adds real examples to the language reference (BT-5227).**
+
 - **New: `beamtalk agents refresh` and `beamtalk agents check` (BT-5228).** The generated region of a project's `AGENTS.md` and `.github/copilot-instructions.md` (between the `beamtalk:template` markers) can be rewritten from the installed toolchain's template, or checked for drift with a non-zero exit. The template now teaches agents the pattern-matching and type-annotation features, and the checked-in `examples/*/AGENTS.md` files are regenerated.
 
 - **New: type patterns nest in composite patterns, and `_ :: T` binds nothing (BT-5294, BT-5284, BT-5277, BT-5278).** `x :: T` is now a sub-pattern of tuple, map, array and `Result ok:`/`error:` patterns (`info match: [{_, port :: Integer} -> port; _ -> 0]`), and `_ :: T` tests a class without naming the value. In a `:=` destructuring (`{_, sid :: Integer} := t`, `#[a :: Integer, b] := xs`, `#{#id => i :: Integer} := m`) the annotation is the declared type of the local, not a runtime test; it previously failed in codegen. Nested patterns work after `Result ok:`/`error:`, and `matchExhaustive:` accepts a `Result`. See `docs/beamtalk-language-features.md`.
